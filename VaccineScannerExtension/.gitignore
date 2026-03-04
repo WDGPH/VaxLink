@@ -19,3 +19,6 @@ Desktop.ini
 coverage/
 playwright-report/
 test-results/
+
+# Local NVC data cache (keep on disk, do not commit)
+nvc_bundle.json
