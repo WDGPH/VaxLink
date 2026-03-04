@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      --bg: #f2f7fb;
+      --panel: #ffffff;
+      --ink: #102135;
+      --subtle: #5d6b7a;
+      --line: #d4dce6;
+      --accent: #0f8b8d;
+      --accent-2: #005f73;
+      --success: #1f9d63;
+      --danger: #c7353a;
+      --ring: rgba(15, 139, 141, 0.22);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 440px;
+      min-height: 100%;
+      border-radius: 0;
+      overflow: visible;
+      color: var(--ink);
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+      background:
+        radial-gradient(circle at 10% -20%, #d8eef7 0%, transparent 46%),
+        radial-gradient(circle at 95% 0%, #dff4ec 0%, transparent 40%),
+        var(--bg);
+    }
+    .shell {
+      padding: 8px;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 10px 26px rgba(16, 33, 53, 0.12);
+      overflow: hidden;
+    }
+    .brand {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
+    }
+    .title {
+      margin: 0;
+      font-size: 24px;
+      letter-spacing: 0.2px;
+      color: #0b3d4f;
+    }
+    .tagline {
+      margin: 4px 0 0;
+      font-size: 12px;
+      color: var(--subtle);
+    }
+    .content {
+      padding: 12px 14px 14px;
+    }
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.28px;
+      text-transform: uppercase;
+      color: #174d5f;
+    }
+    textarea {
+      width: 100%;
+      min-height: 88px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 11px;
+      resize: vertical;
+      font-family: "Consolas", "Courier New", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #0e2b41;
+      background: #fbfdff;
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+    .actions {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 14px;
+      padding: 10px 12px;
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 100ms ease, filter 120ms ease;
+    }
+    button:hover { filter: brightness(1.03); }
+    button:active { transform: translateY(1px); }
+    #parseBtn {
+      background: linear-gradient(130deg, var(--accent) 0%, var(--accent-2) 100%);
+      color: #fff;
+    }
+    #autoFillBtn {
+      background: #0e7490;
+      color: #fff;
+    }
+    #refreshNvcBtn {
+      background: #e7f3f4;
+      border: 1px solid #bddadd;
+      color: #14505f;
+    }
+    #nvcStatus {
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 14px;
+      background: #f6fafc;
+      border: 1px dashed #cbd8e5;
+      font-size: 11px;
+      line-height: 1.35;
+      color: #486071;
+    }
+    .output {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border-radius: 14px;
+      border: 1px solid #c8d9e8;
+      background: #f7fbff;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #1f3d58;
+    }
+    .output.success {
+      border-color: #b8e3cf;
+      background: #eefbf4;
+      color: #10683e;
+    }
+    .output.error {
+      border-color: #efc2c4;
+      background: #fff4f4;
+      color: #97272c;
+    }
+    .output.warning {
+      border-color: #f2d3a6;
+      background: #fff7ed;
+      color: #9a3412;
+    }
+    .expiry-banner {
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      border: 1px solid transparent;
+    }
+    .expiry-banner.expired {
+      background: #fee2e2;
+      color: #991b1b;
+      border-color: #fecaca;
+    }
+    .expiry-banner.expiring {
+      background: #fff7ed;
+      color: #9a3412;
+      border-color: #fed7aa;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="panel">
+      <div class="brand">
+        <h2 class="title">VaxLink</h2>
+        <p class="tagline">Scan. Map. Chart.</p>
+      </div>
+      <div class="content">
+        <label for="scannedData">Scanned Barcode</label>
+        <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
+        <div class="actions">
+          <button id="parseBtn">Parse Barcode</button>
+          <button id="autoFillBtn">Auto-fill CHR</button>
+          <button id="refreshNvcBtn">Refresh NVC Data</button>
+        </div>
+        <div id="nvcStatus"></div>
+        <div id="output" class="output" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+# Editor/OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Logs/temp
+*.log
+*.tmp
+*.temp
+
+# Chrome extension packaging/signing artifacts
+*.crx
+*.pem
+*.zip
+
+# Local test/debug artifacts
+coverage/
+playwright-report/
+test-results/

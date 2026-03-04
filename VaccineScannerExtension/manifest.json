@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "VaxLink",
+  "version": "1.0.0",
+  "description": "Parse GS1 vaccine barcodes and auto-fill Telus health chart",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "clipboardRead",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "VaxLink"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*", "file:///*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["nvc_bundle.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
