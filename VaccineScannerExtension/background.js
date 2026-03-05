@@ -183,7 +183,7 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
     const updatedAt = (metadata && metadata.updatedAt) ? metadata.updatedAt : nowIso;
     await setStorage({
       [STORAGE_KEYS.bundle]: bundle,
-      [STORAGE_KEYS.sourceUrl]: sourceUrl,
+      [STORAGE_KEYS.sourceUrl]: effectiveSourceUrl,
       [STORAGE_KEYS.bundleSha256]: computedSha256,
       [STORAGE_KEYS.lastCheckAt]: nowIso,
       [STORAGE_KEYS.metaVersion]: metadata ? (metadata.version || null) : null,
@@ -285,11 +285,18 @@ function buildNVCIndexes() {
   // Index lots by lot number and by code
   const lotByLotNumber = {};
   const lotByCode = {};
+  const lotByCodePrefix = {};
   
   for (const concept of lots) {
     const code = concept.code;
     if (code) {
-      lotByCode[code.toLowerCase()] = concept;
+      const codeKey = code.toLowerCase();
+      lotByCode[codeKey] = concept;
+      const underscoreIdx = codeKey.indexOf('_');
+      const prefix = underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
+      if (prefix && !lotByCodePrefix[prefix]) {
+        lotByCodePrefix[prefix] = concept;
+      }
     }
     const lotNumber = extractLotNumber(concept);
     if (lotNumber) {
@@ -299,14 +306,14 @@ function buildNVCIndexes() {
   
   console.log('Indexed', Object.keys(lotByLotNumber).length, 'lots by lot number');
   console.log('Indexed', Object.keys(lotByCode).length, 'lots by code');
-  console.log('Sample lot keys:', Object.keys(lotByLotNumber).slice(0, 5));
   
   nvcIndexes = {
     tradenameByCode,
     tradenameByDin,
     tradenameConceptsArray: tradenames,
     lotByLotNumber,
-    lotByCode
+    lotByCode,
+    lotByCodePrefix
   };
   
   console.log('NVC Indexes built successfully');
@@ -533,28 +540,21 @@ function lookupVaccineLot(lotNumber) {
   console.log('lookupVaccineLot: Looking up lot:', lotNumber);
   
   try {
-    const lotKey = lotNumber.toLowerCase();
-    console.log('Looking for lot key (lowercase):', lotKey);
+    const lotKey = String(lotNumber).trim().toLowerCase();
+    if (!lotKey) {
+      return null;
+    }
     
     // Try to find by lot number first
     let concept = nvcIndexes.lotByLotNumber[lotKey];
-    console.log('Found by exact lot number:', !!concept);
     
-    // If not found, try by code
+    // If not found, try direct code then prefix map (O(1)).
     if (!concept) {
-      console.log('Trying to find by code prefix...');
-      for (const codeKey in nvcIndexes.lotByCode) {
-        if (codeKey.startsWith(lotKey + '_')) {
-          concept = nvcIndexes.lotByCode[codeKey];
-          console.log('Found by code prefix:', codeKey);
-          break;
-        }
-      }
+      concept = nvcIndexes.lotByCode[lotKey] || nvcIndexes.lotByCodePrefix[lotKey];
     }
     
     if (!concept) {
       console.log('No matching lot found for:', lotNumber);
-      console.log('Available lots (sample):', Object.keys(nvcIndexes.lotByLotNumber).slice(0, 5));
       return null;
     }
     
@@ -650,7 +650,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'lookupVaccineInfo') {
     console.log('Looking up vaccine info for lot:', request.lot);
-    console.log('nvcIndexes keys:', Object.keys(nvcIndexes));
     
     // Wait for bundle to load if not ready yet
     if (!nvcIndexes.lotByLotNumber || !nvcIndexes.lotByCode) {
@@ -669,10 +668,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ error: 'Failed to load NVC database' });
       });
       return true;
-    }
-    
-    if (nvcIndexes.lotByLotNumber) {
-      console.log('Available lots (first 10):', Object.keys(nvcIndexes.lotByLotNumber).slice(0, 10));
     }
     
     // Look up by lot number instead of GTIN

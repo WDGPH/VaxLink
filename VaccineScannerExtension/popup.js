@@ -5,6 +5,8 @@ let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
 let parsedData = null;
+let activeParseRequestId = 0;
+const lotLookupCache = new Map();
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -16,18 +18,26 @@ document.addEventListener('DOMContentLoaded', () => {
   outputDiv = document.getElementById('output');
   
   if (parseBtn) {
-    parseBtn.addEventListener('click', () => {
+    parseBtn.addEventListener('click', async () => {
       const barcode = scannedInput.value.trim();
       if (!barcode) {
         showOutput('Enter or scan a barcode', 'error');
         return;
       }
-      
+
+      const parseRequestId = ++activeParseRequestId;
+      setButtonBusy(parseBtn, true, 'Parsing...');
+      setButtonBusy(autoFillBtn, true);
       try {
         parsedData = parseGS1Barcode(barcode);
-        displayParsedData(parsedData);
+        await displayParsedData(parsedData, parseRequestId);
       } catch (e) {
         showOutput(`Error parsing barcode: ${e.message}`, 'error');
+      } finally {
+        if (parseRequestId === activeParseRequestId) {
+          setButtonBusy(parseBtn, false);
+          setButtonBusy(autoFillBtn, false);
+        }
       }
     });
   }
@@ -49,30 +59,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const tabUrl = tabs[0].url;
         console.log('Sending to tab - ID:', tabId, 'URL:', tabUrl);
         sendAutoFillMessage(tabId, parsedData);
-        return;
-        
-        chrome.tabs.sendMessage(tabId, {
-          action: 'autoFill',
-          data: parsedData
-        }, (response) => {
-          console.log('sendMessage callback fired');
-          console.log('response:', response);
-          console.log('lastError:', chrome.runtime.lastError);
-          
-          if (chrome.runtime.lastError) {
-            console.error('chrome.runtime.lastError:', chrome.runtime.lastError.message);
-            showOutput('✗ Message send failed: ' + chrome.runtime.lastError.message, 'error');
-            return;
-          }
-          
-          if (response && response.success) {
-            showOutput('✓ Telus chart auto-filled', 'success');
-          } else if (response && response.error) {
-            showOutput('✗ ' + response.error, 'error');
-          } else {
-            showOutput('✗ Could not auto-fill Telus fields', 'error');
-          }
-        });
       });
     });
   }
@@ -126,6 +112,45 @@ function loadNVCStatus() {
     }
     renderNVCStatus(status);
   });
+}
+
+function setButtonBusy(button, busy, busyText) {
+  if (!button) return;
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = button.textContent;
+  }
+  button.disabled = busy;
+  button.classList.toggle('button-busy', busy);
+  button.textContent = busy && busyText ? busyText : button.dataset.defaultLabel;
+}
+
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+function getLoadingMarkup(text) {
+  return `<div class="lookup-loading"><span class="inline-spinner" aria-hidden="true"></span><span>${text}</span></div>`;
+}
+
+async function lookupVaccineInfo(lot) {
+  const lotKey = String(lot || '').trim().toLowerCase();
+  if (!lotKey) {
+    return { error: 'No lot number provided' };
+  }
+  if (lotLookupCache.has(lotKey)) {
+    return lotLookupCache.get(lotKey);
+  }
+  const response = await sendRuntimeMessage({ action: 'lookupVaccineInfo', lot });
+  lotLookupCache.set(lotKey, response);
+  return response;
 }
 
 function sendAutoFillMessage(tabId, data) {
@@ -398,7 +423,7 @@ function outputTypeForExpiry(status) {
   return 'info';
 }
 
-function displayParsedData(data) {
+async function displayParsedData(data, parseRequestId) {
   console.log('displayParsedData called with:', data);
   const expiryStatus = getExpiryStatus(data.expiry);
   const warningBanner = buildExpiryBanner(expiryStatus);
@@ -414,21 +439,24 @@ function displayParsedData(data) {
   // Show loading message while looking up vaccine info
   if (data.lot) {
     html += '<br><strong>Vaccine Information:</strong><br>';
-    html += '<em>Looking up...</em>';
+    html += getLoadingMarkup('Looking up lot in NVC...');
     showOutput(html, outputType);
-    
+
     console.log('Sending lookup request for lot:', data.lot);
-    
-    // Request vaccine info from background service worker using LOT number
-    chrome.runtime.sendMessage({ action: 'lookupVaccineInfo', lot: data.lot },
-      (response) => {
-        console.log('Received lookup response:', response);
-        if (chrome.runtime.lastError) {
-          console.error('Lookup error:', chrome.runtime.lastError);
-        }
-        displayVaccineInfo(data, response);
+    try {
+      const response = await lookupVaccineInfo(data.lot);
+      if (parseRequestId !== activeParseRequestId) {
+        return;
       }
-    );
+      console.log('Received lookup response:', response);
+      displayVaccineInfo(data, response);
+    } catch (error) {
+      if (parseRequestId !== activeParseRequestId) {
+        return;
+      }
+      console.error('Lookup error:', error);
+      displayVaccineInfo(data, { error: error.message || 'Lookup failed' });
+    }
   } else {
     console.log('No lot found, only showing barcode data');
     showOutput(html, outputType);
