@@ -15,9 +15,21 @@
     "http://127.0.0.1/*",
     "<all_urls>"
   ],
+  "icons": {
+    "16": "assets/vaxlink-icon.svg",
+    "32": "assets/vaxlink-icon.svg",
+    "48": "assets/vaxlink-icon.svg",
+    "128": "assets/vaxlink-icon.svg"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "VaxLink"
+    "default_title": "VaxLink",
+    "default_icon": {
+      "16": "assets/vaxlink-icon.svg",
+      "32": "assets/vaxlink-icon.svg",
+      "48": "assets/vaxlink-icon.svg",
+      "128": "assets/vaxlink-icon.svg"
+    }
   },
   "content_scripts": [
     {

@@ -1,4 +1,3 @@
-let parseBtn;
 let autoFillBtn;
 let refreshNvcBtn;
 let scannedInput;
@@ -10,34 +9,21 @@ const lotLookupCache = new Map();
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
-  parseBtn = document.getElementById('parseBtn');
   autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
-  
-  if (parseBtn) {
-    parseBtn.addEventListener('click', async () => {
-      const barcode = scannedInput.value.trim();
-      if (!barcode) {
-        showOutput('Enter or scan a barcode', 'error');
-        return;
-      }
 
-      const parseRequestId = ++activeParseRequestId;
-      setButtonBusy(parseBtn, true, 'Parsing...');
-      setButtonBusy(autoFillBtn, true);
-      try {
-        parsedData = parseGS1Barcode(barcode);
-        await displayParsedData(parsedData, parseRequestId);
-      } catch (e) {
-        showOutput(`Error parsing barcode: ${e.message}`, 'error');
-      } finally {
-        if (parseRequestId === activeParseRequestId) {
-          setButtonBusy(parseBtn, false);
-          setButtonBusy(autoFillBtn, false);
-        }
+  if (scannedInput) {
+    scannedInput.addEventListener('input', () => {
+      queueAutoParse();
+    });
+
+    scannedInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        queueAutoParse(true);
       }
     });
   }
@@ -45,7 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (autoFillBtn) {
     autoFillBtn.addEventListener('click', () => {
       if (!parsedData) {
-        showOutput('Parse barcode first', 'error');
+        showOutput('Scan a barcode first. Parsing runs automatically.', 'error');
         return;
       }
       
@@ -89,6 +75,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
   loadNVCStatus();
 });
+
+let autoParseTimer = null;
+function queueAutoParse(immediate = false) {
+  if (autoParseTimer) {
+    clearTimeout(autoParseTimer);
+    autoParseTimer = null;
+  }
+
+  const run = async () => {
+    const barcode = scannedInput && scannedInput.value ? scannedInput.value.trim() : '';
+    if (!barcode) {
+      parsedData = null;
+      return;
+    }
+
+    const parseRequestId = ++activeParseRequestId;
+    setButtonBusy(autoFillBtn, true);
+    try {
+      parsedData = parseGS1Barcode(barcode);
+      await displayParsedData(parsedData, parseRequestId);
+    } catch (e) {
+      parsedData = null;
+      showOutput(`Error parsing barcode: ${e.message}`, 'error');
+    } finally {
+      if (parseRequestId === activeParseRequestId) {
+        setButtonBusy(autoFillBtn, false);
+      }
+    }
+  };
+
+  if (immediate) {
+    run();
+    return;
+  }
+
+  autoParseTimer = setTimeout(run, 220);
+}
 
 function formatDateTime(value) {
   if (!value) return 'Never';
@@ -235,7 +258,7 @@ function parseGS1Barcode(barcode) {
     } else if (currentAI === '10') {
       // Variable length: lot number
       idx += 2;
-      let lotEnd = findNextAI(s, idx, GS);
+      let lotEnd = findNextAI(s, idx, GS, '10');
       if (lotEnd === -1) {
         lotEnd = s.length;
       }
@@ -246,7 +269,7 @@ function parseGS1Barcode(barcode) {
     } else if (currentAI === '21') {
       // Variable length: serial number
       idx += 2;
-      let serialEnd = findNextAI(s, idx, GS);
+      let serialEnd = findNextAI(s, idx, GS, '21');
       if (serialEnd === -1) {
         serialEnd = s.length;
       }
@@ -265,7 +288,7 @@ function parseGS1Barcode(barcode) {
   return data;
 }
 
-function findNextAI(s, startIdx, GS) {
+function findNextAI(s, startIdx, GS, currentVariableAI = null) {
   // Prefer GS-based boundaries when separators are present.
   if (GS && s.includes(GS) && s.substring(startIdx).includes(GS)) {
     const ais = ['17', '10', '21'];
@@ -280,7 +303,7 @@ function findNextAI(s, startIdx, GS) {
   // Fallback for scans without GS: detect likely AI boundaries by validating
   // that the remaining tail can still be parsed.
   const memo = new Map();
-  return findNextAINoGS(s, startIdx, memo);
+  return findNextAINoGS(s, startIdx, memo, currentVariableAI);
 }
 
 function isLikelyAIStart(s, idx) {
@@ -306,7 +329,7 @@ function canParseTailNoGS(s, idx, memo) {
   } else if (ai === '10' || ai === '21') {
     const valueStart = idx + 2;
     if (valueStart < s.length) {
-      const next = findNextAINoGS(s, valueStart, memo);
+      const next = findNextAINoGS(s, valueStart, memo, ai);
       ok = next === -1 ? true : (next > valueStart && canParseTailNoGS(s, next, memo));
     }
   } else {
@@ -317,9 +340,13 @@ function canParseTailNoGS(s, idx, memo) {
   return ok;
 }
 
-function findNextAINoGS(s, startIdx, memo) {
+function findNextAINoGS(s, startIdx, memo, currentVariableAI = null) {
   for (let i = startIdx + 1; i < s.length - 1; i++) {
     if (!isLikelyAIStart(s, i)) continue;
+    const candidateAI = s.substring(i, i + 2);
+    // In no-GS scans, avoid splitting a variable field on an embedded token
+    // that matches the current variable AI (e.g. lot containing "10").
+    if (currentVariableAI && candidateAI === currentVariableAI) continue;
     if (canParseTailNoGS(s, i, memo)) {
       return i;
     }

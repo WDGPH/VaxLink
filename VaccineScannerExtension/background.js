@@ -4,6 +4,8 @@ let bundleLoadPromise = null;
 const DEFAULT_NVC_SOURCE_URL = 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC';
 const AUTO_SYNC_INTERVAL_MINUTES = 24 * 60;
 const AUTO_SYNC_ALARM_NAME = 'nvc-auto-sync';
+const ACTION_ICON_SIZES = [16, 32, 48, 128];
+const ACTION_ICON_PATH = 'assets/vaxlink-icon.svg';
 const NVC_FETCH_HEADERS = {
   Accept: 'application/json+fhir',
   'x-app-desc': 'PHAC NVC Client'
@@ -16,15 +18,18 @@ const STORAGE_KEYS = {
   bundleSha256: 'nvc_bundle_sha256',
   metaVersion: 'nvc_bundle_meta_version'
 };
+let iconInitPromise = null;
 
 // Load NVC bundle on installation/startup
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Vaccine Scanner extension installed');
+  ensureActionIcon();
   initializeNVCSync();
 });
 
 // Also load on startup
 chrome.runtime.onStartup.addListener(() => {
+  ensureActionIcon();
   initializeNVCSync();
 });
 
@@ -36,7 +41,47 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Load immediately when service worker starts
 console.log('Service worker started, loading NVC bundle');
+ensureActionIcon();
 initializeNVCSync();
+
+function ensureActionIcon() {
+  if (iconInitPromise) {
+    return iconInitPromise;
+  }
+
+  iconInitPromise = (async () => {
+    try {
+      const iconUrl = chrome.runtime.getURL(ACTION_ICON_PATH);
+      const response = await fetch(iconUrl, { cache: 'force-cache' });
+      if (!response.ok) {
+        throw new Error(`Icon fetch failed: HTTP ${response.status}`);
+      }
+
+      const svgText = await response.text();
+      const svgBlob = new Blob([svgText], { type: 'image/svg+xml' });
+      const bitmap = await createImageBitmap(svgBlob);
+      const imageData = {};
+
+      for (const size of ACTION_ICON_SIZES) {
+        const canvas = new OffscreenCanvas(size, size);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          throw new Error('OffscreenCanvas 2D context unavailable');
+        }
+        ctx.clearRect(0, 0, size, size);
+        ctx.drawImage(bitmap, 0, 0, size, size);
+        imageData[size] = ctx.getImageData(0, 0, size, size);
+      }
+
+      chrome.action.setIcon({ imageData });
+      console.log('Action icon updated from VaxLink SVG');
+    } catch (error) {
+      console.warn('Failed to set custom action icon from SVG:', error);
+    }
+  })();
+
+  return iconInitPromise;
+}
 
 function getStorage(keys) {
   return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
@@ -650,35 +695,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'lookupVaccineInfo') {
     console.log('Looking up vaccine info for lot:', request.lot);
-    
-    // Wait for bundle to load if not ready yet
-    if (!nvcIndexes.lotByLotNumber || !nvcIndexes.lotByCode) {
-      console.log('Indexes not ready, waiting for bundle load...');
-      bundleLoadPromise.then(() => {
+
+    Promise.resolve(bundleLoadPromise || loadNVCBundle())
+      .then((loaded) => {
+        if (loaded === false) {
+          return { error: 'Failed to load NVC database' };
+        }
+
         const vaccineInfo = lookupVaccineLot(request.lot);
         console.log('Lookup result:', vaccineInfo);
-        
+
         if (vaccineInfo) {
-          sendResponse(vaccineInfo);
-        } else {
-          sendResponse({ error: 'Vaccine not found in NVC database' });
+          return vaccineInfo;
         }
-      }).catch(error => {
-        console.error('Bundle load failed:', error);
-        sendResponse({ error: 'Failed to load NVC database' });
+
+        return { error: 'Vaccine not found in NVC database' };
+      })
+      .catch((error) => {
+        console.error('Lookup pipeline failed:', error);
+        return { error: error?.message || 'Failed to load NVC database' };
+      })
+      .then((response) => {
+        sendResponse(response);
       });
-      return true;
-    }
-    
-    // Look up by lot number instead of GTIN
-    const vaccineInfo = lookupVaccineLot(request.lot);
-    console.log('Lookup result:', vaccineInfo);
-    
-    if (vaccineInfo) {
-      sendResponse(vaccineInfo);
-    } else {
-      sendResponse({ error: 'Vaccine not found in NVC database' });
-    }
+
     return true;
   }
 });

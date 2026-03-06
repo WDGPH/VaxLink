@@ -11,18 +11,16 @@
       --line: #d4dce6;
       --accent: #0f8b8d;
       --accent-2: #005f73;
-      --success: #1f9d63;
-      --danger: #c7353a;
       --ring: rgba(15, 139, 141, 0.22);
     }
+
     * { box-sizing: border-box; }
+
     html, body {
       margin: 0;
       padding: 0;
       width: 440px;
       min-height: 100%;
-      border-radius: 0;
-      overflow: visible;
       color: var(--ink);
       font-family: "Segoe UI", "Trebuchet MS", sans-serif;
       background:
@@ -30,9 +28,9 @@
         radial-gradient(circle at 95% 0%, #dff4ec 0%, transparent 40%),
         var(--bg);
     }
-    .shell {
-      padding: 8px;
-    }
+
+    .shell { padding: 8px; }
+
     .panel {
       border: 1px solid var(--line);
       border-radius: 24px;
@@ -40,25 +38,92 @@
       box-shadow: 0 10px 26px rgba(16, 33, 53, 0.12);
       overflow: hidden;
     }
+
     .brand {
       padding: 14px 16px 10px;
       border-bottom: 1px solid var(--line);
       background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
     }
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      flex: 0 0 auto;
+      box-shadow: 0 4px 10px rgba(16, 33, 53, 0.14);
+    }
+
     .title {
       margin: 0;
       font-size: 24px;
       letter-spacing: 0.2px;
       color: #0b3d4f;
     }
+
     .tagline {
       margin: 4px 0 0;
       font-size: 12px;
       color: var(--subtle);
     }
-    .content {
-      padding: 12px 14px 14px;
+
+    .content { padding: 12px 14px 14px; }
+
+    .scan-state {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      padding: 12px 13px;
+      border-radius: 18px;
+      border: 1px solid #cfe0eb;
+      background: linear-gradient(145deg, #f7fcff 0%, #eef8f8 100%);
+      transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     }
+
+    .scan-state.ready { border-color: #cfe0eb; }
+    .scan-state.scanning {
+      border-color: #93c5fd;
+      background: linear-gradient(145deg, #eff6ff 0%, #ecfeff 100%);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+    }
+    .scan-state.success {
+      border-color: #b8e3cf;
+      background: linear-gradient(145deg, #f0fdf4 0%, #ecfdf5 100%);
+    }
+    .scan-state.error {
+      border-color: #efc2c4;
+      background: linear-gradient(145deg, #fff4f4 0%, #fff8f1 100%);
+    }
+
+    .scan-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+      flex: 0 0 auto;
+    }
+
+    .scan-copy { min-width: 0; }
+    .scan-title {
+      font-weight: 800;
+      font-size: 14px;
+      color: #10384a;
+    }
+    .scan-subtitle {
+      margin-top: 2px;
+      font-size: 12px;
+      line-height: 1.4;
+      color: #597081;
+    }
+
     label {
       display: block;
       margin: 0 0 6px;
@@ -68,6 +133,7 @@
       text-transform: uppercase;
       color: #174d5f;
     }
+
     textarea {
       width: 100%;
       min-height: 88px;
@@ -82,16 +148,26 @@
       background: #fbfdff;
       transition: border-color 120ms ease, box-shadow 120ms ease;
     }
+
     textarea:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--ring);
     }
+
+    .scan-helper {
+      margin: 8px 2px 0;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #5f7283;
+    }
+
     .actions {
       margin-top: 10px;
       display: grid;
       gap: 8px;
     }
+
     button {
       width: 100%;
       border: 0;
@@ -102,6 +178,7 @@
       cursor: pointer;
       transition: transform 100ms ease, filter 120ms ease;
     }
+
     button:hover { filter: brightness(1.03); }
     button:active { transform: translateY(1px); }
     button:disabled {
@@ -110,22 +187,18 @@
       filter: none;
       transform: none;
     }
-    .button-busy {
-      position: relative;
-    }
-    #parseBtn {
-      background: linear-gradient(130deg, var(--accent) 0%, var(--accent-2) 100%);
-      color: #fff;
-    }
+
     #autoFillBtn {
       background: #0e7490;
       color: #fff;
     }
+
     #refreshNvcBtn {
       background: #e7f3f4;
       border: 1px solid #bddadd;
       color: #14505f;
     }
+
     #nvcStatus {
       margin-top: 8px;
       padding: 8px 10px;
@@ -136,6 +209,7 @@
       line-height: 1.35;
       color: #486071;
     }
+
     .output {
       margin-top: 10px;
       padding: 10px 11px;
@@ -146,21 +220,69 @@
       line-height: 1.5;
       color: #1f3d58;
     }
+
     .output.success {
       border-color: #b8e3cf;
       background: #eefbf4;
       color: #10683e;
     }
+
     .output.error {
       border-color: #efc2c4;
       background: #fff4f4;
       color: #97272c;
     }
+
     .output.warning {
       border-color: #f2d3a6;
       background: #fff7ed;
       color: #9a3412;
     }
+
+    .result-section + .result-section {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(148, 163, 184, 0.2);
+    }
+
+    .result-heading {
+      margin: 0 0 8px;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      color: #0f4c5c;
+    }
+
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 5px 0;
+      border-bottom: 1px dashed rgba(148, 163, 184, 0.16);
+    }
+
+    .result-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .result-label {
+      flex: 0 0 108px;
+      font-weight: 700;
+      color: #476173;
+    }
+
+    .result-value {
+      min-width: 0;
+      text-align: right;
+      color: #17344d;
+      word-break: break-word;
+    }
+
+    .result-value .muted { color: #64748b; }
+    .result-value .status { font-weight: 800; }
+
     .lookup-loading {
       display: inline-flex;
       align-items: center;
@@ -168,6 +290,7 @@
       color: #475569;
       font-style: italic;
     }
+
     .inline-spinner {
       width: 12px;
       height: 12px;
@@ -177,9 +300,9 @@
       animation: spin 0.85s linear infinite;
       flex: 0 0 auto;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .expiry-banner {
       margin: 0 0 8px;
       padding: 8px 10px;
@@ -189,11 +312,13 @@
       letter-spacing: 0.2px;
       border: 1px solid transparent;
     }
+
     .expiry-banner.expired {
       background: #fee2e2;
       color: #991b1b;
       border-color: #fecaca;
     }
+
     .expiry-banner.expiring {
       background: #fff7ed;
       color: #9a3412;
@@ -205,14 +330,26 @@
   <div class="shell">
     <div class="panel">
       <div class="brand">
-        <h2 class="title">VaxLink</h2>
-        <p class="tagline">Scan. Map. Chart.</p>
+        <div class="brand-row">
+          <img class="brand-logo" src="assets/vaxlink-icon.svg" alt="VaxLink logo">
+          <div>
+            <h2 class="title">VaxLink</h2>
+            <p class="tagline">Scan once. Parse automatically. Chart faster.</p>
+          </div>
+        </div>
       </div>
       <div class="content">
-        <label for="scannedData">Scanned Barcode</label>
+        <div id="scanState" class="scan-state ready" aria-live="polite">
+          <div id="scanStateIcon" class="scan-icon">&#128137;</div>
+          <div class="scan-copy">
+            <div id="scanStateTitle" class="scan-title">Ready to scan</div>
+            <div id="scanStateSubtitle" class="scan-subtitle">Auto-parse is on. Scan or paste a barcode to run instantly.</div>
+          </div>
+        </div>
+        <label for="scannedData">Scanned Barcode (Auto-Parse)</label>
         <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
+        <p class="scan-helper">Scan or paste a barcode to decode it and load vaccine details.</p>
         <div class="actions">
-          <button id="parseBtn">Parse Barcode</button>
           <button id="autoFillBtn">Auto-fill CHR</button>
           <button id="refreshNvcBtn">Refresh NVC Data</button>
         </div>
