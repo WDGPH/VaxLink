@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VaxLink Explorer | NVC FHIR Bundle</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>NVC FHIR Bundle Explorer</h1>
+      <p>Explore resources from the National Vaccine Catalogue bundle.</p>
+    </div>
+    <div class="header-actions">
+      <button id="goHomeBtn" onclick="window.location.href='index.html'">Home</button>
+      <button id="loadLocalBtn">Load Local Bundle</button>
+      <button id="loadRemoteBtn">Fetch From API</button>
+    </div>
+  </header>
+
+  <section class="status-row">
+    <div id="status" class="status">Ready</div>
+    <div id="bundleMeta" class="bundle-meta"></div>
+  </section>
+
+  <section class="scanner">
+    <h2>Barcode / AI Parser</h2>
+    <p class="scanner-help">
+      Supports GS1 formats like <code>(01)...(17)...(10)...</code>, compact AI strings, and plain
+      text labels such as <code>LOT</code>/<code>BATCH</code>/<code>EXP</code>/<code>DIN</code>.
+    </p>
+    <textarea
+      id="barcodeInput"
+      rows="3"
+      placeholder="Paste scanned barcode payload here..."
+    ></textarea>
+    <div class="scanner-actions">
+      <button id="parseBarcodeBtn">Parse + Lookup Lot</button>
+      <button id="clearBarcodeBtn">Clear</button>
+    </div>
+    <div id="barcodeResult" class="barcode-result">No barcode parsed yet.</div>
+  </section>
+
+  <section class="controls">
+    <label>
+      Search
+      <input id="searchInput" type="text" placeholder="Search id, name, title, url, publisher..." />
+    </label>
+    <label>
+      Resource Type
+      <select id="resourceTypeSelect">
+        <option value="">All</option>
+      </select>
+    </label>
+  </section>
+
+  <section id="typeSummary" class="type-summary"></section>
+
+  <main class="layout">
+    <section class="list-panel">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Resource Type</th>
+            <th>Primary Label</th>
+            <th>URL</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="resourceTableBody"></tbody>
+      </table>
+    </section>
+
+    <section class="detail-panel">
+      <h2>Selected Resource</h2>
+      <div id="detailSummary" class="detail-summary">Select a row to inspect details.</div>
+      <pre id="jsonViewer" class="json-viewer"></pre>
+    </section>
+  </main>
+
+  <script src="app.js?v=20260306-4" type="module"></script>
+</body>
+</html>

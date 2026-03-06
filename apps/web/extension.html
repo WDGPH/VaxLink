@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VaxLink Browser Extension</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="landing.css" />
+</head>
+<body>
+  <div class="noise"></div>
+  <header class="topbar">
+    <a class="brand" href="index.html">VaxLink</a>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="explorer.html">Explorer</a>
+      <a href="extension.html" class="cta">Extension</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero reveal">
+      <p class="kicker">Browser Extension</p>
+      <h1>VaxLink Chrome Extension</h1>
+      <p class="lede">
+        Parse GS1 vaccine barcodes and auto-fill CHR fields using NVC-backed terminology and lot metadata.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="explorer.html">Open Web Explorer</a>
+        <a class="btn btn-ghost" href="#install">Install Steps</a>
+      </div>
+    </section>
+
+    <section class="feature-grid">
+      <article class="card reveal">
+        <h2>What It Extracts</h2>
+        <p>AI 01 (GTIN), 10 (Lot), 17 (Expiry), 21 (Serial), plus fallback text labels.</p>
+      </article>
+      <article class="card reveal">
+        <h2>What It Fills</h2>
+        <p>Trade name, manufacturer, route, dose, strength, DIN/drug code, lot, and expiry fields.</p>
+      </article>
+      <article class="card reveal">
+        <h2>NVC Sync Model</h2>
+        <p>Uses the NVC bundle endpoint with periodic checks and keeps a last-known-good fallback bundle.</p>
+      </article>
+    </section>
+
+    <section id="install" class="workflow reveal">
+      <h2>Install (Developer Mode)</h2>
+      <ol>
+        <li>Open <code>chrome://extensions</code>.</li>
+        <li>Enable <strong>Developer mode</strong>.</li>
+        <li>Click <strong>Load unpacked</strong>.</li>
+        <li>Select <code>VaxLink/VaccineScannerExtension</code>.</li>
+      </ol>
+      <p class="lede">After install, open your CHR page, click the extension, scan/paste a barcode, then use Parse and Auto-fill.</p>
+    </section>
+
+    <section class="workflow reveal">
+      <h2>Permissions Summary</h2>
+      <ol>
+        <li><code>activeTab</code>, <code>scripting</code>: inject/execute on the current page for autofill.</li>
+        <li><code>clipboardRead</code>: read pasted scanner payloads.</li>
+        <li><code>storage</code>, <code>alarms</code>: persist data and run periodic NVC update checks.</li>
+      </ol>
+      <a class="btn btn-primary" href="index.html">Back to Landing Page</a>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Questions? Use the extension page as onboarding for users and testers.</span>
+    <a href="index.html">Home</a>
+  </footer>
+
+  <script src="landing.js"></script>
+</body>
+</html>
