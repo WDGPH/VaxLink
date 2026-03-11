@@ -757,6 +757,14 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
     return optionTokens.includes(desiredNorm) || desiredTokens.includes(optionTextNorm);
   }
 
+  // Prevent downgrading specific values to broader ones (e.g., "mmr var" -> "mmr").
+  if (desiredTokens.length > optionTokens.length) {
+    const optionIsSubset = optionTokens.every(token => desiredTokens.includes(token));
+    if (optionIsSubset) {
+      return false;
+    }
+  }
+
   return optionTextNorm.includes(desiredNorm) || desiredNorm.includes(optionTextNorm);
 }
 
@@ -833,7 +841,7 @@ function fillComboTextField(field, value) {
     const options = Array.from(document.querySelectorAll(selector));
     const hit = options.find(opt => {
       const optNorm = normalizeForMatch(opt.textContent || '');
-      return candidates.some(desired => optNorm === desired || optNorm.includes(desired) || desired.includes(optNorm));
+      return candidates.some(desired => isLooseSelectTextMatch(optNorm, desired));
     });
     if (hit) {
       hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -1140,17 +1148,19 @@ function isPanoramaImmunizationPage() {
 }
 
 function fillPanoramaImmunizationFields(data) {
-  const agentMappings = [
-    {
-      value: data.name || data.generic_name || data.tradename || data.din,
-      selectors: [
-        'select[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"]',
-        'input[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_focus"]'
-      ]
-    }
+  const agentSelectors = [
+    'select[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"]',
+    'input[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_focus"]'
   ];
+  const agentCandidates = getPanoramaAgentCandidates(data);
+  let agentCount = 0;
+  for (const candidate of agentCandidates) {
+    if (fillFirstMatchingField(agentSelectors, candidate)) {
+      agentCount = 1;
+      break;
+    }
+  }
 
-  const agentCount = runPanoramaMappings(agentMappings);
   let fillCount = agentCount;
   const lotCount = data.lot ? (tryFillPanoramaLot(data.lot) ? 1 : 0) : 0;
   fillCount += lotCount;
@@ -1174,7 +1184,7 @@ function fillPanoramaImmunizationFields(data) {
 
   const fallbackMapping = [
     {
-      value: data.name || data.generic_name || data.tradename || data.din,
+      value: agentCandidates.length ? agentCandidates[0] : (data.name || data.generic_name || data.tradename || data.din),
       labels: ['Agent'],
       preferLast: false
     },
@@ -1197,6 +1207,44 @@ function fillPanoramaImmunizationFields(data) {
     }
   }
   return fallbackCount;
+}
+
+function getPanoramaAgentCandidates(data) {
+  const values = [];
+  const seen = new Set();
+  const add = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return;
+    const key = normalizeForMatch(raw);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    values.push(raw);
+  };
+
+  const haystack = normalizeForMatch([
+    data?.tradename,
+    data?.generic_name,
+    data?.name,
+    data?.disease,
+    data?.antigen
+  ].filter(Boolean).join(' '));
+
+  const isMMRVar =
+    haystack.includes('proquad') ||
+    haystack.includes('mmr var') ||
+    (haystack.includes('measles') && haystack.includes('mumps') && haystack.includes('rubella') && haystack.includes('varicella'));
+
+  if (isMMRVar) {
+    add('MMR-VAR');
+    add('MMR VAR');
+    add('MMR-Var');
+  }
+
+  add(data?.name);
+  add(data?.generic_name);
+  add(data?.tradename);
+  add(data?.din);
+  return values;
 }
 
 function getDoseUnitFieldByLayout() {
