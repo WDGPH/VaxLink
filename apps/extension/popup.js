@@ -6,6 +6,7 @@ let outputDiv;
 let parsedData = null;
 let activeParseRequestId = 0;
 const lotLookupCache = new Map();
+const HANDS_FREE_SCAN_KEY = 'hands_free_scan_autofill_enabled';
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -14,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
+  initHandsFreeToggle();
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -93,7 +95,7 @@ function queueAutoParse(immediate = false) {
     const parseRequestId = ++activeParseRequestId;
     setButtonBusy(autoFillBtn, true);
     try {
-      parsedData = parseGS1Barcode(barcode);
+      parsedData = parseInputData(barcode);
       await displayParsedData(parsedData, parseRequestId);
     } catch (e) {
       parsedData = null;
@@ -145,6 +147,65 @@ function setButtonBusy(button, busy, busyText) {
   button.disabled = busy;
   button.classList.toggle('button-busy', busy);
   button.textContent = busy && busyText ? busyText : button.dataset.defaultLabel;
+}
+
+function initHandsFreeToggle() {
+  if (!outputDiv || document.getElementById('handsFreeScanToggle')) return;
+
+  const section = document.createElement('div');
+  section.style.margin = '8px 0 10px';
+  section.style.padding = '8px 10px';
+  section.style.border = '1px solid #d9e2ec';
+  section.style.borderRadius = '8px';
+  section.style.background = '#f8fafc';
+
+  const label = document.createElement('label');
+  label.style.display = 'flex';
+  label.style.alignItems = 'center';
+  label.style.gap = '8px';
+  label.style.fontSize = '12px';
+  label.style.color = '#1f2937';
+  label.style.cursor = 'pointer';
+
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.id = 'handsFreeScanToggle';
+
+  const textWrap = document.createElement('span');
+  textWrap.textContent = 'Hands-free scan mode (auto-fill on barcode scan)';
+
+  label.appendChild(toggle);
+  label.appendChild(textWrap);
+  section.appendChild(label);
+
+  const hint = document.createElement('div');
+  hint.style.fontSize = '11px';
+  hint.style.color = '#475569';
+  hint.style.marginTop = '6px';
+  hint.textContent = 'When enabled, scanning directly in Panorama or InputHealth can auto-fill without opening this popup.';
+  section.appendChild(hint);
+
+  outputDiv.parentNode.insertBefore(section, outputDiv);
+
+  chrome.storage.local.get([HANDS_FREE_SCAN_KEY], (stored) => {
+    toggle.checked = !!stored[HANDS_FREE_SCAN_KEY];
+  });
+
+  toggle.addEventListener('change', () => {
+    const enabled = !!toggle.checked;
+    chrome.storage.local.set({ [HANDS_FREE_SCAN_KEY]: enabled }, () => {
+      if (chrome.runtime.lastError) {
+        showOutput('Could not update hands-free scan mode: ' + chrome.runtime.lastError.message, 'error');
+        return;
+      }
+      showOutput(
+        enabled
+          ? 'Hands-free scan mode enabled'
+          : 'Hands-free scan mode disabled',
+        'info'
+      );
+    });
+  });
 }
 
 function sendRuntimeMessage(message) {
@@ -215,12 +276,91 @@ function handleAutoFillResponse(response) {
   }
 
   if (response && response.success) {
-    showOutput('Telus chart auto-filled', 'success');
+    showOutput('Chart auto-filled', 'success');
   } else if (response && response.error) {
     showOutput(response.error, 'error');
   } else {
-    showOutput('Could not auto-fill Telus fields', 'error');
+    showOutput('Could not auto-fill fields', 'error');
   }
+}
+
+function parseInputData(rawInput) {
+  const input = String(rawInput || '').trim();
+  if (!input) {
+    throw new Error('No input provided');
+  }
+
+  // Primary path: GS1 scan strings (01...).
+  if (input.startsWith('01') || input.startsWith('(01)')) {
+    return parseGS1Barcode(input);
+  }
+
+  const manual = parseManualTestInput(input);
+  if (manual) {
+    return manual;
+  }
+
+  // Fallback: try GS1 parser anyway for scanners that omit AI wrappers.
+  return parseGS1Barcode(input);
+}
+
+function parseManualTestInput(input) {
+  const normalized = String(input || '').trim();
+  if (!normalized) return null;
+
+  // JSON mode:
+  // {"name":"MMR","lot":"0013AE","tradename":"MMR M-M-R II MC","expiry":"12/16/2013"}
+  if (normalized.startsWith('{') && normalized.endsWith('}')) {
+    const obj = JSON.parse(normalized);
+    if (!obj || typeof obj !== 'object') {
+      throw new Error('Manual JSON input must be an object');
+    }
+    const data = {
+      gtin: obj.gtin || null,
+      expiry: obj.expiry || null,
+      lot: obj.lot || obj.lot_number || null,
+      serial: obj.serial || null,
+      name: obj.name || obj.agent || obj.generic_name || obj.tradename || null,
+      tradename: obj.tradename || null,
+      generic_name: obj.generic_name || null
+    };
+    if (!data.name && !data.lot && !data.tradename) {
+      throw new Error('Manual JSON must include at least one of: name/agent, tradename, lot');
+    }
+    return data;
+  }
+
+  // Key-value mode:
+  // agent=MMR;lot=0013AE;tradename=MMR M-M-R II MC
+  if (/[=]/.test(normalized)) {
+    const pairs = normalized.split(/[;\n]+/).map(part => part.trim()).filter(Boolean);
+    const map = {};
+    for (const pair of pairs) {
+      const eqIdx = pair.indexOf('=');
+      if (eqIdx <= 0) continue;
+      const key = pair.slice(0, eqIdx).trim().toLowerCase();
+      const value = pair.slice(eqIdx + 1).trim();
+      if (key) map[key] = value;
+    }
+
+    if (Object.keys(map).length > 0) {
+      const data = {
+        gtin: map.gtin || null,
+        expiry: map.expiry || null,
+        lot: map.lot || map.lot_number || null,
+        serial: map.serial || null,
+        name: map.name || map.agent || map.generic_name || map.tradename || null,
+        tradename: map.tradename || null,
+        generic_name: map.generic_name || null
+      };
+      if (!data.name && !data.lot && !data.tradename) {
+        throw new Error('Manual key-value input must include name/agent, tradename, or lot');
+      }
+      return data;
+    }
+  }
+
+  return null;
 }
 
 function parseGS1Barcode(barcode) {
