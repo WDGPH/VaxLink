@@ -168,6 +168,12 @@
       gap: 8px;
     }
 
+    .action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
     button {
       width: 100%;
       border: 0;
@@ -191,6 +197,28 @@
     #autoFillBtn {
       background: #0e7490;
       color: #fff;
+    }
+
+    #addCurrentBtn {
+      background: #0f8b8d;
+      color: #fff;
+    }
+
+    #addBatchBtn {
+      background: #d9f0ef;
+      border: 1px solid #b6dcda;
+      color: #114b53;
+    }
+
+    #exportCsvBtn {
+      background: #164e63;
+      color: #fff;
+    }
+
+    #clearInventoryBtn {
+      background: #fff7ed;
+      border: 1px solid #f4cda5;
+      color: #9a3412;
     }
 
     #refreshNvcBtn {
@@ -324,6 +352,91 @@
       color: #9a3412;
       border-color: #fed7aa;
     }
+
+    .inventory {
+      margin-top: 12px;
+      padding: 10px 11px;
+      border-radius: 16px;
+      border: 1px solid #c8d9e8;
+      background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
+    }
+
+    .inventory-summary {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #4a6275;
+    }
+
+    .inventory-list {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .inventory-empty {
+      padding: 10px 2px 2px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #64748b;
+    }
+
+    .inventory-item {
+      border: 1px solid #dbe7f0;
+      border-radius: 14px;
+      padding: 10px;
+      background: #ffffff;
+      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+    }
+
+    .inventory-item-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .inventory-item-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #12364a;
+    }
+
+    .inventory-item-meta {
+      margin-top: 3px;
+      font-size: 11px;
+      color: #64748b;
+    }
+
+    .inventory-item-grid {
+      margin-top: 9px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .inventory-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eef6fb;
+      color: #345067;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .inventory-remove {
+      width: auto;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: #f8fafc;
+      border: 1px solid #d7e3ed;
+      color: #52667a;
+      font-size: 11px;
+    }
   </style>
 </head>
 <body>
@@ -348,13 +461,26 @@
         </div>
         <label for="scannedData">Scanned Barcode (Auto-Parse)</label>
         <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
-        <p class="scan-helper">Scan or paste a barcode to decode it and load vaccine details.</p>
+        <p class="scan-helper">Scan or paste a barcode to decode it and load vaccine details. Press Enter to add the current scan to the inventory tray, or paste multiple lines and add them in one batch.</p>
         <div class="actions">
           <button id="autoFillBtn">Auto-fill CHR</button>
+          <div class="action-row">
+            <button id="addCurrentBtn">Add Current Scan</button>
+            <button id="addBatchBtn">Add All Lines</button>
+          </div>
+          <div class="action-row">
+            <button id="exportCsvBtn">Export CSV</button>
+            <button id="clearInventoryBtn">Clear Inventory</button>
+          </div>
           <button id="refreshNvcBtn">Refresh NVC Data</button>
         </div>
         <div id="nvcStatus"></div>
         <div id="output" class="output" style="display:none;"></div>
+        <div class="inventory">
+          <div class="result-heading">Inventory Tray</div>
+          <div id="inventorySummary" class="inventory-summary">No scans queued for export.</div>
+          <div id="inventoryList" class="inventory-list"></div>
+        </div>
       </div>
     </div>
   </div>
