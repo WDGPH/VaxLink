@@ -72,6 +72,35 @@
 
     .content { padding: 12px 14px 14px; }
 
+    .mode-switch {
+      margin: 0 0 12px;
+      padding: 4px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      border: 1px solid #d5e2ec;
+      border-radius: 16px;
+      background: #f4f9fc;
+    }
+
+    .mode-tab {
+      border-radius: 12px;
+      padding: 9px 10px;
+      background: transparent;
+      color: #4d6375;
+      border: 0;
+    }
+
+    .mode-tab.active {
+      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(14, 116, 144, 0.18);
+    }
+
+    .mode-panel[hidden] {
+      display: none !important;
+    }
+
     .scan-state {
       display: flex;
       align-items: center;
@@ -459,28 +488,40 @@
             <div id="scanStateSubtitle" class="scan-subtitle">Auto-parse is on. Scan or paste a barcode to run instantly.</div>
           </div>
         </div>
+        <div class="mode-switch" role="tablist" aria-label="VaxLink mode">
+          <button id="injectModeBtn" class="mode-tab active" type="button" role="tab" aria-selected="true" data-mode="inject">Inject</button>
+          <button id="inventoryModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false" data-mode="inventory">Inventory</button>
+        </div>
         <label for="scannedData">Scanned Barcode (Auto-Parse)</label>
         <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
-        <p class="scan-helper">Scan or paste a barcode to decode it and load vaccine details. Press Enter to add the current scan to the inventory tray, or paste multiple lines and add them in one batch.</p>
+        <p id="modeHelper" class="scan-helper">Scan or paste a barcode to decode it and load vaccine details for chart injection.</p>
+        <div id="injectModeSection" class="mode-panel">
+          <div class="actions">
+            <button id="autoFillBtn">Auto-fill CHR</button>
+          </div>
+        </div>
+        <div id="inventoryModeSection" class="mode-panel" hidden>
+          <div class="actions">
+            <div class="action-row">
+              <button id="addCurrentBtn">Add Current Scan</button>
+              <button id="addBatchBtn">Add All Lines</button>
+            </div>
+            <div class="action-row">
+              <button id="exportCsvBtn">Export CSV</button>
+              <button id="clearInventoryBtn">Clear Inventory</button>
+            </div>
+          </div>
+          <div class="inventory">
+            <div class="result-heading">Inventory Tray</div>
+            <div id="inventorySummary" class="inventory-summary">No scans queued for export.</div>
+            <div id="inventoryList" class="inventory-list"></div>
+          </div>
+        </div>
         <div class="actions">
-          <button id="autoFillBtn">Auto-fill CHR</button>
-          <div class="action-row">
-            <button id="addCurrentBtn">Add Current Scan</button>
-            <button id="addBatchBtn">Add All Lines</button>
-          </div>
-          <div class="action-row">
-            <button id="exportCsvBtn">Export CSV</button>
-            <button id="clearInventoryBtn">Clear Inventory</button>
-          </div>
           <button id="refreshNvcBtn">Refresh NVC Data</button>
         </div>
         <div id="nvcStatus"></div>
         <div id="output" class="output" style="display:none;"></div>
-        <div class="inventory">
-          <div class="result-heading">Inventory Tray</div>
-          <div id="inventorySummary" class="inventory-summary">No scans queued for export.</div>
-          <div id="inventoryList" class="inventory-list"></div>
-        </div>
       </div>
     </div>
   </div>

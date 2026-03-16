@@ -14,15 +14,36 @@ let addCurrentBtn;
 let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
+let injectModeBtn;
+let inventoryModeBtn;
+let injectModeSection;
+let inventoryModeSection;
 let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
+let modeHelper;
+let scanStateTitle;
+let scanStateSubtitle;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
 let inventoryManager;
+let activeMode = 'inject';
 
 const lotLookupCache = new Map();
+const POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
+const MODE_CONFIG = {
+  inject: {
+    title: 'Inject mode',
+    subtitle: 'Single-scan workflow for preview and chart auto-fill.',
+    helper: 'Scan or paste a barcode to decode it, review the parsed vaccine details, and inject into the active CHR tab.'
+  },
+  inventory: {
+    title: 'Inventory mode',
+    subtitle: 'Batch workflow for tray capture and CSV export.',
+    helper: 'Scan one vaccine per line. Press Enter to add the current scan, or paste multiple lines and add them to the inventory tray in one batch.'
+  }
+};
 
 document.addEventListener('DOMContentLoaded', async () => {
   autoFillBtn = document.getElementById('autoFillBtn');
@@ -31,9 +52,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
+  injectModeBtn = document.getElementById('injectModeBtn');
+  inventoryModeBtn = document.getElementById('inventoryModeBtn');
+  injectModeSection = document.getElementById('injectModeSection');
+  inventoryModeSection = document.getElementById('inventoryModeSection');
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
+  modeHelper = document.getElementById('modeHelper');
+  scanStateTitle = document.getElementById('scanStateTitle');
+  scanStateSubtitle = document.getElementById('scanStateSubtitle');
 
   inventoryManager = new InventoryBatchManager({
     summaryEl: document.getElementById('inventorySummary'),
@@ -44,6 +72,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   initHandsFreeToggle(outputDiv, writeOutput);
   await inventoryManager.load();
+  await loadPopupMode();
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -53,8 +82,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     scannedInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        addPreviewScanToInventory();
+        if (activeMode === 'inventory') {
+          addPreviewScanToInventory();
+        } else {
+          queueAutoParse(true);
+        }
       }
+    });
+  }
+
+  if (injectModeBtn) {
+    injectModeBtn.addEventListener('click', () => {
+      setActiveMode('inject');
+    });
+  }
+
+  if (inventoryModeBtn) {
+    inventoryModeBtn.addEventListener('click', () => {
+      setActiveMode('inventory');
     });
   }
 
@@ -134,6 +179,55 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function writeOutput(message, type = 'info') {
   showOutput(outputDiv, message, type);
+}
+
+async function loadPopupMode() {
+  try {
+    const stored = await chrome.storage.local.get([POPUP_MODE_KEY]);
+    const mode = stored && stored[POPUP_MODE_KEY] === 'inventory' ? 'inventory' : 'inject';
+    await setActiveMode(mode, { persist: false });
+  } catch (_) {
+    await setActiveMode('inject', { persist: false });
+  }
+}
+
+async function setActiveMode(mode, options = {}) {
+  activeMode = mode === 'inventory' ? 'inventory' : 'inject';
+  const config = MODE_CONFIG[activeMode];
+
+  if (injectModeBtn) {
+    injectModeBtn.classList.toggle('active', activeMode === 'inject');
+    injectModeBtn.setAttribute('aria-selected', activeMode === 'inject' ? 'true' : 'false');
+  }
+
+  if (inventoryModeBtn) {
+    inventoryModeBtn.classList.toggle('active', activeMode === 'inventory');
+    inventoryModeBtn.setAttribute('aria-selected', activeMode === 'inventory' ? 'true' : 'false');
+  }
+
+  if (injectModeSection) {
+    injectModeSection.hidden = activeMode !== 'inject';
+  }
+
+  if (inventoryModeSection) {
+    inventoryModeSection.hidden = activeMode !== 'inventory';
+  }
+
+  if (modeHelper) {
+    modeHelper.textContent = config.helper;
+  }
+
+  if (scanStateTitle) {
+    scanStateTitle.textContent = config.title;
+  }
+
+  if (scanStateSubtitle) {
+    scanStateSubtitle.textContent = config.subtitle;
+  }
+
+  if (options.persist !== false) {
+    await chrome.storage.local.set({ [POPUP_MODE_KEY]: activeMode });
+  }
 }
 
 function queueAutoParse(immediate = false) {
