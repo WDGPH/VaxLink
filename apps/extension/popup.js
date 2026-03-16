@@ -1,21 +1,63 @@
 let autoFillBtn;
 let refreshNvcBtn;
+let addCurrentBtn;
+let addBatchBtn;
+let exportCsvBtn;
+let clearInventoryBtn;
 let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
+let inventorySummaryDiv;
+let inventoryListDiv;
 let parsedData = null;
 let activeParseRequestId = 0;
+let inventoryBatch = [];
 const lotLookupCache = new Map();
 const HANDS_FREE_SCAN_KEY = 'hands_free_scan_autofill_enabled';
+const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
+const INVENTORY_CSV_COLUMNS = [
+  'scan_index',
+  'scanned_at',
+  'name',
+  'tradename',
+  'generic_name',
+  'disease',
+  'antigen',
+  'manufacturer',
+  'gtin',
+  'lot',
+  'serial',
+  'barcode_expiry',
+  'inventory_expiry',
+  'nvc_lot_expiry',
+  'expiry_flag',
+  'expiry_days_remaining',
+  'expiry_source',
+  'route',
+  'strength',
+  'dose_value',
+  'dose_unit',
+  'din',
+  'drug_code',
+  'lookup_error',
+  'raw_barcode'
+];
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
   autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
+  addCurrentBtn = document.getElementById('addCurrentBtn');
+  addBatchBtn = document.getElementById('addBatchBtn');
+  exportCsvBtn = document.getElementById('exportCsvBtn');
+  clearInventoryBtn = document.getElementById('clearInventoryBtn');
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
+  inventorySummaryDiv = document.getElementById('inventorySummary');
+  inventoryListDiv = document.getElementById('inventoryList');
   initHandsFreeToggle();
+  loadInventoryBatch();
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -25,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     scannedInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
-        queueAutoParse(true);
+        addPreviewScanToInventory();
       }
     });
   }
@@ -75,6 +117,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  if (addCurrentBtn) {
+    addCurrentBtn.addEventListener('click', () => {
+      addPreviewScanToInventory();
+    });
+  }
+
+  if (addBatchBtn) {
+    addBatchBtn.addEventListener('click', () => {
+      addPendingScansToInventory();
+    });
+  }
+
+  if (exportCsvBtn) {
+    exportCsvBtn.addEventListener('click', () => {
+      exportInventoryCsv();
+    });
+  }
+
+  if (clearInventoryBtn) {
+    clearInventoryBtn.addEventListener('click', () => {
+      clearInventoryBatch();
+    });
+  }
+
   loadNVCStatus();
 });
 
@@ -86,9 +152,8 @@ function queueAutoParse(immediate = false) {
   }
 
   const run = async () => {
-    const barcode = scannedInput && scannedInput.value ? scannedInput.value.trim() : '';
+    const barcode = getPreviewBarcodeValue();
     if (!barcode) {
-      parsedData = null;
       return;
     }
 
@@ -115,6 +180,36 @@ function queueAutoParse(immediate = false) {
   autoParseTimer = setTimeout(run, 220);
 }
 
+function getPendingScanLines() {
+  if (!scannedInput || !scannedInput.value) return [];
+  return String(scannedInput.value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function getPreviewBarcodeValue() {
+  const lines = getPendingScanLines();
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+function setPendingScanLines(lines) {
+  if (!scannedInput) return;
+  scannedInput.value = (lines || []).join('\n');
+}
+
+function removeLastPendingScanLine() {
+  if (!scannedInput || !scannedInput.value) return;
+  const lines = String(scannedInput.value).split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (String(lines[i]).trim()) {
+      lines.splice(i, 1);
+      break;
+    }
+  }
+  setPendingScanLines(lines.map((line) => String(line).trim()).filter(Boolean));
+}
+
 function formatDateTime(value) {
   if (!value) return 'Never';
   const d = new Date(value);
@@ -137,6 +232,111 @@ function loadNVCStatus() {
     }
     renderNVCStatus(status);
   });
+}
+
+function loadInventoryBatch() {
+  chrome.storage.local.get([INVENTORY_BATCH_KEY], (stored) => {
+    const rows = stored && Array.isArray(stored[INVENTORY_BATCH_KEY])
+      ? stored[INVENTORY_BATCH_KEY]
+      : [];
+    inventoryBatch = rows.filter((row) => row && typeof row === 'object');
+    renderInventoryBatch();
+  });
+}
+
+function persistInventoryBatch() {
+  chrome.storage.local.set({ [INVENTORY_BATCH_KEY]: inventoryBatch }, () => {
+    if (chrome.runtime.lastError) {
+      console.warn('Could not persist inventory batch:', chrome.runtime.lastError.message);
+    }
+  });
+}
+
+function renderInventoryBatch() {
+  if (!inventorySummaryDiv || !inventoryListDiv) return;
+
+  if (!inventoryBatch.length) {
+    inventorySummaryDiv.textContent = 'No scans queued for export.';
+    inventoryListDiv.innerHTML = '<div class="inventory-empty">Scan vaccines into the tray, then export when ready.</div>';
+    updateInventoryControls();
+    return;
+  }
+
+  const expiredCount = inventoryBatch.filter((row) => row.expiry_flag === 'expired').length;
+  const expiringCount = inventoryBatch.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  let summary = `${inventoryBatch.length} scan(s) ready for CSV export.`;
+  if (expiredCount || expiringCount) {
+    summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
+  }
+  inventorySummaryDiv.textContent = summary;
+
+  inventoryListDiv.innerHTML = inventoryBatch
+    .map((row, index) => {
+      const title = escapeHtml(row.tradename || row.generic_name || row.name || row.lot || `Scan ${index + 1}`);
+      const lot = escapeHtml(row.lot || 'N/A');
+      const expiry = escapeHtml(row.inventory_expiry || row.barcode_expiry || 'N/A');
+      const manufacturer = escapeHtml(row.manufacturer || 'N/A');
+      const status = escapeHtml(formatInventoryStatus(row));
+      const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
+      return `
+        <div class="inventory-item">
+          <div class="inventory-item-top">
+            <div>
+              <div class="inventory-item-title">${title}</div>
+              <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}</div>
+            </div>
+            <button class="inventory-remove" type="button" data-remove-id="${escapeHtml(row.id || '')}">Remove</button>
+          </div>
+          <div class="inventory-item-grid">
+            <span class="inventory-chip">Expiry ${expiry}</span>
+            <span class="inventory-chip">Status ${status}</span>
+            <span class="inventory-chip">Mfr ${manufacturer}</span>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  inventoryListDiv.querySelectorAll('[data-remove-id]').forEach((button) => {
+    button.addEventListener('click', () => {
+      removeInventoryItem(button.getAttribute('data-remove-id'));
+    });
+  });
+
+  updateInventoryControls();
+}
+
+function updateInventoryControls() {
+  const hasItems = inventoryBatch.length > 0;
+  if (exportCsvBtn) exportCsvBtn.disabled = !hasItems;
+  if (clearInventoryBtn) clearInventoryBtn.disabled = !hasItems;
+}
+
+function removeInventoryItem(id) {
+  inventoryBatch = inventoryBatch.filter((row) => row.id !== id);
+  persistInventoryBatch();
+  renderInventoryBatch();
+}
+
+function formatInventoryTimestamp(value) {
+  if (!value) return 'Unknown time';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function formatInventoryStatus(row) {
+  const flag = row && row.expiry_flag ? row.expiry_flag : 'unknown';
+  if (flag === 'expired') {
+    return 'Expired';
+  }
+  if (flag === 'expiring_soon') {
+    return 'Expiring soon';
+  }
+  if (flag === 'valid') {
+    return 'Valid';
+  }
+  return 'Unknown';
 }
 
 function setButtonBusy(button, busy, busyText) {
@@ -220,8 +420,280 @@ function sendRuntimeMessage(message) {
   });
 }
 
+async function addPreviewScanToInventory() {
+  const rawBarcode = getPreviewBarcodeValue();
+  if (!rawBarcode) {
+    showOutput('Scan a barcode first, then add it to the inventory tray.', 'error');
+    return;
+  }
+
+  const requestId = ++activeParseRequestId;
+  setButtonBusy(addCurrentBtn, true, 'Adding...');
+  try {
+    const baseData = parseInputData(rawBarcode);
+    const enriched = await enrichParsedData(baseData);
+    if (requestId !== activeParseRequestId) {
+      return;
+    }
+
+    parsedData = enriched;
+    inventoryBatch.push(buildInventoryRecord(enriched, rawBarcode));
+    persistInventoryBatch();
+    renderInventoryBatch();
+    removeLastPendingScanLine();
+    queueAutoParse(true);
+    showOutput(buildParsedOutputMarkup(enriched), outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry)));
+  } catch (error) {
+    showOutput(`Could not add scan: ${error.message}`, 'error');
+  } finally {
+    if (requestId === activeParseRequestId) {
+      setButtonBusy(addCurrentBtn, false);
+    }
+  }
+}
+
+async function addPendingScansToInventory() {
+  const lines = getPendingScanLines();
+  if (!lines.length) {
+    showOutput('Paste or scan one barcode per line before running batch add.', 'error');
+    return;
+  }
+
+  const requestId = ++activeParseRequestId;
+  setButtonBusy(addBatchBtn, true, 'Adding...');
+  let addedCount = 0;
+  const errors = [];
+  let lastRecord = null;
+
+  try {
+    for (let index = 0; index < lines.length; index += 1) {
+      const rawBarcode = lines[index];
+      try {
+        const baseData = parseInputData(rawBarcode);
+        const enriched = await enrichParsedData(baseData);
+        inventoryBatch.push(buildInventoryRecord(enriched, rawBarcode));
+        lastRecord = enriched;
+        addedCount += 1;
+      } catch (error) {
+        errors.push(`Line ${index + 1}: ${error.message}`);
+      }
+    }
+
+    if (requestId !== activeParseRequestId) {
+      return;
+    }
+
+    persistInventoryBatch();
+    renderInventoryBatch();
+    setPendingScanLines([]);
+    parsedData = lastRecord;
+
+    if (addedCount) {
+      const message = errors.length
+        ? `Added ${addedCount} scan(s). ${errors.length} line(s) failed.`
+        : `Added ${addedCount} scan(s) to the inventory tray.`;
+      showOutput(message, errors.length ? 'warning' : 'success');
+    } else {
+      showOutput(errors.join('<br>') || 'No scans were added.', 'error');
+    }
+  } finally {
+    if (requestId === activeParseRequestId) {
+      setButtonBusy(addBatchBtn, false);
+    }
+  }
+}
+
+function clearInventoryBatch() {
+  inventoryBatch = [];
+  persistInventoryBatch();
+  renderInventoryBatch();
+  showOutput('Inventory tray cleared.', 'info');
+}
+
+function exportInventoryCsv() {
+  if (!inventoryBatch.length) {
+    showOutput('Add at least one scan before exporting CSV.', 'error');
+    return;
+  }
+
+  const rows = [
+    INVENTORY_CSV_COLUMNS.join(','),
+    ...inventoryBatch.map((row, index) => INVENTORY_CSV_COLUMNS.map((column) => {
+      if (column === 'scan_index') {
+        return csvEscape(index + 1);
+      }
+      return csvEscape(row[column]);
+    }).join(','))
+  ];
+
+  const blob = new Blob([rows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const filename = `vaxlink-inventory-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  showOutput(`CSV export started for ${inventoryBatch.length} scan(s).`, 'success');
+}
+
 function getLoadingMarkup(text) {
   return `<div class="lookup-loading"><span class="inline-spinner" aria-hidden="true"></span><span>${text}</span></div>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function displayValue(value) {
+  const raw = value === undefined || value === null ? '' : String(value).trim();
+  return raw ? escapeHtml(raw) : '<span class="muted">N/A</span>';
+}
+
+function csvEscape(value) {
+  const text = value === undefined || value === null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function buildInventoryRecord(data, rawBarcode) {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    scanned_at: new Date().toISOString(),
+    raw_barcode: rawBarcode || '',
+    name: data.name || '',
+    tradename: data.tradename || '',
+    generic_name: data.generic_name || '',
+    disease: data.disease || '',
+    antigen: data.antigen || '',
+    manufacturer: data.manufacturer || '',
+    gtin: data.gtin || '',
+    lot: data.lot || '',
+    serial: data.serial || '',
+    barcode_expiry: data.expiry || '',
+    inventory_expiry: data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '',
+    nvc_lot_expiry: data.nvc_lot_expiry || '',
+    expiry_flag: data.expiry_flag || '',
+    expiry_days_remaining: data.expiry_days_remaining ?? '',
+    expiry_source: data.expiry_source || '',
+    route: data.route || '',
+    strength: data.strength || '',
+    dose_value: data.dose_value || '',
+    dose_unit: data.dose_unit || '',
+    din: data.din || '',
+    drug_code: data.drug_code || data.din || '',
+    lookup_error: data.lookup_error || ''
+  };
+}
+
+function mergeVaccineInfoIntoParsedData(baseData, vaccineInfo, expiryStatus, expirySource) {
+  const merged = { ...baseData };
+  if (vaccineInfo && !vaccineInfo.error) {
+    merged.tradename = vaccineInfo.tradename || merged.tradename || null;
+    merged.generic_name = vaccineInfo.generic_name || merged.generic_name || null;
+    merged.disease = vaccineInfo.disease || merged.disease || null;
+    merged.antigen = vaccineInfo.antigen || merged.antigen || null;
+    merged.manufacturer = vaccineInfo.manufacturer || merged.manufacturer || null;
+    merged.nvc_lot_expiry = vaccineInfo.lot_expiry || merged.nvc_lot_expiry || null;
+    merged.din = vaccineInfo.din || merged.din || null;
+    merged.route = vaccineInfo.route || merged.route || null;
+    merged.strength = vaccineInfo.strength || merged.strength || null;
+    merged.dose_value = vaccineInfo.dose_value || merged.dose_value || null;
+    merged.dose_unit = vaccineInfo.dose_unit || merged.dose_unit || null;
+    merged.drug_code = vaccineInfo.din || merged.drug_code || null;
+    merged.name = merged.name || vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din || null;
+  }
+  merged.inventory_expiry = merged.expiry || vaccineInfo?.lot_expiry || null;
+  merged.expiry_flag = expiryStatus.flag;
+  merged.expiry_days_remaining = expiryStatus.daysRemaining;
+  merged.expiry_source = expirySource;
+  merged.lookup_error = vaccineInfo?.error || '';
+  return merged;
+}
+
+async function enrichParsedData(baseData) {
+  let vaccineInfo = null;
+
+  if (baseData.lot) {
+    try {
+      vaccineInfo = await lookupVaccineInfo(baseData.lot);
+    } catch (error) {
+      vaccineInfo = { error: error.message || 'Lookup failed' };
+    }
+  }
+
+  if ((!vaccineInfo || vaccineInfo.error) && baseData.gtin && baseData.gtin !== baseData.lot) {
+    try {
+      vaccineInfo = await lookupVaccineInfo(baseData.gtin);
+    } catch (error) {
+      vaccineInfo = { error: error.message || 'Lookup failed' };
+    }
+  }
+
+  const chosenExpiry = baseData.expiry || vaccineInfo?.lot_expiry || null;
+  const expiryStatus = getExpiryStatus(chosenExpiry);
+  const expirySource = baseData.expiry ? 'barcode' : (vaccineInfo?.lot_expiry ? 'nvc' : 'none');
+  return mergeVaccineInfoIntoParsedData(baseData, vaccineInfo, expiryStatus, expirySource);
+}
+
+function buildResultRow(label, value) {
+  return `
+    <div class="result-row">
+      <div class="result-label">${escapeHtml(label)}</div>
+      <div class="result-value">${value}</div>
+    </div>
+  `;
+}
+
+function buildParsedOutputMarkup(data, options = {}) {
+  const loading = !!options.loading;
+  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || null;
+  const expiryStatus = getExpiryStatus(inventoryExpiry);
+  const warningBanner = buildExpiryBanner(expiryStatus);
+
+  let vaccineSectionContent = getLoadingMarkup('Looking up lot in NVC...');
+  if (!loading) {
+    if (data.lookup_error) {
+      vaccineSectionContent = `<div class="result-value"><span class="status">${escapeHtml(data.lookup_error)}</span></div>`;
+    } else {
+      vaccineSectionContent = [
+        buildResultRow('Trade Name', displayValue(data.tradename)),
+        buildResultRow('Generic Name', displayValue(data.generic_name)),
+        buildResultRow('Disease(s)', displayValue(data.disease)),
+        buildResultRow('Antigen', displayValue(data.antigen)),
+        buildResultRow('Manufacturer', displayValue(data.manufacturer)),
+        buildResultRow('Route', displayValue(data.route)),
+        buildResultRow('Strength', displayValue(data.strength)),
+        buildResultRow('Dose', displayValue([data.dose_value, data.dose_unit].filter(Boolean).join(' '))),
+        buildResultRow('DIN', displayValue(data.din)),
+        buildResultRow('NVC Lot Expiry', displayValue(data.nvc_lot_expiry))
+      ].join('');
+    }
+  }
+
+  return `
+    ${warningBanner}
+    <div class="result-section">
+      <div class="result-heading">Parsed Barcode Data</div>
+      ${buildResultRow('GTIN', displayValue(data.gtin))}
+      ${buildResultRow('Lot', displayValue(data.lot))}
+      ${buildResultRow('Serial', displayValue(data.serial))}
+      ${buildResultRow('Barcode Expiry', displayValue(data.expiry))}
+      ${buildResultRow('Inventory Expiry', displayValue(inventoryExpiry))}
+      ${buildResultRow('Expiry Flag', `<span class="status" style="color:${escapeHtml(expiryStatus.color)};">${escapeHtml(expiryStatus.label)}</span> <span class="muted">(${escapeHtml(data.expiry_source || 'none')})</span>`)}
+    </div>
+    <div class="result-section">
+      <div class="result-heading">Vaccine Information from NVC</div>
+      ${vaccineSectionContent}
+    </div>
+  `;
 }
 
 async function lookupVaccineInfo(lot) {
@@ -365,7 +837,20 @@ function parseManualTestInput(input) {
 
 function parseGS1Barcode(barcode) {
   const GS = String.fromCharCode(0x1d); // Group separator character
-  let s = barcode.trim().replace(/\(/g, '').replace(/\)/g, '');
+  let s = String(barcode || '')
+    .trim()
+    .replace(/[\t\r\n]/g, GS)
+    .replace(/^\]C1/i, '')
+    .replace(/\(/g, '')
+    .replace(/\)/g, '')
+    .replace(/[^\x20-\x7E\x1D]/g, '');
+
+  if (!s.startsWith('01')) {
+    const first01 = s.indexOf('01');
+    if (first01 > 0) {
+      s = s.substring(first01);
+    }
+  }
   
   console.log('Parsing barcode:', s, 'length:', s.length);
   
@@ -382,6 +867,11 @@ function parseGS1Barcode(barcode) {
   
   // Parse remaining AIs in order
   while (idx < s.length) {
+    if (s.charAt(idx) === GS) {
+      idx += 1;
+      continue;
+    }
+
     const currentAI = s.substring(idx, idx + 2);
     console.log('At idx', idx, 'found AI:', currentAI);
     
@@ -418,7 +908,11 @@ function parseGS1Barcode(barcode) {
       idx = serialEnd;
       
     } else {
-      // Unknown AI or end of valid data
+      const nextKnownAI = findNextAI(s, idx, GS, null);
+      if (nextKnownAI > idx) {
+        idx = nextKnownAI;
+        continue;
+      }
       console.log('Unknown AI, breaking. idx:', idx, 'char:', currentAI);
       break;
     }
@@ -592,98 +1086,28 @@ function outputTypeForExpiry(status) {
 
 async function displayParsedData(data, parseRequestId) {
   console.log('displayParsedData called with:', data);
-  const expiryStatus = getExpiryStatus(data.expiry);
-  const warningBanner = buildExpiryBanner(expiryStatus);
-  const outputType = outputTypeForExpiry(expiryStatus);
-  
-  let html = `${warningBanner}<strong>Parsed Barcode Data:</strong><br>`;
-  html += `<span style="color: #333;">GTIN: </span>${data.gtin || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Expiry: </span>${data.expiry || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Expiry Flag: </span><strong style="color:${expiryStatus.color};">${expiryStatus.label}</strong><br>`;
-  html += `<span style="color: #333;">Lot: </span>${data.lot || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Serial: </span>${data.serial || 'N/A'}<br>`;
-  
-  // Show loading message while looking up vaccine info
-  if (data.lot) {
-    html += '<br><strong>Vaccine Information:</strong><br>';
-    html += getLoadingMarkup('Looking up lot in NVC...');
-    showOutput(html, outputType);
+  const previewExpiryStatus = getExpiryStatus(data.expiry);
+  showOutput(buildParsedOutputMarkup(data, { loading: !!(data.lot || data.gtin) }), outputTypeForExpiry(previewExpiryStatus));
 
-    console.log('Sending lookup request for lot:', data.lot);
-    try {
-      const response = await lookupVaccineInfo(data.lot);
-      if (parseRequestId !== activeParseRequestId) {
-        return;
-      }
-      console.log('Received lookup response:', response);
-      displayVaccineInfo(data, response);
-    } catch (error) {
-      if (parseRequestId !== activeParseRequestId) {
-        return;
-      }
-      console.error('Lookup error:', error);
-      displayVaccineInfo(data, { error: error.message || 'Lookup failed' });
+  try {
+    const enriched = await enrichParsedData(data);
+    if (parseRequestId !== activeParseRequestId) {
+      return;
     }
-  } else {
-    console.log('No lot found, only showing barcode data');
-    showOutput(html, outputType);
+    parsedData = enriched;
+    showOutput(buildParsedOutputMarkup(enriched), outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry)));
+  } catch (error) {
+    if (parseRequestId !== activeParseRequestId) {
+      return;
+    }
+    console.error('Lookup error:', error);
+    showOutput(buildParsedOutputMarkup({
+      ...data,
+      lookup_error: error.message || 'Lookup failed',
+      inventory_expiry: data.expiry || null,
+      expiry_source: data.expiry ? 'barcode' : 'none'
+    }), 'warning');
   }
-}
-
-function displayVaccineInfo(barcodeData, vaccineInfo) {
-  const chosenExpiry = barcodeData.expiry || vaccineInfo?.lot_expiry || null;
-  const expiryStatus = getExpiryStatus(chosenExpiry);
-  const expirySource = barcodeData.expiry ? 'barcode' : (vaccineInfo?.lot_expiry ? 'nvc' : 'none');
-  const warningBanner = buildExpiryBanner(expiryStatus);
-  const outputType = outputTypeForExpiry(expiryStatus);
-
-  let html = `${warningBanner}<strong>Parsed Barcode Data:</strong><br>`;
-  html += `<span style="color: #333;">GTIN: </span>${barcodeData.gtin || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Expiry: </span>${barcodeData.expiry || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Expiry Flag: </span><strong style="color:${expiryStatus.color};">${expiryStatus.label}</strong> <span style="color:#64748b;">(${expirySource})</span><br>`;
-  html += `<span style="color: #333;">Lot: </span>${barcodeData.lot || 'N/A'}<br>`;
-  html += `<span style="color: #333;">Serial: </span>${barcodeData.serial || 'N/A'}<br>`;
-  
-  html += '<br><strong>Vaccine Information from NVC:</strong><br>';
-  
-  if (vaccineInfo && !vaccineInfo.error) {
-    // Merge vaccine info into parsedData for auto-fill
-    parsedData.tradename = vaccineInfo.tradename;
-    parsedData.generic_name = vaccineInfo.generic_name;
-    parsedData.disease = vaccineInfo.disease;
-    parsedData.antigen = vaccineInfo.antigen;
-    parsedData.manufacturer = vaccineInfo.manufacturer;
-    parsedData.nvc_lot_expiry = vaccineInfo.lot_expiry;
-    parsedData.din = vaccineInfo.din;
-    parsedData.route = vaccineInfo.route;
-    parsedData.strength = vaccineInfo.strength;
-    parsedData.dose_value = vaccineInfo.dose_value;
-    parsedData.dose_unit = vaccineInfo.dose_unit;
-    parsedData.drug_code = vaccineInfo.din;
-    parsedData.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
-    parsedData.expiry_flag = expiryStatus.flag;
-    parsedData.expiry_days_remaining = expiryStatus.daysRemaining;
-    parsedData.expiry_source = expirySource;
-    
-    html += `<span style="color: #333;">Trade Name: </span>${vaccineInfo.tradename || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Generic Name: </span>${vaccineInfo.generic_name || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Disease(s): </span>${vaccineInfo.disease || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Antigen: </span>${vaccineInfo.antigen || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Manufacturer: </span>${vaccineInfo.manufacturer || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Route: </span>${vaccineInfo.route || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Strength: </span>${vaccineInfo.strength || 'N/A'}<br>`;
-    html += `<span style="color: #333;">Dose: </span>${vaccineInfo.dose_value || 'N/A'} ${vaccineInfo.dose_unit || ''}<br>`;
-    if (vaccineInfo.lot_expiry) {
-      html += `<span style="color: #333;">NVC Lot Expiry: </span>${vaccineInfo.lot_expiry}<br>`;
-    }
-    if (vaccineInfo.din) {
-      html += `<span style="color: #333;">DIN: </span>${vaccineInfo.din}<br>`;
-    }
-  } else {
-    html += `<span style="color: #d9534f;">${vaccineInfo?.error || 'No vaccine information found'}</span>`;
-  }
-  
-  showOutput(html, outputType);
 }
 
 function showOutput(message, type = 'info') {
