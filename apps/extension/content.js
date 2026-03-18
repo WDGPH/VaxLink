@@ -72,6 +72,16 @@ function getQueueStorageKeyForWorkflow(mode) {
   return '';
 }
 
+function logAnalyticsEvent(eventType, payload = {}) {
+  try {
+    chrome.runtime.sendMessage({ action: 'logAnalyticsEvent', eventType, payload }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {
+    // Ignore analytics failures on client pages.
+  }
+}
+
 function setupMessageListener() {
   if (window.__vaxlinkMessageListenerInitialized) {
     return;
@@ -384,7 +394,10 @@ async function saveScanToQueue(data, rawBarcode, storageKey) {
     : [];
   rows.push(record);
   await chrome.storage.local.set({ [storageKey]: rows });
-  return record;
+  return {
+    ...record,
+    queueSizeAfter: rows.length
+  };
 }
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
@@ -488,8 +501,19 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   let parsed;
   try {
     parsed = parseGS1BarcodeFromScanner(trimmed);
+    logAnalyticsEvent('parse_success', {
+      workflow: activeWorkflowMode,
+      source,
+      vaccineLabel: parsed.lot || parsed.gtin || '',
+      expiryFlag: getExpiryStatus(parsed.expiry).flag
+    });
   } catch (error) {
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
+    logAnalyticsEvent('parse_error', {
+      workflow: activeWorkflowMode,
+      source,
+      note: error.message
+    });
     return;
   }
 
@@ -507,21 +531,40 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
   try {
     let vaccineInfo = null;
+    let lookupAttempted = false;
     if (parsed.lot) {
+      lookupAttempted = true;
       vaccineInfo = await lookupVaccineInfoByLot(parsed.lot);
     }
 
     // Fallback: some scanners output GTIN only in the wedge stream.
     // NVC index may still resolve this key via lot code/prefix maps.
     if (!vaccineInfo && parsed.gtin) {
+      lookupAttempted = true;
       vaccineInfo = await lookupVaccineInfoByLot(parsed.gtin);
     }
 
     if (vaccineInfo) {
       mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
     }
+
+    if (lookupAttempted) {
+      const lookupExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+      logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
+        workflow: activeWorkflowMode,
+        source,
+        vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+        manufacturer: parsed.manufacturer || '',
+        expiryFlag: lookupExpiryFlag
+      });
+    }
   } catch (error) {
     console.warn('Hands-free lookup error:', error);
+    logAnalyticsEvent('lookup_error', {
+      workflow: activeWorkflowMode,
+      source,
+      note: error?.message || 'Lookup failed'
+    });
   }
 
   if (!parsed.lot && !parsed.expiry && !parsed.serial) {
@@ -531,10 +574,20 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     );
   }
 
+  const finalExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+  logAnalyticsEvent('scan_captured', {
+    workflow: activeWorkflowMode,
+    source,
+    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    manufacturer: parsed.manufacturer || '',
+    expiryFlag: finalExpiryFlag
+  });
+
   const queueStorageKey = getQueueStorageKeyForWorkflow(activeWorkflowMode);
   if (queueStorageKey) {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
+      const queueKey = activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
       console.log('Workflow scan saved to queue:', {
         mode: activeWorkflowMode,
         source,
@@ -542,13 +595,38 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         lot: record.lot,
         tradename: record.tradename
       });
+      logAnalyticsEvent('queue_saved', {
+        workflow: activeWorkflowMode,
+        queue: queueKey,
+        source,
+        count: 1,
+        queueSizeAfter: record.queueSizeAfter || 0,
+        vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag: record.expiry_flag || finalExpiryFlag
+      });
     } catch (error) {
       console.warn('Workflow queue save failed:', error);
     }
     return;
   }
 
+  logAnalyticsEvent('autofill_attempt', {
+    workflow: activeWorkflowMode,
+    source,
+    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    manufacturer: parsed.manufacturer || '',
+    expiryFlag: finalExpiryFlag
+  });
   const success = autoFillTelus(parsed);
+  logAnalyticsEvent('autofill_result', {
+    workflow: activeWorkflowMode,
+    source,
+    success,
+    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    manufacturer: parsed.manufacturer || '',
+    expiryFlag: finalExpiryFlag
+  });
   console.log('Hands-free scan autofill result:', success, { source, parsed });
 }
 

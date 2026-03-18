@@ -47,7 +47,15 @@
     .brand-row {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 10px;
+    }
+
+    .brand-copy {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
 
     .brand-logo {
@@ -69,6 +77,31 @@
       margin: 4px 0 0;
       font-size: 12px;
       color: var(--subtle);
+    }
+
+    .header-icon-btn {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 12px;
+      border: 1px solid #cfe0eb;
+      background: rgba(255, 255, 255, 0.78);
+      color: #14505f;
+      box-shadow: 0 6px 14px rgba(16, 33, 53, 0.08);
+    }
+
+    .header-icon-btn:hover {
+      filter: none;
+      background: #ffffff;
+    }
+
+    .header-icon-btn[aria-expanded="true"] {
+      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+      border-color: transparent;
+      color: #ffffff;
     }
 
     .content { padding: 12px 14px 14px; }
@@ -168,6 +201,22 @@
     }
 
     textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+
+    input[type="text"] {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 9px 10px;
+      font-size: 12px;
+      color: #0e2b41;
+      background: #fbfdff;
+    }
+
+    input[type="text"]:focus {
       outline: none;
       border-color: var(--accent);
       box-shadow: 0 0 0 3px var(--ring);
@@ -489,6 +538,205 @@
       color: #52667a;
       font-size: 11px;
     }
+
+    .settings-panel[hidden] {
+      display: none !important;
+    }
+
+    .settings-panel {
+      margin: 0 0 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .settings-card {
+      padding: 10px 11px;
+      border-radius: 16px;
+      border: 1px solid #c8d9e8;
+      background: linear-gradient(180deg, #f8fcff 0%, #f2f8fb 100%);
+    }
+
+    .analytics {
+      padding: 12px;
+      border-radius: 18px;
+      border: 1px solid #c9dbea;
+      background:
+        radial-gradient(circle at top right, rgba(15, 139, 141, 0.12) 0%, transparent 36%),
+        linear-gradient(180deg, #f8fcff 0%, #eef7fb 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .analytics-summary {
+      display: grid;
+      gap: 10px;
+    }
+
+    .analytics-hero {
+      padding: 12px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+      color: #ffffff;
+      box-shadow: 0 10px 22px rgba(14, 116, 144, 0.2);
+    }
+
+    .analytics-hero-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    .analytics-hero-value {
+      margin-top: 4px;
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -0.4px;
+    }
+
+    .analytics-hero-subtitle {
+      margin-top: 6px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .analytics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .analytics-card {
+      padding: 11px;
+      border-radius: 14px;
+      border: 1px solid #d7e5ef;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+    }
+
+    .analytics-card.device {
+      grid-column: 1 / -1;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+    }
+
+    .analytics-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .analytics-card-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #0f4c5c;
+    }
+
+    .analytics-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #e5f4f5;
+      color: #14505f;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .analytics-metrics {
+      display: grid;
+      gap: 7px;
+    }
+
+    .analytics-metric {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      padding-top: 7px;
+      border-top: 1px solid rgba(148, 163, 184, 0.18);
+    }
+
+    .analytics-metric:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .analytics-metric-label {
+      min-width: 0;
+      font-size: 11px;
+      line-height: 1.35;
+      color: #5a7082;
+    }
+
+    .analytics-metric-value {
+      flex: 0 0 auto;
+      font-size: 16px;
+      font-weight: 800;
+      color: #11364a;
+      text-align: right;
+    }
+
+    .analytics-device-name {
+      font-size: 14px;
+      font-weight: 800;
+      color: #12364a;
+      word-break: break-word;
+    }
+
+    .analytics-device-meta {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .analytics-device-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eef6fb;
+      color: #345067;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .analytics-field {
+      margin-top: 10px;
+    }
+
+    #saveAnalyticsLabelBtn {
+      background: #d9f0ef;
+      border: 1px solid #b6dcda;
+      color: #114b53;
+    }
+
+    #exportTodayAnalyticsBtn,
+    #exportPilotAnalyticsBtn {
+      background: #0e7490;
+      color: #fff;
+    }
+
+    #exportAnalyticsCsvBtn {
+      background: #164e63;
+      color: #fff;
+    }
+
+    #resetAnalyticsBtn {
+      background: #fff7ed;
+      border: 1px solid #f4cda5;
+      color: #9a3412;
+    }
   </style>
 </head>
 <body>
@@ -496,14 +744,46 @@
     <div class="panel">
       <div class="brand">
         <div class="brand-row">
-          <img class="brand-logo" src="assets/vaxlink-icon.svg" alt="VaxLink logo">
-          <div>
-            <h2 class="title">VaxLink</h2>
-            <p class="tagline">Scan once. Parse automatically. Chart faster.</p>
+          <div class="brand-copy">
+            <img class="brand-logo" src="assets/vaxlink-icon.svg" alt="VaxLink logo">
+            <div>
+              <h2 class="title">VaxLink</h2>
+              <p class="tagline">Scan once. Parse automatically. Chart faster.</p>
+            </div>
           </div>
+          <button id="settingsToggleBtn" class="header-icon-btn" type="button" aria-label="Open settings and analytics" aria-expanded="false" aria-controls="settingsPanel">&#9881;</button>
         </div>
       </div>
       <div class="content">
+        <div id="settingsPanel" class="settings-panel" hidden>
+          <div class="settings-card">
+            <div class="result-heading">Data Tools</div>
+            <div class="actions">
+              <button id="refreshNvcBtn">Refresh NVC Data</button>
+            </div>
+            <div id="nvcStatus"></div>
+          </div>
+          <div class="analytics">
+            <div class="result-heading">Local Analytics</div>
+            <div id="analyticsSummary" class="analytics-summary">Loading analytics...</div>
+            <div class="analytics-field">
+              <label for="analyticsLabelInput">Workstation / Nurse Label</label>
+              <input id="analyticsLabelInput" type="text" placeholder="Example: Clinic 2 - Nurse A">
+            </div>
+            <div class="actions">
+              <button id="saveAnalyticsLabelBtn">Save Label</button>
+              <div class="action-row">
+                <button id="exportTodayAnalyticsBtn">Export Today JSON</button>
+                <button id="exportPilotAnalyticsBtn">Export Pilot JSON</button>
+              </div>
+              <div class="action-row">
+                <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
+                <button id="resetAnalyticsBtn">Reset Analytics</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div id="mainWorkflowPanel">
         <div id="scanState" class="scan-state" aria-live="polite">
           <div id="scanStateIcon" class="scan-icon">&#128137;</div>
           <div class="scan-copy">
@@ -561,11 +841,8 @@
             <div id="inventoryList" class="inventory-list"></div>
           </div>
         </div>
-
-        <div class="actions">
-          <button id="refreshNvcBtn">Refresh NVC Data</button>
         </div>
-        <div id="nvcStatus"></div>
+
         <div id="output" class="output" style="display:none;"></div>
       </div>
     </div>
