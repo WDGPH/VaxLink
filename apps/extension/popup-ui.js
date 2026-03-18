@@ -1,6 +1,15 @@
 import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
 
 export const HANDS_FREE_SCAN_KEY = 'hands_free_scan_autofill_enabled';
+export const HANDS_FREE_SCAN_MODE_KEY = 'hands_free_scan_mode_v1';
+
+function normalizeHandsFreeMode(stored) {
+  const mode = stored && stored[HANDS_FREE_SCAN_MODE_KEY];
+  if (mode === 'autofill' || mode === 'tray') {
+    return mode;
+  }
+  return stored && stored[HANDS_FREE_SCAN_KEY] ? 'autofill' : 'off';
+}
 
 export function formatDateTime(value) {
   if (!value) return 'Never';
@@ -28,7 +37,7 @@ export function setButtonBusy(button, busy, busyText) {
 }
 
 export function initHandsFreeToggle(outputDiv, showOutput) {
-  if (!outputDiv || document.getElementById('handsFreeScanToggle')) return;
+  if (!outputDiv || document.getElementById('handsFreeScanModeSelect')) return;
 
   const section = document.createElement('div');
   section.style.margin = '8px 0 10px';
@@ -38,46 +47,79 @@ export function initHandsFreeToggle(outputDiv, showOutput) {
   section.style.background = '#f8fafc';
 
   const label = document.createElement('label');
-  label.style.display = 'flex';
-  label.style.alignItems = 'center';
-  label.style.gap = '8px';
+  label.style.display = 'block';
   label.style.fontSize = '12px';
   label.style.color = '#1f2937';
-  label.style.cursor = 'pointer';
+  label.style.marginBottom = '6px';
+  label.textContent = 'Remote Scan Mode';
 
-  const toggle = document.createElement('input');
-  toggle.type = 'checkbox';
-  toggle.id = 'handsFreeScanToggle';
+  const select = document.createElement('select');
+  select.id = 'handsFreeScanModeSelect';
+  select.style.width = '100%';
+  select.style.border = '1px solid #cbd5e1';
+  select.style.borderRadius = '8px';
+  select.style.padding = '8px 10px';
+  select.style.fontSize = '12px';
+  select.style.background = '#fff';
+  select.innerHTML = [
+    '<option value="off">Off</option>',
+    '<option value="autofill">Auto-fill chart on scan</option>',
+    '<option value="tray">Save each scan to tray</option>'
+  ].join('');
 
   const textWrap = document.createElement('span');
-  textWrap.textContent = 'Hands-free scan mode (auto-fill on barcode scan)';
-
-  label.appendChild(toggle);
-  label.appendChild(textWrap);
+  textWrap.textContent = 'Choose what a scanner does when barcodes are read on the live chart page.';
   section.appendChild(label);
+  section.appendChild(select);
+  section.appendChild(textWrap);
+  textWrap.style.display = 'block';
+  textWrap.style.marginTop = '6px';
+  textWrap.style.fontSize = '11px';
+  textWrap.style.color = '#475569';
 
   const hint = document.createElement('div');
   hint.style.fontSize = '11px';
   hint.style.color = '#475569';
   hint.style.marginTop = '6px';
-  hint.textContent = 'When enabled, scanning directly in Panorama or InputHealth can auto-fill without opening this popup.';
   section.appendChild(hint);
 
   outputDiv.parentNode.insertBefore(section, outputDiv);
 
-  chrome.storage.local.get([HANDS_FREE_SCAN_KEY], (stored) => {
-    toggle.checked = !!stored[HANDS_FREE_SCAN_KEY];
+  const renderHint = (mode) => {
+    if (mode === 'autofill') {
+      hint.textContent = 'Scans on Panorama or InputHealth fill the current chart immediately without opening the popup.';
+      return;
+    }
+    if (mode === 'tray') {
+      hint.textContent = 'Scans on Panorama or InputHealth are saved into the inventory tray automatically, so clinicians can scan several vaccines with no extra clicks.';
+      return;
+    }
+    hint.textContent = 'Scanner input is ignored by the hands-free listener until you turn a mode on.';
+  };
+
+  chrome.storage.local.get([HANDS_FREE_SCAN_KEY, HANDS_FREE_SCAN_MODE_KEY], (stored) => {
+    const mode = normalizeHandsFreeMode(stored);
+    select.value = mode;
+    renderHint(mode);
   });
 
-  toggle.addEventListener('change', () => {
-    const enabled = !!toggle.checked;
-    chrome.storage.local.set({ [HANDS_FREE_SCAN_KEY]: enabled }, () => {
+  select.addEventListener('change', () => {
+    const mode = select.value === 'autofill' || select.value === 'tray' ? select.value : 'off';
+    chrome.storage.local.set({
+      [HANDS_FREE_SCAN_MODE_KEY]: mode,
+      [HANDS_FREE_SCAN_KEY]: mode === 'autofill'
+    }, () => {
       if (chrome.runtime.lastError) {
-        showOutput(`Could not update hands-free scan mode: ${chrome.runtime.lastError.message}`, 'error');
+        showOutput(`Could not update remote scan mode: ${chrome.runtime.lastError.message}`, 'error');
         return;
       }
+      renderHint(mode);
       showOutput(
-        enabled ? 'Hands-free scan mode enabled' : 'Hands-free scan mode disabled',
+        mode === 'off'
+          ? 'Remote scan mode disabled'
+          : mode === 'tray'
+            ? 'Remote scan mode set to save each scan into the tray'
+            : 'Remote scan mode set to auto-fill the chart',
         'info'
       );
     });
