@@ -33,7 +33,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*", "file:///*"],
-      "js": ["content.js"],
+      "js": ["panorama-agent-rules.js", "content.js"],
       "run_at": "document_start",
       "all_frames": true
     }

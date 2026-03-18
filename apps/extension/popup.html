@@ -10,7 +10,6 @@
       --subtle: #5d6b7a;
       --line: #d4dce6;
       --accent: #0f8b8d;
-      --accent-2: #005f73;
       --ring: rgba(15, 139, 141, 0.22);
     }
 
@@ -44,11 +43,13 @@
       border-bottom: 1px solid var(--line);
       background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
     }
+
     .brand-row {
       display: flex;
       align-items: center;
       gap: 10px;
     }
+
     .brand-logo {
       width: 38px;
       height: 38px;
@@ -76,7 +77,7 @@
       margin: 0 0 12px;
       padding: 4px;
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(3, 1fr);
       gap: 4px;
       border: 1px solid #d5e2ec;
       border-radius: 16px;
@@ -85,10 +86,11 @@
 
     .mode-tab {
       border-radius: 12px;
-      padding: 9px 10px;
+      padding: 9px 8px;
       background: transparent;
       color: #4d6375;
       border: 0;
+      font-size: 12px;
     }
 
     .mode-tab.active {
@@ -97,7 +99,8 @@
       box-shadow: 0 8px 18px rgba(14, 116, 144, 0.18);
     }
 
-    .mode-panel[hidden] {
+    .mode-panel[hidden],
+    .scanner-input[hidden] {
       display: none !important;
     }
 
@@ -110,22 +113,6 @@
       border-radius: 18px;
       border: 1px solid #cfe0eb;
       background: linear-gradient(145deg, #f7fcff 0%, #eef8f8 100%);
-      transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
-    }
-
-    .scan-state.ready { border-color: #cfe0eb; }
-    .scan-state.scanning {
-      border-color: #93c5fd;
-      background: linear-gradient(145deg, #eff6ff 0%, #ecfeff 100%);
-      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
-    }
-    .scan-state.success {
-      border-color: #b8e3cf;
-      background: linear-gradient(145deg, #f0fdf4 0%, #ecfdf5 100%);
-    }
-    .scan-state.error {
-      border-color: #efc2c4;
-      background: linear-gradient(145deg, #fff4f4 0%, #fff8f1 100%);
     }
 
     .scan-icon {
@@ -141,11 +128,13 @@
     }
 
     .scan-copy { min-width: 0; }
+
     .scan-title {
       font-weight: 800;
       font-size: 14px;
       color: #10384a;
     }
+
     .scan-subtitle {
       margin-top: 2px;
       font-size: 12px;
@@ -191,6 +180,17 @@
       color: #5f7283;
     }
 
+    .workflow-note {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border-radius: 14px;
+      border: 1px solid #d9e7ef;
+      background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #486071;
+    }
+
     .actions {
       margin-top: 10px;
       display: grid;
@@ -228,6 +228,7 @@
       color: #fff;
     }
 
+    #clearMultipleBtn,
     #addCurrentBtn {
       background: #0f8b8d;
       color: #fff;
@@ -420,11 +421,24 @@
       box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
     }
 
+    .inventory-item.active {
+      border-color: #8fd3d1;
+      box-shadow: 0 0 0 3px rgba(15, 139, 141, 0.12);
+      background: linear-gradient(180deg, #ffffff 0%, #f1fbfa 100%);
+    }
+
     .inventory-item-top {
       display: flex;
       justify-content: space-between;
       gap: 8px;
       align-items: flex-start;
+    }
+
+    .inventory-item-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex: 0 0 auto;
     }
 
     .inventory-item-title {
@@ -437,6 +451,15 @@
       margin-top: 3px;
       font-size: 11px;
       color: #64748b;
+    }
+
+    .inventory-use {
+      width: auto;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #0f8b8d;
+      color: #fff;
+      font-size: 11px;
     }
 
     .inventory-item-grid {
@@ -481,25 +504,46 @@
         </div>
       </div>
       <div class="content">
-        <div id="scanState" class="scan-state ready" aria-live="polite">
+        <div id="scanState" class="scan-state" aria-live="polite">
           <div id="scanStateIcon" class="scan-icon">&#128137;</div>
           <div class="scan-copy">
-            <div id="scanStateTitle" class="scan-title">Ready to scan</div>
-            <div id="scanStateSubtitle" class="scan-subtitle">Auto-parse is on. Scan or paste a barcode to run instantly.</div>
+            <div id="scanStateTitle" class="scan-title">Single Inject</div>
+            <div id="scanStateSubtitle" class="scan-subtitle">One scan fills the current chart immediately.</div>
           </div>
         </div>
-        <div class="mode-switch" role="tablist" aria-label="VaxLink mode">
-          <button id="injectModeBtn" class="mode-tab active" type="button" role="tab" aria-selected="true" data-mode="inject">Inject</button>
-          <button id="inventoryModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false" data-mode="inventory">Inventory</button>
+
+        <div class="mode-switch" role="tablist" aria-label="VaxLink workflow mode">
+          <button id="singleModeBtn" class="mode-tab active" type="button" role="tab" aria-selected="true">Single Inject</button>
+          <button id="multipleModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false">Multiple Inject</button>
+          <button id="inventoryModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false">Inventory</button>
         </div>
-        <label for="scannedData">Scanned Barcode (Auto-Parse)</label>
-        <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
-        <p id="modeHelper" class="scan-helper">Scan or paste a barcode to decode it and load vaccine details for chart injection.</p>
-        <div id="injectModeSection" class="mode-panel">
+
+        <div id="scannerInputSection" class="scanner-input">
+          <label id="scannedInputLabel" for="scannedData">Scanned Barcode</label>
+          <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
+        </div>
+
+        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.</p>
+
+        <div id="singleModeSection" class="mode-panel">
+          <div class="workflow-note">Hands-free is active in Single Inject. Keep the chart page open and scan directly there to auto-fill one vaccine at a time.</div>
           <div class="actions">
             <button id="autoFillBtn">Auto-fill CHR</button>
           </div>
         </div>
+
+        <div id="multipleModeSection" class="mode-panel" hidden>
+          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Each scan will be saved automatically into this queue.</div>
+          <div class="actions">
+            <button id="clearMultipleBtn">Clear Queue</button>
+          </div>
+          <div class="inventory">
+            <div class="result-heading">Multiple Inject Queue</div>
+            <div id="multipleQueueSummary" class="inventory-summary">No saved vaccines yet.</div>
+            <div id="multipleQueueList" class="inventory-list"></div>
+          </div>
+        </div>
+
         <div id="inventoryModeSection" class="mode-panel" hidden>
           <div class="actions">
             <div class="action-row">
@@ -513,10 +557,11 @@
           </div>
           <div class="inventory">
             <div class="result-heading">Inventory Tray</div>
-            <div id="inventorySummary" class="inventory-summary">No scans queued for export.</div>
+            <div id="inventorySummary" class="inventory-summary">No inventory scans yet.</div>
             <div id="inventoryList" class="inventory-list"></div>
           </div>
         </div>
+
         <div class="actions">
           <button id="refreshNvcBtn">Refresh NVC Data</button>
         </div>

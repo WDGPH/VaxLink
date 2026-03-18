@@ -9,8 +9,13 @@ console.log('Hands-free build:', HANDS_FREE_BUILD);
 
 console.log('Setting up message listener...');
 
-const HANDS_FREE_SCAN_KEY = 'hands_free_scan_autofill_enabled';
-let handsFreeScanEnabled = false;
+const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
+const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
+const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
+const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
+let activeWorkflowMode = 'single';
 let scannerBuffer = '';
 let scannerStartedAt = 0;
 let scannerLastAt = 0;
@@ -27,6 +32,45 @@ const SCAN_MAX_AVG_INTERVAL_MS = 220;
 const SCAN_CHAR_GAP_RESET_MS = 1500;
 const SCAN_IDLE_COMMIT_MS = 1500;
 const INPUT_CANDIDATE_TTL_MS = 5000;
+
+function normalizeWorkflowMode(stored) {
+  const direct = stored && stored[WORKFLOW_MODE_KEY];
+  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
+    return direct;
+  }
+
+  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
+  if (legacyPopup === 'inventory') {
+    return 'inventory';
+  }
+  if (legacyPopup === 'inject') {
+    return 'single';
+  }
+
+  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
+  if (legacyRemote === 'tray') {
+    return 'multiple';
+  }
+  if (legacyRemote === 'autofill') {
+    return 'single';
+  }
+
+  if (stored && stored[LEGACY_HANDS_FREE_KEY]) {
+    return 'single';
+  }
+
+  return 'single';
+}
+
+function getQueueStorageKeyForWorkflow(mode) {
+  if (mode === 'multiple') {
+    return MULTIPLE_INJECT_QUEUE_KEY;
+  }
+  if (mode === 'inventory') {
+    return INVENTORY_BATCH_KEY;
+  }
+  return '';
+}
 
 function setupMessageListener() {
   if (window.__vaxlinkMessageListenerInitialized) {
@@ -250,6 +294,99 @@ function lookupVaccineInfoByLot(lot) {
   });
 }
 
+function parseDateToLocal(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  }
+
+  const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    return new Date(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2]));
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function getExpiryStatus(value) {
+  const expiry = parseDateToLocal(value);
+  if (!expiry) {
+    return {
+      flag: 'unknown',
+      daysRemaining: null
+    };
+  }
+
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / msPerDay);
+
+  if (daysRemaining < 0) {
+    return { flag: 'expired', daysRemaining };
+  }
+  if (daysRemaining <= 30) {
+    return { flag: 'expiring_soon', daysRemaining };
+  }
+  return { flag: 'valid', daysRemaining };
+}
+
+function buildInventoryRecordFromParsed(data, rawBarcode) {
+  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+  const expiryStatus = getExpiryStatus(inventoryExpiry);
+  const expirySource = data.expiry
+    ? 'barcode'
+    : (data.nvc_lot_expiry ? 'nvc' : (data.expiry_source || 'none'));
+
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    scanned_at: new Date().toISOString(),
+    raw_barcode: rawBarcode || '',
+    name: data.name || data.generic_name || data.tradename || data.din || '',
+    tradename: data.tradename || '',
+    generic_name: data.generic_name || '',
+    disease: data.disease || '',
+    antigen: data.antigen || '',
+    manufacturer: data.manufacturer || '',
+    gtin: data.gtin || '',
+    lot: data.lot || '',
+    serial: data.serial || '',
+    barcode_expiry: data.expiry || '',
+    inventory_expiry: inventoryExpiry,
+    nvc_lot_expiry: data.nvc_lot_expiry || '',
+    expiry_flag: expiryStatus.flag || '',
+    expiry_days_remaining: expiryStatus.daysRemaining ?? '',
+    expiry_source: expirySource,
+    route: data.route || '',
+    strength: data.strength || '',
+    dose_value: data.dose_value || '',
+    dose_unit: data.dose_unit || '',
+    din: data.din || '',
+    drug_code: data.drug_code || data.din || '',
+    lookup_error: data.lookup_error || ''
+  };
+}
+
+async function saveScanToQueue(data, rawBarcode, storageKey) {
+  if (!storageKey) {
+    throw new Error('No storage key configured for queued scan mode');
+  }
+  const record = buildInventoryRecordFromParsed(data, rawBarcode);
+  const stored = await chrome.storage.local.get([storageKey]);
+  const rows = stored && Array.isArray(stored[storageKey])
+    ? stored[storageKey]
+    : [];
+  rows.push(record);
+  await chrome.storage.local.set({ [storageKey]: rows });
+  return record;
+}
+
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   if (!parsed || !vaccineInfo) return;
   parsed.tradename = vaccineInfo.tradename;
@@ -394,6 +531,23 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     );
   }
 
+  const queueStorageKey = getQueueStorageKeyForWorkflow(activeWorkflowMode);
+  if (queueStorageKey) {
+    try {
+      const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
+      console.log('Workflow scan saved to queue:', {
+        mode: activeWorkflowMode,
+        source,
+        id: record.id,
+        lot: record.lot,
+        tradename: record.tradename
+      });
+    } catch (error) {
+      console.warn('Workflow queue save failed:', error);
+    }
+    return;
+  }
+
   const success = autoFillTelus(parsed);
   console.log('Hands-free scan autofill result:', success, { source, parsed });
 }
@@ -447,7 +601,6 @@ function clearActiveElementValue() {
 }
 
 function onHandsFreePaste(event) {
-  if (!handsFreeScanEnabled) return;
   if (!isHandsFreeSupportedPage()) return;
 
   const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
@@ -492,7 +645,6 @@ function hasPostGTINAI(value) {
 }
 
 function onHandsFreeInput(event) {
-  if (!handsFreeScanEnabled) return;
   if (!isHandsFreeSupportedPage()) return;
 
   const target = event && event.target;
@@ -543,7 +695,6 @@ function isHandsFreeSupportedPage() {
 }
 
 function onHandsFreeKeydown(event) {
-  if (!handsFreeScanEnabled) return;
   if (!isHandsFreeSupportedPage()) return;
   if (event.defaultPrevented) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -605,17 +756,35 @@ function initHandsFreeScanner() {
   }
   window.__vaxlinkHandsFreeInitialized = true;
 
-  chrome.storage.local.get([HANDS_FREE_SCAN_KEY], (stored) => {
-    handsFreeScanEnabled = !!stored[HANDS_FREE_SCAN_KEY];
-    console.log('Hands-free scan mode enabled:', handsFreeScanEnabled);
+  chrome.storage.local.get([
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    LEGACY_REMOTE_MODE_KEY,
+    LEGACY_HANDS_FREE_KEY
+  ], (stored) => {
+    activeWorkflowMode = normalizeWorkflowMode(stored);
+    console.log('Active workflow mode:', activeWorkflowMode);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (!(HANDS_FREE_SCAN_KEY in changes)) return;
-    handsFreeScanEnabled = !!changes[HANDS_FREE_SCAN_KEY].newValue;
+    if (
+      !(WORKFLOW_MODE_KEY in changes) &&
+      !(LEGACY_POPUP_MODE_KEY in changes) &&
+      !(LEGACY_REMOTE_MODE_KEY in changes) &&
+      !(LEGACY_HANDS_FREE_KEY in changes)
+    ) {
+      return;
+    }
+    const nextState = {
+      [WORKFLOW_MODE_KEY]: WORKFLOW_MODE_KEY in changes ? changes[WORKFLOW_MODE_KEY].newValue : activeWorkflowMode,
+      [LEGACY_POPUP_MODE_KEY]: LEGACY_POPUP_MODE_KEY in changes ? changes[LEGACY_POPUP_MODE_KEY].newValue : undefined,
+      [LEGACY_REMOTE_MODE_KEY]: LEGACY_REMOTE_MODE_KEY in changes ? changes[LEGACY_REMOTE_MODE_KEY].newValue : undefined,
+      [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined
+    };
+    activeWorkflowMode = normalizeWorkflowMode(nextState);
     resetScannerBuffer();
-    console.log('Hands-free scan mode changed:', handsFreeScanEnabled);
+    console.log('Active workflow mode changed:', activeWorkflowMode);
   });
 
   window.addEventListener('keydown', onHandsFreeKeydown, true);
@@ -1209,6 +1378,43 @@ function fillPanoramaImmunizationFields(data) {
   return fallbackCount;
 }
 
+const PANORAMA_AGENT_RULES = Array.isArray(globalThis.VAXLINK_PANORAMA_AGENT_RULES)
+  ? globalThis.VAXLINK_PANORAMA_AGENT_RULES
+  : [];
+
+function buildPanoramaAgentSourceText(data) {
+  return normalizeForMatch([
+    data?.name,
+    data?.generic_name,
+    data?.tradename,
+    data?.disease,
+    data?.antigen,
+    data?.manufacturer,
+    data?.route,
+    data?.strength
+  ].filter(Boolean).join(' '));
+}
+
+function panoramaSourceHasAll(sourceText, terms) {
+  return terms.every(term => sourceText.includes(normalizeForMatch(term)));
+}
+
+function panoramaSourceHasAny(sourceText, terms) {
+  return terms.some(term => sourceText.includes(normalizeForMatch(term)));
+}
+
+function panoramaAgentRuleClauseMatches(sourceText, clause) {
+  if (clause.any && !panoramaSourceHasAny(sourceText, clause.any)) return false;
+  if (clause.all && !panoramaSourceHasAll(sourceText, clause.all)) return false;
+  if (clause.notAny && panoramaSourceHasAny(sourceText, clause.notAny)) return false;
+  if (clause.notAll && panoramaSourceHasAll(sourceText, clause.notAll)) return false;
+  return true;
+}
+
+function panoramaAgentRuleMatches(sourceText, rule) {
+  return (rule.clauses || []).some(clause => panoramaAgentRuleClauseMatches(sourceText, clause));
+}
+
 function getPanoramaAgentCandidates(data) {
   const values = [];
   const seen = new Set();
@@ -1221,23 +1427,12 @@ function getPanoramaAgentCandidates(data) {
     values.push(raw);
   };
 
-  const haystack = normalizeForMatch([
-    data?.tradename,
-    data?.generic_name,
-    data?.name,
-    data?.disease,
-    data?.antigen
-  ].filter(Boolean).join(' '));
-
-  const isMMRVar =
-    haystack.includes('proquad') ||
-    haystack.includes('mmr var') ||
-    (haystack.includes('measles') && haystack.includes('mumps') && haystack.includes('rubella') && haystack.includes('varicella'));
-
-  if (isMMRVar) {
-    add('MMR-VAR');
-    add('MMR VAR');
-    add('MMR-Var');
+  const sourceText = buildPanoramaAgentSourceText(data);
+  for (const rule of PANORAMA_AGENT_RULES) {
+    if (!panoramaAgentRuleMatches(sourceText, rule)) continue;
+    for (const output of rule.outputs || []) {
+      add(output);
+    }
   }
 
   add(data?.name);

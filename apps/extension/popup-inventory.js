@@ -1,7 +1,9 @@
 import { escapeHtml } from './popup-ui.js';
 
-const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
-const INVENTORY_CSV_COLUMNS = [
+export const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+export const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
+
+const CSV_COLUMNS = [
   'scan_index',
   'scanned_at',
   'name',
@@ -29,20 +31,40 @@ const INVENTORY_CSV_COLUMNS = [
   'raw_barcode'
 ];
 
-export class InventoryBatchManager {
-  constructor({ summaryEl, listEl, exportButton, clearButton }) {
+export class ScanQueueManager {
+  constructor({
+    storageKey,
+    summaryEl,
+    listEl,
+    clearButton,
+    exportButton = null,
+    onUseRecord = null,
+    showUseAction = false,
+    useButtonLabel = 'Use for Chart',
+    emptySummary = 'No saved scans yet.',
+    emptyMessage = 'No saved scans yet.',
+    summaryBuilder = defaultSummaryBuilder,
+    exportFilenamePrefix = 'vaxlink-queue'
+  }) {
+    this.storageKey = storageKey;
     this.summaryEl = summaryEl;
     this.listEl = listEl;
-    this.exportButton = exportButton;
     this.clearButton = clearButton;
+    this.exportButton = exportButton;
+    this.onUseRecord = typeof onUseRecord === 'function' ? onUseRecord : null;
+    this.showUseAction = !!showUseAction;
+    this.useButtonLabel = useButtonLabel;
+    this.emptySummary = emptySummary;
+    this.emptyMessage = emptyMessage;
+    this.summaryBuilder = typeof summaryBuilder === 'function' ? summaryBuilder : defaultSummaryBuilder;
+    this.exportFilenamePrefix = exportFilenamePrefix;
     this.rows = [];
+    this.activeUseId = '';
   }
 
   async load() {
-    const stored = await chrome.storage.local.get([INVENTORY_BATCH_KEY]);
-    const rows = stored && Array.isArray(stored[INVENTORY_BATCH_KEY])
-      ? stored[INVENTORY_BATCH_KEY]
-      : [];
+    const stored = await chrome.storage.local.get([this.storageKey]);
+    const rows = stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [];
     this.rows = rows.filter((row) => row && typeof row === 'object');
     this.render();
   }
@@ -61,12 +83,16 @@ export class InventoryBatchManager {
 
   async clear() {
     this.rows = [];
+    this.activeUseId = '';
     await this.persist();
     this.render();
   }
 
   async remove(id) {
     this.rows = this.rows.filter((row) => row.id !== id);
+    if (this.activeUseId === id) {
+      this.activeUseId = '';
+    }
     await this.persist();
     this.render();
   }
@@ -75,12 +101,13 @@ export class InventoryBatchManager {
     return this.rows.length;
   }
 
-  hasItems() {
-    return this.rows.length > 0;
+  getById(id) {
+    return this.rows.find((row) => row && row.id === id) || null;
   }
 
-  latest() {
-    return this.rows.length ? this.rows[this.rows.length - 1] : null;
+  setActiveUse(id) {
+    this.activeUseId = id || '';
+    this.render();
   }
 
   exportCsv() {
@@ -89,8 +116,8 @@ export class InventoryBatchManager {
     }
 
     const csvRows = [
-      INVENTORY_CSV_COLUMNS.join(','),
-      ...this.rows.map((row, index) => INVENTORY_CSV_COLUMNS.map((column) => {
+      CSV_COLUMNS.join(','),
+      ...this.rows.map((row, index) => CSV_COLUMNS.map((column) => {
         if (column === 'scan_index') {
           return csvEscape(index + 1);
         }
@@ -100,7 +127,7 @@ export class InventoryBatchManager {
 
     const blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const filename = `vaxlink-inventory-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+    const filename = `${this.exportFilenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
     const link = document.createElement('a');
     link.href = url;
     link.download = filename;
@@ -115,46 +142,20 @@ export class InventoryBatchManager {
     if (!this.summaryEl || !this.listEl) return;
 
     if (!this.rows.length) {
-      this.summaryEl.textContent = 'No scans queued for export.';
-      this.listEl.innerHTML = '<div class="inventory-empty">Scan vaccines into the tray, then export when ready.</div>';
+      this.summaryEl.textContent = this.emptySummary;
+      this.listEl.innerHTML = `<div class="inventory-empty">${escapeHtml(this.emptyMessage)}</div>`;
       this.updateControls();
       return;
     }
 
-    const expiredCount = this.rows.filter((row) => row.expiry_flag === 'expired').length;
-    const expiringCount = this.rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
-    let summary = `${this.rows.length} scan(s) ready for CSV export.`;
-    if (expiredCount || expiringCount) {
-      summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
-    }
-    this.summaryEl.textContent = summary;
+    this.summaryEl.textContent = this.summaryBuilder(this.rows);
 
     this.listEl.innerHTML = this.rows
-      .map((row, index) => {
-        const title = escapeHtml(row.tradename || row.generic_name || row.name || row.lot || `Scan ${index + 1}`);
-        const lot = escapeHtml(row.lot || 'N/A');
-        const expiry = escapeHtml(row.inventory_expiry || row.barcode_expiry || 'N/A');
-        const manufacturer = escapeHtml(row.manufacturer || 'N/A');
-        const status = escapeHtml(formatInventoryStatus(row));
-        const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
-        const id = escapeHtml(row.id || '');
-        return `
-          <div class="inventory-item">
-            <div class="inventory-item-top">
-              <div>
-                <div class="inventory-item-title">${title}</div>
-                <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}</div>
-              </div>
-              <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
-            </div>
-            <div class="inventory-item-grid">
-              <span class="inventory-chip">Expiry ${expiry}</span>
-              <span class="inventory-chip">Status ${status}</span>
-              <span class="inventory-chip">Mfr ${manufacturer}</span>
-            </div>
-          </div>
-        `;
-      })
+      .map((row, index) => buildQueueItemMarkup(row, index, {
+        isActive: row.id && row.id === this.activeUseId,
+        showUseAction: this.showUseAction,
+        useButtonLabel: this.useButtonLabel
+      }))
       .join('');
 
     this.listEl.querySelectorAll('[data-remove-id]').forEach((button) => {
@@ -163,21 +164,40 @@ export class InventoryBatchManager {
       });
     });
 
+    if (this.showUseAction && this.onUseRecord) {
+      this.listEl.querySelectorAll('[data-use-id]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const id = button.getAttribute('data-use-id');
+          const row = this.getById(id);
+          if (!row) {
+            return;
+          }
+          this.activeUseId = id || '';
+          this.render();
+          await this.onUseRecord(row);
+        });
+      });
+    }
+
     this.updateControls();
   }
 
   async persist() {
-    await chrome.storage.local.set({ [INVENTORY_BATCH_KEY]: this.rows });
+    await chrome.storage.local.set({ [this.storageKey]: this.rows });
   }
 
   updateControls() {
     const hasItems = this.rows.length > 0;
-    if (this.exportButton) this.exportButton.disabled = !hasItems;
-    if (this.clearButton) this.clearButton.disabled = !hasItems;
+    if (this.exportButton) {
+      this.exportButton.disabled = !hasItems;
+    }
+    if (this.clearButton) {
+      this.clearButton.disabled = !hasItems;
+    }
   }
 }
 
-export function buildInventoryRecord(data, rawBarcode) {
+export function buildQueueRecord(data, rawBarcode) {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     scanned_at: new Date().toISOString(),
@@ -205,6 +225,65 @@ export function buildInventoryRecord(data, rawBarcode) {
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || ''
   };
+}
+
+export function buildMultipleInjectSummary(rows) {
+  const count = rows.length;
+  const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
+  const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  let summary = `${count} vaccine(s) saved for later chart fill.`;
+  if (expiredCount || expiringCount) {
+    summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
+  }
+  return summary;
+}
+
+export function buildInventorySummary(rows) {
+  const count = rows.length;
+  const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
+  const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  let summary = `${count} scan(s) ready for inventory export.`;
+  if (expiredCount || expiringCount) {
+    summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
+  }
+  return summary;
+}
+
+function buildQueueItemMarkup(row, index, options) {
+  const title = escapeHtml(row.tradename || row.generic_name || row.name || row.lot || `Scan ${index + 1}`);
+  const lot = escapeHtml(row.lot || 'N/A');
+  const expiry = escapeHtml(row.inventory_expiry || row.barcode_expiry || 'N/A');
+  const manufacturer = escapeHtml(row.manufacturer || 'N/A');
+  const status = escapeHtml(formatInventoryStatus(row));
+  const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
+  const id = escapeHtml(row.id || '');
+  const useActionMarkup = options.showUseAction
+    ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
+    : '';
+
+  return `
+    <div class="inventory-item${options.isActive ? ' active' : ''}">
+      <div class="inventory-item-top">
+        <div>
+          <div class="inventory-item-title">${title}</div>
+          <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}</div>
+        </div>
+        <div class="inventory-item-actions">
+          ${useActionMarkup}
+          <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
+        </div>
+      </div>
+      <div class="inventory-item-grid">
+        <span class="inventory-chip">Expiry ${expiry}</span>
+        <span class="inventory-chip">Status ${status}</span>
+        <span class="inventory-chip">Mfr ${manufacturer}</span>
+      </div>
+    </div>
+  `;
+}
+
+function defaultSummaryBuilder(rows) {
+  return `${rows.length} saved item(s).`;
 }
 
 function formatInventoryTimestamp(value) {

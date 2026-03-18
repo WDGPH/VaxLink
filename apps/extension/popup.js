@@ -1,8 +1,14 @@
-import { InventoryBatchManager, buildInventoryRecord } from './popup-inventory.js';
+import {
+  ScanQueueManager,
+  buildInventorySummary,
+  buildMultipleInjectSummary,
+  buildQueueRecord,
+  INVENTORY_BATCH_KEY,
+  MULTIPLE_INJECT_QUEUE_KEY
+} from './popup-inventory.js';
 import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-parser.js';
 import {
   buildParsedOutputMarkup,
-  initHandsFreeToggle,
   renderNVCStatus,
   setButtonBusy,
   showOutput
@@ -14,10 +20,15 @@ let addCurrentBtn;
 let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
-let injectModeBtn;
+let clearMultipleBtn;
+let singleModeBtn;
+let multipleModeBtn;
 let inventoryModeBtn;
-let injectModeSection;
+let singleModeSection;
+let multipleModeSection;
 let inventoryModeSection;
+let scannerInputSection;
+let scannedInputLabel;
 let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
@@ -27,21 +38,38 @@ let scanStateSubtitle;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
+let multipleInjectManager;
 let inventoryManager;
-let activeMode = 'inject';
+let activeMode = 'single';
 
 const lotLookupCache = new Map();
-const POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
+const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
+const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
+const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
+
 const MODE_CONFIG = {
-  inject: {
-    title: 'Inject mode',
-    subtitle: 'Single-scan workflow for preview and chart auto-fill.',
-    helper: 'Scan or paste a barcode to decode it, review the parsed vaccine details, and inject into the active CHR tab.'
+  single: {
+    title: 'Single Inject',
+    subtitle: 'One scan fills the current chart immediately.',
+    helper: 'Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.',
+    inputLabel: 'Scanned Barcode',
+    inputPlaceholder: 'Paste barcode here or scan with device...',
+    usesScannerInput: true
+  },
+  multiple: {
+    title: 'Multiple Inject',
+    subtitle: 'Scan several vaccines now, choose them for chart fill later.',
+    helper: 'Leave this mode active while walking to the fridge. Each scan on the live chart page is saved automatically. When you come back, open the queue and choose Use for Chart on each saved vaccine.',
+    usesScannerInput: false
   },
   inventory: {
-    title: 'Inventory mode',
-    subtitle: 'Batch workflow for tray capture and CSV export.',
-    helper: 'Scan one vaccine per line. Press Enter to add the current scan, or paste multiple lines and add them to the inventory tray in one batch.'
+    title: 'Inventory',
+    subtitle: 'Capture vaccines into an export tray.',
+    helper: 'Use this for stock or export work. Scan into the field below and add to the inventory tray, or leave this mode active to save each live scan into the inventory export list automatically.',
+    inputLabel: 'Inventory Barcode Input',
+    inputPlaceholder: 'Scan one barcode per line or paste a batch...',
+    usesScannerInput: true
   }
 };
 
@@ -52,10 +80,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
-  injectModeBtn = document.getElementById('injectModeBtn');
+  clearMultipleBtn = document.getElementById('clearMultipleBtn');
+  singleModeBtn = document.getElementById('singleModeBtn');
+  multipleModeBtn = document.getElementById('multipleModeBtn');
   inventoryModeBtn = document.getElementById('inventoryModeBtn');
-  injectModeSection = document.getElementById('injectModeSection');
+  singleModeSection = document.getElementById('singleModeSection');
+  multipleModeSection = document.getElementById('multipleModeSection');
   inventoryModeSection = document.getElementById('inventoryModeSection');
+  scannerInputSection = document.getElementById('scannerInputSection');
+  scannedInputLabel = document.getElementById('scannedInputLabel');
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
@@ -63,60 +96,86 @@ document.addEventListener('DOMContentLoaded', async () => {
   scanStateTitle = document.getElementById('scanStateTitle');
   scanStateSubtitle = document.getElementById('scanStateSubtitle');
 
-  inventoryManager = new InventoryBatchManager({
-    summaryEl: document.getElementById('inventorySummary'),
-    listEl: document.getElementById('inventoryList'),
-    exportButton: exportCsvBtn,
-    clearButton: clearInventoryBtn
+  multipleInjectManager = new ScanQueueManager({
+    storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+    summaryEl: document.getElementById('multipleQueueSummary'),
+    listEl: document.getElementById('multipleQueueList'),
+    clearButton: clearMultipleBtn,
+    onUseRecord: handleUseMultipleInjectRecord,
+    showUseAction: true,
+    useButtonLabel: 'Use for Chart',
+    emptySummary: 'No saved vaccines yet.',
+    emptyMessage: 'Leave Multiple Inject active, scan several vaccines on the live chart page, then come back and choose one to fill.',
+    summaryBuilder: buildMultipleInjectSummary
   });
 
-  initHandsFreeToggle(outputDiv, writeOutput);
-  await inventoryManager.load();
-  await loadPopupMode();
+  inventoryManager = new ScanQueueManager({
+    storageKey: INVENTORY_BATCH_KEY,
+    summaryEl: document.getElementById('inventorySummary'),
+    listEl: document.getElementById('inventoryList'),
+    clearButton: clearInventoryBtn,
+    exportButton: exportCsvBtn,
+    emptySummary: 'No inventory scans yet.',
+    emptyMessage: 'Scan vaccines into the inventory tray, then export when ready.',
+    summaryBuilder: buildInventorySummary,
+    exportFilenamePrefix: 'vaxlink-inventory'
+  });
+
+  await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
+  await loadWorkflowMode();
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
-      queueAutoParse();
+      if (usesScannerInput(activeMode)) {
+        queueAutoParse();
+      }
     });
 
     scannedInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        if (activeMode === 'inventory') {
-          addPreviewScanToInventory();
-        } else {
-          queueAutoParse(true);
-        }
+      if (event.key !== 'Enter') {
+        return;
+      }
+      event.preventDefault();
+      if (activeMode === 'inventory') {
+        addPreviewScanToInventory();
+        return;
+      }
+      if (activeMode === 'single') {
+        queueAutoParse(true);
       }
     });
   }
 
-  if (injectModeBtn) {
-    injectModeBtn.addEventListener('click', () => {
-      setActiveMode('inject');
-    });
+  if (singleModeBtn) {
+    singleModeBtn.addEventListener('click', () => setActiveMode('single'));
   }
-
+  if (multipleModeBtn) {
+    multipleModeBtn.addEventListener('click', () => setActiveMode('multiple'));
+  }
   if (inventoryModeBtn) {
-    inventoryModeBtn.addEventListener('click', () => {
-      setActiveMode('inventory');
-    });
+    inventoryModeBtn.addEventListener('click', () => setActiveMode('inventory'));
   }
 
   if (autoFillBtn) {
-    autoFillBtn.addEventListener('click', () => {
+    autoFillBtn.addEventListener('click', async () => {
       if (!parsedData) {
         writeOutput('Scan a barcode first. Parsing runs automatically.', 'error');
         return;
       }
 
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (!tabs.length) {
-          writeOutput('No active tab found', 'error');
-          return;
-        }
-        sendAutoFillMessage(tabs[0].id, parsedData);
-      });
+      try {
+        await sendAutoFillToActiveTab(parsedData);
+        writeOutput('Chart auto-filled', 'success');
+      } catch (error) {
+        writeOutput(error.message || 'Could not auto-fill fields', 'error');
+      }
+    });
+  }
+
+  if (clearMultipleBtn) {
+    clearMultipleBtn.addEventListener('click', async () => {
+      await multipleInjectManager.clear();
+      writeOutput('Multiple Inject queue cleared.', 'info');
     });
   }
 
@@ -181,53 +240,126 @@ function writeOutput(message, type = 'info') {
   showOutput(outputDiv, message, type);
 }
 
-async function loadPopupMode() {
+function usesScannerInput(mode) {
+  return !!MODE_CONFIG[mode]?.usesScannerInput;
+}
+
+function normalizeWorkflowMode(stored) {
+  const direct = stored && stored[WORKFLOW_MODE_KEY];
+  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
+    return direct;
+  }
+
+  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
+  if (legacyPopup === 'inventory') {
+    return 'inventory';
+  }
+  if (legacyPopup === 'inject') {
+    return 'single';
+  }
+
+  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
+  if (legacyRemote === 'tray') {
+    return 'multiple';
+  }
+  if (legacyRemote === 'autofill') {
+    return 'single';
+  }
+
+  if (stored && stored[LEGACY_HANDS_FREE_KEY]) {
+    return 'single';
+  }
+
+  return 'single';
+}
+
+function buildAutofillPayloadFromQueueRecord(record) {
+  if (!record) return null;
+  return {
+    gtin: record.gtin || '',
+    lot: record.lot || '',
+    serial: record.serial || '',
+    expiry: record.barcode_expiry || record.inventory_expiry || '',
+    inventory_expiry: record.inventory_expiry || record.barcode_expiry || '',
+    nvc_lot_expiry: record.nvc_lot_expiry || '',
+    expiry_flag: record.expiry_flag || '',
+    expiry_days_remaining: record.expiry_days_remaining ?? '',
+    expiry_source: record.expiry_source || (record.barcode_expiry ? 'barcode' : 'none'),
+    tradename: record.tradename || '',
+    generic_name: record.generic_name || '',
+    disease: record.disease || '',
+    antigen: record.antigen || '',
+    manufacturer: record.manufacturer || '',
+    route: record.route || '',
+    strength: record.strength || '',
+    dose_value: record.dose_value || '',
+    dose_unit: record.dose_unit || '',
+    din: record.din || '',
+    drug_code: record.drug_code || record.din || '',
+    lookup_error: record.lookup_error || '',
+    name: record.name || record.generic_name || record.tradename || record.din || ''
+  };
+}
+
+async function loadWorkflowMode() {
   try {
-    const stored = await chrome.storage.local.get([POPUP_MODE_KEY]);
-    const mode = stored && stored[POPUP_MODE_KEY] === 'inventory' ? 'inventory' : 'inject';
-    await setActiveMode(mode, { persist: false });
+    const stored = await chrome.storage.local.get([
+      WORKFLOW_MODE_KEY,
+      LEGACY_POPUP_MODE_KEY,
+      LEGACY_REMOTE_MODE_KEY,
+      LEGACY_HANDS_FREE_KEY
+    ]);
+    await setActiveMode(normalizeWorkflowMode(stored), { persist: false });
   } catch (_) {
-    await setActiveMode('inject', { persist: false });
+    await setActiveMode('single', { persist: false });
   }
 }
 
 async function setActiveMode(mode, options = {}) {
-  activeMode = mode === 'inventory' ? 'inventory' : 'inject';
+  activeMode = mode === 'multiple' || mode === 'inventory' ? mode : 'single';
   const config = MODE_CONFIG[activeMode];
 
-  if (injectModeBtn) {
-    injectModeBtn.classList.toggle('active', activeMode === 'inject');
-    injectModeBtn.setAttribute('aria-selected', activeMode === 'inject' ? 'true' : 'false');
-  }
+  toggleModeButton(singleModeBtn, activeMode === 'single');
+  toggleModeButton(multipleModeBtn, activeMode === 'multiple');
+  toggleModeButton(inventoryModeBtn, activeMode === 'inventory');
 
-  if (inventoryModeBtn) {
-    inventoryModeBtn.classList.toggle('active', activeMode === 'inventory');
-    inventoryModeBtn.setAttribute('aria-selected', activeMode === 'inventory' ? 'true' : 'false');
+  if (singleModeSection) {
+    singleModeSection.hidden = activeMode !== 'single';
   }
-
-  if (injectModeSection) {
-    injectModeSection.hidden = activeMode !== 'inject';
+  if (multipleModeSection) {
+    multipleModeSection.hidden = activeMode !== 'multiple';
   }
-
   if (inventoryModeSection) {
     inventoryModeSection.hidden = activeMode !== 'inventory';
   }
-
+  if (scannerInputSection) {
+    scannerInputSection.hidden = !config.usesScannerInput;
+  }
+  if (scannedInputLabel && config.inputLabel) {
+    scannedInputLabel.textContent = config.inputLabel;
+  }
+  if (scannedInput && config.inputPlaceholder) {
+    scannedInput.placeholder = config.inputPlaceholder;
+  }
   if (modeHelper) {
     modeHelper.textContent = config.helper;
   }
-
   if (scanStateTitle) {
     scanStateTitle.textContent = config.title;
   }
-
   if (scanStateSubtitle) {
     scanStateSubtitle.textContent = config.subtitle;
   }
 
   if (options.persist !== false) {
-    await chrome.storage.local.set({ [POPUP_MODE_KEY]: activeMode });
+    await chrome.storage.local.set({ [WORKFLOW_MODE_KEY]: activeMode });
   }
+}
+
+function toggleModeButton(button, isActive) {
+  if (!button) return;
+  button.classList.toggle('active', isActive);
+  button.setAttribute('aria-selected', isActive ? 'true' : 'false');
 }
 
 function queueAutoParse(immediate = false) {
@@ -304,6 +436,30 @@ function loadNVCStatus() {
   });
 }
 
+async function sendAutoFillToActiveTab(data) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      if (!tabs.length || !tabs[0]?.id) {
+        reject(new Error('No active tab found'));
+        return;
+      }
+
+      sendAutoFillMessage(tabs[0].id, data, (response) => {
+        if (response && response.success) {
+          resolve(response);
+          return;
+        }
+        reject(new Error(response?.error || 'Could not auto-fill fields'));
+      });
+    });
+  });
+}
+
 function sendRuntimeMessage(message) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(message, (response) => {
@@ -332,7 +488,7 @@ async function lookupVaccineInfo(lot) {
 async function addPreviewScanToInventory() {
   const rawBarcode = getPreviewBarcodeValue();
   if (!rawBarcode) {
-    writeOutput('Scan a barcode first, then add it to the inventory tray.', 'error');
+    writeOutput('Scan a barcode first, then add it to inventory.', 'error');
     return;
   }
 
@@ -346,7 +502,7 @@ async function addPreviewScanToInventory() {
     }
 
     parsedData = enriched;
-    await inventoryManager.add(buildInventoryRecord(enriched, rawBarcode));
+    await inventoryManager.add(buildQueueRecord(enriched, rawBarcode));
     removeLastPendingScanLine();
     queueAutoParse(true);
     writeOutput(buildParsedOutputMarkup(enriched), outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry)));
@@ -379,7 +535,7 @@ async function addPendingScansToInventory() {
       try {
         const baseData = parseInputData(rawBarcode);
         const enriched = await enrichParsedData(baseData);
-        records.push(buildInventoryRecord(enriched, rawBarcode));
+        records.push(buildQueueRecord(enriched, rawBarcode));
         lastRecord = enriched;
         addedCount += 1;
       } catch (error) {
@@ -400,7 +556,7 @@ async function addPendingScansToInventory() {
     if (addedCount) {
       const message = errors.length
         ? `Added ${addedCount} scan(s). ${errors.length} line(s) failed.`
-        : `Added ${addedCount} scan(s) to the inventory tray.`;
+        : `Added ${addedCount} scan(s) to inventory.`;
       writeOutput(message, errors.length ? 'warning' : 'success');
     } else {
       writeOutput(errors.join('<br>') || 'No scans were added.', 'error');
@@ -409,6 +565,29 @@ async function addPendingScansToInventory() {
     if (requestId === activeParseRequestId) {
       setButtonBusy(addBatchBtn, false);
     }
+  }
+}
+
+async function handleUseMultipleInjectRecord(record) {
+  const data = buildAutofillPayloadFromQueueRecord(record);
+  if (!data) {
+    writeOutput('Saved vaccine could not be loaded.', 'error');
+    return;
+  }
+
+  parsedData = data;
+  writeOutput(
+    buildParsedOutputMarkup(data),
+    outputTypeForExpiry(getExpiryStatus(data.inventory_expiry || data.expiry))
+  );
+
+  try {
+    await sendAutoFillToActiveTab(data);
+    multipleInjectManager.setActiveUse(record.id);
+    const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
+    writeOutput(`${label} auto-filled from Multiple Inject queue.`, 'success');
+  } catch (error) {
+    writeOutput(error.message || 'Could not auto-fill fields', 'error');
   }
 }
 
@@ -495,27 +674,27 @@ async function displayParsedData(data, parseRequestId) {
   }
 }
 
-function sendAutoFillMessage(tabId, data) {
+function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
   chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, (response) => {
     if (chrome.runtime.lastError) {
       const message = chrome.runtime.lastError.message || '';
 
       if (message.includes('Receiving end does not exist')) {
-        chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] }, () => {
+        chrome.scripting.executeScript({ target: { tabId }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
           if (chrome.runtime.lastError) {
-            writeOutput(`Message failed and script injection failed: ${chrome.runtime.lastError.message}`, 'error');
+            callback({ success: false, error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}` });
             return;
           }
-          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, handleAutoFillResponse);
+          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, callback);
         });
         return;
       }
 
-      writeOutput(`Message send failed: ${message}`, 'error');
+      callback({ success: false, error: `Message send failed: ${message}` });
       return;
     }
 
-    handleAutoFillResponse(response);
+    callback(response);
   });
 }
 
