@@ -18,6 +18,10 @@ const STORAGE_KEYS = {
   bundleSha256: 'nvc_bundle_sha256',
   metaVersion: 'nvc_bundle_meta_version'
 };
+const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
+const ANALYTICS_MAX_RECENT_EVENTS = 2000;
+const ANALYTICS_TOP_LIMIT = 12;
+let analyticsWriteQueue = Promise.resolve();
 let iconInitPromise = null;
 
 // Load NVC bundle on installation/startup
@@ -89,6 +93,409 @@ function getStorage(keys) {
 
 function setStorage(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+function buildAnalyticsId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function analyticsDayKey(value = Date.now()) {
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+function safeAnalyticsCount(value, fallback = 1) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? num : fallback;
+}
+
+function createAnalyticsWorkflowStats() {
+  return {
+    liveScans: 0,
+    popupParses: 0,
+    queueSaved: 0,
+    queueUsed: 0,
+    autofillSuccess: 0,
+    autofillFailure: 0
+  };
+}
+
+function createAnalyticsDay(dayKey) {
+  return {
+    day: dayKey,
+    eventCount: 0,
+    popupOpens: 0,
+    modeSwitches: { single: 0, multiple: 0, inventory: 0 },
+    workflows: {
+      single: createAnalyticsWorkflowStats(),
+      multiple: createAnalyticsWorkflowStats(),
+      inventory: createAnalyticsWorkflowStats()
+    },
+    parsing: { success: 0, error: 0 },
+    lookup: { success: 0, error: 0 },
+    autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
+    queues: {
+      multipleSaved: 0,
+      multipleUsed: 0,
+      multipleCleared: 0,
+      inventorySaved: 0,
+      inventoryCleared: 0,
+      maxMultipleDepth: 0,
+      maxInventoryDepth: 0
+    },
+    exports: { inventoryCount: 0, inventoryRows: 0 },
+    nvc: { manualSuccess: 0, manualFailure: 0, autoSuccess: 0, autoFailure: 0 },
+    expiry: { expired: 0, expiringSoon: 0, valid: 0, unknown: 0 },
+    sources: {},
+    vaccines: {},
+    manufacturers: {}
+  };
+}
+
+function createAnalyticsStore() {
+  const now = new Date().toISOString();
+  return {
+    version: 1,
+    deviceId: buildAnalyticsId(),
+    deviceLabel: '',
+    firstSeenAt: now,
+    lastEventAt: null,
+    lastExportAt: null,
+    days: {},
+    recentEvents: []
+  };
+}
+
+async function getAnalyticsStore() {
+  const stored = await getStorage([ANALYTICS_STORAGE_KEY]);
+  const existing = stored[ANALYTICS_STORAGE_KEY];
+  if (!existing || typeof existing !== 'object') {
+    const created = createAnalyticsStore();
+    await setStorage({ [ANALYTICS_STORAGE_KEY]: created });
+    return created;
+  }
+  if (!existing.deviceId) {
+    existing.deviceId = buildAnalyticsId();
+  }
+  if (!existing.firstSeenAt) {
+    existing.firstSeenAt = new Date().toISOString();
+  }
+  if (!existing.days || typeof existing.days !== 'object') {
+    existing.days = {};
+  }
+  if (!Array.isArray(existing.recentEvents)) {
+    existing.recentEvents = [];
+  }
+  if (typeof existing.deviceLabel !== 'string') {
+    existing.deviceLabel = '';
+  }
+  return existing;
+}
+
+function ensureAnalyticsDay(store, dayKey) {
+  if (!store.days[dayKey]) {
+    store.days[dayKey] = createAnalyticsDay(dayKey);
+  }
+  return store.days[dayKey];
+}
+
+function incrementMap(map, key, amount = 1) {
+  if (!key) return;
+  map[key] = (map[key] || 0) + amount;
+}
+
+function normalizeWorkflowKey(value) {
+  return value === 'multiple' || value === 'inventory' ? value : 'single';
+}
+
+function normalizeQueueKey(value) {
+  return value === 'inventory' ? 'inventory' : 'multiple';
+}
+
+function normalizeExpiryKey(value) {
+  if (value === 'expired') return 'expired';
+  if (value === 'expiring_soon') return 'expiringSoon';
+  if (value === 'valid') return 'valid';
+  return 'unknown';
+}
+
+function trimAnalyticsLabel(value, maxLength = 80) {
+  return String(value || '').trim().slice(0, maxLength);
+}
+
+function applyTopCounter(map, rawKey, amount = 1) {
+  const key = trimAnalyticsLabel(rawKey, 60);
+  if (!key) return;
+  map[key] = (map[key] || 0) + amount;
+  const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
+  if (entries.length <= ANALYTICS_TOP_LIMIT) {
+    return;
+  }
+  const trimmed = Object.fromEntries(entries.slice(0, ANALYTICS_TOP_LIMIT));
+  Object.keys(map).forEach((existingKey) => {
+    if (!(existingKey in trimmed)) {
+      delete map[existingKey];
+    }
+  });
+}
+
+function appendRecentAnalyticsEvent(store, event) {
+  store.recentEvents.push(event);
+  if (store.recentEvents.length > ANALYTICS_MAX_RECENT_EVENTS) {
+    store.recentEvents = store.recentEvents.slice(-ANALYTICS_MAX_RECENT_EVENTS);
+  }
+}
+
+function applyAnalyticsEvent(day, event) {
+  const workflow = normalizeWorkflowKey(event.workflow);
+  const count = safeAnalyticsCount(event.count, 1);
+  day.eventCount += 1;
+
+  if (event.source) {
+    incrementMap(day.sources, trimAnalyticsLabel(event.source, 40), count);
+  }
+  if (event.vaccineLabel) {
+    applyTopCounter(day.vaccines, event.vaccineLabel, count);
+  }
+  if (event.manufacturer) {
+    applyTopCounter(day.manufacturers, event.manufacturer, count);
+  }
+  if (event.expiryFlag) {
+    day.expiry[normalizeExpiryKey(event.expiryFlag)] += count;
+  }
+
+  switch (event.eventType) {
+    case 'popup_open':
+      day.popupOpens += 1;
+      break;
+    case 'workflow_mode_set':
+      day.modeSwitches[workflow] += 1;
+      break;
+    case 'parse_success':
+      day.parsing.success += count;
+      if (event.source && String(event.source).startsWith('popup')) {
+        day.workflows[workflow].popupParses += count;
+      }
+      break;
+    case 'parse_error':
+      day.parsing.error += count;
+      break;
+    case 'lookup_success':
+      day.lookup.success += count;
+      break;
+    case 'lookup_error':
+      day.lookup.error += count;
+      break;
+    case 'scan_captured':
+      day.workflows[workflow].liveScans += count;
+      break;
+    case 'queue_saved': {
+      const queue = normalizeQueueKey(event.queue);
+      if (queue === 'multiple') {
+        day.queues.multipleSaved += count;
+        day.queues.maxMultipleDepth = Math.max(day.queues.maxMultipleDepth, Number(event.queueSizeAfter) || 0);
+      } else {
+        day.queues.inventorySaved += count;
+        day.queues.maxInventoryDepth = Math.max(day.queues.maxInventoryDepth, Number(event.queueSizeAfter) || 0);
+      }
+      day.workflows[queue].queueSaved += count;
+      break;
+    }
+    case 'queue_used':
+      day.queues.multipleUsed += count;
+      day.workflows.multiple.queueUsed += count;
+      break;
+    case 'queue_cleared': {
+      const queue = normalizeQueueKey(event.queue);
+      if (queue === 'multiple') {
+        day.queues.multipleCleared += count;
+      } else {
+        day.queues.inventoryCleared += count;
+      }
+      break;
+    }
+    case 'autofill_attempt':
+      day.autofill.attempts += count;
+      break;
+    case 'autofill_result':
+      if (event.success) {
+        day.autofill.success += count;
+        day.workflows[workflow].autofillSuccess += count;
+        if (event.source === 'queue') {
+          day.autofill.fromQueueSuccess += count;
+        }
+      } else {
+        day.autofill.failure += count;
+        day.workflows[workflow].autofillFailure += count;
+      }
+      break;
+    case 'inventory_export':
+      day.exports.inventoryCount += count;
+      day.exports.inventoryRows += safeAnalyticsCount(event.rows, 0);
+      break;
+    case 'nvc_refresh_result': {
+      const trigger = event.trigger === 'manual' ? 'manual' : 'auto';
+      const key = event.success ? `${trigger}Success` : `${trigger}Failure`;
+      day.nvc[key] += count;
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+function makeAnalyticsEvent(eventType, payload = {}) {
+  const ts = payload.ts || new Date().toISOString();
+  return {
+    id: buildAnalyticsId(),
+    ts,
+    day: analyticsDayKey(ts),
+    eventType,
+    workflow: normalizeWorkflowKey(payload.workflow),
+    queue: payload.queue ? normalizeQueueKey(payload.queue) : '',
+    source: trimAnalyticsLabel(payload.source, 40),
+    success: !!payload.success,
+    count: safeAnalyticsCount(payload.count, 1),
+    rows: safeAnalyticsCount(payload.rows, 0),
+    queueSizeAfter: safeAnalyticsCount(payload.queueSizeAfter, 0),
+    expiryFlag: payload.expiryFlag || '',
+    vaccineLabel: trimAnalyticsLabel(payload.vaccineLabel, 60),
+    manufacturer: trimAnalyticsLabel(payload.manufacturer, 60),
+    trigger: payload.trigger || '',
+    note: trimAnalyticsLabel(payload.note, 120)
+  };
+}
+
+function mutateAnalyticsStore(mutator) {
+  analyticsWriteQueue = analyticsWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const store = await getAnalyticsStore();
+      await mutator(store);
+      await setStorage({ [ANALYTICS_STORAGE_KEY]: store });
+      return store;
+    });
+  return analyticsWriteQueue;
+}
+
+async function logAnalyticsEvent(eventType, payload = {}) {
+  return mutateAnalyticsStore((store) => {
+    const event = makeAnalyticsEvent(eventType, payload);
+    const day = ensureAnalyticsDay(store, event.day);
+    applyAnalyticsEvent(day, event);
+    appendRecentAnalyticsEvent(store, event);
+    store.lastEventAt = event.ts;
+  });
+}
+
+function sumObjectCounters(target, source) {
+  for (const [key, value] of Object.entries(source || {})) {
+    target[key] = (target[key] || 0) + Number(value || 0);
+  }
+}
+
+function aggregateAnalyticsDays(days) {
+  const rollup = createAnalyticsDay('rollup');
+  for (const day of days) {
+    rollup.eventCount += day.eventCount || 0;
+    rollup.popupOpens += day.popupOpens || 0;
+    sumObjectCounters(rollup.modeSwitches, day.modeSwitches);
+    ['single', 'multiple', 'inventory'].forEach((workflow) => {
+      const target = rollup.workflows[workflow];
+      const source = (day.workflows && day.workflows[workflow]) || {};
+      target.liveScans += source.liveScans || 0;
+      target.popupParses += source.popupParses || 0;
+      target.queueSaved += source.queueSaved || 0;
+      target.queueUsed += source.queueUsed || 0;
+      target.autofillSuccess += source.autofillSuccess || 0;
+      target.autofillFailure += source.autofillFailure || 0;
+    });
+    ['success', 'error'].forEach((key) => {
+      rollup.parsing[key] += day.parsing?.[key] || 0;
+      rollup.lookup[key] += day.lookup?.[key] || 0;
+    });
+    ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
+      rollup.autofill[key] += day.autofill?.[key] || 0;
+    });
+    ['multipleSaved', 'multipleUsed', 'multipleCleared', 'inventorySaved', 'inventoryCleared'].forEach((key) => {
+      rollup.queues[key] += day.queues?.[key] || 0;
+    });
+    rollup.queues.maxMultipleDepth = Math.max(rollup.queues.maxMultipleDepth, day.queues?.maxMultipleDepth || 0);
+    rollup.queues.maxInventoryDepth = Math.max(rollup.queues.maxInventoryDepth, day.queues?.maxInventoryDepth || 0);
+    ['inventoryCount', 'inventoryRows'].forEach((key) => {
+      rollup.exports[key] += day.exports?.[key] || 0;
+    });
+    ['manualSuccess', 'manualFailure', 'autoSuccess', 'autoFailure'].forEach((key) => {
+      rollup.nvc[key] += day.nvc?.[key] || 0;
+    });
+    ['expired', 'expiringSoon', 'valid', 'unknown'].forEach((key) => {
+      rollup.expiry[key] += day.expiry?.[key] || 0;
+    });
+    sumObjectCounters(rollup.sources, day.sources);
+    sumObjectCounters(rollup.vaccines, day.vaccines);
+    sumObjectCounters(rollup.manufacturers, day.manufacturers);
+  }
+  return rollup;
+}
+
+async function getAnalyticsSummary() {
+  const store = await getAnalyticsStore();
+  const dayKeys = Object.keys(store.days).sort();
+  const todayKey = analyticsDayKey();
+  const today = store.days[todayKey] || createAnalyticsDay(todayKey);
+  const rollup = aggregateAnalyticsDays(dayKeys.map((key) => store.days[key]));
+  return {
+    deviceId: store.deviceId,
+    deviceLabel: store.deviceLabel || '',
+    firstSeenAt: store.firstSeenAt || null,
+    lastEventAt: store.lastEventAt || null,
+    lastExportAt: store.lastExportAt || null,
+    daysTracked: dayKeys.length,
+    todayKey,
+    today,
+    rollup
+  };
+}
+
+async function getAnalyticsExport(scope = 'pilot') {
+  const store = await getAnalyticsStore();
+  const dayKeys = Object.keys(store.days).sort();
+  const todayKey = analyticsDayKey();
+  const selectedKeys = scope === 'today'
+    ? dayKeys.filter((key) => key === todayKey)
+    : dayKeys;
+  const selectedDays = Object.fromEntries(selectedKeys.map((key) => [key, store.days[key]]));
+  return {
+    exportedAt: new Date().toISOString(),
+    scope,
+    deviceId: store.deviceId,
+    deviceLabel: store.deviceLabel || '',
+    firstSeenAt: store.firstSeenAt || null,
+    lastEventAt: store.lastEventAt || null,
+    daysTracked: selectedKeys.length,
+    days: selectedDays,
+    rollup: aggregateAnalyticsDays(selectedKeys.map((key) => store.days[key]))
+  };
+}
+
+async function setAnalyticsDeviceLabel(label) {
+  return mutateAnalyticsStore((store) => {
+    store.deviceLabel = trimAnalyticsLabel(label, 80);
+  });
+}
+
+async function markAnalyticsExported() {
+  return mutateAnalyticsStore((store) => {
+    store.lastExportAt = new Date().toISOString();
+  });
+}
+
+async function resetAnalyticsStore() {
+  const fresh = createAnalyticsStore();
+  await setStorage({ [ANALYTICS_STORAGE_KEY]: fresh });
+  return fresh;
 }
 
 function normalizeSourceUrl(url) {
@@ -180,6 +587,7 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
   }
 
   const force = !!options.force;
+  const trigger = options.trigger === 'manual' ? 'manual' : 'auto';
   try {
     const nowIso = new Date().toISOString();
     const stored = await getStorage([STORAGE_KEYS.bundleSha256, STORAGE_KEYS.updatedAt]);
@@ -201,12 +609,14 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
 
       if (!force && metadata.sha256 && previousHash && String(metadata.sha256).toLowerCase() === String(previousHash).toLowerCase()) {
         await setStorage({ [STORAGE_KEYS.lastCheckAt]: nowIso });
-        return {
+        const result = {
           success: true,
           unchanged: true,
           sourceUrl: effectiveSourceUrl,
           updatedAt: stored[STORAGE_KEYS.updatedAt] || metadata.updatedAt || nowIso
         };
+        await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true, note: 'unchanged' });
+        return result;
       }
 
       bundle = await fetchJsonWithHeaders(bundleUrl);
@@ -235,7 +645,7 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
       [STORAGE_KEYS.updatedAt]: updatedAt
     });
 
-    return {
+    const result = {
       success: true,
       sourceUrl: effectiveSourceUrl,
       bundleUrl,
@@ -245,8 +655,11 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
       sha256: computedSha256,
       version: metadata ? (metadata.version || null) : null
     };
+    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true });
+    return result;
   } catch (error) {
     console.error('Failed to refresh NVC bundle:', error);
+    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: false, note: error.message });
     return { success: false, error: error.message };
   }
 }
@@ -721,4 +1134,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true;
   }
+
+  if (request.action === 'logAnalyticsEvent') {
+    logAnalyticsEvent(request.eventType, request.payload || {})
+      .then(() => sendResponse({ success: true }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics log failed' }));
+    return true;
+  }
+
+  if (request.action === 'getAnalyticsSummary') {
+    getAnalyticsSummary()
+      .then((summary) => sendResponse({ success: true, summary }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics summary failed' }));
+    return true;
+  }
+
+  if (request.action === 'getAnalyticsExport') {
+    getAnalyticsExport(request.scope === 'today' ? 'today' : 'pilot')
+      .then((data) => markAnalyticsExported().then(() => sendResponse({ success: true, data })))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics export failed' }));
+    return true;
+  }
+
+  if (request.action === 'setAnalyticsDeviceLabel') {
+    setAnalyticsDeviceLabel(request.label || '')
+      .then(() => getAnalyticsSummary())
+      .then((summary) => sendResponse({ success: true, summary }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics label update failed' }));
+    return true;
+  }
+
+  if (request.action === 'resetAnalyticsStore') {
+    resetAnalyticsStore()
+      .then(() => getAnalyticsSummary())
+      .then((summary) => sendResponse({ success: true, summary }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics reset failed' }));
+    return true;
+  }
+
+  sendResponse({ success: false, error: `Unknown background action: ${request?.action || 'missing'}` });
+  return false;
 });
