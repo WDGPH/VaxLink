@@ -304,6 +304,46 @@ function lookupVaccineInfoByLot(lot) {
   });
 }
 
+function getLocalStorage(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function setLocalStorage(values) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(values, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function appendQueueRecordViaBackground(storageKey, record) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ action: 'appendQueueRecord', storageKey, record }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!response || !response.success) {
+        reject(new Error(response?.error || 'Queue append failed'));
+        return;
+      }
+      resolve(response.record || null);
+    });
+  });
+}
+
 function parseDateToLocal(value) {
   if (!value) return null;
   const raw = String(value).trim();
@@ -388,16 +428,8 @@ async function saveScanToQueue(data, rawBarcode, storageKey) {
     throw new Error('No storage key configured for queued scan mode');
   }
   const record = buildInventoryRecordFromParsed(data, rawBarcode);
-  const stored = await chrome.storage.local.get([storageKey]);
-  const rows = stored && Array.isArray(stored[storageKey])
-    ? stored[storageKey]
-    : [];
-  rows.push(record);
-  await chrome.storage.local.set({ [storageKey]: rows });
-  return {
-    ...record,
-    queueSizeAfter: rows.length
-  };
+  const appended = await appendQueueRecordViaBackground(storageKey, record);
+  return appended || record;
 }
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
