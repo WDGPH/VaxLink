@@ -95,6 +95,23 @@ function setStorage(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
 
+async function appendQueueRecord(storageKey, record) {
+  if (!storageKey) {
+    throw new Error('Missing queue storage key');
+  }
+  if (!record || typeof record !== 'object') {
+    throw new Error('Missing queue record');
+  }
+  const stored = await getStorage([storageKey]);
+  const rows = stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  rows.push(record);
+  await setStorage({ [storageKey]: rows });
+  return {
+    ...record,
+    queueSizeAfter: rows.length
+  };
+}
+
 function buildAnalyticsId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -1139,6 +1156,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     logAnalyticsEvent(request.eventType, request.payload || {})
       .then(() => sendResponse({ success: true }))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics log failed' }));
+    return true;
+  }
+
+  if (request.action === 'appendQueueRecord') {
+    appendQueueRecord(request.storageKey || '', request.record || null)
+      .then((record) => sendResponse({ success: true, record }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Queue append failed' }));
     return true;
   }
 

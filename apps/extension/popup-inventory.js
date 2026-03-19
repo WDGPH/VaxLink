@@ -31,6 +31,30 @@ const CSV_COLUMNS = [
   'raw_barcode'
 ];
 
+function getLocalStorage(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function setLocalStorage(values) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(values, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 export class ScanQueueManager {
   constructor({
     storageKey,
@@ -60,10 +84,12 @@ export class ScanQueueManager {
     this.exportFilenamePrefix = exportFilenamePrefix;
     this.rows = [];
     this.activeUseId = '';
+    this.handleStorageChanged = this.handleStorageChanged.bind(this);
+    chrome.storage.onChanged.addListener(this.handleStorageChanged);
   }
 
   async load() {
-    const stored = await chrome.storage.local.get([this.storageKey]);
+    const stored = await getLocalStorage([this.storageKey]);
     const rows = stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [];
     this.rows = rows.filter((row) => row && typeof row === 'object');
     this.render();
@@ -183,7 +209,7 @@ export class ScanQueueManager {
   }
 
   async persist() {
-    await chrome.storage.local.set({ [this.storageKey]: this.rows });
+    await setLocalStorage({ [this.storageKey]: this.rows });
   }
 
   updateControls() {
@@ -194,6 +220,20 @@ export class ScanQueueManager {
     if (this.clearButton) {
       this.clearButton.disabled = !hasItems;
     }
+  }
+
+  handleStorageChanged(changes, area) {
+    if (area !== 'local' || !(this.storageKey in changes)) {
+      return;
+    }
+    const nextRows = Array.isArray(changes[this.storageKey]?.newValue)
+      ? changes[this.storageKey].newValue
+      : [];
+    this.rows = nextRows.filter((row) => row && typeof row === 'object');
+    if (this.activeUseId && !this.rows.some((row) => row.id === this.activeUseId)) {
+      this.activeUseId = '';
+    }
+    this.render();
   }
 }
 
