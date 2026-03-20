@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaxLink EMR Adaptation"
+  short_description: "Add new EMR page adapters and selectors"
+  default_prompt: "Use $vaxlink-emr-adaptation to add support for a new EMR by defining page detection, selectors, and field-mapping behavior."
