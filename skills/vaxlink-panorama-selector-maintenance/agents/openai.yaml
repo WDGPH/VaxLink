@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaxLink Panorama Selector Maintenance"
+  short_description: "Maintain Panorama DOM selectors and rerender timing"
+  default_prompt: "Use $vaxlink-panorama-selector-maintenance to update Panorama selectors, lot/date timing, and rerender-safe autofill behavior."

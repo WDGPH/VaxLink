@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaxLink NVC Maintenance"
+  short_description: "Maintain NVC bundle lookup and barcode parsing"
+  default_prompt: "Use $vaxlink-nvc-maintenance to update VaxLink GS1 parsing, vaccine lookup, and NVC bundle refresh behavior."
