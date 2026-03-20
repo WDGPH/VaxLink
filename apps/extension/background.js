@@ -740,27 +740,39 @@ function buildNVCIndexes() {
   
   const tradenames = collectTradenameConceptsFromBundle();
   const lots = collectLotConceptsFromBundle();
+  const lotAgentRows = collectLotAgentMappingRowsFromBundle();
   
   bgLog('Collected', tradenames.length, 'tradename concepts');
   bgLog('Collected', lots.length, 'lot concepts');
+  bgLog('Collected', lotAgentRows.length, 'lot-agent mapping rows');
   
   // Index tradenames by code and by DIN
   const tradenameByCode = {};
   const tradenameByDin = {};
+  const tradenameByName = {};
   
   for (const concept of tradenames) {
-    const code = concept.code;
-    if (code) {
-      tradenameByCode[code] = concept;
+    const codeKey = normalizeCodeKey(concept.code);
+    if (codeKey) {
+      const existingByCode = tradenameByCode[codeKey];
+      if (!existingByCode || conceptRichness(concept) >= conceptRichness(existingByCode)) {
+        tradenameByCode[codeKey] = concept;
+      }
     }
     const din = extractTradenameDIN(concept);
-    if (din && !tradenameByDin[din]) {
-      tradenameByDin[din] = concept;
+    const dinKey = normalizeDinKey(din);
+    if (dinKey) {
+      const existingByDin = tradenameByDin[dinKey];
+      if (!existingByDin || conceptRichness(concept) >= conceptRichness(existingByDin)) {
+        tradenameByDin[dinKey] = concept;
+      }
     }
+    indexTradenameNames(tradenameByName, concept);
   }
   
   bgLog('Indexed', Object.keys(tradenameByCode).length, 'tradenames by code');
   bgLog('Indexed', Object.keys(tradenameByDin).length, 'tradenames by DIN');
+  bgLog('Indexed', Object.keys(tradenameByName).length, 'tradenames by name');
   
   // Index lots by lot number and by code
   const lotByLotNumber = {};
@@ -786,14 +798,18 @@ function buildNVCIndexes() {
   
   bgLog('Indexed', Object.keys(lotByLotNumber).length, 'lots by lot number');
   bgLog('Indexed', Object.keys(lotByCode).length, 'lots by code');
+  const lotAgentMappingByLot = buildLotAgentMappingIndex(lotAgentRows);
+  bgLog('Indexed', Object.keys(lotAgentMappingByLot).length, 'lot-agent mappings by lot key');
   
   nvcIndexes = {
     tradenameByCode,
     tradenameByDin,
+    tradenameByName,
     tradenameConceptsArray: tradenames,
     lotByLotNumber,
     lotByCode,
-    lotByCodePrefix
+    lotByCodePrefix,
+    lotAgentMappingByLot
   };
   
   bgLog('NVC Indexes built successfully');
@@ -805,9 +821,26 @@ function collectTradenameConceptsFromBundle() {
   
   for (const entry of nvcBundle.entry) {
     const resource = entry.resource;
+    if (!resource || !resource.resourceType) continue;
     if (resource.resourceType === 'ValueSet' && resource.id === 'Tradename') {
       for (const include of resource.compose?.include || []) {
         concepts.push(...(include.concept || []));
+      }
+      for (const item of resource.expansion?.contains || []) {
+        concepts.push(item);
+      }
+    } else if (resource.resourceType === 'CodeSystem') {
+      const idKey = normalizeCodeKey(resource.id);
+      const titleKey = normalizeCodeKey(resource.title);
+      const nameKey = normalizeCodeKey(resource.name);
+      const urlKey = normalizeCodeKey(resource.url);
+      const looksLikeTradename =
+        idKey.includes('tradename') ||
+        titleKey.includes('tradename') ||
+        nameKey.includes('tradename') ||
+        urlKey.includes('tradename');
+      if (looksLikeTradename) {
+        concepts.push(...(resource.concept || []));
       }
     }
   }
@@ -827,6 +860,146 @@ function collectLotConceptsFromBundle() {
   return concepts;
 }
 
+function collectLotAgentMappingRowsFromBundle() {
+  const rows = [];
+  if (!nvcBundle.entry) return rows;
+
+  for (const entry of nvcBundle.entry) {
+    const resource = entry.resource;
+    if (!resource || !resource.resourceType) continue;
+    const identity = normalizeCodeKey([
+      resource.id,
+      resource.name,
+      resource.title,
+      resource.url
+    ].filter(Boolean).join(' '));
+    if (!identity.includes('lotagentmapping')) {
+      continue;
+    }
+
+    if (resource.resourceType === 'CodeSystem') {
+      for (const concept of resource.concept || []) {
+        rows.push({ concept, sourceType: 'codesystem' });
+      }
+      continue;
+    }
+
+    if (resource.resourceType === 'ValueSet') {
+      for (const include of resource.compose?.include || []) {
+        for (const concept of include.concept || []) {
+          rows.push({ concept, sourceType: 'valueset-compose' });
+        }
+      }
+      for (const concept of resource.expansion?.contains || []) {
+        rows.push({ concept, sourceType: 'valueset-expansion' });
+      }
+    }
+  }
+  return rows;
+}
+
+function normalizeLotMapKey(value) {
+  return String(value || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .trim();
+}
+
+function readPropertyScalar(prop) {
+  if (!prop || typeof prop !== 'object') return '';
+  if (prop.valueString !== undefined) return String(prop.valueString);
+  if (prop.valueCode !== undefined) return String(prop.valueCode);
+  if (prop.valueDateTime !== undefined) return String(prop.valueDateTime);
+  if (prop.valueInteger !== undefined) return String(prop.valueInteger);
+  if (prop.valueDecimal !== undefined) return String(prop.valueDecimal);
+  if (prop.valueBoolean !== undefined) return String(prop.valueBoolean);
+  if (prop.valueCoding) return prop.valueCoding.display || prop.valueCoding.code || '';
+  if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept) || '';
+  return '';
+}
+
+function normalizeMappingPropKey(value) {
+  return normalizeCodeKey(value).replace(/[^a-z0-9]/g, '');
+}
+
+function parseLotAgentMappingConcept(concept) {
+  if (!concept || typeof concept !== 'object') {
+    return null;
+  }
+
+  const lotKeys = [];
+  const addLotKey = (value) => {
+    const key = normalizeLotMapKey(value);
+    if (!key) return;
+    if (!lotKeys.includes(key)) lotKeys.push(key);
+  };
+
+  const mapped = {
+    tradename: '',
+    generic_name: '',
+    disease: '',
+    antigen: '',
+    manufacturer: '',
+    route: '',
+    strength: '',
+    dose_value: '',
+    dose_unit: '',
+    din: ''
+  };
+
+  addLotKey(concept.code || '');
+  if (!mapped.tradename && concept.display) {
+    mapped.tradename = concept.display;
+  }
+
+  for (const prop of concept.property || []) {
+    const key = normalizeMappingPropKey(prop.code);
+    const value = readPropertyScalar(prop);
+    if (!key || !value) continue;
+
+    if ((key.includes('source') || key.includes('lot')) && key.includes('lot')) {
+      addLotKey(value);
+    }
+
+    if (key.includes('target') && key.includes('tradename')) mapped.tradename = value;
+    else if (key.includes('tradename') && !mapped.tradename) mapped.tradename = value;
+    else if (key.includes('generic')) mapped.generic_name = value;
+    else if (key.includes('disease')) mapped.disease = value;
+    else if (key.includes('antigen')) mapped.antigen = value;
+    else if (key.includes('manufacturer')) mapped.manufacturer = value;
+    else if (key.includes('route')) mapped.route = value;
+    else if (key.includes('strength')) mapped.strength = value;
+    else if (key.includes('dose') && (key.includes('unit') || key.includes('uom'))) mapped.dose_unit = value;
+    else if (key.includes('dose')) mapped.dose_value = value;
+    else if (key === 'din' || key.includes('drugidentificationnumber')) mapped.din = value;
+  }
+
+  if (!lotKeys.length) {
+    return null;
+  }
+
+  return { lotKeys, mapped };
+}
+
+function buildLotAgentMappingIndex(rows) {
+  const index = {};
+  for (const row of rows || []) {
+    const parsed = parseLotAgentMappingConcept(row?.concept);
+    if (!parsed) continue;
+    for (const lotKey of parsed.lotKeys) {
+      if (!index[lotKey]) {
+        index[lotKey] = { ...parsed.mapped };
+        continue;
+      }
+      mergeDefinedVaccineFields(index[lotKey], parsed.mapped);
+      if (parsed.mapped.din && !index[lotKey].din) {
+        index[lotKey].din = parsed.mapped.din;
+      }
+    }
+  }
+  return index;
+}
+
 function extractLotNumber(concept) {
   for (const prop of concept.property || []) {
     if (prop.code === 'lotNumber') {
@@ -841,8 +1014,10 @@ function extractLotDIN(concept) {
     if (prop.code === 'drugIdentificationNumber') {
       const valueCoding = prop.valueCoding;
       if (valueCoding) {
-        return valueCoding.code;
+        return valueCoding.code || valueCoding.display || null;
       }
+      if (prop.valueString) return prop.valueString;
+      if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept);
     }
   }
   return null;
@@ -876,16 +1051,48 @@ function extractLotManufacturer(concept) {
   return null;
 }
 
-function extractLotTradenameCode(concept) {
-  for (const prop of concept.property || []) {
-    if (prop.code === 'tradename') {
-      const valueCoding = prop.valueCoding;
-      if (valueCoding) {
-        return valueCoding.code;
-      }
+function getLotTradenameReferences(concept) {
+  const refs = [];
+  for (const ext of concept.extension || []) {
+    const url = normalizeCodeKey(ext.url);
+    if (!url.includes('linked-tradename-concept') && !url.endsWith('/tradename')) {
+      continue;
     }
+    const cc = ext.valueCodeableConcept || null;
+    const coding = cc?.coding?.[0] || null;
+    refs.push({
+      code: coding?.code || '',
+      display: coding?.display || cc?.text || '',
+      raw: cc?.text || ''
+    });
   }
-  return null;
+
+  for (const prop of concept.property || []) {
+    const code = normalizeCodeKey(prop.code);
+    if (code !== 'tradename' && code !== 'trade name' && code !== 'tradenamecode') {
+      continue;
+    }
+    const coding = prop.valueCoding || prop.valueCodeableConcept?.coding?.[0] || null;
+    refs.push({
+      code: coding?.code || '',
+      display: coding?.display || prop.valueCodeableConcept?.text || '',
+      raw: prop.valueString || ''
+    });
+  }
+
+  const seen = new Set();
+  return refs.filter((ref) => {
+    const key = [normalizeCodeKey(ref.code), normalizeNameKey(ref.display), normalizeNameKey(ref.raw)].join('|');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractLotTradenameCode(concept) {
+  const refs = getLotTradenameReferences(concept);
+  const first = refs[0];
+  return first ? (first.code || first.display || first.raw || null) : null;
 }
 
 function extractTradenameDIN(concept) {
@@ -897,7 +1104,92 @@ function extractTradenameDIN(concept) {
       }
     }
   }
+  for (const prop of concept.property || []) {
+    const code = normalizeCodeKey(prop.code);
+    if (code === 'drugidentificationnumber' || code === 'din') {
+      if (prop.valueCoding) return prop.valueCoding.code || prop.valueCoding.display || null;
+      if (prop.valueString) return prop.valueString;
+      if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept);
+    }
+  }
   return null;
+}
+
+function normalizeCodeKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function conceptRichness(concept) {
+  if (!concept || typeof concept !== 'object') return 0;
+  const extCount = Array.isArray(concept.extension) ? concept.extension.length : 0;
+  const propCount = Array.isArray(concept.property) ? concept.property.length : 0;
+  const desigCount = Array.isArray(concept.designation) ? concept.designation.length : 0;
+  const hasDisplay = concept.display ? 1 : 0;
+  return (extCount * 4) + (propCount * 3) + (desigCount * 2) + hasDisplay;
+}
+
+function normalizeDinKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const digitsOnly = raw.replace(/\D/g, '');
+  if (digitsOnly) {
+    return digitsOnly.replace(/^0+/, '') || '0';
+  }
+  return raw.toLowerCase();
+}
+
+function normalizeNameKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\(.*?\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function indexTradenameNames(map, concept) {
+  const candidates = [];
+  if (concept && concept.display) {
+    candidates.push(concept.display);
+  }
+  for (const designation of (concept && concept.designation) || []) {
+    if (designation && designation.value) {
+      candidates.push(designation.value);
+    }
+  }
+  for (const value of candidates) {
+    const key = normalizeNameKey(value);
+    if (!key) continue;
+    const existing = map[key];
+    if (!existing || conceptRichness(concept) >= conceptRichness(existing)) {
+      map[key] = concept;
+    }
+  }
+}
+
+function mergeDefinedVaccineFields(target, source) {
+  if (!source || typeof source !== 'object') return;
+  const keys = ['tradename', 'generic_name', 'disease', 'antigen', 'manufacturer', 'route', 'strength', 'dose_value', 'dose_unit'];
+  for (const key of keys) {
+    const value = source[key];
+    if (value === undefined || value === null) continue;
+    if (!String(value).trim()) continue;
+    target[key] = value;
+  }
+}
+
+function extractLotDirectVaccineInfo(concept) {
+  const refs = getLotTradenameReferences(concept);
+  return {
+    tradename: refs[0]?.display || refs[0]?.raw || '',
+    generic_name: extractTradenameGeneric(concept) || '',
+    disease: extractTradenameDisease(concept) || '',
+    antigen: extractTradenameAntigen(concept) || '',
+    route: extractTradenameRoute(concept) || '',
+    strength: extractTradenameStrength(concept) || '',
+    dose_value: extractTradenameDoseValue(concept) || '',
+    dose_unit: extractTradenameDoseUnit(concept) || ''
+  };
 }
 
 function extractTrademenameDisplay(concept) {
@@ -1051,24 +1343,56 @@ function lookupVaccineLot(lotNumber) {
       din: extractLotDIN(concept),
       manufacturer: extractLotManufacturer(concept)
     };
+
+    const lotMapKey = normalizeLotMapKey(vaccineInfo.lot_number || lotNumber);
+    const lotCodeMapKey = normalizeLotMapKey(concept.code || '');
+    const lotAgentMappedInfo =
+      nvcIndexes.lotAgentMappingByLot?.[lotMapKey] ||
+      nvcIndexes.lotAgentMappingByLot?.[lotCodeMapKey] ||
+      null;
+    if (lotAgentMappedInfo) {
+      bgLog('Lot-agent mapping matched:', { lotMapKey, lotCodeMapKey, lotAgentMappedInfo });
+      mergeDefinedVaccineFields(vaccineInfo, lotAgentMappedInfo);
+      if (!vaccineInfo.din && lotAgentMappedInfo.din) {
+        vaccineInfo.din = lotAgentMappedInfo.din;
+      }
+    }
+
+    mergeDefinedVaccineFields(vaccineInfo, extractLotDirectVaccineInfo(concept));
     
     bgLog('Extracted from lot concept:', vaccineInfo);
     
     // Get tradename info
-    const tradenameSnomedCode = extractLotTradenameCode(concept);
-    bgLog('Tradename SNOMED code:', tradenameSnomedCode);
-    
-    if (tradenameSnomedCode) {
-      const tradenameInfo = lookupTradenameByCode(tradenameSnomedCode);
-      bgLog('Tradename info from code:', tradenameInfo);
-      if (tradenameInfo) {
-        Object.assign(vaccineInfo, tradenameInfo);
+    const tradenameRefs = getLotTradenameReferences(concept);
+    bgLog('Lot tradename references:', tradenameRefs);
+    let resolvedTradename = null;
+    for (const ref of tradenameRefs) {
+      if (!ref.code) continue;
+      resolvedTradename = lookupTradenameByCode(ref.code);
+      if (resolvedTradename) {
+        bgLog('Tradename resolved from code reference:', ref.code);
+        break;
       }
+    }
+    if (!resolvedTradename) {
+      for (const ref of tradenameRefs) {
+        const label = ref.display || ref.raw || '';
+        if (!label) continue;
+        resolvedTradename = lookupTradenameByName(label);
+        if (resolvedTradename) {
+          bgLog('Tradename resolved from name reference:', label);
+          break;
+        }
+      }
+    }
+
+    if (resolvedTradename) {
+      mergeDefinedVaccineFields(vaccineInfo, resolvedTradename);
     } else if (vaccineInfo.din) {
       const tradenameInfo = lookupTradenameByDIN(vaccineInfo.din);
       bgLog('Tradename info from DIN:', tradenameInfo);
       if (tradenameInfo) {
-        Object.assign(vaccineInfo, tradenameInfo);
+        mergeDefinedVaccineFields(vaccineInfo, tradenameInfo);
       }
     }
     
@@ -1081,7 +1405,8 @@ function lookupVaccineLot(lotNumber) {
 }
 
 function lookupTradenameByCode(code) {
-  const concept = nvcIndexes.tradenameByCode[code];
+  const codeKey = normalizeCodeKey(code);
+  const concept = nvcIndexes.tradenameByCode[codeKey];
   if (!concept) return null;
   
   return {
@@ -1097,8 +1422,26 @@ function lookupTradenameByCode(code) {
   };
 }
 
+function lookupTradenameByName(name) {
+  const nameKey = normalizeNameKey(name);
+  const concept = nvcIndexes.tradenameByName[nameKey];
+  if (!concept) return null;
+  return {
+    tradename: extractTrademenameDisplay(concept),
+    generic_name: extractTradenameGeneric(concept),
+    disease: extractTradenameDisease(concept),
+    antigen: extractTradenameAntigen(concept),
+    manufacturer: extractTradenameManufacturer(concept),
+    route: extractTradenameRoute(concept),
+    strength: extractTradenameStrength(concept),
+    dose_value: extractTradenameDoseValue(concept),
+    dose_unit: extractTradenameDoseUnit(concept)
+  };
+}
+
 function lookupTradenameByDIN(din) {
-  const concept = nvcIndexes.tradenameByDin[din];
+  const dinKey = normalizeDinKey(din);
+  const concept = nvcIndexes.tradenameByDin[dinKey];
   if (!concept) return null;
   
   return {
