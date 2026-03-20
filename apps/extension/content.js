@@ -292,13 +292,17 @@ function parseGS1BarcodeFromScanner(rawScan) {
   return data;
 }
 
-function lookupVaccineInfoByLot(lot) {
+function lookupVaccineInfoByLot(lot, gtin) {
   return new Promise((resolve) => {
     if (!lot) {
       resolve(null);
       return;
     }
-    chrome.runtime.sendMessage({ action: 'lookupVaccineInfo', lot }, (response) => {
+    const request = { action: 'lookupVaccineInfo', lot };
+    if (gtin) {
+      request.gtin = gtin;
+    }
+    chrome.runtime.sendMessage(request, (response) => {
       if (chrome.runtime.lastError) {
         console.warn('Hands-free lot lookup failed:', chrome.runtime.lastError.message);
         resolve(null);
@@ -575,7 +579,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     let lookupAttempted = false;
     if (parsed.lot) {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfoByLot(parsed.lot);
+      vaccineInfo = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
     }
 
     // Do not treat GTIN as a lot lookup key (pilot: wrong agent / e.g. TI vs HB).
@@ -1461,12 +1465,15 @@ function fillPanoramaLotFromPanelItems(lotValue) {
     'input[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_filter"]',
     'input[id*="LotInfo:lotNumberSelect:selectOneMenu_filter"]'
   ];
+  const lotText = String(lotValue || '');
+  const lotToken = normalizePanoramaLotToken(lotText);
   const filters = getFields(filterSelectors).filter(canFillPanoramaControl);
   for (const filterInput of filters) {
     filterInput.focus();
-    filterInput.value = String(lotValue || '');
+    filterInput.value = lotText;
     filterInput.dispatchEvent(new Event('input', { bubbles: true }));
-    filterInput.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+    filterInput.dispatchEvent(new KeyboardEvent('keyup', { key: lotText.slice(-1) || 'a', bubbles: true }));
+    filterInput.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   const itemSelectors = [
@@ -1476,11 +1483,41 @@ function fillPanoramaLotFromPanelItems(lotValue) {
   ];
   for (const selector of itemSelectors) {
     const items = Array.from(document.querySelectorAll(selector))
-      .filter(item => isVisible(item) && String(item.textContent || '').trim());
-    const matched = items.find(item => optionTextContainsLot(item.textContent, lotValue));
+      .filter((item) => {
+        if (!item) return false;
+        if (item.classList && item.classList.contains('ui-helper-hidden')) return false;
+        const text = String(
+          item.getAttribute?.('data-label')
+          || item.getAttribute?.('title')
+          || item.textContent
+          || ''
+        ).trim();
+        return isVisible(item) && text.length > 0;
+      });
+    const matched = items.find((item) => {
+      const itemText = String(
+        item.getAttribute?.('data-label')
+        || item.getAttribute?.('title')
+        || item.textContent
+        || ''
+      );
+      return optionTextContainsLot(itemText, lotValue);
+    });
     if (!matched) continue;
+    matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     matched.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    matched.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     matched.click();
+    const selectedLotLabels = getFields([
+      'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+      'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
+    ]);
+    const confirmed = selectedLotLabels.some((label) => (
+      normalizePanoramaLotToken(label?.textContent || '').includes(lotToken)
+    ));
+    if (confirmed) {
+      return true;
+    }
     return true;
   }
   return false;
@@ -1501,14 +1538,32 @@ function tryFillPanoramaLotOrTrade(data) {
 
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   let attempts = 0;
-  const maxAttempts = 10;
+  const maxAttempts = 16;
+  const nextDelay = () => (attempts < 4 ? 450 : 900);
   const tick = () => {
     attempts += 1;
     if (tryFillPanoramaLotOrTrade(data)) {
       return;
     }
+
+    const dropdownOpened = openPanoramaLotDropdown();
+    if (dropdownOpened) {
+      setTimeout(() => {
+        if (tryFillPanoramaLotOrTrade(data)) {
+          return;
+        }
+        if (fillPanoramaLotFromPanelItems(data?.lot)) {
+          return;
+        }
+        if (attempts < maxAttempts) {
+          setTimeout(tick, nextDelay());
+        }
+      }, 260);
+      return;
+    }
+
     if (attempts < maxAttempts) {
-      setTimeout(tick, attempts < 3 ? 350 : 700);
+      setTimeout(tick, nextDelay());
     }
   };
   setTimeout(tick, initialDelayMs);
@@ -1557,7 +1612,7 @@ function fillPanoramaImmunizationFields(data) {
 
   // Panorama refreshes lot options asynchronously after selecting Agent.
   if (data.lot && (agentCount > 0 || fillCount === 0)) {
-    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 550 : 150);
+    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350);
   }
 
   if (fillCount > 0) {
@@ -1617,19 +1672,55 @@ function buildPanoramaAgentSourceText(data) {
   ].filter(Boolean).join(' '));
 }
 
-function panoramaSourceHasAll(sourceText, terms) {
-  return terms.every(term => sourceText.includes(normalizeForMatch(term)));
+function getNormalizedSourceTokens(sourceText) {
+  return String(sourceText || '')
+    .split(' ')
+    .map(token => token.trim())
+    .filter(Boolean);
 }
 
-function panoramaSourceHasAny(sourceText, terms) {
-  return terms.some(term => sourceText.includes(normalizeForMatch(term)));
+function panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term) {
+  const normalizedTerm = normalizeForMatch(term);
+  if (!normalizedTerm) return false;
+
+  const termTokens = normalizedTerm.split(' ').filter(Boolean);
+  if (!termTokens.length) return false;
+
+  if (termTokens.length === 1) {
+    const token = termTokens[0];
+    // Keep short rule terms strict (e.g., "tig", "hb", "mmr") so they do not
+    // match inside longer words like "antigen".
+    if (token.length <= 3) {
+      return sourceTokens.includes(token);
+    }
+    return sourceTokens.includes(token) || sourceText.includes(token);
+  }
+
+  if (sourceText.includes(normalizedTerm)) {
+    return true;
+  }
+
+  return termTokens.every((token) => (
+    token.length <= 3
+      ? sourceTokens.includes(token)
+      : (sourceTokens.includes(token) || sourceText.includes(token))
+  ));
+}
+
+function panoramaSourceHasAll(sourceText, sourceTokens, terms) {
+  return terms.every(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+}
+
+function panoramaSourceHasAny(sourceText, sourceTokens, terms) {
+  return terms.some(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
 }
 
 function panoramaAgentRuleClauseMatches(sourceText, clause) {
-  if (clause.any && !panoramaSourceHasAny(sourceText, clause.any)) return false;
-  if (clause.all && !panoramaSourceHasAll(sourceText, clause.all)) return false;
-  if (clause.notAny && panoramaSourceHasAny(sourceText, clause.notAny)) return false;
-  if (clause.notAll && panoramaSourceHasAll(sourceText, clause.notAll)) return false;
+  const sourceTokens = getNormalizedSourceTokens(sourceText);
+  if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any)) return false;
+  if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all)) return false;
+  if (clause.notAny && panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)) return false;
+  if (clause.notAll && panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)) return false;
   return true;
 }
 
