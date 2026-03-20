@@ -89,12 +89,16 @@ export function parseGS1Barcode(barcode) {
   }
 
   const data = { gtin: null, expiry: null, lot: null, serial: null };
-  if (!scan.startsWith('01')) {
-    throw new Error('Expected AI(01) at start');
+  let idx = 0;
+  if (scan.startsWith('01')) {
+    if (scan.length < 16) {
+      throw new Error('AI(01) GTIN incomplete');
+    }
+    data.gtin = scan.substring(2, 16);
+    idx = 16;
+  } else if (!isLikelyAIStart(scan, 0)) {
+    throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
   }
-
-  data.gtin = scan.substring(2, 16);
-  let idx = 16;
 
   while (idx < scan.length) {
     if (scan.charAt(idx) === GS) {
@@ -133,6 +137,10 @@ export function parseGS1Barcode(barcode) {
       }
       break;
     }
+  }
+
+  if (!data.gtin && !data.expiry && !data.lot && !data.serial) {
+    throw new Error('No recognized GS1 fields found');
   }
 
   return data;
