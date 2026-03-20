@@ -1,13 +1,11 @@
-// Debug: Log immediately when script loads
-console.log('===== CONTENT SCRIPT STARTING =====');
-console.log('Location:', window.location.href);
-console.log('Document ready state:', document.readyState);
+// Flip to true while developing (content script isolated world).
+const VAXLINK_CONTENT_DEBUG = false;
+function vlog(...args) {
+  if (VAXLINK_CONTENT_DEBUG) console.log('[VaxLink]', ...args);
+}
 
-console.log('Vaccine Scanner content script loaded:', location.href);
 const HANDS_FREE_BUILD = '2026-03-11-hf-recovery-1';
-console.log('Hands-free build:', HANDS_FREE_BUILD);
-
-console.log('Setting up message listener...');
+vlog('content script', location.href, 'readyState=', document.readyState, 'build=', HANDS_FREE_BUILD);
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -89,12 +87,11 @@ function setupMessageListener() {
   window.__vaxlinkMessageListenerInitialized = true;
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('✓ Auto-fill message received:', request);
+    vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'autoFill') {
       try {
-        console.log('Calling autoFillTelus with data:', request.data);
         const success = autoFillTelus(request.data);
-        console.log('autoFillTelus returned:', success);
+        vlog('autoFillTelus', success);
         sendResponse({ success: success });
       } catch (e) {
         console.error('Error in autoFillTelus:', e);
@@ -102,11 +99,11 @@ function setupMessageListener() {
       }
       return true;
     }
-    console.log('Unknown action:', request.action);
+    vlog('unknown action', request?.action);
     sendResponse({ success: false, error: 'Unknown action' });
     return true;
   });
-  console.log('✓ Message listener registered');
+  vlog('message listener registered');
 }
 
 function resetScannerBuffer() {
@@ -521,7 +518,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
   const trimmed = String(scanValue || '').trim();
   if (!trimmed) return;
-  console.log('Hands-free scan candidate:', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
+  vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
 
   const now = Date.now();
   if (trimmed === lastHandledScanValue && (now - lastHandledScanAt) < 1500) {
@@ -553,7 +550,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     const recovered = getRecentRichScanCandidate(parsed.gtin);
     if (recovered) {
       parsed = mergeParsedScanFields(parsed, recovered.parsed);
-      console.log('Hands-free scan recovered details from recent input candidate:', {
+      vlog('hands-free recovered from input candidate', {
         source,
         candidatePreview: recovered.raw.slice(0, 80),
         parsed
@@ -569,11 +566,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       vaccineInfo = await lookupVaccineInfoByLot(parsed.lot);
     }
 
-    // Fallback: some scanners output GTIN only in the wedge stream.
-    // NVC index may still resolve this key via lot code/prefix maps.
+    // Do not treat GTIN as a lot lookup key (pilot: wrong agent / e.g. TI vs HB).
     if (!vaccineInfo && parsed.gtin) {
-      lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfoByLot(parsed.gtin);
+      vlog('skip GTIN lot lookup (hands-free)');
     }
 
     if (vaccineInfo) {
@@ -620,7 +615,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
       const queueKey = activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
-      console.log('Workflow scan saved to queue:', {
+      vlog('workflow scan saved to queue', {
         mode: activeWorkflowMode,
         source,
         id: record.id,
@@ -659,7 +654,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
-  console.log('Hands-free scan autofill result:', success, { source, parsed });
+  vlog('hands-free autofill', success, { source, parsed });
 }
 
 function flushHandsFreeBuffer(event) {
@@ -719,7 +714,7 @@ function onHandsFreePaste(event) {
 
   event.preventDefault();
   rememberRecentInputCandidate(text);
-  console.log('Hands-free scan captured from paste');
+    vlog('hands-free paste');
   handleHandsFreeScan(text, 'paste');
 }
 
@@ -776,7 +771,7 @@ function onHandsFreeInput(event) {
     target.value = '';
     target.dispatchEvent(new Event('input', { bubbles: true }));
     target.dispatchEvent(new Event('change', { bubbles: true }));
-    console.log('Hands-free scan captured from input event');
+    vlog('hands-free input event');
     handleHandsFreeScan(latest, 'input-event');
   }, SCAN_IDLE_COMMIT_MS + 120);
 }
@@ -831,7 +826,7 @@ function onHandsFreeKeydown(event) {
     if (activeScan) {
       event.preventDefault();
       clearActiveElementValue();
-      console.log('Hands-free scan captured from focused input');
+      vlog('hands-free focused input');
       handleHandsFreeScan(activeScan, 'focused-input');
       return;
     }
@@ -873,7 +868,7 @@ function initHandsFreeScanner() {
     LEGACY_HANDS_FREE_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
-    console.log('Active workflow mode:', activeWorkflowMode);
+    vlog('active workflow mode', activeWorkflowMode);
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -894,7 +889,7 @@ function initHandsFreeScanner() {
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
     resetScannerBuffer();
-    console.log('Active workflow mode changed:', activeWorkflowMode);
+    vlog('workflow mode changed', activeWorkflowMode);
   });
 
   window.addEventListener('keydown', onHandsFreeKeydown, true);
@@ -908,7 +903,7 @@ initHandsFreeScanner();
 
 // Also re-register when DOM is ready in case of timing issues
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('DOMContentLoaded fired, listener should already be active');
+  vlog('DOMContentLoaded');
 });
 
 function toIsoDate(value) {
@@ -939,6 +934,17 @@ function getFields(selectors) {
     }
   }
   return fields;
+}
+
+function isPanoramaAgentControl(field) {
+  const hint = `${field?.id || ''} ${field?.name || ''}`.toLowerCase();
+  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || /\bagent\b/.test(hint);
+}
+
+function extractBracketAgentCode(optionText) {
+  const m = String(optionText || '').match(/^\s*\[([^\]]+)\]/);
+  if (!m) return '';
+  return normalizeForMatch(m[1]);
 }
 
 function fillField(field, value) {
@@ -1044,6 +1050,12 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
     }
   }
 
+  // Single-token desired (e.g. "mmr", "hb") must not match a longer product line via substring
+  // (pilot: MMR -> MMRV, HB -> combination agents).
+  if (desiredTokens.length === 1 && optionTokens.length > 1) {
+    return false;
+  }
+
   return optionTextNorm.includes(desiredNorm) || desiredNorm.includes(optionTextNorm);
 }
 
@@ -1053,12 +1065,19 @@ function fillSelectField(field, value) {
   const candidates = getValueAliases(rawValue, field);
   const options = Array.from(field.options || []).filter(opt => opt && opt.value !== '');
   if (!options.length) return false;
+  const agentStrict = isPanoramaAgentControl(field);
 
   let matched = options.find(opt => opt.value === rawValue || opt.text.trim() === rawValue);
   if (!matched) {
     matched = options.find(opt => candidates.includes(normalizeForMatch(opt.text)));
   }
-  if (!matched && candidates.length > 0) {
+  if (!matched && agentStrict && candidates.length > 0) {
+    matched = options.find((opt) => {
+      const bracket = extractBracketAgentCode(opt.text);
+      return bracket && candidates.includes(bracket);
+    });
+  }
+  if (!matched && !agentStrict && candidates.length > 0) {
     matched = options.find(opt => {
       const optNorm = normalizeForMatch(opt.text);
       return candidates.some(desired => isLooseSelectTextMatch(optNorm, desired));
@@ -1079,6 +1098,7 @@ function fillComboTextField(field, value) {
   if (!rawValue) return false;
   const candidates = getValueAliases(rawValue, field);
   if (!candidates.length) return false;
+  const agentStrict = isPanoramaAgentControl(field);
 
   const unitTextAliases = {
     ml: 'Millilitre(s)',
@@ -1119,7 +1139,13 @@ function fillComboTextField(field, value) {
   for (const selector of optionSelectors) {
     const options = Array.from(document.querySelectorAll(selector));
     const hit = options.find(opt => {
-      const optNorm = normalizeForMatch(opt.textContent || '');
+      const text = opt.textContent || '';
+      const optNorm = normalizeForMatch(text);
+      if (agentStrict) {
+        if (candidates.includes(optNorm)) return true;
+        const bracket = extractBracketAgentCode(text);
+        return !!(bracket && candidates.includes(bracket));
+      }
       return candidates.some(desired => isLooseSelectTextMatch(optNorm, desired));
     });
     if (hit) {
@@ -1553,7 +1579,6 @@ function getPanoramaAgentCandidates(data) {
 }
 
 function getDoseUnitFieldByLayout() {
-  const labels = Array.from(document.querySelectorAll('label, span, div'));
   const controlSelector = [
     'select',
     'input',
@@ -1565,47 +1590,53 @@ function getDoseUnitFieldByLayout() {
     '.ui-dropdown'
   ].join(', ');
 
-  for (const label of labels) {
-    const text = normalizeForMatch(label.textContent || '');
-    if (!(text === 'dose' || text.startsWith('dose '))) {
-      continue;
-    }
+  function doseUnitFromCaptionNodes(nodes) {
+    for (const label of nodes) {
+      const text = normalizeForMatch(label.textContent || '');
+      if (!(text === 'dose' || text.startsWith('dose '))) continue;
 
-    const container = label.parentElement;
-    if (!container) continue;
+      const container = label.parentElement;
+      if (!container) continue;
 
-    const controls = Array.from(
-      container.querySelectorAll(controlSelector)
-    ).filter(el => isVisible(el) && el.type !== 'hidden' && !el.disabled);
-
-    if (controls.length >= 2) {
-      const unitControl =
-        controls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
-        controls[1];
-      if (unitControl) return unitControl;
-    }
-
-    const next = container.nextElementSibling;
-    if (next) {
-      const nextControls = Array.from(
-        next.querySelectorAll(controlSelector)
+      const controls = Array.from(
+        container.querySelectorAll(controlSelector)
       ).filter(el => isVisible(el) && el.type !== 'hidden' && !el.disabled);
-      if (nextControls.length >= 2) {
+
+      if (controls.length >= 2) {
         const unitControl =
-          nextControls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
-          nextControls[1];
+          controls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
+          controls[1];
         if (unitControl) return unitControl;
       }
+
+      const next = container.nextElementSibling;
+      if (next) {
+        const nextControls = Array.from(
+          next.querySelectorAll(controlSelector)
+        ).filter(el => isVisible(el) && el.type !== 'hidden' && !el.disabled);
+        if (nextControls.length >= 2) {
+          const unitControl =
+            nextControls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
+            nextControls[1];
+          if (unitControl) return unitControl;
+        }
+      }
     }
+    return null;
   }
-  return null;
+
+  // Labels first (cheap). Table layouts second — still tiny vs all span/div on SPAs.
+  return (
+    doseUnitFromCaptionNodes(document.querySelectorAll('label')) ||
+    doseUnitFromCaptionNodes(document.querySelectorAll('th, td'))
+  );
 }
 
 function autoFillTelus(data) {
   try {
     if (isPanoramaImmunizationPage()) {
       const panoramaFillCount = fillPanoramaImmunizationFields(data);
-      console.log('Panorama auto-fill updated fields:', panoramaFillCount);
+      vlog('Panorama fields filled', panoramaFillCount);
       return panoramaFillCount > 0;
     }
 
@@ -1799,7 +1830,7 @@ function autoFillTelus(data) {
       }
     }
 
-    console.log('Auto-fill updated fields:', fillCount);
+    vlog('generic auto-fill fields', fillCount);
     return fillCount > 0;
   } catch (e) {
     console.error('Auto-fill error:', e);
