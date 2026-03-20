@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaxLink Panorama Autofill"
+  short_description: "Optimize Panorama autofill speed and reliability"
+  default_prompt: "Use $vaxlink-panorama-autofill to update VaxLink extension autofill behavior for Panorama immunization forms."

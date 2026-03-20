@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaxLink Extension Debugging"
+  short_description: "Debug extension popup, content, and background flows"
+  default_prompt: "Use $vaxlink-extension-debugging to debug VaxLink popup, content script, background messaging, and autofill failures."
