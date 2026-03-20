@@ -15,6 +15,11 @@ const NVC_FETCH_HEADERS = {
   Accept: 'application/json+fhir',
   'x-app-desc': 'PHAC NVC Client'
 };
+const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
+  // RECOMBIVAX HB lot Y016312 is ambiguous in NVC lot->tradename links.
+  // This GTIN is treated as regular/adult RECOMBIVAX HB in pilot workflows.
+  '00067055046339': '6951000087100'
+});
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',
   sourceUrl: 'nvc_bundle_source_url',
@@ -1138,6 +1143,17 @@ function normalizeDinKey(value) {
   return raw.toLowerCase();
 }
 
+function normalizeGtinKey(value) {
+  const digitsOnly = String(value || '').replace(/\D/g, '');
+  return digitsOnly || '';
+}
+
+function resolveTradenameCodeOverrideByGtin(gtin) {
+  const gtinKey = normalizeGtinKey(gtin);
+  if (!gtinKey) return '';
+  return normalizeCodeKey(GTIN_TRADENAME_CODE_OVERRIDES[gtinKey] || '');
+}
+
 function normalizeNameKey(value) {
   return String(value || '')
     .toLowerCase()
@@ -1264,13 +1280,48 @@ function extractTradenameRoute(concept) {
   return null;
 }
 
-function extractTradenameStrength(concept) {
+function collectTradenameStringValues(concept, extensionUrl) {
+  const values = [];
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-strength') {
-      return ext.valueString || null;
+    if (ext.url !== extensionUrl) continue;
+    const raw = String(ext.valueString || '').trim();
+    if (!raw) continue;
+    if (!values.includes(raw)) {
+      values.push(raw);
     }
   }
-  return null;
+  return values;
+}
+
+function extractStrengthFromTradenameDisplay(concept) {
+  const display = String(concept?.display || '').trim();
+  if (!display) return null;
+  const match = display.match(/(\d+(?:\.\d+)?)\s*(?:microgram|micrograms|mcg)\b/i);
+  return match ? match[1] : null;
+}
+
+function extractTradenameStrength(concept) {
+  const values = collectTradenameStringValues(
+    concept,
+    'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-strength'
+  );
+  if (!values.length) {
+    return extractStrengthFromTradenameDisplay(concept);
+  }
+  if (values.length === 1) {
+    return values[0];
+  }
+
+  const fromDisplay = extractStrengthFromTradenameDisplay(concept);
+  if (fromDisplay) {
+    for (const value of values) {
+      if (value === fromDisplay) {
+        return value;
+      }
+    }
+    return fromDisplay;
+  }
+  return values[0];
 }
 
 function extractTradenameDoseValue(concept) {
@@ -1308,7 +1359,7 @@ function looksLikeGtinOrNumericId(key) {
   return /^\d{8,14}$/.test(k);
 }
 
-function lookupVaccineLot(lotNumber) {
+function lookupVaccineLot(lotNumber, options = {}) {
   if (!lotNumber) {
     bgLog('lookupVaccineLot: no lot number provided');
     return null;
@@ -1365,15 +1416,30 @@ function lookupVaccineLot(lotNumber) {
     // Get tradename info
     const tradenameRefs = getLotTradenameReferences(concept);
     bgLog('Lot tradename references:', tradenameRefs);
+    const gtinOverrideCode = resolveTradenameCodeOverrideByGtin(options.gtin);
+    const byCodeCandidates = [];
     let resolvedTradename = null;
     for (const ref of tradenameRefs) {
       if (!ref.code) continue;
-      resolvedTradename = lookupTradenameByCode(ref.code);
-      if (resolvedTradename) {
-        bgLog('Tradename resolved from code reference:', ref.code);
-        break;
+      const info = lookupTradenameByCode(ref.code);
+      if (info) {
+        byCodeCandidates.push({ ref, info });
       }
     }
+
+    if (gtinOverrideCode && byCodeCandidates.length > 0) {
+      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === gtinOverrideCode);
+      if (overrideMatch) {
+        resolvedTradename = overrideMatch.info;
+        bgLog('Tradename resolved from GTIN override:', options.gtin, '->', overrideMatch.ref.code);
+      }
+    }
+
+    if (!resolvedTradename && byCodeCandidates.length > 0) {
+      resolvedTradename = byCodeCandidates[0].info;
+      bgLog('Tradename resolved from first code reference:', byCodeCandidates[0].ref.code);
+    }
+
     if (!resolvedTradename) {
       for (const ref of tradenameRefs) {
         const label = ref.display || ref.raw || '';
@@ -1478,7 +1544,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'lookupVaccineInfo') {
-    bgLog('Looking up vaccine info for lot:', request.lot);
+    bgLog('Looking up vaccine info for lot:', request.lot, 'gtin:', request.gtin || '');
 
     Promise.resolve(bundleLoadPromise || loadNVCBundle())
       .then((loaded) => {
@@ -1486,7 +1552,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return { error: 'Failed to load NVC database' };
         }
 
-        const vaccineInfo = lookupVaccineLot(request.lot);
+        const vaccineInfo = lookupVaccineLot(request.lot, { gtin: request.gtin });
         bgLog('Lookup result:', vaccineInfo);
 
         if (vaccineInfo) {
