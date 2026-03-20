@@ -1176,20 +1176,31 @@ function sendRuntimeMessage(message) {
   });
 }
 
-async function lookupVaccineInfo(lot) {
+function buildLotLookupCacheKey(lot, gtin) {
+  const lotKey = String(lot || '').trim().toLowerCase();
+  const gtinKey = String(gtin || '').replace(/\D/g, '');
+  return `${lotKey}|${gtinKey}`;
+}
+
+async function lookupVaccineInfo(lot, gtin) {
   const lotKey = String(lot || '').trim().toLowerCase();
   if (!lotKey) {
     return { error: 'No lot number provided' };
   }
-  if (lotLookupCache.has(lotKey)) {
-    return lotLookupCache.get(lotKey);
+  const cacheKey = buildLotLookupCacheKey(lot, gtin);
+  if (lotLookupCache.has(cacheKey)) {
+    return lotLookupCache.get(cacheKey);
   }
-  const response = await sendRuntimeMessage({ action: 'lookupVaccineInfo', lot });
+  const message = { action: 'lookupVaccineInfo', lot };
+  if (gtin) {
+    message.gtin = gtin;
+  }
+  const response = await sendRuntimeMessage(message);
   if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
     const oldest = lotLookupCache.keys().next().value;
     if (oldest !== undefined) lotLookupCache.delete(oldest);
   }
-  lotLookupCache.set(lotKey, response);
+  lotLookupCache.set(cacheKey, response);
   return response;
 }
 
@@ -1391,7 +1402,7 @@ async function enrichParsedData(baseData) {
   if (baseData.lot) {
     try {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfo(baseData.lot);
+      vaccineInfo = await lookupVaccineInfo(baseData.lot, baseData.gtin);
     } catch (error) {
       vaccineInfo = { error: error.message || 'Lookup failed' };
     }
