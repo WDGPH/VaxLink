@@ -227,13 +227,21 @@ function parseGS1BarcodeFromScanner(rawScan) {
     }
   }
 
-  if (!s || !s.startsWith('01')) {
-    throw new Error('Expected AI(01) at start');
+  if (!s) {
+    throw new Error('Empty scan payload');
   }
 
   const data = { gtin: null, expiry: null, lot: null, serial: null };
-  data.gtin = s.substring(2, 16);
-  let idx = 16;
+  let idx = 0;
+  if (s.startsWith('01')) {
+    if (s.length < 16) {
+      throw new Error('AI(01) GTIN incomplete');
+    }
+    data.gtin = s.substring(2, 16);
+    idx = 16;
+  } else if (!parseScannerIsLikelyAIStart(s, 0)) {
+    throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
+  }
 
   while (idx < s.length) {
     // Skip explicit separators.
@@ -275,6 +283,10 @@ function parseGS1BarcodeFromScanner(rawScan) {
       }
       break;
     }
+  }
+
+  if (!data.gtin && !data.expiry && !data.lot && !data.serial) {
+    throw new Error('No recognized GS1 fields found');
   }
 
   return data;
@@ -686,15 +698,12 @@ function getActiveElementScanCandidate() {
   if (!el || !('value' in el)) return '';
   const raw = String(el.value || '').trim();
   // Field values on app forms can be truncated by maxlength/masks.
-  // Only trust focused-input capture for clearly full GS1-like payloads.
-  if (raw.length < 24) return '';
-  if (!(raw.startsWith('01') || raw.startsWith(']C1') || raw.includes('01'))) {
+  // Accept short AI-only GS1 payloads too (e.g., 17+10 without AI01).
+  if (raw.length < 8) return '';
+  if (!isCandidateGS1Text(raw)) {
     return '';
   }
-  if (hasPostGTINAI(raw)) {
-    return raw;
-  }
-  return '';
+  return raw;
 }
 
 function clearActiveElementValue() {
@@ -710,7 +719,7 @@ function onHandsFreePaste(event) {
 
   const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
   if (!text || text.length < SCAN_MIN_LENGTH) return;
-  if (!(text.startsWith('01') || text.startsWith(']C1') || text.includes('01'))) return;
+  if (!isCandidateGS1Text(text)) return;
 
   event.preventDefault();
   rememberRecentInputCandidate(text);
@@ -721,7 +730,16 @@ function onHandsFreePaste(event) {
 function isCandidateGS1Text(value) {
   const text = String(value || '').trim();
   if (text.length < SCAN_MIN_LENGTH) return false;
-  return text.startsWith('01') || text.startsWith(']C1') || text.includes('01');
+  const normalized = normalizeScannerCandidate(text);
+  if (!normalized) return false;
+  if (normalized.startsWith('01') || normalized.includes('01')) return true;
+  if (normalized.startsWith('17')) {
+    return normalized.length >= 8 && /^\d{6}$/.test(normalized.substring(2, 8));
+  }
+  if (normalized.startsWith('10') || normalized.startsWith('21')) {
+    return normalized.length > 2;
+  }
+  return parseScannerIsLikelyAIStart(normalized, 0);
 }
 
 function normalizeScannerCandidate(value) {
@@ -759,8 +777,7 @@ function onHandsFreeInput(event) {
     rememberRecentInputCandidate(value);
   }
   if (scannerBuffer && scannerBuffer.length > 0) return;
-  if (value.length < 24 || !isCandidateGS1Text(value)) return;
-  if (!hasPostGTINAI(value)) return;
+  if (value.length < SCAN_MIN_LENGTH || !isCandidateGS1Text(value)) return;
 
   if (scannerInputTimer) {
     clearTimeout(scannerInputTimer);
