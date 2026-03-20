@@ -1,3 +1,8 @@
+const VAXLINK_BG_DEBUG = false;
+function bgLog(...args) {
+  if (VAXLINK_BG_DEBUG) console.log('[VaxLink]', ...args);
+}
+
 let nvcBundle = null;
 let nvcIndexes = {};
 let bundleLoadPromise = null;
@@ -26,7 +31,7 @@ let iconInitPromise = null;
 
 // Load NVC bundle on installation/startup
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('Vaccine Scanner extension installed');
+  bgLog('Vaccine Scanner extension installed');
   ensureActionIcon();
   initializeNVCSync();
 });
@@ -44,7 +49,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // Load immediately when service worker starts
-console.log('Service worker started, loading NVC bundle');
+bgLog('Service worker started, loading NVC bundle');
 ensureActionIcon();
 initializeNVCSync();
 
@@ -78,7 +83,7 @@ function ensureActionIcon() {
       }
 
       chrome.action.setIcon({ imageData });
-      console.log('Action icon updated from VaxLink SVG');
+      bgLog('Action icon updated from VaxLink SVG');
     } catch (error) {
       console.warn('Failed to set custom action icon from SVG:', error);
     }
@@ -560,7 +565,7 @@ function applyBundleData(data, source) {
   }
   nvcBundle = data;
   buildNVCIndexes();
-  console.log('NVC bundle applied from source:', source);
+  bgLog('NVC bundle applied from source:', source);
 }
 
 function loadNVCBundle(forceReload = false) {
@@ -725,19 +730,19 @@ async function getNVCUpdateStatus() {
 }
 
 function buildNVCIndexes() {
-  console.log('buildNVCIndexes called');
+  bgLog('buildNVCIndexes called');
   if (!nvcBundle || !nvcBundle.entry) {
     console.error('nvcBundle not loaded or no entries');
     return;
   }
   
-  console.log('nvcBundle has', nvcBundle.entry.length, 'entries');
+  bgLog('nvcBundle has', nvcBundle.entry.length, 'entries');
   
   const tradenames = collectTradenameConceptsFromBundle();
   const lots = collectLotConceptsFromBundle();
   
-  console.log('Collected', tradenames.length, 'tradename concepts');
-  console.log('Collected', lots.length, 'lot concepts');
+  bgLog('Collected', tradenames.length, 'tradename concepts');
+  bgLog('Collected', lots.length, 'lot concepts');
   
   // Index tradenames by code and by DIN
   const tradenameByCode = {};
@@ -754,8 +759,8 @@ function buildNVCIndexes() {
     }
   }
   
-  console.log('Indexed', Object.keys(tradenameByCode).length, 'tradenames by code');
-  console.log('Indexed', Object.keys(tradenameByDin).length, 'tradenames by DIN');
+  bgLog('Indexed', Object.keys(tradenameByCode).length, 'tradenames by code');
+  bgLog('Indexed', Object.keys(tradenameByDin).length, 'tradenames by DIN');
   
   // Index lots by lot number and by code
   const lotByLotNumber = {};
@@ -779,8 +784,8 @@ function buildNVCIndexes() {
     }
   }
   
-  console.log('Indexed', Object.keys(lotByLotNumber).length, 'lots by lot number');
-  console.log('Indexed', Object.keys(lotByCode).length, 'lots by code');
+  bgLog('Indexed', Object.keys(lotByLotNumber).length, 'lots by lot number');
+  bgLog('Indexed', Object.keys(lotByCode).length, 'lots by code');
   
   nvcIndexes = {
     tradenameByCode,
@@ -791,7 +796,7 @@ function buildNVCIndexes() {
     lotByCodePrefix
   };
   
-  console.log('NVC Indexes built successfully');
+  bgLog('NVC Indexes built successfully');
 }
 
 function collectTradenameConceptsFromBundle() {
@@ -1006,13 +1011,18 @@ function extractCodeableConceptDisplay(cc) {
   return cc.text || null;
 }
 
+function looksLikeGtinOrNumericId(key) {
+  const k = String(key || '').trim();
+  return /^\d{8,14}$/.test(k);
+}
+
 function lookupVaccineLot(lotNumber) {
   if (!lotNumber) {
-    console.log('lookupVaccineLot: no lot number provided');
+    bgLog('lookupVaccineLot: no lot number provided');
     return null;
   }
   
-  console.log('lookupVaccineLot: Looking up lot:', lotNumber);
+  bgLog('lookupVaccineLot: Looking up lot:', lotNumber);
   
   try {
     const lotKey = String(lotNumber).trim().toLowerCase();
@@ -1024,12 +1034,13 @@ function lookupVaccineLot(lotNumber) {
     let concept = nvcIndexes.lotByLotNumber[lotKey];
     
     // If not found, try direct code then prefix map (O(1)).
-    if (!concept) {
+    // Skip code/prefix for all-numeric keys (GTIN mistaken for lot -> wrong hit).
+    if (!concept && !looksLikeGtinOrNumericId(lotKey)) {
       concept = nvcIndexes.lotByCode[lotKey] || nvcIndexes.lotByCodePrefix[lotKey];
     }
     
     if (!concept) {
-      console.log('No matching lot found for:', lotNumber);
+      bgLog('No matching lot found for:', lotNumber);
       return null;
     }
     
@@ -1041,27 +1052,27 @@ function lookupVaccineLot(lotNumber) {
       manufacturer: extractLotManufacturer(concept)
     };
     
-    console.log('Extracted from lot concept:', vaccineInfo);
+    bgLog('Extracted from lot concept:', vaccineInfo);
     
     // Get tradename info
     const tradenameSnomedCode = extractLotTradenameCode(concept);
-    console.log('Tradename SNOMED code:', tradenameSnomedCode);
+    bgLog('Tradename SNOMED code:', tradenameSnomedCode);
     
     if (tradenameSnomedCode) {
       const tradenameInfo = lookupTradenameByCode(tradenameSnomedCode);
-      console.log('Tradename info from code:', tradenameInfo);
+      bgLog('Tradename info from code:', tradenameInfo);
       if (tradenameInfo) {
         Object.assign(vaccineInfo, tradenameInfo);
       }
     } else if (vaccineInfo.din) {
       const tradenameInfo = lookupTradenameByDIN(vaccineInfo.din);
-      console.log('Tradename info from DIN:', tradenameInfo);
+      bgLog('Tradename info from DIN:', tradenameInfo);
       if (tradenameInfo) {
         Object.assign(vaccineInfo, tradenameInfo);
       }
     }
     
-    console.log('Final vaccine info:', vaccineInfo);
+    bgLog('Final vaccine info:', vaccineInfo);
     return vaccineInfo;
   } catch (e) {
     console.error('Error looking up vaccine lot:', e);
@@ -1105,7 +1116,7 @@ function lookupTradenameByDIN(din) {
 
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  console.log('Background received message:', request);
+  bgLog('Background received message:', request);
   if (request.action === 'refreshNVCBundle') {
     const requestedSource = (request.sourceUrl || '').trim();
     const sourceUrl = normalizeSourceUrl(requestedSource || DEFAULT_NVC_SOURCE_URL);
@@ -1124,7 +1135,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'lookupVaccineInfo') {
-    console.log('Looking up vaccine info for lot:', request.lot);
+    bgLog('Looking up vaccine info for lot:', request.lot);
 
     Promise.resolve(bundleLoadPromise || loadNVCBundle())
       .then((loaded) => {
@@ -1133,7 +1144,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
 
         const vaccineInfo = lookupVaccineLot(request.lot);
-        console.log('Lookup result:', vaccineInfo);
+        bgLog('Lookup result:', vaccineInfo);
 
         if (vaccineInfo) {
           return vaccineInfo;

@@ -53,6 +53,7 @@ let inventoryManager;
 let activeMode = 'single';
 
 const lotLookupCache = new Map();
+const LOT_LOOKUP_CACHE_MAX = 64;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
@@ -1184,6 +1185,10 @@ async function lookupVaccineInfo(lot) {
     return lotLookupCache.get(lotKey);
   }
   const response = await sendRuntimeMessage({ action: 'lookupVaccineInfo', lot });
+  if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
+    const oldest = lotLookupCache.keys().next().value;
+    if (oldest !== undefined) lotLookupCache.delete(oldest);
+  }
   lotLookupCache.set(lotKey, response);
   return response;
 }
@@ -1392,15 +1397,6 @@ async function enrichParsedData(baseData) {
     }
   }
 
-  if ((!vaccineInfo || vaccineInfo.error) && baseData.gtin && baseData.gtin !== baseData.lot) {
-    try {
-      lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfo(baseData.gtin);
-    } catch (error) {
-      vaccineInfo = { error: error.message || 'Lookup failed' };
-    }
-  }
-
   const chosenExpiry = baseData.expiry || vaccineInfo?.lot_expiry || null;
   const expiryStatus = getExpiryStatus(chosenExpiry);
   const expirySource = baseData.expiry ? 'barcode' : (vaccineInfo?.lot_expiry ? 'nvc' : 'none');
@@ -1419,7 +1415,7 @@ async function enrichParsedData(baseData) {
 async function displayParsedData(data, parseRequestId) {
   const previewExpiryStatus = getExpiryStatus(data.expiry);
   writeOutput(
-    buildParsedOutputMarkup(data, { loading: !!(data.lot || data.gtin) }),
+    buildParsedOutputMarkup(data, { loading: !!data.lot }),
     outputTypeForExpiry(previewExpiryStatus)
   );
 
