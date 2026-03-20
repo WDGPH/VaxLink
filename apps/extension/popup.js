@@ -45,12 +45,14 @@ let exportTodayAnalyticsBtn;
 let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
+let adminDateTimeAutofillToggle;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
+let adminDateTimeAutofillEnabled = true;
 
 const lotLookupCache = new Map();
 const LOT_LOOKUP_CACHE_MAX = 64;
@@ -60,6 +62,7 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
+const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -118,6 +121,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportPilotAnalyticsBtn = document.getElementById('exportPilotAnalyticsBtn');
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
+  adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
 
   multipleInjectManager = new ScanQueueManager({
     storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -147,6 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
   await loadWorkflowMode();
   await loadSettingsPanelState();
+  await loadAdminDateTimeAutofillSetting();
   await loadAnalyticsSummary();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
 
@@ -185,6 +190,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settingsToggleBtn) {
     settingsToggleBtn.addEventListener('click', () => {
       void setSettingsPanelOpen(settingsPanel?.hidden ?? true);
+    });
+  }
+  if (adminDateTimeAutofillToggle) {
+    adminDateTimeAutofillToggle.addEventListener('change', () => {
+      void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
     });
   }
 
@@ -374,6 +384,41 @@ function applySettingsPanelState(isOpen) {
   }
   if (settingsToggleBtn) {
     settingsToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  }
+}
+
+function normalizeAdminDateTimeAutofillSetting(stored) {
+  return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+}
+
+function applyAdminDateTimeAutofillSetting(enabled) {
+  adminDateTimeAutofillEnabled = !!enabled;
+  if (adminDateTimeAutofillToggle) {
+    adminDateTimeAutofillToggle.checked = adminDateTimeAutofillEnabled;
+  }
+}
+
+async function loadAdminDateTimeAutofillSetting() {
+  try {
+    const stored = await getLocalStorage([ADMIN_DATETIME_AUTOFILL_KEY]);
+    applyAdminDateTimeAutofillSetting(normalizeAdminDateTimeAutofillSetting(stored));
+  } catch (_) {
+    applyAdminDateTimeAutofillSetting(true);
+  }
+}
+
+async function setAdminDateTimeAutofillSetting(enabled) {
+  applyAdminDateTimeAutofillSetting(enabled);
+  try {
+    await setLocalStorage({ [ADMIN_DATETIME_AUTOFILL_KEY]: adminDateTimeAutofillEnabled });
+    writeOutput(
+      adminDateTimeAutofillEnabled
+        ? 'Date Administered auto-fill is enabled.'
+        : 'Date Administered auto-fill is disabled.',
+      'info'
+    );
+  } catch (error) {
+    writeOutput(error.message || 'Could not update Date Administered auto-fill setting.', 'error');
   }
 }
 
@@ -969,6 +1014,7 @@ function normalizeWorkflowMode(stored) {
 function buildAutofillPayloadFromQueueRecord(record) {
   if (!record) return null;
   return {
+    scanned_at: record.scanned_at || '',
     gtin: record.gtin || '',
     lot: record.lot || '',
     serial: record.serial || '',
@@ -992,6 +1038,28 @@ function buildAutofillPayloadFromQueueRecord(record) {
     lookup_error: record.lookup_error || '',
     name: record.name || record.generic_name || record.tradename || record.din || ''
   };
+}
+
+function toIsoTimestamp(value) {
+  if (!value) return '';
+  const parsed = new Date(String(value).trim());
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString();
+}
+
+function buildAutoFillPayload(data, fallbackTimestamp = '') {
+  const payload = { ...(data || {}) };
+  if (adminDateTimeAutofillEnabled) {
+    const administeredAt =
+      toIsoTimestamp(payload.administered_at) ||
+      toIsoTimestamp(payload.scanned_at) ||
+      toIsoTimestamp(fallbackTimestamp) ||
+      new Date().toISOString();
+    payload.administered_at = administeredAt;
+  } else {
+    delete payload.administered_at;
+  }
+  return payload;
 }
 
 async function loadWorkflowMode() {
@@ -1075,6 +1143,9 @@ function queueAutoParse(immediate = false) {
     setButtonBusy(autoFillBtn, true);
     try {
       parsedData = parseInputData(barcode);
+      if (!parsedData.scanned_at) {
+        parsedData.scanned_at = new Date().toISOString();
+      }
       logAnalyticsEvent('parse_success', {
         workflow: activeMode,
         source: 'popup_input',
@@ -1140,7 +1211,8 @@ function loadNVCStatus() {
   });
 }
 
-async function sendAutoFillToActiveTab(data) {
+async function sendAutoFillToActiveTab(data, options = {}) {
+  const payload = buildAutoFillPayload(data, options.fallbackTimestamp || '');
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (chrome.runtime.lastError) {
@@ -1153,7 +1225,7 @@ async function sendAutoFillToActiveTab(data) {
         return;
       }
 
-      sendAutoFillMessage(tabs[0].id, data, (response) => {
+      sendAutoFillMessage(tabs[0].id, payload, (response) => {
         if (response && response.success) {
           resolve(response);
           return;
