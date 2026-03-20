@@ -1106,6 +1106,14 @@ function fillSelectField(field, value) {
   field.value = matched.value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  if (field.id && field.id.endsWith('_input')) {
+    const labelId = `${field.id.slice(0, -6)}_label`;
+    const label = document.getElementById(labelId);
+    if (label) {
+      label.textContent = matched.text;
+      label.setAttribute('title', matched.text);
+    }
+  }
   field.blur();
   return true;
 }
@@ -1317,6 +1325,66 @@ function fillFirstMatchingField(selectors, value) {
   return false;
 }
 
+function getFieldFilledText(field) {
+  if (!field) return '';
+  if (field.tagName === 'SELECT') {
+    const selected = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    return String(selected?.text || field.value || '').trim();
+  }
+  const id = String(field.id || '');
+  if (id.endsWith('_focus')) {
+    const label = document.getElementById(id.slice(0, -6) + '_label');
+    if (label) {
+      const labelText = String(label.textContent || '').trim();
+      return labelText;
+    }
+  }
+  if (id.endsWith('_input')) {
+    const label = document.getElementById(id.slice(0, -6) + '_label');
+    if (label && String(label.textContent || '').trim()) {
+      return String(label.textContent || '').trim();
+    }
+  }
+  return String(field.value || field.textContent || '').trim();
+}
+
+function isShortAgentCandidate(value) {
+  const compact = normalizeForMatch(value).replace(/[^a-z0-9]/g, '');
+  return compact.length > 0 && compact.length <= 3;
+}
+
+function isAgentCandidateAccepted(candidate, field) {
+  const candidateNorm = normalizeForMatch(candidate);
+  if (!candidateNorm) return false;
+  const filledNorm = normalizeForMatch(getFieldFilledText(field));
+  if (!filledNorm) return false;
+  if (filledNorm === candidateNorm) return true;
+  if (filledNorm.includes(candidateNorm)) return true;
+
+  if (isShortAgentCandidate(candidate)) {
+    const token = candidateNorm.replace(/[^a-z0-9]/g, '');
+    const filledTokens = filledNorm.split(' ').map(t => t.replace(/[^a-z0-9]/g, '')).filter(Boolean);
+    return filledTokens.includes(token);
+  }
+
+  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
+  return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+}
+
+function fillPanoramaAgentField(selectors, candidate) {
+  if (!candidate) return false;
+  const fields = getFields(selectors).filter(canFillPanoramaControl);
+  for (const field of fields) {
+    if (!fillField(field, candidate)) {
+      continue;
+    }
+    if (isAgentCandidateAccepted(candidate, field)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function runPanoramaMappings(entries) {
   let fillCount = 0;
   for (const entry of entries) {
@@ -1477,7 +1545,7 @@ function fillPanoramaImmunizationFields(data) {
   const agentCandidates = getPanoramaAgentCandidates(data);
   let agentCount = 0;
   for (const candidate of agentCandidates) {
-    if (fillFirstMatchingField(agentSelectors, candidate)) {
+    if (fillPanoramaAgentField(agentSelectors, candidate)) {
       agentCount = 1;
       break;
     }
@@ -1509,11 +1577,6 @@ function fillPanoramaImmunizationFields(data) {
       value: agentCandidates.length ? agentCandidates[0] : (data.name || data.generic_name || data.tradename || data.din),
       labels: ['Agent'],
       preferLast: false
-    },
-    {
-      value: data.lot,
-      labels: ['Lot Number'],
-      preferLast: false
     }
   ];
 
@@ -1523,7 +1586,13 @@ function fillPanoramaImmunizationFields(data) {
     if (!entry.value) continue;
     const field = findFieldByLabelText(entry.labels, { preferLast: entry.preferLast });
     if (!field || usedFields.has(field)) continue;
-    if (fillField(field, entry.value)) {
+    if (!fillField(field, entry.value)) {
+      continue;
+    }
+    if (entry.labels && entry.labels.includes('Agent') && !isAgentCandidateAccepted(entry.value, field)) {
+      continue;
+    }
+    {
       usedFields.add(field);
       fallbackCount += 1;
     }
@@ -1580,6 +1649,10 @@ function getPanoramaAgentCandidates(data) {
     values.push(raw);
   };
 
+  add(data?.tradename);
+  add(data?.generic_name);
+  add(data?.name);
+
   const sourceText = buildPanoramaAgentSourceText(data);
   for (const rule of PANORAMA_AGENT_RULES) {
     if (!panoramaAgentRuleMatches(sourceText, rule)) continue;
@@ -1588,9 +1661,6 @@ function getPanoramaAgentCandidates(data) {
     }
   }
 
-  add(data?.name);
-  add(data?.generic_name);
-  add(data?.tradename);
   add(data?.din);
   return values;
 }
