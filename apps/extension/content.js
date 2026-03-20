@@ -13,7 +13,9 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
+const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
 let activeWorkflowMode = 'single';
+let adminDateTimeAutofillEnabled = true;
 let scannerBuffer = '';
 let scannerStartedAt = 0;
 let scannerLastAt = 0;
@@ -30,6 +32,10 @@ const SCAN_MAX_AVG_INTERVAL_MS = 220;
 const SCAN_CHAR_GAP_RESET_MS = 1500;
 const SCAN_IDLE_COMMIT_MS = 1500;
 const INPUT_CANDIDATE_TTL_MS = 5000;
+
+function normalizeAdminDateTimeAutofillSetting(stored) {
+  return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+}
 
 function normalizeWorkflowMode(stored) {
   const direct = stored && stored[WORKFLOW_MODE_KEY];
@@ -409,7 +415,7 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    scanned_at: new Date().toISOString(),
+    scanned_at: data.scanned_at || new Date().toISOString(),
     raw_barcode: rawBarcode || '',
     name: data.name || data.generic_name || data.tradename || data.din || '',
     tradename: data.tradename || '',
@@ -472,6 +478,8 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
 function mergeParsedScanFields(base, extra) {
   if (!extra) return base;
   return {
+    scanned_at: base.scanned_at || extra.scanned_at || null,
+    administered_at: base.administered_at || extra.administered_at || null,
     gtin: base.gtin || extra.gtin || null,
     expiry: base.expiry || extra.expiry || null,
     lot: base.lot || extra.lot || null,
@@ -534,6 +542,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
   const trimmed = String(scanValue || '').trim();
   if (!trimmed) return;
+  const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
 
   const now = Date.now();
@@ -561,6 +570,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     });
     return;
   }
+  parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
 
   if (!parsed.lot && !parsed.expiry && !parsed.serial) {
     const recovered = getRecentRichScanCandidate(parsed.gtin);
@@ -661,6 +671,11 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
+  if (adminDateTimeAutofillEnabled) {
+    parsed.administered_at = parsed.administered_at || parsed.scanned_at || scanCapturedAt;
+  } else {
+    delete parsed.administered_at;
+  }
   const success = autoFillTelus(parsed);
   logAnalyticsEvent('autofill_result', {
     workflow: activeWorkflowMode,
@@ -886,9 +901,11 @@ function initHandsFreeScanner() {
     WORKFLOW_MODE_KEY,
     LEGACY_POPUP_MODE_KEY,
     LEGACY_REMOTE_MODE_KEY,
-    LEGACY_HANDS_FREE_KEY
+    LEGACY_HANDS_FREE_KEY,
+    ADMIN_DATETIME_AUTOFILL_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
+    adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
   });
 
@@ -898,7 +915,8 @@ function initHandsFreeScanner() {
       !(WORKFLOW_MODE_KEY in changes) &&
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
-      !(LEGACY_HANDS_FREE_KEY in changes)
+      !(LEGACY_HANDS_FREE_KEY in changes) &&
+      !(ADMIN_DATETIME_AUTOFILL_KEY in changes)
     ) {
       return;
     }
@@ -906,9 +924,13 @@ function initHandsFreeScanner() {
       [WORKFLOW_MODE_KEY]: WORKFLOW_MODE_KEY in changes ? changes[WORKFLOW_MODE_KEY].newValue : activeWorkflowMode,
       [LEGACY_POPUP_MODE_KEY]: LEGACY_POPUP_MODE_KEY in changes ? changes[LEGACY_POPUP_MODE_KEY].newValue : undefined,
       [LEGACY_REMOTE_MODE_KEY]: LEGACY_REMOTE_MODE_KEY in changes ? changes[LEGACY_REMOTE_MODE_KEY].newValue : undefined,
-      [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined
+      [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
+      [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
+        ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
+        : adminDateTimeAutofillEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
+    adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
     resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
   });
@@ -1400,6 +1422,189 @@ function runPanoramaMappings(entries) {
   return fillCount;
 }
 
+function parseAdministeredDateTime(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) {
+    return direct;
+  }
+
+  const mdyHm = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  if (mdyHm) {
+    const month = Number(mdyHm[1]);
+    const day = Number(mdyHm[2]);
+    const year = Number(mdyHm[3]);
+    const hour = Number(mdyHm[4] || 0);
+    const minute = Number(mdyHm[5] || 0);
+    return new Date(year, month - 1, day, hour, minute, 0, 0);
+  }
+
+  return null;
+}
+
+function formatPanoramaDateValue(dateValue) {
+  const yyyy = dateValue.getFullYear();
+  const mm = String(dateValue.getMonth() + 1).padStart(2, '0');
+  const dd = String(dateValue.getDate()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd}`;
+}
+
+function formatPanoramaTimeValue(dateValue) {
+  const hh = String(dateValue.getHours()).padStart(2, '0');
+  const mm = String(dateValue.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function getPanoramaAdministeredDateTimeValues(data) {
+  const sourceValue = data?.administered_at || (adminDateTimeAutofillEnabled ? data?.scanned_at : '');
+  const parsed = parseAdministeredDateTime(sourceValue);
+  if (!parsed) {
+    return { date: '', time: '' };
+  }
+  return {
+    date: formatPanoramaDateValue(parsed),
+    time: formatPanoramaTimeValue(parsed)
+  };
+}
+
+function getPanoramaTradeCandidates(data) {
+  const values = [];
+  const seen = new Set();
+  const add = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return;
+    const key = normalizeForMatch(raw);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    values.push(raw);
+  };
+  add(data?.tradename);
+  add(data?.name);
+  add(data?.generic_name);
+  return values;
+}
+
+function fillPanoramaTradeName(data) {
+  const candidates = getPanoramaTradeCandidates(data);
+  if (!candidates.length) return false;
+  const selectors = [
+    'select[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_input"]',
+    'input[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_focus"]',
+    'select[id*="createImms_tradenameinput:selectOneMenu_input"]',
+    'input[id*="createImms_tradenameinput:selectOneMenu_focus"]'
+  ];
+  for (const candidate of candidates) {
+    if (fillFirstMatchingField(selectors, candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getPanoramaAgentSelectors() {
+  return [
+    'select[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"]',
+    'input[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_focus"]'
+  ];
+}
+
+function hasPanoramaAgentSelection(data) {
+  const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
+  if (!fields.length) return false;
+
+  const candidates = getPanoramaAgentCandidates(data);
+  if (!candidates.length) {
+    return fields.some((field) => normalizeForMatch(getFieldFilledText(field)).length > 0);
+  }
+
+  return fields.some((field) => candidates.some((candidate) => isAgentCandidateAccepted(candidate, field)));
+}
+
+function tryFillPanoramaAgent(data) {
+  const candidates = getPanoramaAgentCandidates(data);
+  if (!candidates.length) return false;
+  const selectors = getPanoramaAgentSelectors();
+  for (const candidate of candidates) {
+    if (fillPanoramaAgentField(selectors, candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasPanoramaDeferredDetailData(data) {
+  const administered = getPanoramaAdministeredDateTimeValues(data);
+  return !!(administered.date || administered.time);
+}
+
+function fillPanoramaMaskedTextInput(field, nextValue) {
+  if (!field || !nextValue) return false;
+  const value = String(nextValue).trim();
+  if (!value) return false;
+  field.focus();
+  field.value = '';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  field.dispatchEvent(new KeyboardEvent('keyup', { key: value.slice(-1) || '0', bubbles: true }));
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  field.blur();
+  return String(field.value || '').trim() === value;
+}
+
+function fillPanoramaAdministeredDateTimeFields(data) {
+  const administered = getPanoramaAdministeredDateTimeValues(data);
+  if (!administered.date && !administered.time) return 0;
+
+  const dateField = getFields([
+    'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
+    'input[id*="dateAdministedDate:dateInput_input"]'
+  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
+
+  const timeField = getFields([
+    'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
+    'input[id*="dateAdministedDate:timeInput:timeInput"]'
+  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
+
+  let fillCount = 0;
+  if (administered.date && fillPanoramaMaskedTextInput(dateField, administered.date)) {
+    fillCount += 1;
+  }
+  if (administered.time && fillPanoramaMaskedTextInput(timeField, administered.time)) {
+    fillCount += 1;
+  }
+  return fillCount;
+}
+
+function isPrimeFacesAjaxBusy() {
+  try {
+    const queue = globalThis.PrimeFaces && globalThis.PrimeFaces.ajax && globalThis.PrimeFaces.ajax.Queue;
+    if (!queue) return false;
+    if (typeof queue.isEmpty === 'function') {
+      return !queue.isEmpty();
+    }
+    if (Array.isArray(queue.requests)) {
+      return queue.requests.length > 0;
+    }
+  } catch (_) {
+    return false;
+  }
+  return false;
+}
+
+function buildPanoramaDeferredDetailMappings(data) {
+  void data;
+  return [];
+}
+
+function fillPanoramaDeferredDetailFields(data) {
+  if (!data) return 0;
+  return fillPanoramaAdministeredDateTimeFields(data);
+}
+
 function normalizePanoramaLotToken(value) {
   return String(value || '')
     .toUpperCase()
@@ -1420,6 +1625,7 @@ function optionTextContainsLot(optionText, lotValue) {
 function fillPanoramaLotFromSelect(lotValue) {
   const selectors = [
     'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
     'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
   ];
   const fields = getFields(selectors).filter(canFillPanoramaControl);
@@ -1449,6 +1655,7 @@ function fillPanoramaLotFromSelect(lotValue) {
 function openPanoramaLotDropdown() {
   const selectors = [
     '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
+    '[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
     '[id*="LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger'
   ];
   const triggers = getFields(selectors).filter(isVisible);
@@ -1463,6 +1670,7 @@ function openPanoramaLotDropdown() {
 function fillPanoramaLotFromPanelItems(lotValue) {
   const filterSelectors = [
     'input[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_filter"]',
+    'input[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_filter"]',
     'input[id*="LotInfo:lotNumberSelect:selectOneMenu_filter"]'
   ];
   const lotText = String(lotValue || '');
@@ -1478,6 +1686,7 @@ function fillPanoramaLotFromPanelItems(lotValue) {
 
   const itemSelectors = [
     'li[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_"]',
+    'li[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_"]',
     'li[id*="LotInfo:lotNumberSelect:selectOneMenu_"]',
     '.ui-selectonemenu-panel .ui-selectonemenu-item'
   ];
@@ -1510,6 +1719,7 @@ function fillPanoramaLotFromPanelItems(lotValue) {
     matched.click();
     const selectedLotLabels = getFields([
       'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+      'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
       'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
     ]);
     const confirmed = selectedLotLabels.some((label) => (
@@ -1532,41 +1742,108 @@ function tryFillPanoramaLot(lotValue) {
 }
 
 function tryFillPanoramaLotOrTrade(data) {
-  if (!data || !data.lot) return false;
-  return tryFillPanoramaLot(data.lot);
+  if (!data) return false;
+  if (data.lot) return tryFillPanoramaLot(data.lot);
+  return fillPanoramaTradeName(data);
 }
 
+let stopPanoramaLotTradeWatcher = null;
+
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
-  let attempts = 0;
-  const maxAttempts = 16;
-  const nextDelay = () => (attempts < 4 ? 450 : 900);
-  const tick = () => {
-    attempts += 1;
-    if (tryFillPanoramaLotOrTrade(data)) {
-      return;
-    }
+  if (!data) return;
+  if (typeof stopPanoramaLotTradeWatcher === 'function') {
+    stopPanoramaLotTradeWatcher();
+    stopPanoramaLotTradeWatcher = null;
+  }
 
-    const dropdownOpened = openPanoramaLotDropdown();
-    if (dropdownOpened) {
-      setTimeout(() => {
-        if (tryFillPanoramaLotOrTrade(data)) {
-          return;
-        }
-        if (fillPanoramaLotFromPanelItems(data?.lot)) {
-          return;
-        }
-        if (attempts < maxAttempts) {
-          setTimeout(tick, nextDelay());
-        }
-      }, 260);
-      return;
-    }
+  const hasLot = !!String(data?.lot || '').trim();
+  const hasTrade = getPanoramaTradeCandidates(data).length > 0;
+  const hasAgent = getPanoramaAgentCandidates(data).length > 0;
+  const shouldTryLotOrTrade = hasLot || hasTrade;
+  const shouldFillDeferredFields = hasPanoramaDeferredDetailData(data);
+  if (!shouldTryLotOrTrade && !shouldFillDeferredFields && !hasAgent) {
+    return;
+  }
 
-    if (attempts < maxAttempts) {
-      setTimeout(tick, nextDelay());
+  const maxDurationMs = 16000;
+  const attemptDelaysMs = [0, 120, 260, 450, 800, 1300, 1900, 2800, 4100, 5600, 8000, 11000, 14000];
+  const minAttemptGapMs = 110;
+  let observer = null;
+  const timers = [];
+  let stopped = false;
+  let lastAttemptAt = 0;
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    while (timers.length > 0) {
+      const timer = timers.pop();
+      clearTimeout(timer);
+    }
+    if (stopPanoramaLotTradeWatcher === stop) {
+      stopPanoramaLotTradeWatcher = null;
     }
   };
-  setTimeout(tick, initialDelayMs);
+  stopPanoramaLotTradeWatcher = stop;
+
+  const runAttempt = () => {
+    if (stopped) return;
+    const now = Date.now();
+    if ((now - lastAttemptAt) < minAttemptGapMs) return;
+    lastAttemptAt = now;
+
+    let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
+    if (!hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+      hasResolvedAgent = tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
+    }
+
+    let resolved = false;
+    if (shouldTryLotOrTrade && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+      resolved = tryFillPanoramaLotOrTrade(data);
+    }
+
+    if (!resolved && hasLot && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+      openPanoramaLotDropdown();
+      resolved = fillPanoramaLotFromPanelItems(data?.lot) || resolved;
+    }
+
+    if (shouldFillDeferredFields && !isPrimeFacesAjaxBusy()) {
+      fillPanoramaDeferredDetailFields(data);
+    }
+
+    // Keep watcher alive when deferred detail fields are requested, because PrimeFaces
+    // updates after agent/lot selection can overwrite date/time fields.
+    if (resolved && !shouldFillDeferredFields) {
+      stop();
+    }
+  };
+
+  const start = () => {
+    if (stopped) return;
+    for (const delayMs of attemptDelaysMs) {
+      timers.push(setTimeout(runAttempt, delayMs));
+    }
+    timers.push(setTimeout(stop, maxDurationMs));
+    timers.push(setInterval(runAttempt, 500));
+
+    if (typeof MutationObserver === 'function' && document.body) {
+      observer = new MutationObserver(() => {
+        runAttempt();
+      });
+      observer.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'aria-expanded']
+      });
+    }
+  };
+
+  timers.push(setTimeout(start, Math.max(0, Number(initialDelayMs) || 0)));
 }
 
 function isPanoramaImmunizationPage() {
@@ -1593,25 +1870,18 @@ function isPanoramaImmunizationPage() {
 }
 
 function fillPanoramaImmunizationFields(data) {
-  const agentSelectors = [
-    'select[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"]',
-    'input[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_focus"]'
-  ];
-  const agentCandidates = getPanoramaAgentCandidates(data);
   let agentCount = 0;
-  for (const candidate of agentCandidates) {
-    if (fillPanoramaAgentField(agentSelectors, candidate)) {
-      agentCount = 1;
-      break;
-    }
+  if (hasPanoramaAgentSelection(data) || tryFillPanoramaAgent(data)) {
+    agentCount = 1;
   }
 
   let fillCount = agentCount;
-  const lotCount = data.lot ? (tryFillPanoramaLot(data.lot) ? 1 : 0) : 0;
+  const lotCount = (data.lot && !isPrimeFacesAjaxBusy()) ? (tryFillPanoramaLot(data.lot) ? 1 : 0) : 0;
   fillCount += lotCount;
+  fillCount += fillPanoramaDeferredDetailFields(data);
 
-  // Panorama refreshes lot options asynchronously after selecting Agent.
-  if (data.lot && (agentCount > 0 || fillCount === 0)) {
+  // Panorama refreshes lot options and dependent controls asynchronously after selection.
+  if (agentCount > 0 || data.lot || hasPanoramaDeferredDetailData(data) || getPanoramaTradeCandidates(data).length > 0) {
     schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350);
   }
 
@@ -1620,7 +1890,7 @@ function fillPanoramaImmunizationFields(data) {
   }
 
   // If agent did not fill, still attempt lot/trade directly.
-  if (data.lot && tryFillPanoramaLot(data.lot)) {
+  if (tryFillPanoramaLotOrTrade(data)) {
     fillCount += 1;
   }
   if (fillCount > 0) {
@@ -1629,7 +1899,7 @@ function fillPanoramaImmunizationFields(data) {
 
   const fallbackMapping = [
     {
-      value: agentCandidates.length ? agentCandidates[0] : (data.name || data.generic_name || data.tradename || data.din),
+      value: getPanoramaAgentCandidates(data)[0] || (data.name || data.generic_name || data.tradename || data.din),
       labels: ['Agent'],
       preferLast: false
     }

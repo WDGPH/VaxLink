@@ -240,7 +240,7 @@ export class ScanQueueManager {
 export function buildQueueRecord(data, rawBarcode) {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    scanned_at: new Date().toISOString(),
+    scanned_at: data.scanned_at || new Date().toISOString(),
     raw_barcode: rawBarcode || '',
     name: data.name || '',
     tradename: data.tradename || '',

@@ -715,6 +715,33 @@
       margin-top: 10px;
     }
 
+    .settings-check {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: none;
+      color: #174d5f;
+      cursor: pointer;
+    }
+
+    .settings-check input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      accent-color: #0e7490;
+      transform: translateY(1px);
+    }
+
+    .settings-hint {
+      margin: 6px 0 0;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #5f7283;
+    }
+
     #saveAnalyticsLabelBtn {
       background: #d9f0ef;
       border: 1px solid #b6dcda;
@@ -761,6 +788,11 @@
             <div class="actions">
               <button id="refreshNvcBtn">Refresh NVC Data</button>
             </div>
+            <label class="settings-check" for="adminDateTimeAutofillToggle">
+              <input id="adminDateTimeAutofillToggle" type="checkbox">
+              <span>Auto-fill Date Administered from scan time</span>
+            </label>
+            <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
             <div id="nvcStatus"></div>
           </div>
           <div class="analytics">
