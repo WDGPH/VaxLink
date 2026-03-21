@@ -511,6 +511,16 @@
       font-size: 11px;
     }
 
+    .inventory-dose-set {
+      width: auto;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: #fde68a;
+      border: 1px solid #fcd34d;
+      color: #78350f;
+      font-size: 11px;
+    }
+
     .inventory-item-grid {
       margin-top: 9px;
       display: flex;
@@ -793,6 +803,11 @@
               <span>Auto-fill Date Administered from scan time</span>
             </label>
             <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
+            <label class="settings-check" for="audioFeedbackToggle">
+              <input id="audioFeedbackToggle" type="checkbox">
+              <span>Play scan audio feedback tones</span>
+            </label>
+            <p class="settings-hint">When enabled, VaxLink plays tones for scan success, parse/lookup failures, and expiry warnings on live chart pages.</p>
             <div id="nvcStatus"></div>
           </div>
           <div class="analytics">
@@ -845,7 +860,7 @@
         </div>
 
         <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Each scan will be saved automatically into this queue.</div>
+          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>

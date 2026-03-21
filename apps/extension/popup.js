@@ -46,6 +46,7 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
+let audioFeedbackToggle;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
@@ -63,6 +64,7 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -122,6 +124,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
+  audioFeedbackToggle = document.getElementById('audioFeedbackToggle');
 
   multipleInjectManager = new ScanQueueManager({
     storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -152,6 +155,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
+  await loadAudioFeedbackSetting();
   await loadAnalyticsSummary();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
 
@@ -195,6 +199,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
+    });
+  }
+  if (audioFeedbackToggle) {
+    audioFeedbackToggle.addEventListener('change', () => {
+      void setAudioFeedbackSetting(!!audioFeedbackToggle.checked);
     });
   }
 
@@ -419,6 +428,40 @@ async function setAdminDateTimeAutofillSetting(enabled) {
     );
   } catch (error) {
     writeOutput(error.message || 'Could not update Date Administered auto-fill setting.', 'error');
+  }
+}
+
+function normalizeAudioFeedbackSetting(stored) {
+  return !(stored && stored[AUDIO_FEEDBACK_KEY] === false);
+}
+
+function applyAudioFeedbackSetting(enabled) {
+  if (audioFeedbackToggle) {
+    audioFeedbackToggle.checked = !!enabled;
+  }
+}
+
+async function loadAudioFeedbackSetting() {
+  try {
+    const stored = await getLocalStorage([AUDIO_FEEDBACK_KEY]);
+    applyAudioFeedbackSetting(normalizeAudioFeedbackSetting(stored));
+  } catch (_) {
+    applyAudioFeedbackSetting(true);
+  }
+}
+
+async function setAudioFeedbackSetting(enabled) {
+  applyAudioFeedbackSetting(enabled);
+  try {
+    await setLocalStorage({ [AUDIO_FEEDBACK_KEY]: !!enabled });
+    writeOutput(
+      enabled
+        ? 'Scan audio feedback is enabled.'
+        : 'Scan audio feedback is disabled.',
+      'info'
+    );
+  } catch (error) {
+    writeOutput(error.message || 'Could not update audio feedback setting.', 'error');
   }
 }
 
@@ -1013,6 +1056,12 @@ function normalizeWorkflowMode(stored) {
 
 function buildAutofillPayloadFromQueueRecord(record) {
   if (!record) return null;
+  const totalDoses = Number.isFinite(Number(record.total_doses)) && Number(record.total_doses) > 0
+    ? Number(record.total_doses)
+    : '';
+  const remainingDoses = Number.isFinite(Number(record.remaining_doses)) && Number(record.remaining_doses) > 0
+    ? Number(record.remaining_doses)
+    : (Number.isFinite(totalDoses) ? totalDoses : '');
   return {
     scanned_at: record.scanned_at || '',
     gtin: record.gtin || '',
@@ -1035,6 +1084,9 @@ function buildAutofillPayloadFromQueueRecord(record) {
     dose_unit: record.dose_unit || '',
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
+    total_doses: totalDoses,
+    remaining_doses: remainingDoses,
+    dose_tracking: record.dose_tracking || 'manual',
     lookup_error: record.lookup_error || '',
     name: record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -1060,6 +1112,26 @@ function buildAutoFillPayload(data, fallbackTimestamp = '') {
     delete payload.administered_at;
   }
   return payload;
+}
+
+function normalizeDoseCount(value, fallback = null) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function getQueueRemainingDoses(row, fallback = 1) {
+  const remaining = normalizeDoseCount(row && row.remaining_doses, null);
+  if (remaining !== null) {
+    return remaining;
+  }
+  const total = normalizeDoseCount(row && row.total_doses, null);
+  return total !== null ? total : fallback;
 }
 
 async function loadWorkflowMode() {
@@ -1395,16 +1467,6 @@ async function handleUseMultipleInjectRecord(record) {
   }
 
   parsedData = data;
-  logAnalyticsEvent('queue_used', {
-    workflow: 'multiple',
-    queue: 'multiple',
-    source: 'queue',
-    count: 1,
-    queueSizeAfter: multipleInjectManager.count,
-    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-  });
   writeOutput(
     buildParsedOutputMarkup(data),
     outputTypeForExpiry(getExpiryStatus(data.inventory_expiry || data.expiry))
@@ -1419,7 +1481,28 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     await sendAutoFillToActiveTab(data);
-    multipleInjectManager.setActiveUse(record.id);
+    const remainingDoses = getQueueRemainingDoses(record, 1);
+    const nextRecord = remainingDoses > 1
+      ? await multipleInjectManager.consumeById(record.id)
+      : await multipleInjectManager.remove(record.id);
+    if (nextRecord) {
+      multipleInjectManager.setActiveUse(nextRecord.id);
+    } else {
+      multipleInjectManager.setActiveUse('');
+    }
+    const updatedRemaining = nextRecord
+      ? getQueueRemainingDoses(nextRecord, 1)
+      : 0;
+    logAnalyticsEvent('queue_used', {
+      workflow: 'multiple',
+      queue: 'multiple',
+      source: 'queue',
+      count: 1,
+      queueSizeAfter: multipleInjectManager.count,
+      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+    });
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'queue',
@@ -1429,7 +1512,10 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
-    writeOutput(`${label} auto-filled from Multiple Inject queue.`, 'success');
+    const dosesMessage = updatedRemaining > 0 && updatedRemaining !== 1
+      ? ` ${updatedRemaining} dose(s) remaining in this vial.`
+      : '';
+    writeOutput(`${label} auto-filled from Multiple Inject queue.${dosesMessage}`, 'success');
   } catch (error) {
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
