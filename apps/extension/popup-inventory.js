@@ -25,11 +25,50 @@ const CSV_COLUMNS = [
   'strength',
   'dose_value',
   'dose_unit',
+  'total_doses',
+  'remaining_doses',
   'din',
   'drug_code',
   'lookup_error',
   'raw_barcode'
 ];
+
+function normalizeDoseCount(value, fallback = null) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function getRemainingDoseCount(row, fallback = 1) {
+  const remaining = normalizeDoseCount(row && row.remaining_doses, null);
+  if (remaining !== null) {
+    return remaining;
+  }
+  const total = normalizeDoseCount(row && row.total_doses, null);
+  return total !== null ? total : fallback;
+}
+
+function getTotalDoseCount(row) {
+  return normalizeDoseCount(row && row.total_doses, null);
+}
+
+function formatDoseSummary(row) {
+  const remaining = getRemainingDoseCount(row, 0);
+  const total = getTotalDoseCount(row);
+  if (!Number.isFinite(remaining) || remaining <= 0) {
+    return '';
+  }
+  if (total && total > 1) {
+    const clampedRemaining = remaining > total ? total : remaining;
+    return `${clampedRemaining}/${total} dose(s) remaining`;
+  }
+  return `${remaining} dose(s) remaining`;
+}
 
 function getLocalStorage(keys) {
   return new Promise((resolve, reject) => {
@@ -123,6 +162,81 @@ export class ScanQueueManager {
     this.render();
   }
 
+  async replaceRows(rows) {
+    this.rows = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+    await this.persist();
+    this.render();
+  }
+
+  async updateById(id, patch) {
+    const targetId = String(id || '');
+    if (!targetId || !patch || typeof patch !== 'object') {
+      return null;
+    }
+    const index = this.rows.findIndex((row) => row && row.id === targetId);
+    if (index === -1) {
+      return null;
+    }
+    const nextRows = [...this.rows];
+    nextRows[index] = { ...nextRows[index], ...patch };
+    await this.replaceRows(nextRows);
+    return nextRows[index];
+  }
+
+  async setDoseCounts(id, totalDoses) {
+    const targetId = String(id || '');
+    const total = normalizeDoseCount(totalDoses, null);
+    if (!targetId || total === null) {
+      return null;
+    }
+
+    const row = this.getById(targetId);
+    if (!row) {
+      return null;
+    }
+
+    const remaining = total;
+    return this.updateById(targetId, {
+      total_doses: total,
+      remaining_doses: remaining,
+      dose_tracking: 'manual'
+    });
+  }
+
+  async consumeById(id) {
+    const targetId = String(id || '');
+    if (!targetId) {
+      return null;
+    }
+
+    const row = this.getById(targetId);
+    if (!row) {
+      return null;
+    }
+
+    const remaining = getRemainingDoseCount(row, 1);
+    if (remaining <= 1) {
+      await this.remove(targetId);
+      return null;
+    }
+
+    const index = this.rows.findIndex((item) => item && item.id === targetId);
+    if (index < 0) {
+      return null;
+    }
+
+    const nextRows = [...this.rows];
+    const total = getTotalDoseCount(row) || remaining;
+    nextRows[index] = {
+      ...row,
+      total_doses: total,
+      remaining_doses: remaining - 1,
+      dose_tracking: 'manual'
+    };
+    await this.replaceRows(nextRows);
+    return nextRows[index];
+  }
+
   get count() {
     return this.rows.length;
   }
@@ -204,6 +318,31 @@ export class ScanQueueManager {
         });
       });
     }
+    this.listEl.querySelectorAll('[data-set-doses-id]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const id = button.getAttribute('data-set-doses-id');
+        const row = this.getById(id);
+        if (!row) {
+          return;
+        }
+        const promptLabel = row.tradename || row.generic_name || row.name || row.lot || 'this vial';
+        const currentValue = getRemainingDoseCount(row, 1);
+        const nextValue = window.prompt(
+          `Set remaining doses for ${promptLabel}.`,
+          String(currentValue || '')
+        );
+        if (nextValue === null) {
+          return;
+        }
+
+        const nextDoseTotal = normalizeDoseCount(nextValue, null);
+        if (nextDoseTotal === null) {
+          return;
+        }
+
+        await this.setDoseCounts(id, nextDoseTotal);
+      });
+    });
 
     this.updateControls();
   }
@@ -261,6 +400,8 @@ export function buildQueueRecord(data, rawBarcode) {
     strength: data.strength || '',
     dose_value: data.dose_value || '',
     dose_unit: data.dose_unit || '',
+    total_doses: normalizeDoseCount(data.total_doses, null),
+    remaining_doses: normalizeDoseCount(data.remaining_doses, normalizeDoseCount(data.total_doses, null)) || 1,
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || ''
@@ -271,7 +412,14 @@ export function buildMultipleInjectSummary(rows) {
   const count = rows.length;
   const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
   const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  const doseTotal = rows.reduce((total, row) => {
+    const remaining = getRemainingDoseCount(row, 0);
+    return total + (Number.isFinite(remaining) ? remaining : 0);
+  }, 0);
   let summary = `${count} vaccine(s) saved for later chart fill.`;
+  if (doseTotal > 0) {
+    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
+  }
   if (expiredCount || expiringCount) {
     summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
   }
@@ -282,7 +430,14 @@ export function buildInventorySummary(rows) {
   const count = rows.length;
   const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
   const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  const doseTotal = rows.reduce((total, row) => {
+    const remaining = getRemainingDoseCount(row, 0);
+    return total + (Number.isFinite(remaining) ? remaining : 0);
+  }, 0);
   let summary = `${count} scan(s) ready for inventory export.`;
+  if (doseTotal > 0) {
+    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
+  }
   if (expiredCount || expiringCount) {
     summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
   }
@@ -297,9 +452,11 @@ function buildQueueItemMarkup(row, index, options) {
   const status = escapeHtml(formatInventoryStatus(row));
   const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
   const id = escapeHtml(row.id || '');
+  const doseText = formatDoseSummary(row);
   const useActionMarkup = options.showUseAction
     ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
     : '';
+  const setDoseActionMarkup = `<button class="inventory-dose-set" type="button" data-set-doses-id="${id}">Set doses</button>`;
 
   return `
     <div class="inventory-item${options.isActive ? ' active' : ''}">
@@ -310,6 +467,7 @@ function buildQueueItemMarkup(row, index, options) {
         </div>
         <div class="inventory-item-actions">
           ${useActionMarkup}
+          ${setDoseActionMarkup}
           <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
         </div>
       </div>
@@ -317,6 +475,7 @@ function buildQueueItemMarkup(row, index, options) {
         <span class="inventory-chip">Expiry ${expiry}</span>
         <span class="inventory-chip">Status ${status}</span>
         <span class="inventory-chip">Mfr ${manufacturer}</span>
+        ${doseText ? `<span class="inventory-chip">${escapeHtml(doseText)}</span>` : ''}
       </div>
     </div>
   `;
