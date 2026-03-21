@@ -16,6 +16,9 @@ const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let hudInitialized = false;
+let lastAutoDrainAt = 0;
+let lastVaxlinkFillAt = 0;
 let scannerBuffer = '';
 let scannerStartedAt = 0;
 let scannerLastAt = 0;
@@ -542,6 +545,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
   const trimmed = String(scanValue || '').trim();
   if (!trimmed) return;
+
+  if (handleVaxlinkCommand(trimmed)) return;
+
   const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
 
@@ -685,6 +691,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
+  if (success) {
+    showVaxlinkToast(parsed);
+  }
   vlog('hands-free autofill', success, { source, parsed });
 }
 
@@ -2080,11 +2089,45 @@ function getDoseUnitFieldByLayout() {
   );
 }
 
+function buildAutofillPayloadFromQueueRecord(record) {
+  if (!record) return null;
+  const payload = {
+    scanned_at: record.scanned_at || '',
+    gtin: record.gtin || '',
+    lot: record.lot || '',
+    serial: record.serial || '',
+    expiry: record.barcode_expiry || record.inventory_expiry || '',
+    inventory_expiry: record.inventory_expiry || record.barcode_expiry || '',
+    nvc_lot_expiry: record.nvc_lot_expiry || '',
+    expiry_flag: record.expiry_flag || '',
+    expiry_days_remaining: record.expiry_days_remaining ?? '',
+    expiry_source: record.expiry_source || (record.barcode_expiry ? 'barcode' : 'none'),
+    tradename: record.tradename || '',
+    generic_name: record.generic_name || '',
+    disease: record.disease || '',
+    antigen: record.antigen || '',
+    manufacturer: record.manufacturer || '',
+    route: record.route || '',
+    strength: record.strength || '',
+    dose_value: record.dose_value || '',
+    dose_unit: record.dose_unit || '',
+    din: record.din || '',
+    drug_code: record.drug_code || record.din || '',
+    lookup_error: record.lookup_error || '',
+    name: record.name || record.generic_name || record.tradename || record.din || ''
+  };
+  if (adminDateTimeAutofillEnabled) {
+    payload.administered_at = record.scanned_at || new Date().toISOString();
+  }
+  return payload;
+}
+
 function autoFillTelus(data) {
   try {
     if (isPanoramaImmunizationPage()) {
       const panoramaFillCount = fillPanoramaImmunizationFields(data);
       vlog('Panorama fields filled', panoramaFillCount);
+      lastVaxlinkFillAt = Date.now();
       return panoramaFillCount > 0;
     }
 
@@ -2284,4 +2327,450 @@ function autoFillTelus(data) {
     console.error('Auto-fill error:', e);
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Scanner-triggered mode switch (VAXLINK: command barcodes)
+// ---------------------------------------------------------------------------
+
+function handleVaxlinkCommand(value) {
+  const upper = String(value).trim().toUpperCase();
+  if (!upper.startsWith('VAXLINK:')) return false;
+  const command = upper.slice('VAXLINK:'.length).trim();
+  const modeMap = { SINGLE: 'single', MULTIPLE: 'multiple', INVENTORY: 'inventory' };
+  const newMode = modeMap[command];
+  if (!newMode) {
+    vlog('unknown VAXLINK command', command);
+    return true;
+  }
+  activeWorkflowMode = newMode;
+  chrome.storage.local.set({ [WORKFLOW_MODE_KEY]: newMode });
+  logAnalyticsEvent('workflow_mode_set', { workflow: newMode, source: 'scanner_command' });
+  showVaxlinkToast({ _commandMode: newMode });
+  vlog('scanner command mode switch', newMode);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// In-page toast notifications
+// ---------------------------------------------------------------------------
+
+let toastHost = null;
+let toastRoot = null;
+let toastDismissTimer = null;
+
+function ensureToastHost() {
+  if (toastHost && document.body.contains(toastHost)) return toastRoot;
+  toastHost = document.createElement('div');
+  toastHost.id = 'vaxlink-toast-host';
+  const shadow = toastHost.attachShadow({ mode: 'closed' });
+  const style = document.createElement('style');
+  style.textContent = `
+    :host { all: initial; }
+    .vl-toast {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 2147483647;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      padding: 10px 16px;
+      border-radius: 8px;
+      color: #fff;
+      max-width: 360px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.25);
+      opacity: 0;
+      transform: translateY(-8px);
+      transition: opacity .2s, transform .2s;
+      pointer-events: none;
+    }
+    .vl-toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .vl-toast.valid   { background: #047857; }
+    .vl-toast.expiring { background: #b45309; }
+    .vl-toast.expired  { background: #b91c1c; }
+    .vl-toast.info     { background: #0e7490; }
+    .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
+    .vl-toast-detail { opacity: .9; font-size: 12px; }
+  `;
+  shadow.appendChild(style);
+  toastRoot = document.createElement('div');
+  shadow.appendChild(toastRoot);
+  document.body.appendChild(toastHost);
+  return toastRoot;
+}
+
+function showVaxlinkToast(data, durationMs = 4000) {
+  if (!isHandsFreeSupportedPage()) return;
+  const root = ensureToastHost();
+  if (toastDismissTimer) {
+    clearTimeout(toastDismissTimer);
+    toastDismissTimer = null;
+  }
+
+  if (data._commandMode) {
+    const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
+    root.innerHTML = `<div class="vl-toast info show">
+      <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
+      <div class="vl-toast-detail">Switched via scanner command</div>
+    </div>`;
+    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    return;
+  }
+
+  if (data._queueEmpty) {
+    root.innerHTML = `<div class="vl-toast info show">
+      <div class="vl-toast-title">Queue empty</div>
+      <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
+    </div>`;
+    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    return;
+  }
+
+  const label = data.tradename || data.generic_name || data.name || data.lot || 'Vaccine';
+  const lot = data.lot || '';
+  const flag = data.expiry_flag || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
+  const expiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+
+  let expiryText = '';
+  if (expiry) {
+    const friendlyDate = expiry.length > 10 ? expiry.slice(0, 10) : expiry;
+    const flagLabels = { valid: 'Valid', expiring_soon: 'Expiring soon', expired: 'Expired' };
+    expiryText = `${flagLabels[flag] || 'Unknown'} (exp ${friendlyDate})`;
+  }
+  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
+  const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+
+  root.innerHTML = `<div class="vl-toast ${cssClass} show">
+    <div class="vl-toast-title">${escapeToastHtml(label)}</div>
+    ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+  </div>`;
+  toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+}
+
+function dismissToast(root) {
+  const el = root && root.querySelector('.vl-toast');
+  if (el) el.classList.remove('show');
+  setTimeout(() => { if (root) root.innerHTML = ''; }, 300);
+}
+
+function escapeToastHtml(text) {
+  const d = document.createElement('span');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// ---------------------------------------------------------------------------
+// In-page floating HUD for multiple-inject queue
+// ---------------------------------------------------------------------------
+
+let hudHost = null;
+let hudShadow = null;
+let hudCountEl = null;
+let hudApplyBtn = null;
+let hudContainer = null;
+
+function initHud() {
+  if (hudInitialized) return;
+  if (!isHandsFreeSupportedPage()) return;
+  hudInitialized = true;
+
+  hudHost = document.createElement('div');
+  hudHost.id = 'vaxlink-hud-host';
+  hudShadow = hudHost.attachShadow({ mode: 'closed' });
+
+  const style = document.createElement('style');
+  style.textContent = `
+    :host { all: initial; }
+    .vl-hud {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 2147483647;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #164e63;
+      color: #fff;
+      padding: 6px 12px;
+      border-radius: 24px;
+      box-shadow: 0 2px 12px rgba(0,0,0,.3);
+      font-size: 13px;
+      cursor: default;
+      user-select: none;
+      transition: opacity .2s;
+    }
+    .vl-hud.hidden { display: none; }
+    .vl-hud-count {
+      background: rgba(255,255,255,.2);
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-weight: 600;
+      min-width: 18px;
+      text-align: center;
+    }
+    .vl-hud-btn {
+      background: #ecfeff;
+      color: #164e63;
+      border: none;
+      border-radius: 14px;
+      padding: 4px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .vl-hud-btn:hover { background: #fff; }
+    .vl-hud-btn:disabled { opacity: .5; cursor: default; }
+    .vl-hud-label { font-size: 11px; opacity: .8; }
+  `;
+  hudShadow.appendChild(style);
+
+  hudContainer = document.createElement('div');
+  hudContainer.className = 'vl-hud hidden';
+
+  const label = document.createElement('span');
+  label.className = 'vl-hud-label';
+  label.textContent = 'VaxLink';
+
+  hudCountEl = document.createElement('span');
+  hudCountEl.className = 'vl-hud-count';
+  hudCountEl.textContent = '0';
+
+  hudApplyBtn = document.createElement('button');
+  hudApplyBtn.className = 'vl-hud-btn';
+  hudApplyBtn.textContent = 'Apply Next';
+  hudApplyBtn.addEventListener('click', applyNextQueueItem);
+
+  hudContainer.appendChild(label);
+  hudContainer.appendChild(hudCountEl);
+  hudContainer.appendChild(hudApplyBtn);
+  hudShadow.appendChild(hudContainer);
+  document.body.appendChild(hudHost);
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+      updateHudState();
+    }
+  });
+
+  updateHudState();
+}
+
+function updateHudState() {
+  chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
+    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    const count = rows.length;
+    const shouldShow = activeWorkflowMode === 'multiple' && count > 0
+      && isPanoramaImmunizationPage();
+
+    if (hudContainer) {
+      hudContainer.classList.toggle('hidden', !shouldShow);
+    }
+    if (hudCountEl) {
+      hudCountEl.textContent = String(count);
+    }
+    if (hudApplyBtn) {
+      hudApplyBtn.disabled = count === 0;
+    }
+  });
+}
+
+async function applyNextQueueItem() {
+  if (hudApplyBtn) hudApplyBtn.disabled = true;
+  try {
+    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    if (!rows.length) {
+      showVaxlinkToast({ _queueEmpty: true });
+      updateHudState();
+      return;
+    }
+
+    const record = rows.shift();
+    await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
+
+    const data = buildAutofillPayloadFromQueueRecord(record);
+    if (!data) return;
+
+    logAnalyticsEvent('autofill_attempt', {
+      workflow: 'multiple',
+      source: 'hud',
+      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || ''
+    });
+
+    const success = autoFillTelus(data);
+    logAnalyticsEvent('autofill_result', {
+      workflow: 'multiple',
+      source: 'hud',
+      success,
+      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || ''
+    });
+    logAnalyticsEvent('queue_used', {
+      workflow: 'multiple',
+      queue: 'multiple',
+      source: 'hud',
+      count: 1,
+      queueSizeAfter: rows.length
+    });
+
+    if (success) {
+      showVaxlinkToast(data);
+    }
+    updateHudState();
+  } catch (error) {
+    console.warn('VaxLink HUD apply error:', error);
+    if (hudApplyBtn) hudApplyBtn.disabled = false;
+  }
+}
+
+function getLocalStorage(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function setLocalStorage(values) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(values, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Auto-drain: auto-apply queue head when an empty immunization form is detected
+// ---------------------------------------------------------------------------
+
+function isImmunizationFormEmpty() {
+  const agentSelectors = getPanoramaAgentSelectors();
+  const fields = getFields(agentSelectors).filter(canFillPanoramaControl);
+  for (const field of fields) {
+    const filled = getFieldFilledText(field);
+    if (filled && filled !== '--' && filled.toLowerCase() !== 'select' && filled.length > 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function tryAutoDrain() {
+  if (activeWorkflowMode !== 'multiple') return;
+  if (!isPanoramaImmunizationPage()) return;
+  if (isPrimeFacesAjaxBusy()) return;
+
+  const now = Date.now();
+  if ((now - lastAutoDrainAt) < 3000) return;
+  if ((now - lastVaxlinkFillAt) < 2000) return;
+
+  if (!isImmunizationFormEmpty()) return;
+
+  lastAutoDrainAt = now;
+  vlog('auto-drain: empty form detected, applying queue head');
+  await applyNextQueueItem();
+}
+
+// ---------------------------------------------------------------------------
+// Post-save auto-advance: watch for agent field reset after Panorama save
+// ---------------------------------------------------------------------------
+
+let postSaveObserver = null;
+let lastAgentFilledState = false;
+
+function initPostSaveWatcher() {
+  if (!isHandsFreeSupportedPage()) return;
+  if (postSaveObserver) return;
+
+  const checkAgentTransition = () => {
+    if (activeWorkflowMode !== 'multiple') return;
+    if (!isPanoramaImmunizationPage()) return;
+
+    const wasFilledBefore = lastAgentFilledState;
+    const isEmptyNow = isImmunizationFormEmpty();
+    lastAgentFilledState = !isEmptyNow;
+
+    // Detect filled -> empty transition (Panorama form reset after save)
+    if (wasFilledBefore && isEmptyNow) {
+      const now = Date.now();
+      if ((now - lastVaxlinkFillAt) < 2000) return;
+      vlog('post-save: agent field reset detected, auto-advancing');
+      setTimeout(() => tryAutoDrain(), 800);
+    }
+  };
+
+  const targetNode = document.body;
+  if (!targetNode) return;
+
+  postSaveObserver = new MutationObserver(() => {
+    checkAgentTransition();
+  });
+  postSaveObserver.observe(targetNode, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'value', 'aria-expanded']
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Initialize new features after DOM is ready
+// ---------------------------------------------------------------------------
+
+function initClickReductionFeatures() {
+  if (!isHandsFreeSupportedPage()) return;
+
+  if (document.body) {
+    initHud();
+    initPostSaveWatcher();
+    // Initial auto-drain attempt after a short settle delay
+    if (activeWorkflowMode === 'multiple') {
+      setTimeout(() => tryAutoDrain(), 1200);
+    }
+  } else {
+    document.addEventListener('DOMContentLoaded', () => {
+      initHud();
+      initPostSaveWatcher();
+      if (activeWorkflowMode === 'multiple') {
+        setTimeout(() => tryAutoDrain(), 1200);
+      }
+    });
+  }
+}
+
+// Re-run when mode changes so HUD visibility updates
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (WORKFLOW_MODE_KEY in changes) {
+    updateHudState();
+    if (activeWorkflowMode === 'multiple') {
+      setTimeout(() => tryAutoDrain(), 800);
+    }
+  }
+});
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
+} else {
+  initClickReductionFeatures();
 }
