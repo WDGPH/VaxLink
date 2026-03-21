@@ -57,6 +57,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 bgLog('Service worker started, loading NVC bundle');
 ensureActionIcon();
 initializeNVCSync();
+initQueueBadge();
 
 function ensureActionIcon() {
   if (iconInitPromise) {
@@ -95,6 +96,27 @@ function ensureActionIcon() {
   })();
 
   return iconInitPromise;
+}
+
+const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const BADGE_COLOR = '#0891b2';
+
+function updateQueueBadge(rows) {
+  const count = Array.isArray(rows) ? rows.length : 0;
+  chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
+  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+}
+
+function initQueueBadge() {
+  chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
+    updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+      updateQueueBadge(changes[MULTIPLE_INJECT_QUEUE_KEY].newValue);
+    }
+  });
 }
 
 function getStorage(keys) {
