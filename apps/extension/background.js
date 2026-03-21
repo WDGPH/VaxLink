@@ -33,6 +33,8 @@ const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let iconInitPromise = null;
+const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const BADGE_COLOR = '#0891b2';
 
 // Load NVC bundle on installation/startup
 chrome.runtime.onInstalled.addListener(() => {
@@ -97,9 +99,6 @@ function ensureActionIcon() {
 
   return iconInitPromise;
 }
-
-const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
-const BADGE_COLOR = '#0891b2';
 
 function updateQueueBadge(rows) {
   const count = Array.isArray(rows) ? rows.length : 0;
