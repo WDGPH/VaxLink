@@ -2,3 +2,7 @@
 apps/web/nvc-bundle.json
 apps/extension/nvc_bundle.json
 tmp/
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
