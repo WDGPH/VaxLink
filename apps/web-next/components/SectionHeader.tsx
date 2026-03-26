@@ -1,4 +1,4 @@
-import { FadeIn } from '@/components/ui/motion'
+import { SectionRail } from '@/components/SectionRail'
 
 export function SectionHeader({
   eyebrow,
@@ -11,13 +11,5 @@ export function SectionHeader({
   body?: string
   align?: 'left' | 'center'
 }) {
-  return (
-    <FadeIn>
-      <div className={align === 'center' ? 'mx-auto max-w-3xl text-center mb-14' : 'max-w-2xl mb-14'}>
-        <p className="section-eyebrow">{eyebrow}</p>
-        <h2 className="section-title">{title}</h2>
-        {body ? <p className="section-body">{body}</p> : null}
-      </div>
-    </FadeIn>
-  )
+  return <SectionRail eyebrow={eyebrow} title={title} body={body} align={align} />
 }

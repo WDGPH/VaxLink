@@ -1,6 +1,7 @@
+import type { MetadataRoute } from 'next'
 import { siteConfig } from '@/content/site'
 
-export default function sitemap() {
+export default function sitemap(): MetadataRoute.Sitemap {
   const routes = ['/', '/extension', '/explorer']
 
   return routes.map((path) => ({

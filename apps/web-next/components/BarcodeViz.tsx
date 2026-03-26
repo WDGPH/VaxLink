@@ -13,68 +13,101 @@ const DECODED_FIELDS = [
   { ai: 'AI 17', value: '2026-06',         delay: '1.1s' },
 ]
 
+const BARCODE_MODULE = 4
+const BARCODE_QUIET_ZONE = 24
+const BARCODE_HEIGHT = 92
+const BARCODE_BAR_TOP = 8
+const BARCODE_BAR_HEIGHT = 58
+const BARCODE_LABEL = '(01)00381370007577  (10)2024B-LOT12  (17)202606'
+
+const BARCODE_VIEWBOX_WIDTH = BAR_PATTERN.reduce(
+  (sum, units) => sum + (units * BARCODE_MODULE),
+  BARCODE_QUIET_ZONE * 2,
+)
+
+const barcodeRects: Array<{ x: number; width: number; height: number }> = []
+
+let barcodeCursor = BARCODE_QUIET_ZONE
+BAR_PATTERN.forEach((units, index) => {
+  const width = units * BARCODE_MODULE
+
+  if (index % 2 === 0) {
+    barcodeRects.push({
+      x: barcodeCursor,
+      width,
+      height: index % 7 === 0 ? BARCODE_BAR_HEIGHT + 10 : BARCODE_BAR_HEIGHT,
+    })
+  }
+
+  barcodeCursor += width
+})
+
 export function BarcodeViz() {
   return (
-    <div className="relative animate-float" style={{ animationDelay: '0.3s' }}>
-      <div
-        className="rounded-2xl border border-hero-border bg-hero-surface p-6 shadow-2xl"
-        style={{ width: 'clamp(240px, 34vw, 360px)' }}
-      >
-        <p className="font-mono text-[10px] text-blue-400/60 uppercase tracking-widest mb-3">
-          GS1-128 · Scanning…
-        </p>
-
-        <div
-          className="relative flex items-stretch overflow-hidden rounded-sm"
-          style={{ height: '96px' }}
-          aria-hidden="true"
-        >
-          {BAR_PATTERN.map((units, i) => (
-            <div
-              key={i}
-              className={i % 2 === 0 ? 'flex-shrink-0 bg-white/88' : 'flex-shrink-0 bg-transparent'}
-              style={{ width: `${units * 5}px` }}
-            />
-          ))}
-          <div className="barcode-beam" />
-          <div
-            className="absolute inset-x-0 pointer-events-none"
-            style={{
-              height: '30px',
-              background: 'linear-gradient(180deg, transparent, rgba(37,99,235,0.08), transparent)',
-              animation: 'scanBeam 2.6s ease-in-out infinite',
-              top: 0,
-            }}
-          />
+    <div className="barcode-viz-shell animate-float" style={{ animationDelay: '0.3s' }}>
+      <div className="barcode-viz-frame">
+        <div className="barcode-viz-head">
+          <p>GS1-128</p>
+          <span>scanner read</span>
         </div>
 
-        <div className="mt-4 space-y-1.5 font-mono">
+        <div
+          className="barcode-viz-bars"
+          aria-hidden="true"
+        >
+          <svg
+            className="barcode-viz-svg"
+            viewBox={`0 0 ${BARCODE_VIEWBOX_WIDTH} ${BARCODE_HEIGHT}`}
+            role="presentation"
+          >
+            {barcodeRects.map((bar, index) => (
+              <rect
+                key={`${bar.x}-${bar.width}`}
+                x={bar.x}
+                y={BARCODE_BAR_TOP}
+                width={bar.width}
+                height={bar.height}
+                rx="1"
+                fill={index % 6 === 0 ? '#f4ffff' : '#d7f0f0'}
+                opacity={index % 5 === 0 ? 1 : 0.92}
+              />
+            ))}
+            <text
+              x={BARCODE_VIEWBOX_WIDTH / 2}
+              y={BARCODE_HEIGHT - 10}
+              fill="rgba(236,247,247,0.52)"
+              fontFamily="IBM Plex Mono, monospace"
+              fontSize="8.5"
+              letterSpacing="1.1"
+              textAnchor="middle"
+            >
+              {BARCODE_LABEL}
+            </text>
+          </svg>
+          <div className="barcode-viz-scan" />
+          <div className="barcode-beam" />
+        </div>
+
+        <div className="barcode-viz-fields">
           {DECODED_FIELDS.map(({ ai, value, delay }) => (
             <div
               key={ai}
-              className="flex items-center gap-2.5 opacity-0 animate-fieldReveal"
+              className="barcode-viz-row opacity-0 animate-fieldReveal"
               style={{ animationDelay: delay, animationFillMode: 'forwards' }}
             >
-              <span className="text-[10px] text-blue-400/70 uppercase tracking-widest w-12 shrink-0">
-                {ai}
-              </span>
-              <span className="text-xs text-white/85 tracking-wide">{value}</span>
+              <span>{ai}</span>
+              <strong>{value}</strong>
             </div>
           ))}
         </div>
 
-        <div className="mt-4 pt-3 border-t border-hero-border flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-          <span className="font-mono text-[10px] text-blue-400/70 uppercase tracking-widest">
-            NVC match found · 1 lot resolved
-          </span>
+        <div className="barcode-viz-foot">
+          <span className="barcode-viz-dot" />
+          <span>NVC match found · 1 lot resolved</span>
         </div>
       </div>
 
-      <div
-        className="absolute -inset-4 -z-10 rounded-3xl blur-2xl opacity-30"
-        style={{ background: 'radial-gradient(circle, rgba(37,99,235,0.4) 0%, transparent 70%)' }}
-      />
+      <div className="barcode-viz-glow" />
     </div>
   )
 }
