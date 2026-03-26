@@ -98,6 +98,16 @@ function setupMessageListener() {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'autoFill') {
+      // Only the top frame should respond to autoFill messages from the popup.
+      // With all_frames:true, iframes also receive the message; if an iframe
+      // responds first with { success: false } (no matching fields), the popup
+      // sees a failure even though the main frame would succeed. Returning
+      // false lets the top frame's response through. (Edge delivers iframe
+      // responses before the main frame more often than Chrome, causing
+      // multi-inject to fail.)
+      if (window.top !== window.self) {
+        return false;
+      }
       try {
         const success = autoFillTelus(request.data);
         vlog('autoFillTelus', success);

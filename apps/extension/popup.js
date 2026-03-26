@@ -1529,17 +1529,19 @@ async function displayParsedData(data, parseRequestId) {
 }
 
 function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
-  chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, (response) => {
+  // Target the main frame (frameId 0) to avoid iframe content scripts
+  // responding first with { success: false } and masking the real result.
+  chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, { frameId: 0 }, (response) => {
     if (chrome.runtime.lastError) {
       const message = chrome.runtime.lastError.message || '';
 
       if (message.includes('Receiving end does not exist')) {
-        chrome.scripting.executeScript({ target: { tabId }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
+        chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
           if (chrome.runtime.lastError) {
             callback({ success: false, error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}` });
             return;
           }
-          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, callback);
+          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, { frameId: 0 }, callback);
         });
         return;
       }
