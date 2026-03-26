@@ -32,62 +32,50 @@ export function Navbar() {
     <header
       className={`fixed top-0 inset-x-0 z-50 transition-all duration-300 ${
         scrolled || !isHome
-          ? 'bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200/80'
-          : 'bg-transparent border-b border-transparent'
+          ? 'nav-shell nav-shell-solid'
+          : 'nav-shell nav-shell-ghost'
       }`}
     >
-      <div className="section-inner h-16 flex items-center justify-between">
-
-        {/* Brand */}
+      <div className="section-inner nav-inner">
         <Link
           href={withBasePath('/')}
-          className={`font-sora font-extrabold text-xl tracking-tight transition-colors ${
-            onDark ? 'text-white' : 'text-slate-900'
-          }`}
+          className={`nav-brand ${onDark ? 'nav-brand-dark' : ''}`}
         >
-          Vax<span className={onDark ? 'text-blue-400' : 'text-blue-600'}>Link</span>
+          <span>Vax</span>
+          <span>Link</span>
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="nav-mode-bar hidden md:flex">
           {NAV_LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={withBasePath(href)}
-              className={`text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
-                onDark
-                  ? 'text-white/70 hover:text-white hover:bg-white/10'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
+              className={`nav-mode-link ${onDark ? 'nav-mode-link-dark' : ''}`}
             >
               {label}
             </Link>
           ))}
+        </nav>
+
+        <div className="hidden md:flex items-center gap-2">
           <TrackedLink
             href={withBasePath('/extension#install')}
             event={{ name: 'cta_click', target: 'install' }}
-            className={`ml-1 text-sm font-semibold px-4 py-2 rounded-full transition-all ${
-              onDark
-                ? 'text-white/90 border border-white/20 hover:bg-white/10'
-                : 'text-blue-700 border border-blue-200 hover:bg-blue-50'
-            }`}
+            className="nav-secondary-cta"
           >
             Install Extension
           </TrackedLink>
           <TrackedLink
             href={withBasePath('/explorer')}
             event={{ name: 'cta_click', target: 'explorer' }}
-            className="ml-2 text-sm font-semibold px-4 py-2 rounded-full text-white transition-all hover:opacity-90 hover:shadow-md"
-            style={{ background: 'linear-gradient(135deg, #3b82f6, var(--accent))' }}
+            className="nav-primary-cta"
           >
-            Open Explorer →
+            Open Explorer
           </TrackedLink>
-        </nav>
+        </div>
 
         <button
-          className={`md:hidden p-2 rounded-lg transition-colors ${
-            onDark ? 'text-white hover:bg-white/10' : 'text-slate-700 hover:bg-slate-100'
-          }`}
+          className="md:hidden nav-mobile-toggle"
           onClick={() => setOpen(!open)}
           aria-label="Toggle menu"
         >
@@ -103,13 +91,13 @@ export function Navbar() {
 
         {/* Mobile drawer */}
       {open && (
-        <div className="md:hidden bg-white border-t border-slate-100 px-6 py-5 flex flex-col gap-3 shadow-lg">
+        <div className="md:hidden nav-mobile-drawer">
           {NAV_LINKS.map(({ href, label }) => (
             <Link
               key={href}
               href={withBasePath(href)}
               onClick={() => setOpen(false)}
-              className="text-sm font-medium text-slate-700 hover:text-slate-900 py-1"
+              className="nav-mobile-link"
             >
               {label}
             </Link>
@@ -118,7 +106,7 @@ export function Navbar() {
             href={withBasePath('/extension#install')}
             event={{ name: 'cta_click', target: 'install' }}
             onClick={() => setOpen(false)}
-            className="mt-2 inline-flex items-center justify-center rounded-full border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700"
+            className="nav-mobile-secondary"
           >
             Install Extension
           </TrackedLink>
@@ -126,7 +114,7 @@ export function Navbar() {
             href={withBasePath('/explorer')}
             event={{ name: 'cta_click', target: 'explorer' }}
             onClick={() => setOpen(false)}
-            className="inline-flex items-center justify-center rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white"
+            className="nav-mobile-primary"
           >
             Open Explorer
           </TrackedLink>

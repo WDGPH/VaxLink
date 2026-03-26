@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { CompatibilityTable } from '@/components/CompatibilityTable'
+import { DiagnosticShell } from '@/components/DiagnosticShell'
 import { FAQSection } from '@/components/FAQSection'
 import { InstallSteps } from '@/components/InstallSteps'
+import { PanelFrame } from '@/components/PanelFrame'
 import { PermissionsTable } from '@/components/PermissionsTable'
 import { SectionHeader } from '@/components/SectionHeader'
 import { TrustStrip } from '@/components/TrustStrip'
@@ -49,163 +51,96 @@ export default function ExtensionPage() {
   }
 
   return (
-    <div className="pt-16">
+    <div className="pt-16 extension-page-shell">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
 
-      <section className="relative overflow-hidden py-20" style={{ background: 'var(--hero-bg)' }}>
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(ellipse at 75% 50%, rgba(37,99,235,0.12) 0%, transparent 55%)',
-          }}
-        />
-        <div className="grain" />
-
-        <div className="section-inner relative z-10 flex flex-col lg:flex-row items-center gap-12">
-          <div className="flex-1 max-w-xl">
-            <div
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 mb-6"
-              style={{ borderColor: 'rgba(37,99,235,0.35)', background: 'rgba(37,99,235,0.08)' }}
-            >
-              <span className="font-mono text-[11px] text-blue-300 tracking-widest uppercase">
-                Chrome Extension · v{siteConfig.version} · Manifest V3
-              </span>
-            </div>
-
-            <h1
-              className="font-sora font-extrabold text-white leading-tight"
-              style={{ fontSize: 'clamp(2rem, 4.5vw, 3.5rem)' }}
-            >
-              Barcode to CHR,
-              <br />
-              <span
-                style={{
-                  background: 'linear-gradient(135deg, #3b82f6, #818cf8)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                }}
-              >
-                with review before write.
-              </span>
-            </h1>
-
-            <p className="mt-5 text-white/60 leading-relaxed" style={{ maxWidth: '48ch' }}>
-              Parse GS1 vaccine barcodes, resolve lot metadata, and review autofill-ready values for
-              Panorama and InputHealth before updating chart fields.
-            </p>
-
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a
-                href="#install"
-                className="inline-flex items-center gap-2 font-sora font-semibold text-sm px-6 py-3 rounded-full text-white"
-                style={{
-                  background: 'linear-gradient(135deg,#3b82f6,#2563eb)',
-                  boxShadow: '0 0 24px rgba(37,99,235,0.3)',
-                }}
-              >
-                Install Guide ↓
-              </a>
-              <Link
-                href={withBasePath('/explorer')}
-                className="inline-flex items-center gap-2 font-sora font-semibold text-sm px-6 py-3 rounded-full border"
-                style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.78)' }}
-              >
-                Open Web Explorer
-              </Link>
-            </div>
-
-            <div className="mt-8">
+      <section className="mode-page-hero mode-page-extension">
+        <div className="section-inner mode-page-hero-grid">
+          <DiagnosticShell
+            label="Entry Mode"
+            title="Chrome extension for barcode review and chart entry"
+            aside={<span className="hero-version-pill">v{siteConfig.version}</span>}
+            className="extension-command-shell"
+          >
+            <div className="extension-hero-copy">
+              <p>
+                Parse GS1 vaccine barcodes, check the lot data, and review the values before filling
+                Panorama or InputHealth fields.
+              </p>
+              <div className="extension-hero-cta">
+                <a href="#install" className="hero-primary-cta">Install Guide</a>
+                <Link href={withBasePath('/explorer')} className="hero-secondary-cta">
+                  Open Explorer
+                </Link>
+              </div>
               <TrustStrip items={extensionTrustChips} dark />
             </div>
-          </div>
+          </DiagnosticShell>
 
-          <div className="flex-shrink-0 w-full max-w-xs">
+          <PanelFrame tone="hero" eyebrow="Popup Preview" title="Extension review window" className="extension-hero-preview">
             <ExtensionMockup />
-          </div>
+          </PanelFrame>
         </div>
       </section>
 
-      <section id="compatibility" className="py-20 bg-white">
+      <section id="compatibility" className="py-20" style={{ background: 'var(--bg-base)' }}>
         <div className="section-inner">
           <SectionHeader
             eyebrow="Supported Environments"
-            title="Compatibility is explicit, not implied"
-            body="The extension is intended for Chrome-based clinic workflows. Only Panorama and InputHealth are supported today."
+            title="Compatibility matrix"
+            body="The extension targets Chrome. Panorama and InputHealth are supported charting targets in the current release."
           />
-          <CompatibilityTable />
+          <PanelFrame tone="utility" eyebrow="Matrix" title="Browser and CHR support" className="matrix-frame">
+            <CompatibilityTable />
+          </PanelFrame>
         </div>
       </section>
 
       <section className="py-20 bg-white">
         <div className="section-inner">
           <SectionHeader
-            eyebrow="Read and Write Surface"
-            title="What VaxLink reads from the barcode and writes into the CHR"
-            body="The extension stays narrow on purpose: parse the barcode, resolve the lot, review the fields, then autofill the supported record."
+            eyebrow="Read and Write"
+            title="What the extension reads from the barcode and writes into the chart"
+            body="The extension keeps its scope narrow: barcode in, review step, then field fill on supported screens."
           />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="rounded-2xl border border-slate-200 p-6">
-              <p className="font-mono text-xs text-blue-600 uppercase tracking-widest mb-4">
-                Reads from barcode
-              </p>
-              <div className="space-y-3">
+          <div className="io-console-grid">
+            <PanelFrame tone="utility" eyebrow="Reads" title="Barcode fields and fallbacks" className="io-console">
+              <div className="io-console-list">
                 {EXTRACTS.map(({ ai, label, desc }) => (
-                  <div key={ai} className="flex items-start gap-3">
-                    <span
-                      className="font-mono text-[10px] rounded-md px-2 py-1 shrink-0 mt-0.5"
-                      style={{ background: 'rgba(37,99,235,0.1)', color: '#2563eb' }}
-                    >
-                      {ai}
-                    </span>
+                  <div key={ai} className="io-console-row">
+                    <span>{ai}</span>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">{label}</p>
-                      <p className="text-xs text-slate-500">{desc}</p>
+                      <strong>{label}</strong>
+                      <p>{desc}</p>
                     </div>
                   </div>
                 ))}
               </div>
-              <p className="mt-4 text-xs text-slate-400">
-                Also supports plain text labels: <span className="font-mono">LOT:</span>{' '}
-                <span className="font-mono">EXP:</span>{' '}
-                <span className="font-mono">DIN:</span>
-              </p>
-            </div>
+              <p className="io-console-note">Also supports text labels such as LOT:, EXP:, and DIN: when scanner output is not fully structured.</p>
+            </PanelFrame>
 
-            <div className="rounded-2xl border border-slate-200 p-6">
-              <p className="font-mono text-xs text-amber-600 uppercase tracking-widest mb-4">
-                Fills in CHR
-              </p>
-              <ul className="space-y-2.5">
+            <PanelFrame tone="panel" eyebrow="Writes" title="Fields prepared for chart entry" className="io-console">
+              <div className="io-console-list io-console-list-simple">
                 {FILLS.map((field) => (
-                  <li key={field} className="flex items-center gap-3 text-sm text-slate-700">
-                    <span
-                      className="w-4 h-4 rounded-full flex items-center justify-center shrink-0"
-                      style={{ background: 'rgba(245,158,11,0.15)' }}
-                    >
-                      <svg className="w-2.5 h-2.5 text-amber-500" viewBox="0 0 12 12" fill="currentColor">
-                        <path d="M10 3L5 8.5 2 5.5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </span>
-                    {field}
-                  </li>
+                  <div key={field} className="io-console-row io-console-row-simple">
+                    <span className="io-dot" />
+                    <strong>{field}</strong>
+                  </div>
                 ))}
-              </ul>
-              <p className="mt-4 text-xs text-slate-400">
-                Supported platforms: Panorama, InputHealth. More planned: OSCAR, Wolf, PS Suite.
-              </p>
-            </div>
+              </div>
+              <p className="io-console-note">Supported platforms: Panorama and InputHealth. Other CHRs remain planned.</p>
+            </PanelFrame>
           </div>
         </div>
       </section>
 
-      <section id="install" className="py-20" style={{ background: 'var(--bg)' }}>
+      <section id="install" className="py-20" style={{ background: 'var(--bg-panel)' }}>
         <div className="section-inner">
           <SectionHeader
-            eyebrow="Installation"
-            title="Developer mode install with a validation checklist"
-            body="The current distribution model is an unpacked Chrome extension. Use these steps and the checklist to validate the environment before documenting live charts."
+            eyebrow="Install"
+            title="Developer mode install and preflight check"
+            body="The current release installs as an unpacked Chrome extension. Check the environment before working in a live chart."
           />
           <InstallSteps />
         </div>
@@ -215,40 +150,44 @@ export default function ExtensionPage() {
         <div className="section-inner">
           <SectionHeader
             eyebrow="Permissions and Local Data"
-            title="What the extension requests, what it stores, and what it does not do"
-            body="Permissions are tied directly to supported workflow needs. The extension stores bundle data locally, works against active chart fields, and does not turn the website into a patient-data backend."
+            title="Browser access, local storage, and what the site does not keep"
+            body="Each permission maps to a concrete browser action. Bundle data stays local to the browser."
           />
-          <PermissionsTable />
+          <PanelFrame tone="reference" eyebrow="Access table" title="Requested permissions" className="matrix-frame">
+            <PermissionsTable />
+          </PanelFrame>
           <div id="data-handling" className="compatibility-notes mt-6">
-            <div className="note-card">
-              <h3>Local bundle storage</h3>
+            <PanelFrame tone="utility" eyebrow="Storage" title="Local bundle storage" className="note-card">
               <p>Bundle data is cached in browser storage to support repeat lookups and offline fallback behavior.</p>
-            </div>
-            <div className="note-card">
-              <h3>No chart backend</h3>
-              <p>The website does not persist patient chart data. The extension acts on the active page fields needed for autofill.</p>
-            </div>
-            <div className="note-card">
-              <h3>Refresh cadence</h3>
+            </PanelFrame>
+            <PanelFrame tone="reference" eyebrow="Charts" title="No chart backend" className="note-card">
+              <p>The website does not persist patient chart data. The extension acts only on the active page fields needed for autofill.</p>
+            </PanelFrame>
+            <PanelFrame tone="panel" eyebrow="Refresh" title="Bundle check interval" className="note-card">
               <p>Bundle checks run about every 24 hours, with the last local snapshot available if a refresh fails.</p>
-            </div>
+            </PanelFrame>
           </div>
         </div>
       </section>
 
-      <section id="troubleshooting" className="py-20" style={{ background: 'var(--bg)' }}>
+      <section id="troubleshooting" className="py-20" style={{ background: 'var(--bg-base)' }}>
         <div className="section-inner">
           <SectionHeader
             eyebrow="Troubleshooting"
-            title="Common install and workflow failure modes"
-            body="This page is intended to cover the common setup, barcode, and lot-match issues without requiring repo spelunking."
+            title="Common install and chart-entry problems"
+            body="This section covers the setup, barcode, and lot-match problems people usually hit first."
           />
           <div className="trouble-grid">
-            {troubleshootingItems.map((item) => (
-              <div key={item.title} className="faq-card">
-                <h3>{item.title}</h3>
+            {troubleshootingItems.map((item, index) => (
+              <PanelFrame
+                key={item.title}
+                tone={index % 3 === 0 ? 'utility' : index % 3 === 1 ? 'panel' : 'reference'}
+                eyebrow={`Issue 0${index + 1}`}
+                title={item.title}
+                className="faq-card issue-card"
+              >
                 <p>{item.body}</p>
-              </div>
+              </PanelFrame>
             ))}
           </div>
         </div>
@@ -258,32 +197,29 @@ export default function ExtensionPage() {
         <div className="section-inner">
           <SectionHeader
             eyebrow="Release Notes"
-            title="Current release posture"
-            body="The website now acts as the operational adoption surface for the current extension release."
+            title="Current release"
+            body="This page tracks what the current extension release supports."
           />
           <div className="compatibility-notes">
-            <div className="note-card">
-              <h3>Current release</h3>
-              <p>Version {siteConfig.version} focuses on barcode parsing, NVC-backed lot resolution, and Panorama/InputHealth autofill workflows.</p>
-            </div>
-            <div className="note-card">
-              <h3>Maturity</h3>
-              <p>Recommended for internal clinic evaluation where supported screens can be validated before production use.</p>
-            </div>
-            <div className="note-card">
-              <h3>Roadmap</h3>
-              <p>Additional CHR integrations remain planned and should not be treated as supported until released here.</p>
-            </div>
+            <PanelFrame tone="hero" eyebrow="Release" title={`Version ${siteConfig.version}`} className="note-card">
+              <p>Barcode parsing, lot lookup, and Panorama/InputHealth field fill are the supported paths in this release.</p>
+            </PanelFrame>
+            <PanelFrame tone="reference" eyebrow="Status" title="Maturity" className="note-card">
+              <p>Best suited for internal evaluation where supported screens can be checked before production use.</p>
+            </PanelFrame>
+            <PanelFrame tone="utility" eyebrow="Next" title="Roadmap" className="note-card">
+              <p>Additional CHR integrations remain planned and are not supported until released here.</p>
+            </PanelFrame>
           </div>
         </div>
       </section>
 
-      <section id="faq" className="py-20" style={{ background: 'var(--bg)' }}>
+      <section id="faq" className="py-20" style={{ background: 'var(--bg-panel)' }}>
         <div className="section-inner">
           <SectionHeader
             eyebrow="FAQ"
-            title="Questions clinic teams ask before rollout"
-            body="These answers are written to help operational reviewers quickly assess risk, compatibility, and workflow fit."
+            title="Questions people ask before trying the extension"
+            body="These answers cover the practical questions that come up before rollout."
           />
           <FAQSection />
         </div>

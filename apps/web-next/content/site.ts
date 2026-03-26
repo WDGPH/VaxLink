@@ -12,6 +12,8 @@ export type FeatureCard = {
   summary: string
   detail: string
   proof?: string
+  tone?: VisualTone
+  layout?: LayoutMode
 }
 
 export type CompatibilityRow = {
@@ -33,19 +35,35 @@ export type FAQItem = {
   answer: string
 }
 
-type Screenshot = {
-  src: string
-  alt: string
+export type VisualTone = 'hero' | 'panel' | 'reference' | 'utility'
+
+export type LayoutMode = 'split' | 'stack' | 'rail' | 'grid'
+
+export type EvidenceItem = {
   title: string
   caption: string
+  asset: string
+  alt: string
+  variant: 'screenshot' | 'diagram' | 'mockup'
+}
+
+export type ModeCard = {
+  slug: string
+  label: string
+  title: string
+  description: string
+  href: string
+  cta: string
+  tone: VisualTone
+  bullets: string[]
 }
 
 export const siteConfig = {
   name: 'VaxLink',
   shortName: 'VaxLink',
   description:
-    'Scan vaccine barcodes, resolve NVC-backed lot metadata, and autofill CHR records for Panorama and InputHealth workflows.',
-  tagline: 'Clinic-ready vaccine barcode workflows backed by the National Vaccine Catalogue.',
+    'Scan vaccine barcodes, look up lot data from the National Vaccine Catalogue, and fill Panorama or InputHealth records.',
+  tagline: 'Vaccine barcode lookup and chart entry for Panorama and InputHealth.',
   baseUrl: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
   basePath: process.env.BASE_PATH || '',
   repoUrl: 'https://github.com/',
@@ -56,7 +74,7 @@ export const siteConfig = {
 export const homepageCTAs: CTA[] = [
   { label: 'Install Extension', href: '/extension#install', variant: 'primary' },
   { label: 'Open Explorer', href: '/explorer', variant: 'secondary' },
-  { label: 'See Supported Workflows', href: '/#workflows', variant: 'ghost' },
+  { label: 'See Use Cases', href: '/#workflows', variant: 'ghost' },
 ]
 
 export const homepageMetrics = [
@@ -66,21 +84,27 @@ export const homepageMetrics = [
   { value: '24h', label: 'Refresh cadence' },
 ]
 
+export const heroTelemetry = [
+  { label: 'Mode', value: 'Panorama / InputHealth' },
+  { label: 'Bundle', value: 'National Vaccine Catalogue' },
+  { label: 'Writes', value: 'Lot, DIN, expiry, trade name' },
+]
+
 export const clinicBenefits = [
   {
     title: 'Reduce manual entry',
     body:
-      'Move from barcode scan to autofill-ready vaccine metadata without hunting through separate product references.',
+      'Pull vaccine details from the barcode and the catalogue instead of typing lot, DIN, and expiry by hand.',
   },
   {
     title: 'Reduce transcription errors',
     body:
-      'Keep lot, DIN, expiry, and trade name aligned to the same NVC-backed source when documenting immunizations.',
+      'Keep lot, DIN, expiry, and trade name together while documenting an immunization record.',
   },
   {
     title: 'Speed up documentation',
     body:
-      'Give staff a repeatable workflow for Panorama and InputHealth instead of copying fields one by one.',
+      'Give staff the same repeatable steps in Panorama and InputHealth instead of copying fields one at a time.',
   },
 ]
 
@@ -92,30 +116,38 @@ export const homepageFeatures: FeatureCard[] = [
     detail:
       'Supports parenthesized GS1, compact payloads, and common text-label fallbacks used in clinic environments.',
     proof: 'Works with AI 01, AI 10, AI 17, and AI 21 barcode fields.',
+    tone: 'utility',
+    layout: 'split',
   },
   {
     slug: 'lot-resolution',
     title: 'Resolve lot metadata from NVC',
     summary: 'Match scanned lot numbers against National Vaccine Catalogue concepts.',
     detail:
-      'Surface trade name, DIN, manufacturer context, and related product metadata for review before data entry.',
-    proof: 'Built on Health Canada NVC FHIR bundle content.',
+      'Show trade name, DIN, and related product details before anything is entered into the chart.',
+    proof: 'Built on National Vaccine Catalogue FHIR bundle content.',
+    tone: 'panel',
+    layout: 'split',
   },
   {
     slug: 'chr-autofill',
-    title: 'Autofill supported CHR workflows',
-    summary: 'Push parsed vaccine details into Panorama and InputHealth with fewer manual steps.',
+    title: 'Fill supported CHR fields',
+    summary: 'Write parsed vaccine details into Panorama and InputHealth with fewer manual steps.',
     detail:
       'VaxLink targets the active page fields needed for immunization documentation rather than broad browser automation.',
     proof: 'Currently supported for Chrome + Panorama/InputHealth.',
+    tone: 'hero',
+    layout: 'rail',
   },
   {
     slug: 'source-inspection',
     title: 'Inspect source catalogue data when needed',
     summary: 'Use the explorer to verify bundle resources, lot matches, and barcode output.',
     detail:
-      'This is the fallback path for odd barcodes, no-match scenarios, or validating what the extension is using.',
+      'Use this when a barcode looks odd, a lot does not match, or you want to inspect the bundle directly.',
     proof: 'Remote NVC fetch and local JSON bundle loading are both supported.',
+    tone: 'reference',
+    layout: 'grid',
   },
 ]
 
@@ -133,16 +165,39 @@ export const workflowCards = [
   {
     title: 'Explorer verification',
     steps: ['Fetch the latest NVC bundle', 'Paste barcode or search resources', 'Inspect lot and FHIR resource details'],
-    note: 'Best for troubleshooting or validating source-of-truth data.',
+    note: 'Best for troubleshooting or checking what is in the current bundle.',
   },
 ]
 
 export const compatibilityRows: CompatibilityRow[] = [
-  { browser: 'Chrome', chr: 'Panorama', status: 'supported', notes: 'Primary in-clinic autofill workflow.' },
+  { browser: 'Chrome', chr: 'Panorama', status: 'supported', notes: 'Main supported autofill path.' },
   { browser: 'Chrome', chr: 'InputHealth', status: 'supported', notes: 'Supported for barcode parsing and autofill.' },
   { browser: 'Chrome', chr: 'OSCAR', status: 'planned', notes: 'Not yet mapped for stable field targeting.' },
   { browser: 'Chrome', chr: 'Wolf', status: 'planned', notes: 'Planned once selectors and workflow coverage are defined.' },
   { browser: 'Chrome', chr: 'PS Suite', status: 'planned', notes: 'Roadmap item, not available in the current extension.' },
+]
+
+export const modeCards: ModeCard[] = [
+  {
+    slug: 'explorer',
+    label: 'Lookup Mode',
+    title: 'Explorer',
+    description: 'Fetch the bundle, inspect FHIR resources, and confirm what the data says before changing a chart.',
+    href: '/explorer',
+    cta: 'Open Explorer',
+    tone: 'utility',
+    bullets: ['Remote NVC fetch', 'Local bundle load', 'FHIR resource detail view'],
+  },
+  {
+    slug: 'extension',
+    label: 'Entry Mode',
+    title: 'Extension',
+    description: 'Parse the barcode, review the fields, and fill Panorama or InputHealth with fewer manual steps.',
+    href: '/extension#install',
+    cta: 'Install Extension',
+    tone: 'panel',
+    bullets: ['Chrome extension', 'Panorama + InputHealth', 'Review before write'],
+  },
 ]
 
 export const installSteps = [
@@ -166,7 +221,7 @@ export const installSteps = [
   },
   {
     n: '04',
-    title: 'Validate the workflow',
+    title: 'Check the result',
     detail: 'Open Panorama or InputHealth, click the VaxLink icon, parse a barcode, then verify the autofill fields.',
     code: 'Parse -> Review -> Auto-fill',
   },
@@ -188,7 +243,7 @@ export const permissions: PermissionRow[] = [
   },
   {
     permission: 'clipboardRead',
-    reason: 'Supports scanners and workflows that deliver barcode payloads through paste actions.',
+    reason: 'Supports scanners and setups that deliver barcode payloads through paste actions.',
     optional: true,
     leavesBrowser: false,
   },
@@ -200,7 +255,7 @@ export const permissions: PermissionRow[] = [
   },
   {
     permission: 'alarms',
-    reason: 'Checks for bundle refreshes roughly every 24 hours so lot lookups do not drift.',
+    reason: 'Checks for bundle refreshes roughly every 24 hours so local lot lookups stay current.',
     optional: false,
     leavesBrowser: false,
   },
@@ -252,7 +307,7 @@ export const faqItems: FAQItem[] = [
   {
     question: 'What if lot lookup fails?',
     answer:
-      'Use the explorer to verify the barcode parse and confirm whether the lot exists in the current NVC bundle before assuming an extension issue.',
+      'Use the explorer to check the parsed barcode and confirm whether the lot exists in the current NVC bundle.',
   },
   {
     question: 'Which CHRs are supported today?',
@@ -262,35 +317,38 @@ export const faqItems: FAQItem[] = [
   {
     question: 'Is this Health Canada software?',
     answer:
-      'No. VaxLink uses the National Vaccine Catalogue as a source of truth but is an internal toolkit and is not affiliated with Health Canada.',
+      'No. VaxLink uses National Vaccine Catalogue data maintained by the Public Health Agency of Canada, but it is an internal toolkit and is not affiliated with PHAC.',
   },
 ]
 
 export const trustPoints = [
-  'NVC bundle data from Health Canada',
-  '24-hour refresh cadence for local bundle checks',
-  'Local browser storage for bundle caching',
+  'National Vaccine Catalogue bundle maintained by PHAC',
+  '24-hour bundle refresh checks',
+  'Local browser storage for cached data',
   'Manifest V3 Chrome extension for supported CHRs',
 ]
 
-export const proofScreenshots: Screenshot[] = [
+export const proofScreenshots: EvidenceItem[] = [
   {
-    src: '/proof-extension-parse.svg',
-    alt: 'VaxLink extension parse results showing GTIN, lot, expiry, and DIN fields.',
     title: 'Parsed barcode ready for review',
     caption: 'Extension view showing parsed AI fields before autofill.',
+    asset: '/proof-extension-parse.svg',
+    alt: 'VaxLink extension parse results showing GTIN, lot, expiry, and DIN fields.',
+    variant: 'mockup',
   },
   {
-    src: '/proof-autofill.svg',
+    title: 'Autofill review before commit',
+    caption: 'Staff can review which CHR values will be written.',
+    asset: '/proof-autofill.svg',
     alt: 'VaxLink autofill checklist showing CHR fields ready to populate.',
-    title: 'Autofill workflow before commit',
-    caption: 'Clinic operators can verify which CHR values will be written.',
+    variant: 'screenshot',
   },
   {
-    src: '/proof-explorer.svg',
+    title: 'Explorer lookup view',
+    caption: 'Use the explorer to check lot matches and inspect bundle resources.',
+    asset: '/proof-explorer.svg',
     alt: 'VaxLink explorer listing FHIR resources and a resolved lot match panel.',
-    title: 'Explorer verification surface',
-    caption: 'Use the explorer to validate lot matches and inspect source bundle resources.',
+    variant: 'diagram',
   },
 ]
 
@@ -339,6 +397,8 @@ export const footerColumns = [
   },
 ]
 
+const socialImagePath = '/proof-extension-parse.svg'
+
 function canonical(path: string) {
   const normalized = path === '/' ? '/' : path.replace(/\/$/, '')
   const withBasePath =
@@ -373,13 +433,13 @@ export function buildMetadata({
       url: canonical(path),
       siteName: siteConfig.name,
       type: 'website',
-      images: [{ url: canonical('/opengraph-image') }],
+      images: [{ url: canonical(socialImagePath) }],
     },
     twitter: {
       card: 'summary_large_image',
       title,
       description,
-      images: [canonical('/opengraph-image').toString()],
+      images: [canonical(socialImagePath).toString()],
     },
   }
 }

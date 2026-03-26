@@ -4,35 +4,34 @@ import { withBasePath } from '@/lib/base-path'
 
 export function Footer() {
   return (
-    <footer style={{ background: 'var(--dark-bg)' }}>
+    <footer className="site-footer">
       <div
-        className="h-px w-full"
-        style={{ background: 'linear-gradient(90deg, transparent, #3b82f6 30%, #818cf8 50%, #3b82f6 70%, transparent)' }}
+        className="site-footer-line"
       />
 
-      <div className="section-inner py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr_1fr_1fr_1fr] gap-10">
+      <div className="section-inner site-footer-inner">
+        <div className="site-footer-grid">
           <div>
-            <p className="font-sora font-extrabold text-xl text-white tracking-tight">
-              Vax<span className="text-blue-400">Link</span>
+            <p className="site-footer-brand">
+              Vax<span>Link</span>
             </p>
-            <p className="text-sm text-white/40 mt-2.5 leading-relaxed max-w-xs">
-              Vaccine barcode workflows for clinic teams. Powered by the National Vaccine Catalogue and designed for Panorama/InputHealth operations.
+            <p className="site-footer-copy">
+              Vaccine barcode lookup and chart entry for Panorama and InputHealth, using National Vaccine Catalogue data.
             </p>
-            <p className="text-xs text-white/25 mt-4">Version {siteConfig.version} · Internal toolkit, not affiliated with Health Canada.</p>
+            <p className="site-footer-meta">Version {siteConfig.version} · Internal toolkit, not affiliated with PHAC.</p>
           </div>
 
           {footerColumns.map((column) => (
             <div key={column.title}>
-              <p className="font-mono text-[10px] text-white/30 uppercase tracking-widest mb-4">{column.title}</p>
-              <nav className="flex flex-col gap-2.5">
+              <p className="site-footer-heading">{column.title}</p>
+              <nav className="site-footer-links">
                 {column.links.map((link) => (
                   <Link
                     key={link.label}
                     href={link.external ? link.href : withBasePath(link.href)}
                     target={link.external ? '_blank' : undefined}
                     rel={link.external ? 'noreferrer' : undefined}
-                    className="text-sm text-white/50 hover:text-white transition-colors w-fit"
+                    className="site-footer-link"
                   >
                     {link.label}
                   </Link>
@@ -42,9 +41,9 @@ export function Footer() {
           ))}
         </div>
 
-        <div className="mt-10 pt-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-          <p className="text-xs text-white/25">Source data reference: Health Canada National Vaccine Catalogue FHIR bundle.</p>
-          <p className="font-mono text-xs text-white/20">Built for clinic workflow clarity.</p>
+        <div className="site-footer-bottom">
+          <p>Source data reference: National Vaccine Catalogue FHIR bundle maintained by the Public Health Agency of Canada.</p>
+          <p>Built for clinic chart entry.</p>
         </div>
       </div>
     </footer>

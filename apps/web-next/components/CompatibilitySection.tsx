@@ -8,7 +8,7 @@ export function CompatibilitySection() {
         <SectionHeader
           eyebrow="Compatibility and Limits"
           title="Clear about where VaxLink works today"
-          body="The current release is built for Chrome-based Panorama and InputHealth workflows. Other CHRs remain planned and should not be assumed to work yet."
+          body="The current release supports Chrome with Panorama and InputHealth. Other CHRs are still planned."
         />
         <CompatibilityTable />
         <div className="compatibility-notes">
@@ -22,7 +22,7 @@ export function CompatibilitySection() {
           </div>
           <div className="note-card">
             <h3>Planned environments</h3>
-            <p>OSCAR, Wolf, and PS Suite remain roadmap items until selector coverage and workflow validation are complete.</p>
+            <p>OSCAR, Wolf, and PS Suite are still on the roadmap. They are not supported in the current extension.</p>
           </div>
         </div>
       </div>

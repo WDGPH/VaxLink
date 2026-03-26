@@ -1,3 +1,4 @@
+import { PanelFrame } from '@/components/PanelFrame'
 import { workflowCards } from '@/content/site'
 import { SectionHeader } from '@/components/SectionHeader'
 import { StaggerContainer, StaggerItem } from '@/components/ui/motion'
@@ -7,24 +8,23 @@ export function WorkflowSection() {
     <section id="workflows" className="py-24" style={{ background: 'var(--bg)' }}>
       <div className="section-inner">
         <SectionHeader
-          eyebrow="Supported Workflows"
-          title="Three ways clinic teams can use VaxLink"
-          body="The extension is the fastest path for documentation. The explorer is the verification surface when a barcode, lot, or workflow needs extra review."
+          eyebrow="Use Cases"
+          title="Three ways teams can move through the product"
+          body="The extension handles chart entry. The explorer handles lookup. The structure below shows where those two modes meet."
         />
 
-        <StaggerContainer className="grid grid-cols-1 lg:grid-cols-3 gap-6" stagger={0.12}>
+        <StaggerContainer className="workflow-rack" stagger={0.12}>
+          <div className="workflow-track" />
           {workflowCards.map(({ title, steps, note }, index) => (
             <StaggerItem key={title}>
-              <article className="workflow-card">
-                <div className="workflow-badge">{`0${index + 1}`}</div>
-                <h3>{title}</h3>
+              <PanelFrame tone={index === 1 ? 'hero' : 'utility'} eyebrow={`Step 0${index + 1}`} title={title} className="workflow-card">
                 <ul>
                   {steps.map((step) => (
                     <li key={step}>{step}</li>
                   ))}
                 </ul>
                 <div className="workflow-note">{note}</div>
-              </article>
+              </PanelFrame>
             </StaggerItem>
           ))}
         </StaggerContainer>
