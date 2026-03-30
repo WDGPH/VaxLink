@@ -73,7 +73,7 @@ export const siteConfig = {
 
 export const homepageCTAs: CTA[] = [
   { label: 'Install Extension', href: '/extension#install', variant: 'primary' },
-  { label: 'Open Explorer', href: '/explorer', variant: 'secondary' },
+  { label: 'View Extension', href: '/extension', variant: 'secondary' },
   { label: 'See Use Cases', href: '/#workflows', variant: 'ghost' },
 ]
 
@@ -141,11 +141,11 @@ export const homepageFeatures: FeatureCard[] = [
   },
   {
     slug: 'source-inspection',
-    title: 'Inspect source catalogue data when needed',
-    summary: 'Use the explorer to verify bundle resources, lot matches, and barcode output.',
+    title: 'Review source catalogue data when needed',
+    summary: 'Inspect cached bundle resources, lot matches, and barcode output in one place.',
     detail:
-      'Use this when a barcode looks odd, a lot does not match, or you want to inspect the bundle directly.',
-    proof: 'Remote NVC fetch and local JSON bundle loading are both supported.',
+      'Use this when a barcode looks odd, a lot does not match, or you want to review the bundle directly.',
+    proof: 'Remote NVC fetch and local JSON bundle loading both support repeat lookups.',
     tone: 'reference',
     layout: 'grid',
   },
@@ -163,9 +163,9 @@ export const workflowCards = [
     note: 'Useful when scanners output plain text or partial payloads.',
   },
   {
-    title: 'Explorer verification',
-    steps: ['Fetch the latest NVC bundle', 'Paste barcode or search resources', 'Inspect lot and FHIR resource details'],
-    note: 'Best for troubleshooting or checking what is in the current bundle.',
+    title: 'Cached bundle review',
+    steps: ['Refresh the local NVC bundle', 'Paste barcode or check lot data', 'Confirm the current reference details'],
+    note: 'Best for troubleshooting or confirming what is in the current bundle.',
   },
 ]
 
@@ -179,23 +179,13 @@ export const compatibilityRows: CompatibilityRow[] = [
 
 export const modeCards: ModeCard[] = [
   {
-    slug: 'explorer',
-    label: 'Lookup Mode',
-    title: 'Explorer',
-    description: 'Fetch the bundle, inspect FHIR resources, and confirm what the data says before changing a chart.',
-    href: '/explorer',
-    cta: 'Open Explorer',
-    tone: 'utility',
-    bullets: ['Remote NVC fetch', 'Local bundle load', 'FHIR resource detail view'],
-  },
-  {
     slug: 'extension',
-    label: 'Entry Mode',
     title: 'Extension',
+    label: 'Entry Mode',
     description: 'Parse the barcode, review the fields, and fill Panorama or InputHealth with fewer manual steps.',
     href: '/extension#install',
     cta: 'Install Extension',
-    tone: 'panel',
+    tone: 'utility',
     bullets: ['Chrome extension', 'Panorama + InputHealth', 'Review before write'],
   },
 ]
@@ -276,7 +266,7 @@ export const troubleshootingItems = [
   },
   {
     title: 'No lot match is returned',
-    body: 'Open the explorer, fetch the latest NVC bundle, and verify whether the lot exists in current catalogue data.',
+    body: 'Reload the extension, refresh the bundle, and verify whether the lot exists in current catalogue data.',
   },
   {
     title: 'Autofill fields are not detected',
@@ -284,7 +274,7 @@ export const troubleshootingItems = [
   },
   {
     title: 'Local NVC data feels stale',
-    body: 'Reload the extension or force a fresh bundle fetch in the explorer to validate whether newer source data is available.',
+    body: 'Reload the extension or force a fresh bundle fetch to validate whether newer source data is available.',
   },
 ]
 
@@ -307,7 +297,7 @@ export const faqItems: FAQItem[] = [
   {
     question: 'What if lot lookup fails?',
     answer:
-      'Use the explorer to check the parsed barcode and confirm whether the lot exists in the current NVC bundle.',
+      'Reload the extension, check the parsed barcode, and confirm whether the lot exists in the current NVC bundle.',
   },
   {
     question: 'Which CHRs are supported today?',
@@ -344,10 +334,10 @@ export const proofScreenshots: EvidenceItem[] = [
     variant: 'screenshot',
   },
   {
-    title: 'Explorer lookup view',
-    caption: 'Use the explorer to check lot matches and inspect bundle resources.',
+    title: 'Reference lookup view',
+    caption: 'Use the extension workflow to check lot matches and inspect bundle resources.',
     asset: '/proof-explorer.svg',
-    alt: 'VaxLink explorer listing FHIR resources and a resolved lot match panel.',
+    alt: 'VaxLink reference data listing FHIR resources and a resolved lot match panel.',
     variant: 'diagram',
   },
 ]
@@ -365,7 +355,6 @@ export const footerColumns = [
     title: 'Product',
     links: [
       { label: 'Home', href: '/' },
-      { label: 'Explorer', href: '/explorer' },
       { label: 'Extension', href: '/extension' },
       { label: 'Install', href: '/extension#install' },
     ],
@@ -390,7 +379,6 @@ export const footerColumns = [
   {
     title: 'Technical',
     links: [
-      { label: 'NVC / FHIR Source', href: '/explorer' },
       { label: `Version ${siteConfig.version}`, href: '/extension#release-notes' },
       { label: 'Repository', href: siteConfig.repoUrl, external: true },
     ],
@@ -455,11 +443,4 @@ export const extensionMetadata = buildMetadata({
   description:
     'Install the VaxLink Chrome extension to parse vaccine barcodes, resolve NVC-backed lot metadata, and autofill Panorama or InputHealth.',
   path: '/extension',
-})
-
-export const explorerMetadata = buildMetadata({
-  title: 'VaxLink Explorer | Verify NVC FHIR Resources and Lot Matches',
-  description:
-    'Use the VaxLink explorer to fetch the National Vaccine Catalogue bundle, inspect FHIR resources, parse GS1 barcodes, and verify lot metadata.',
-  path: '/explorer',
 })

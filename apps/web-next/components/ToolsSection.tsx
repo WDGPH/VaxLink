@@ -3,22 +3,6 @@ import { ModeSwitcher } from '@/components/ModeSwitcher'
 import { PanelFrame } from '@/components/PanelFrame'
 import { SectionHeader } from '@/components/SectionHeader'
 
-function ExplorerPreview() {
-  return (
-    <div className="mode-preview mode-preview-explorer">
-      <div className="mode-preview-head">
-        <span>Explorer</span>
-        <span>Lookup mode</span>
-      </div>
-      <div className="mode-preview-list">
-        <div><span>CodeSystem</span><strong>nvc-lot-codes</strong></div>
-        <div><span>ValueSet</span><strong>nvc-vaccines</strong></div>
-        <div><span>Result</span><strong>DIN 02484811</strong></div>
-      </div>
-    </div>
-  )
-}
-
 function ExtensionPreview() {
   return (
     <div className="mode-preview mode-preview-extension">
@@ -41,17 +25,14 @@ export function ToolsSection() {
       <section className="py-24 bg-white">
         <div className="section-inner">
           <SectionHeader
-            eyebrow="Product Modes"
-            title="Extension for chart entry, explorer for lookup"
-            body="VaxLink runs in two modes. One prepares and writes chart fields. The other checks bundle data and explains what the lot match is based on."
+            eyebrow="Product Mode"
+            title="Extension-first workflow for chart entry"
+            body="VaxLink centers on the extension: parse the barcode, review the fields, and write the chart values with fewer manual steps."
           />
 
           <div className="mode-layout">
             <ModeSwitcher />
             <div className="mode-preview-stack">
-              <PanelFrame tone="utility" eyebrow="Resource view" title="Explorer preview" className="mode-preview-frame">
-                <ExplorerPreview />
-              </PanelFrame>
               <PanelFrame tone="panel" eyebrow="Review view" title="Extension preview" className="mode-preview-frame">
                 <ExtensionPreview />
               </PanelFrame>

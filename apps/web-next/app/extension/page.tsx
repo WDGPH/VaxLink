@@ -15,7 +15,6 @@ import {
   siteConfig,
   troubleshootingItems,
 } from '@/content/site'
-import { withBasePath } from '@/lib/base-path'
 
 export const metadata = extensionMetadata
 
@@ -69,8 +68,8 @@ export default function ExtensionPage() {
               </p>
               <div className="extension-hero-cta">
                 <a href="#install" className="hero-primary-cta">Install Guide</a>
-                <Link href={withBasePath('/explorer')} className="hero-secondary-cta">
-                  Open Explorer
+                <Link href="#compatibility" className="hero-secondary-cta">
+                  View Compatibility
                 </Link>
               </div>
               <TrustStrip items={extensionTrustChips} dark />

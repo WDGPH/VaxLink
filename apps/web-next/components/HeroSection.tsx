@@ -57,7 +57,7 @@ export function HeroSection() {
             </TrackedLink>
             <TrackedLink
               href={withBasePath(secondary.href)}
-              event={{ name: 'cta_click', target: 'explorer' }}
+              event={{ name: 'cta_click', target: 'extension' }}
               className="hero-secondary-cta"
             >
               {secondary.label}

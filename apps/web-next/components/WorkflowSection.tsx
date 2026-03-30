@@ -10,7 +10,7 @@ export function WorkflowSection() {
         <SectionHeader
           eyebrow="Use Cases"
           title="Three ways teams can move through the product"
-          body="The extension handles chart entry. The explorer handles lookup. The structure below shows where those two modes meet."
+          body="The extension handles chart entry, review, and bundle refresh. The structure below shows where those steps meet."
         />
 
         <StaggerContainer className="workflow-rack" stagger={0.12}>

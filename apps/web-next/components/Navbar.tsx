@@ -9,7 +9,6 @@ import { withBasePath } from '@/lib/base-path'
 const NAV_LINKS = [
   { href: '/', label: 'Home' },
   { href: '/extension', label: 'Extension' },
-  { href: '/explorer', label: 'Explorer' },
   { href: '/extension#compatibility', label: 'Compatibility' },
   { href: '/extension#install', label: 'Install' },
 ]
@@ -59,18 +58,18 @@ export function Navbar() {
 
         <div className="hidden md:flex items-center gap-2">
           <TrackedLink
-            href={withBasePath('/extension#install')}
-            event={{ name: 'cta_click', target: 'install' }}
+            href={withBasePath('/extension')}
+            event={{ name: 'cta_click', target: 'extension' }}
             className="nav-secondary-cta"
           >
-            Install Extension
+            View Extension
           </TrackedLink>
           <TrackedLink
-            href={withBasePath('/explorer')}
-            event={{ name: 'cta_click', target: 'explorer' }}
+            href={withBasePath('/extension#install')}
+            event={{ name: 'cta_click', target: 'install' }}
             className="nav-primary-cta"
           >
-            Open Explorer
+            Install Extension
           </TrackedLink>
         </div>
 
@@ -103,20 +102,20 @@ export function Navbar() {
             </Link>
           ))}
           <TrackedLink
-            href={withBasePath('/extension#install')}
-            event={{ name: 'cta_click', target: 'install' }}
+            href={withBasePath('/extension')}
+            event={{ name: 'cta_click', target: 'extension' }}
             onClick={() => setOpen(false)}
             className="nav-mobile-secondary"
           >
-            Install Extension
+            View Extension
           </TrackedLink>
           <TrackedLink
-            href={withBasePath('/explorer')}
-            event={{ name: 'cta_click', target: 'explorer' }}
+            href={withBasePath('/extension#install')}
+            event={{ name: 'cta_click', target: 'install' }}
             onClick={() => setOpen(false)}
             className="nav-mobile-primary"
           >
-            Open Explorer
+            Install Extension
           </TrackedLink>
         </div>
       )}
