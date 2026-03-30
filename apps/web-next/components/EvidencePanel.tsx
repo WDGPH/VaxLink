@@ -1,5 +1,6 @@
 import Image from 'next/image'
 import type { EvidenceItem } from '@/content/site'
+import { withBasePath } from '@/lib/base-path'
 
 export function EvidencePanel({
   item,
@@ -12,7 +13,7 @@ export function EvidencePanel({
     <figure className={`evidence-panel evidence-${item.variant}${className ? ` ${className}` : ''}`}>
       <div className="evidence-tag">{item.variant}</div>
       <Image
-        src={item.asset}
+        src={withBasePath(item.asset)}
         alt={item.alt}
         width={720}
         height={480}

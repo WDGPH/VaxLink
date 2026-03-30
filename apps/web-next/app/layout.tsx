@@ -2,8 +2,7 @@ import './globals.css'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
 import { rootMetadata } from '@/content/site'
-
-const basePath = process.env.BASE_PATH || ''
+import { basePath } from '@/lib/base-path'
 
 export const metadata = {
   ...rootMetadata,
