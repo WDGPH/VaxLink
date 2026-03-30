@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { basePath } from '@/lib/base-path'
 
 export type CTA = {
   label: string
@@ -65,7 +66,7 @@ export const siteConfig = {
     'Scan vaccine barcodes, look up lot data from the National Vaccine Catalogue, and fill Panorama or InputHealth records.',
   tagline: 'Vaccine barcode lookup and chart entry for Panorama and InputHealth.',
   baseUrl: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
-  basePath: process.env.BASE_PATH || '',
+  basePath,
   repoUrl: 'https://github.com/',
   nvcUrl: 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC',
   version: '1.0.4',
@@ -408,20 +409,22 @@ export function buildMetadata({
   description: string
   path: string
 }): Metadata {
+  const canonicalUrl = canonical(path).toString()
+
   return {
     title,
     description,
     metadataBase: new URL(siteConfig.baseUrl),
     alternates: {
-      canonical: canonical(path),
+      canonical: canonicalUrl,
     },
     openGraph: {
       title,
       description,
-      url: canonical(path),
+      url: canonicalUrl,
       siteName: siteConfig.name,
       type: 'website',
-      images: [{ url: canonical(socialImagePath) }],
+      images: [{ url: canonical(socialImagePath).toString() }],
     },
     twitter: {
       card: 'summary_large_image',
