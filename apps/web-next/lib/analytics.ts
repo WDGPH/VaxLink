@@ -1,7 +1,5 @@
 export type SiteEvent =
-  | { name: 'cta_click'; target: 'explorer' | 'extension' | 'install' }
-  | { name: 'explorer_load_remote' }
-  | { name: 'explorer_load_local' }
+  | { name: 'cta_click'; target: 'extension' | 'install' }
   | { name: 'barcode_parse' }
 
 declare global {

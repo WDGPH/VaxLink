@@ -4,9 +4,9 @@ import { withBasePath } from '@/lib/base-path'
 import type { SiteEvent } from '@/lib/analytics'
 
 function eventFor(card: ModeCard): SiteEvent {
-  return card.slug === 'explorer'
-    ? { name: 'cta_click', target: 'explorer' }
-    : { name: 'cta_click', target: 'install' }
+  return card.slug === 'extension'
+    ? { name: 'cta_click', target: 'install' }
+    : { name: 'cta_click', target: 'extension' }
 }
 
 export function ModeSwitcher() {

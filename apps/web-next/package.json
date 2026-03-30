@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "PORT=3000 next dev",
-    "dev:proxy": "PORT=3000 next dev",
-    "notebook": "npm run build && PORT=3000 next start",
+    "dev": "next dev -p 3000",
+    "dev:proxy": "next dev -p 3000",
+    "notebook": "npm run build && next start -p 3000",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3000",
     "lint": "next lint"
   },
   "dependencies": {
