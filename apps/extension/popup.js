@@ -20,6 +20,7 @@ let addCurrentBtn;
 let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
+let openInventoryPageBtn;
 let clearMultipleBtn;
 let singleModeBtn;
 let multipleModeBtn;
@@ -98,6 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
+  openInventoryPageBtn = document.getElementById('openInventoryPageBtn');
   clearMultipleBtn = document.getElementById('clearMultipleBtn');
   singleModeBtn = document.getElementById('singleModeBtn');
   multipleModeBtn = document.getElementById('multipleModeBtn');
@@ -356,6 +358,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       await inventoryManager.clear();
       logAnalyticsEvent('queue_cleared', { workflow: 'inventory', queue: 'inventory', source: 'popup_button' });
       writeOutput('Inventory tray cleared.', 'info');
+    });
+  }
+
+  if (openInventoryPageBtn) {
+    openInventoryPageBtn.addEventListener('click', () => {
+      const url = chrome.runtime.getURL('inventory-manager.html');
+      chrome.tabs.create({ url });
     });
   }
 
