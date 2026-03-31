@@ -14,10 +14,8 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
-let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
 let lastVaxlinkFillAt = 0;
@@ -43,55 +41,6 @@ const INPUT_CANDIDATE_TTL_MS = 5000;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
-}
-
-function normalizeAudioFeedbackSetting(stored) {
-  return !(stored && stored[AUDIO_FEEDBACK_KEY] === false);
-}
-
-function getAudioContext() {
-  if (audioContextRef) return audioContextRef;
-  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
-  if (!AudioContextCtor) return null;
-  audioContextRef = new AudioContextCtor();
-  return audioContextRef;
-}
-
-function playAudioCue(kind) {
-  if (!audioFeedbackEnabled) return;
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  if (ctx.state === 'suspended') {
-    void ctx.resume().catch(() => undefined);
-  }
-
-  const playTone = (frequency, durationMs, type = 'sine', gainValue = 0.06, delayMs = 0) => {
-    const oscillator = ctx.createOscillator();
-    const gain = ctx.createGain();
-    oscillator.type = type;
-    oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000));
-    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + (delayMs / 1000) + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000) + (durationMs / 1000));
-    oscillator.connect(gain);
-    gain.connect(ctx.destination);
-    oscillator.start(ctx.currentTime + (delayMs / 1000));
-    oscillator.stop(ctx.currentTime + (delayMs / 1000) + (durationMs / 1000) + 0.02);
-  };
-
-  if (kind === 'success') {
-    playTone(880, 90, 'sine', 0.045, 0);
-    playTone(1175, 120, 'sine', 0.05, 95);
-    return;
-  }
-  if (kind === 'error') {
-    playTone(220, 220, 'square', 0.055, 0);
-    return;
-  }
-  if (kind === 'expiry_warning') {
-    playTone(980, 110, 'square', 0.06, 0);
-    playTone(980, 110, 'square', 0.06, 170);
-  }
 }
 
 function normalizeWorkflowMode(stored) {
@@ -152,6 +101,16 @@ function setupMessageListener() {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'autoFill') {
+      // Only the top frame should respond to autoFill messages from the popup.
+      // With all_frames:true, iframes also receive the message; if an iframe
+      // responds first with { success: false } (no matching fields), the popup
+      // sees a failure even though the main frame would succeed. Returning
+      // false lets the top frame's response through. (Edge delivers iframe
+      // responses before the main frame more often than Chrome, causing
+      // multi-inject to fail.)
+      if (window.top !== window.self) {
+        return false;
+      }
       try {
         const success = autoFillTelus(request.data);
         vlog('autoFillTelus', success);
@@ -760,43 +719,6 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
-  if (finalExpiryFlag === 'expired') {
-    playAudioCue('expiry_warning');
-    logAnalyticsEvent('expiry_blocked', {
-      workflow: activeWorkflowMode,
-      source,
-      vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
-      manufacturer: parsed.manufacturer || '',
-      expiryFlag: finalExpiryFlag
-    });
-    showExpiredAutofillGuard(parsed, async () => {
-      if (adminDateTimeAutofillEnabled) {
-        parsed.administered_at = parsed.administered_at || parsed.scanned_at || scanCapturedAt;
-      } else {
-        delete parsed.administered_at;
-      }
-      const overrideSuccess = autoFillTelus(parsed);
-      logAnalyticsEvent('autofill_result', {
-        workflow: activeWorkflowMode,
-        source,
-        success: overrideSuccess,
-        vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
-        manufacturer: parsed.manufacturer || '',
-        expiryFlag: finalExpiryFlag
-      });
-      if (overrideSuccess) {
-        showVaxlinkToast(parsed, getAutofillToastDurationMs(finalExpiryFlag));
-        playAudioCue('success');
-      } else {
-        playAudioCue('error');
-      }
-      vlog('hands-free autofill override', overrideSuccess, { source, parsed });
-    });
-    return;
-  }
-  if (finalExpiryFlag === 'expiring_soon') {
-    playAudioCue('expiry_warning');
-  }
   if (adminDateTimeAutofillEnabled) {
     parsed.administered_at = parsed.administered_at || parsed.scanned_at || scanCapturedAt;
   } else {
@@ -812,10 +734,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     expiryFlag: finalExpiryFlag
   });
   if (success) {
-    showVaxlinkToast(parsed, getAutofillToastDurationMs(finalExpiryFlag));
-    playAudioCue('success');
-  } else {
-    playAudioCue('error');
+    showVaxlinkToast(parsed);
   }
   vlog('hands-free autofill', success, { source, parsed });
 }
@@ -1034,12 +953,10 @@ function initHandsFreeScanner() {
     LEGACY_POPUP_MODE_KEY,
     LEGACY_REMOTE_MODE_KEY,
     LEGACY_HANDS_FREE_KEY,
-    ADMIN_DATETIME_AUTOFILL_KEY,
-    AUDIO_FEEDBACK_KEY
+    ADMIN_DATETIME_AUTOFILL_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
-    audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
   });
 
@@ -1050,8 +967,7 @@ function initHandsFreeScanner() {
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
-      !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
-      !(AUDIO_FEEDBACK_KEY in changes)
+      !(ADMIN_DATETIME_AUTOFILL_KEY in changes)
     ) {
       return;
     }
@@ -1062,14 +978,10 @@ function initHandsFreeScanner() {
       [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
       [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
         ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
-        : adminDateTimeAutofillEnabled,
-      [AUDIO_FEEDBACK_KEY]: AUDIO_FEEDBACK_KEY in changes
-        ? changes[AUDIO_FEEDBACK_KEY].newValue
-        : audioFeedbackEnabled
+        : adminDateTimeAutofillEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
-    audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
   });
@@ -2221,12 +2133,6 @@ function getDoseUnitFieldByLayout() {
 
 function buildAutofillPayloadFromQueueRecord(record) {
   if (!record) return null;
-  const totalDoses = Number.isFinite(Number(record.total_doses)) && Number(record.total_doses) > 0
-    ? Number(record.total_doses)
-    : '';
-  const remainingDoses = Number.isFinite(Number(record.remaining_doses)) && Number(record.remaining_doses) > 0
-    ? Number(record.remaining_doses)
-    : (totalDoses || 1);
   const payload = {
     scanned_at: record.scanned_at || '',
     gtin: record.gtin || '',
@@ -2249,9 +2155,6 @@ function buildAutofillPayloadFromQueueRecord(record) {
     dose_unit: record.dose_unit || '',
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
-    total_doses: totalDoses,
-    remaining_doses: remainingDoses,
-    dose_tracking: record.dose_tracking || 'manual',
     lookup_error: record.lookup_error || '',
     name: record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -2602,83 +2505,6 @@ function escapeToastHtml(text) {
   return d.innerHTML;
 }
 
-function getAutofillToastDurationMs(expiryFlag) {
-  return expiryFlag === 'expiring_soon' ? 8000 : 4000;
-}
-
-function ensureExpiryGuardHost() {
-  if (expiryGuardHost && document.body.contains(expiryGuardHost)) return expiryGuardRoot;
-  expiryGuardHost = document.createElement('div');
-  expiryGuardHost.id = 'vaxlink-expiry-guard-host';
-  const shadow = expiryGuardHost.attachShadow({ mode: 'closed' });
-  const style = document.createElement('style');
-  style.textContent = `
-    :host { all: initial; }
-    .vl-guard {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 2147483647;
-      width: min(540px, calc(100vw - 24px));
-      border-radius: 12px;
-      border: 2px solid #ef4444;
-      background: #7f1d1d;
-      color: #fff;
-      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.36);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      padding: 12px 14px;
-      pointer-events: auto;
-    }
-    .vl-guard-title { font-size: 16px; font-weight: 800; }
-    .vl-guard-sub { margin-top: 4px; font-size: 13px; opacity: 0.95; }
-    .vl-guard-btn {
-      margin-top: 10px;
-      border: 0;
-      border-radius: 8px;
-      background: #fee2e2;
-      color: #7f1d1d;
-      font-size: 12px;
-      font-weight: 700;
-      padding: 8px 12px;
-      cursor: pointer;
-    }
-  `;
-  shadow.appendChild(style);
-  expiryGuardRoot = document.createElement('div');
-  shadow.appendChild(expiryGuardRoot);
-  document.body.appendChild(expiryGuardHost);
-  return expiryGuardRoot;
-}
-
-function dismissExpiredGuard() {
-  if (expiryGuardRoot) {
-    expiryGuardRoot.innerHTML = '';
-  }
-}
-
-function showExpiredAutofillGuard(data, onOverride) {
-  if (!isHandsFreeSupportedPage()) return;
-  const root = ensureExpiryGuardHost();
-  const expiry = data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry || '';
-  const expiryDate = expiry ? escapeToastHtml(String(expiry).slice(0, 10)) : 'Unknown date';
-  const label = escapeToastHtml(data?.tradename || data?.generic_name || data?.name || data?.lot || 'Vaccine');
-  root.innerHTML = `<div class="vl-guard">
-    <div class="vl-guard-title">EXPIRED - Do not administer</div>
-    <div class="vl-guard-sub">${label} (exp ${expiryDate})</div>
-    <button class="vl-guard-btn" type="button">Override and Fill</button>
-  </div>`;
-  const overrideBtn = root.querySelector('.vl-guard-btn');
-  if (overrideBtn) {
-    overrideBtn.addEventListener('click', () => {
-      dismissExpiredGuard();
-      if (typeof onOverride === 'function') {
-        void onOverride();
-      }
-    });
-  }
-}
-
 // ---------------------------------------------------------------------------
 // In-page floating HUD for multiple-inject queue
 // ---------------------------------------------------------------------------
@@ -2798,47 +2624,6 @@ function updateHudState() {
   });
 }
 
-function consumeQueueHeadWithDoseRecord(rows, record) {
-  if (!Array.isArray(rows) || !rows.length) {
-    return {
-      nextRows: [],
-      remainingDosesAfterUse: 0,
-      removed: true
-    };
-  }
-  const sourceRecord = rows[0];
-  if (record && record.id && sourceRecord && sourceRecord.id !== record.id) {
-    return {
-      nextRows: rows.slice(1),
-      remainingDosesAfterUse: 0,
-      removed: true
-    };
-  }
-
-  const remaining = getQueueRemainingDoses(sourceRecord, 1);
-  if (remaining <= 1) {
-    return {
-      nextRows: rows.slice(1),
-      remainingDosesAfterUse: 0,
-      removed: true
-    };
-  }
-
-  const nextRecord = {
-    ...sourceRecord,
-    total_doses: getPositiveInt(sourceRecord.total_doses, remaining),
-    remaining_doses: remaining - 1,
-    dose_tracking: sourceRecord.dose_tracking || 'manual'
-  };
-  const nextRows = [...rows];
-  nextRows[0] = nextRecord;
-  return {
-    nextRows,
-    remainingDosesAfterUse: nextRecord.remaining_doses,
-    removed: false
-  };
-}
-
 async function applyNextQueueItem() {
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
@@ -2851,67 +2636,20 @@ async function applyNextQueueItem() {
       return;
     }
 
-    const record = rows[0];
+    const record = rows.shift();
+    await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
+
     const data = buildAutofillPayloadFromQueueRecord(record);
-    if (!data) {
-      if (hudApplyBtn) hudApplyBtn.disabled = false;
-      return;
-    }
-    const finalExpiryFlag = data.expiry_flag || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
+    if (!data) return;
 
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source: 'hud',
       vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
       manufacturer: record.manufacturer || '',
-      expiryFlag: finalExpiryFlag
+      expiryFlag: record.expiry_flag || ''
     });
 
-    if (finalExpiryFlag === 'expired') {
-      playAudioCue('expiry_warning');
-      logAnalyticsEvent('expiry_blocked', {
-        workflow: 'multiple',
-        source: 'hud',
-        vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
-        manufacturer: record.manufacturer || '',
-        expiryFlag: finalExpiryFlag
-      });
-      showExpiredAutofillGuard(data, async () => {
-        const consumed = consumeQueueHeadWithDoseRecord(rows, record);
-        await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: consumed.nextRows });
-        const overrideSuccess = autoFillTelus(data);
-        logAnalyticsEvent('autofill_result', {
-          workflow: 'multiple',
-          source: 'hud',
-          success: overrideSuccess,
-          vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
-          manufacturer: record.manufacturer || '',
-          expiryFlag: finalExpiryFlag
-        });
-        if (overrideSuccess) {
-          logAnalyticsEvent('queue_used', {
-            workflow: 'multiple',
-            queue: 'multiple',
-            source: 'hud',
-            count: 1,
-            queueSizeAfter: consumed.nextRows.length
-          });
-          showVaxlinkToast(data, getAutofillToastDurationMs(finalExpiryFlag));
-          playAudioCue('success');
-        } else {
-          playAudioCue('error');
-        }
-        updateHudState();
-      });
-      if (hudApplyBtn) hudApplyBtn.disabled = false;
-      return;
-    }
-    if (finalExpiryFlag === 'expiring_soon') {
-      playAudioCue('expiry_warning');
-    }
-
-    const consumed = consumeQueueHeadWithDoseRecord(rows, record);
-    await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: consumed.nextRows });
     const success = autoFillTelus(data);
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
@@ -2919,21 +2657,18 @@ async function applyNextQueueItem() {
       success,
       vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
       manufacturer: record.manufacturer || '',
-      expiryFlag: finalExpiryFlag
+      expiryFlag: record.expiry_flag || ''
     });
     logAnalyticsEvent('queue_used', {
       workflow: 'multiple',
       queue: 'multiple',
       source: 'hud',
       count: 1,
-      queueSizeAfter: consumed.nextRows.length
+      queueSizeAfter: rows.length
     });
 
     if (success) {
-      showVaxlinkToast(data, getAutofillToastDurationMs(finalExpiryFlag));
-      playAudioCue('success');
-    } else {
-      playAudioCue('error');
+      showVaxlinkToast(data);
     }
     updateHudState();
   } catch (error) {

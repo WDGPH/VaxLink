@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480" fill="none">
+  <rect width="720" height="480" rx="28" fill="#F8FAFC"/>
+  <rect x="28" y="28" width="664" height="424" rx="24" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="56" y="72" fill="#0F172A" font-family="Arial, sans-serif" font-size="24" font-weight="700">Autofill Validation Before Commit</text>
+  <text x="56" y="100" fill="#64748B" font-family="Arial, sans-serif" font-size="15">Operators can confirm every field before writing to Panorama or InputHealth.</text>
+  <rect x="56" y="132" width="608" height="60" rx="18" fill="#EFF6FF" stroke="#BFDBFE"/>
+  <text x="84" y="168" fill="#1D4ED8" font-family="Arial, sans-serif" font-size="18" font-weight="700">Target environment: Panorama immunization record</text>
+  <g font-family="Arial, sans-serif" font-size="18">
+    <rect x="56" y="220" width="608" height="48" rx="14" fill="#FFF7ED" stroke="#FCD34D"/>
+    <text x="82" y="250" fill="#92400E">Trade Name</text>
+    <text x="434" y="250" fill="#0F172A">Fluzone Quadrivalent</text>
+    <circle cx="633" cy="244" r="12" fill="#16A34A"/>
+    <path d="M628 244.5 632 248 639 239" stroke="#F8FAFC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="56" y="282" width="608" height="48" rx="14" fill="#FFF7ED" stroke="#FCD34D"/>
+    <text x="82" y="312" fill="#92400E">DIN</text>
+    <text x="434" y="312" fill="#0F172A">02484811</text>
+    <circle cx="633" cy="306" r="12" fill="#16A34A"/>
+    <path d="M628 306.5 632 310 639 301" stroke="#F8FAFC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="56" y="344" width="608" height="48" rx="14" fill="#FFF7ED" stroke="#FCD34D"/>
+    <text x="82" y="374" fill="#92400E">Lot / Expiry</text>
+    <text x="434" y="374" fill="#0F172A">2024B-LOT12 / 2026-06-30</text>
+    <circle cx="633" cy="368" r="12" fill="#16A34A"/>
+    <path d="M628 368.5 632 372 639 363" stroke="#F8FAFC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="56" y="412" width="230" height="24" rx="12" fill="#DBEAFE"/>
+  <text x="75" y="428" fill="#1D4ED8" font-family="Arial, sans-serif" font-size="13">Fields only populate after operator review</text>
+</svg>

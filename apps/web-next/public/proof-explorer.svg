@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="480" viewBox="0 0 720 480" fill="none">
+  <rect width="720" height="480" rx="28" fill="#E2E8F0"/>
+  <rect x="28" y="28" width="664" height="424" rx="24" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <rect x="52" y="52" width="616" height="48" rx="14" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <text x="76" y="82" fill="#1D4ED8" font-family="Arial, sans-serif" font-size="18" font-weight="700">Quick start: fetch NVC bundle -> paste barcode -> inspect lot match</text>
+  <rect x="52" y="124" width="346" height="284" rx="18" fill="#0F172A"/>
+  <rect x="420" y="124" width="248" height="132" rx="18" fill="#EFF6FF" stroke="#BFDBFE"/>
+  <rect x="420" y="276" width="248" height="132" rx="18" fill="#FFF7ED" stroke="#FCD34D"/>
+  <text x="76" y="152" fill="#94A3B8" font-family="Courier New, monospace" font-size="14">FHIR Resource List</text>
+  <g font-family="Courier New, monospace" font-size="14">
+    <text x="76" y="186" fill="#60A5FA">1  CodeSystem   nvc-lot-codes</text>
+    <text x="76" y="214" fill="#CBD5E1">2  ValueSet     nvc-vaccines</text>
+    <text x="76" y="242" fill="#CBD5E1">3  ValueSet     nvc-routes</text>
+    <text x="76" y="270" fill="#CBD5E1">4  CodeSystem   nvc-tradenames</text>
+    <text x="76" y="298" fill="#CBD5E1">5  ValueSet     nvc-manufacturers</text>
+  </g>
+  <rect x="76" y="330" width="298" height="50" rx="12" fill="#16233F" stroke="#334155"/>
+  <text x="96" y="360" fill="#93C5FD" font-family="Courier New, monospace" font-size="14">Search: lot 2024B-LOT12</text>
+  <text x="444" y="156" fill="#1D4ED8" font-family="Arial, sans-serif" font-size="18" font-weight="700">Bundle Summary</text>
+  <text x="444" y="186" fill="#334155" font-family="Arial, sans-serif" font-size="16">Resources: 15</text>
+  <text x="444" y="210" fill="#334155" font-family="Arial, sans-serif" font-size="16">Lot concepts: 4,200+</text>
+  <text x="444" y="234" fill="#334155" font-family="Arial, sans-serif" font-size="16">Source: Remote NVC API</text>
+  <text x="444" y="308" fill="#92400E" font-family="Arial, sans-serif" font-size="18" font-weight="700">Lot Match</text>
+  <text x="444" y="338" fill="#7C2D12" font-family="Arial, sans-serif" font-size="16">2024B-LOT12 -> Fluzone Quadrivalent</text>
+  <text x="444" y="362" fill="#7C2D12" font-family="Arial, sans-serif" font-size="16">DIN 02484811 / Active</text>
+</svg>
