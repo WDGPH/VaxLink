@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VaxLink Inventory Manager</title>
+  <style>
+    :root {
+      --bg: #f5f7f9;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --subtle: #6b7280;
+      --line: #e5e7eb;
+      --accent: #0f766e;
+      --danger: #9a3412;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", "Inter", "Trebuchet MS", sans-serif;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+      overflow: hidden;
+    }
+    .header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(135deg, #fafafa 0%, #f7fbfb 100%);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0.1px;
+    }
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--subtle);
+      font-size: 13px;
+    }
+    .workflow-strip {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #4b5563;
+      line-height: 1.5;
+    }
+    .content {
+      padding: 14px 16px 18px;
+      display: grid;
+      gap: 10px;
+    }
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 11px;
+      background: #fcfcfd;
+    }
+    .section h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: #111827;
+      letter-spacing: 0.2px;
+    }
+    .section-note {
+      margin: 0 0 10px;
+      font-size: 12px;
+      color: var(--subtle);
+      line-height: 1.45;
+    }
+    textarea {
+      width: 100%;
+      min-height: 76px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: "Consolas", "Courier New", monospace;
+      resize: vertical;
+      background: #fff;
+    }
+    input[type="number"] {
+      width: 90px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+    .summary {
+      font-size: 13px;
+      color: var(--subtle);
+    }
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 1px solid transparent;
+      border-radius: 10px;
+      padding: 8px 11px;
+      font-weight: 700;
+      cursor: pointer;
+      font-size: 12px;
+      transition: transform 80ms ease, filter 120ms ease;
+    }
+    button:hover {
+      filter: brightness(1.02);
+    }
+    button:active {
+      transform: translateY(1px);
+    }
+    button:focus-visible,
+    textarea:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid rgba(15, 118, 110, 0.25);
+      outline-offset: 1px;
+    }
+    #refreshBtn { background: #e5f4f5; color: #14505f; }
+    #receiveBtn { background: #0f8b8d; color: #fff; }
+    #saveWastageBtn { background: #b45309; color: #fff; }
+    #saveIncidentBtn { background: #7c3aed; color: #fff; }
+    #signoffReconBtn { background: #0e7490; color: #fff; }
+    #exportPackageBtn { background: #1d4ed8; color: #fff; }
+    #exportJsonBtn { background: #334155; color: #fff; }
+    #markDoNotUseBtn { background: #991b1b; color: #fff; }
+    #clearDoNotUseBtn { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+    #exportHandoffBtn { background: #0f766e; color: #fff; }
+    #exportBtn { background: #164e63; color: #fff; }
+    #clearBtn {
+      background: #fff7ed;
+      border: 1px solid #f4cda5;
+      color: var(--danger);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px;
+      border-bottom: 1px solid #e7edf3;
+      font-size: 12px;
+      vertical-align: top;
+    }
+    th {
+      background: #f8fbfe;
+      color: #436078;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.25px;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .empty {
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      color: var(--subtle);
+      font-size: 13px;
+      background: #fafafa;
+    }
+    .status {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--subtle);
+    }
+    .chip {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      background: #eef6fb;
+      color: #345067;
+    }
+    .variance-ok { color: #166534; font-weight: 700; }
+    .variance-warn { color: #9a3412; font-weight: 700; }
+    .variance-bad { color: #b91c1c; font-weight: 700; }
+    .field-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .field-row input[type="text"],
+    .field-row input[type="datetime-local"],
+    .field-row select {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 8px;
+      font-size: 12px;
+      min-width: 170px;
+    }
+    .ledger {
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .warning-row {
+      border-left: 4px solid #b91c1c;
+      padding-left: 8px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #7f1d1d;
+    }
+    details.fold {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fcfcfd;
+    }
+    details.fold summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 11px;
+      font-weight: 700;
+      font-size: 13px;
+      color: #374151;
+      border-bottom: 1px solid transparent;
+      user-select: none;
+    }
+    details.fold[open] summary {
+      border-bottom-color: var(--line);
+      background: #f9fafb;
+    }
+    details.fold > .section-body {
+      padding: 11px;
+    }
+    .micro-note {
+      margin: 0;
+      color: #6b7280;
+      font-size: 11px;
+    }
+    .toggle-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 8px;
+      align-items: center;
+    }
+    .toggle-row label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #374151;
+      font-weight: 600;
+    }
+    .scan-live-indicator {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #0f766e;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <div class="header">
+        <div>
+          <h1>Inventory Manager</h1>
+          <p class="subtitle">Local inventory data saved by VaxLink extension.</p>
+          <div class="workflow-strip">Receive stock -> Use FEFO board -> Reconcile count -> Sign-off -> Export handoff.</div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="section">
+          <h2>Receive Stock</h2>
+          <p class="section-note">Scan one barcode per line. VaxLink will parse GS1, enrich with NVC lot data, and add records into local inventory.</p>
+          <textarea id="receiveInput" placeholder="Scan or paste barcode lines..."></textarea>
+          <div class="toggle-row">
+            <label><input id="ultraFastToggle" type="checkbox"> Ultra-fast scanner mode (Enter = instant receive)</label>
+            <label><input id="scannerBeepsToggle" type="checkbox"> Scanner beeps (success/error)</label>
+          </div>
+          <div id="scanLiveIndicator" class="scan-live-indicator"></div>
+          <div class="btn-group" style="margin-top:8px;">
+            <button id="receiveBtn" type="button">Receive Into Inventory</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <div id="summary" class="summary">Loading...</div>
+          <div class="btn-group">
+            <button id="refreshBtn" type="button">Refresh</button>
+            <button id="exportPackageBtn" type="button">Export Clinical CSV Pack</button>
+            <button id="exportBtn" type="button">Export Inventory CSV</button>
+            <button id="exportJsonBtn" type="button">Advanced JSON Export</button>
+            <button id="clearBtn" type="button">Clear Inventory</button>
+          </div>
+        </div>
+        <div class="section">
+          <h2>Clinical Actions</h2>
+          <p class="section-note">Prioritize expiring stock and quarantine unsafe lots.</p>
+          <div id="fefoHost"></div>
+          <div class="field-row">
+            <input id="doNotUseLotInput" type="text" placeholder="Lot to quarantine / do not use">
+            <input id="doNotUseReasonInput" type="text" placeholder="Reason (recall, incident, etc.)">
+            <button id="markDoNotUseBtn" type="button">Mark Do Not Use</button>
+            <button id="clearDoNotUseBtn" type="button">Clear Lot Flag</button>
+          </div>
+          <div id="doNotUseHost" class="warning-row"></div>
+        </div>
+        <div class="section">
+          <h2>Reconciliation</h2>
+          <p class="section-note">For each vaccine/lot, compare expected remaining doses in VaxLink with the physical count in fridge stock.</p>
+          <div id="reconHost"></div>
+          <div class="btn-group" style="margin-top:8px;">
+            <button id="signoffReconBtn" type="button">Save Reconciliation Sign-off</button>
+          </div>
+          <p class="micro-note" style="margin-top:8px;">Tip: fill physical count only for lots you counted now; pending fields stay highlighted as follow-up.</p>
+        </div>
+        <details class="fold">
+          <summary>Wastage (Advanced)</summary>
+          <div class="section-body">
+            <p class="section-note">Record wasted doses by lot and reason. This updates inventory and logs an auditable transaction.</p>
+            <div class="field-row">
+              <input id="wastageLotInput" type="text" placeholder="Lot number">
+              <input id="wastageQtyInput" type="number" min="1" placeholder="Qty">
+              <select id="wastageReasonSelect">
+                <option value="expired">Expired</option>
+                <option value="cold_chain_excursion">Cold chain excursion</option>
+                <option value="broken_vial">Broken vial</option>
+                <option value="partial_vial_discard">Partial vial discard</option>
+                <option value="contamination">Contamination</option>
+                <option value="other">Other</option>
+              </select>
+              <input id="wastageNoteInput" type="text" placeholder="Optional note">
+              <button id="saveWastageBtn" type="button">Record Wastage</button>
+            </div>
+          </div>
+        </details>
+        <details class="fold">
+          <summary>Cold Chain Incident (Advanced)</summary>
+          <div class="section-body">
+            <p class="section-note">Capture excursion details and outcome for reporting and follow-up.</p>
+            <div class="field-row">
+              <input id="incidentLotInput" type="text" placeholder="Lot (optional)">
+              <input id="incidentMinTempInput" type="text" placeholder="Min temp (C)">
+              <input id="incidentMaxTempInput" type="text" placeholder="Max temp (C)">
+              <input id="incidentStartInput" type="datetime-local">
+              <input id="incidentEndInput" type="datetime-local">
+              <select id="incidentOutcomeSelect">
+                <option value="quarantine">Quarantine pending guidance</option>
+                <option value="use_allowed">Use allowed</option>
+                <option value="discarded">Discarded</option>
+              </select>
+              <input id="incidentNoteInput" type="text" placeholder="Optional note">
+              <button id="saveIncidentBtn" type="button">Log Incident</button>
+            </div>
+          </div>
+        </details>
+        <details class="fold">
+          <summary>Transaction Ledger & Handoff (Advanced)</summary>
+          <div class="section-body">
+            <p class="section-note">Most recent inventory transactions (receive, wastage, incidents, reconciliation sign-offs).</p>
+            <div id="ledgerHost" class="ledger"></div>
+            <div class="btn-group" style="margin-top:8px;">
+              <button id="exportHandoffBtn" type="button">Export Shift Handoff</button>
+            </div>
+          </div>
+        </details>
+        <div id="tableHost"></div>
+        <div id="status" class="status"></div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="inventory-manager.js"></script>
+</body>
+</html>
