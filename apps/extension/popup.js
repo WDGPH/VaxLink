@@ -47,7 +47,6 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
-let audioFeedbackToggle;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
@@ -65,7 +64,6 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -126,7 +124,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
-  audioFeedbackToggle = document.getElementById('audioFeedbackToggle');
 
   multipleInjectManager = new ScanQueueManager({
     storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -157,7 +154,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
-  await loadAudioFeedbackSetting();
   await loadAnalyticsSummary();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
 
@@ -201,11 +197,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
-    });
-  }
-  if (audioFeedbackToggle) {
-    audioFeedbackToggle.addEventListener('change', () => {
-      void setAudioFeedbackSetting(!!audioFeedbackToggle.checked);
     });
   }
 
@@ -437,40 +428,6 @@ async function setAdminDateTimeAutofillSetting(enabled) {
     );
   } catch (error) {
     writeOutput(error.message || 'Could not update Date Administered auto-fill setting.', 'error');
-  }
-}
-
-function normalizeAudioFeedbackSetting(stored) {
-  return !(stored && stored[AUDIO_FEEDBACK_KEY] === false);
-}
-
-function applyAudioFeedbackSetting(enabled) {
-  if (audioFeedbackToggle) {
-    audioFeedbackToggle.checked = !!enabled;
-  }
-}
-
-async function loadAudioFeedbackSetting() {
-  try {
-    const stored = await getLocalStorage([AUDIO_FEEDBACK_KEY]);
-    applyAudioFeedbackSetting(normalizeAudioFeedbackSetting(stored));
-  } catch (_) {
-    applyAudioFeedbackSetting(true);
-  }
-}
-
-async function setAudioFeedbackSetting(enabled) {
-  applyAudioFeedbackSetting(enabled);
-  try {
-    await setLocalStorage({ [AUDIO_FEEDBACK_KEY]: !!enabled });
-    writeOutput(
-      enabled
-        ? 'Scan audio feedback is enabled.'
-        : 'Scan audio feedback is disabled.',
-      'info'
-    );
-  } catch (error) {
-    writeOutput(error.message || 'Could not update audio feedback setting.', 'error');
   }
 }
 
@@ -1123,26 +1080,6 @@ function buildAutoFillPayload(data, fallbackTimestamp = '') {
   return payload;
 }
 
-function normalizeDoseCount(value, fallback = null) {
-  if (value === null || value === undefined || value === '') {
-    return fallback;
-  }
-  const parsed = Number.parseInt(String(value).trim(), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
-}
-
-function getQueueRemainingDoses(row, fallback = 1) {
-  const remaining = normalizeDoseCount(row && row.remaining_doses, null);
-  if (remaining !== null) {
-    return remaining;
-  }
-  const total = normalizeDoseCount(row && row.total_doses, null);
-  return total !== null ? total : fallback;
-}
-
 async function loadWorkflowMode() {
   try {
     const stored = await getLocalStorage([
@@ -1624,17 +1561,19 @@ async function displayParsedData(data, parseRequestId) {
 }
 
 function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
-  chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, (response) => {
+  // Target the main frame (frameId 0) to avoid iframe content scripts
+  // responding first with { success: false } and masking the real result.
+  chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, { frameId: 0 }, (response) => {
     if (chrome.runtime.lastError) {
       const message = chrome.runtime.lastError.message || '';
 
       if (message.includes('Receiving end does not exist')) {
-        chrome.scripting.executeScript({ target: { tabId }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
+        chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
           if (chrome.runtime.lastError) {
             callback({ success: false, error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}` });
             return;
           }
-          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, callback);
+          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, { frameId: 0 }, callback);
         });
         return;
       }
