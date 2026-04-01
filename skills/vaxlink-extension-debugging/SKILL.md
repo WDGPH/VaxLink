@@ -25,17 +25,12 @@ Trace the path from scan input to parsed payload to background queue to content-
 - `apps/extension/popup-parser.js`
 - `apps/extension/background.js`
 - `apps/extension/content.js`
-- `apps/extension/inventory/page-controller.js`
-- `apps/extension/inventory/repository.js`
-- `apps/extension/inventory/model.js`
 
 ## What To Check First
 
 - Does the parsed barcode contain `lot`, `expiry`, `gtin`, and `serial` as expected?
 - Did the popup include `administered_at` only when the setting is enabled?
 - Is `workflow_mode` correct for single, multiple, or inventory flows?
-- Did the popup/content flow update the legacy queue key as expected?
-- Did the inventory page mirror or import the queue into IndexedDB correctly?
 - Did background storage keep the last-known-good bundle and analytics state?
 - Is the content script on the right host and page type before autofill starts?
 - Are there runtime errors from `chrome.runtime.lastError` or missing permissions?

@@ -20,7 +20,6 @@ let addCurrentBtn;
 let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
-let openInventoryPageBtn;
 let clearMultipleBtn;
 let singleModeBtn;
 let multipleModeBtn;
@@ -97,7 +96,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
-  openInventoryPageBtn = document.getElementById('openInventoryPageBtn');
   clearMultipleBtn = document.getElementById('clearMultipleBtn');
   singleModeBtn = document.getElementById('singleModeBtn');
   multipleModeBtn = document.getElementById('multipleModeBtn');
@@ -349,13 +347,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       await inventoryManager.clear();
       logAnalyticsEvent('queue_cleared', { workflow: 'inventory', queue: 'inventory', source: 'popup_button' });
       writeOutput('Inventory tray cleared.', 'info');
-    });
-  }
-
-  if (openInventoryPageBtn) {
-    openInventoryPageBtn.addEventListener('click', () => {
-      const url = chrome.runtime.getURL('inventory-manager.html');
-      chrome.tabs.create({ url });
     });
   }
 
@@ -1022,12 +1013,6 @@ function normalizeWorkflowMode(stored) {
 
 function buildAutofillPayloadFromQueueRecord(record) {
   if (!record) return null;
-  const totalDoses = Number.isFinite(Number(record.total_doses)) && Number(record.total_doses) > 0
-    ? Number(record.total_doses)
-    : '';
-  const remainingDoses = Number.isFinite(Number(record.remaining_doses)) && Number(record.remaining_doses) > 0
-    ? Number(record.remaining_doses)
-    : (Number.isFinite(totalDoses) ? totalDoses : '');
   return {
     scanned_at: record.scanned_at || '',
     gtin: record.gtin || '',
@@ -1050,9 +1035,6 @@ function buildAutofillPayloadFromQueueRecord(record) {
     dose_unit: record.dose_unit || '',
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
-    total_doses: totalDoses,
-    remaining_doses: remainingDoses,
-    dose_tracking: record.dose_tracking || 'manual',
     lookup_error: record.lookup_error || '',
     name: record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -1413,6 +1395,16 @@ async function handleUseMultipleInjectRecord(record) {
   }
 
   parsedData = data;
+  logAnalyticsEvent('queue_used', {
+    workflow: 'multiple',
+    queue: 'multiple',
+    source: 'queue',
+    count: 1,
+    queueSizeAfter: multipleInjectManager.count,
+    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    manufacturer: record.manufacturer || '',
+    expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+  });
   writeOutput(
     buildParsedOutputMarkup(data),
     outputTypeForExpiry(getExpiryStatus(data.inventory_expiry || data.expiry))
@@ -1427,28 +1419,7 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     await sendAutoFillToActiveTab(data);
-    const remainingDoses = getQueueRemainingDoses(record, 1);
-    const nextRecord = remainingDoses > 1
-      ? await multipleInjectManager.consumeById(record.id)
-      : await multipleInjectManager.remove(record.id);
-    if (nextRecord) {
-      multipleInjectManager.setActiveUse(nextRecord.id);
-    } else {
-      multipleInjectManager.setActiveUse('');
-    }
-    const updatedRemaining = nextRecord
-      ? getQueueRemainingDoses(nextRecord, 1)
-      : 0;
-    logAnalyticsEvent('queue_used', {
-      workflow: 'multiple',
-      queue: 'multiple',
-      source: 'queue',
-      count: 1,
-      queueSizeAfter: multipleInjectManager.count,
-      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
-      manufacturer: record.manufacturer || '',
-      expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-    });
+    multipleInjectManager.setActiveUse(record.id);
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'queue',
@@ -1458,10 +1429,7 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
-    const dosesMessage = updatedRemaining > 0 && updatedRemaining !== 1
-      ? ` ${updatedRemaining} dose(s) remaining in this vial.`
-      : '';
-    writeOutput(`${label} auto-filled from Multiple Inject queue.${dosesMessage}`, 'success');
+    writeOutput(`${label} auto-filled from Multiple Inject queue.`, 'success');
   } catch (error) {
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
