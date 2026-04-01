@@ -24,6 +24,9 @@ The goal is a fast, predictable mapping from barcode to structured vaccine metad
 - `apps/extension/popup.js`
 - `apps/extension/background.js`
 - `apps/extension/popup-inventory.js`
+- `apps/extension/inventory/model.js`
+- `apps/extension/inventory/receive.js`
+- `apps/extension/inventory/exports.js`
 - `scripts/fetch-nvc.sh`
 
 ## What To Preserve
@@ -31,4 +34,5 @@ The goal is a fast, predictable mapping from barcode to structured vaccine metad
 - AI/GS1 parsing of `01`, `10`, `17`, and `21`.
 - NVC lookup keyed by lot and optionally GTIN.
 - JSON/CSV inventory export columns.
+- Legacy popup inventory row compatibility via `buildLegacyQueueRecord`.
 - Local bundle refresh cadence and fallback bundle handling.

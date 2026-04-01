@@ -511,6 +511,16 @@
       font-size: 11px;
     }
 
+    .inventory-dose-set {
+      width: auto;
+      padding: 6px 9px;
+      border-radius: 999px;
+      background: #fde68a;
+      border: 1px solid #fcd34d;
+      color: #78350f;
+      font-size: 11px;
+    }
+
     .inventory-item-grid {
       margin-top: 9px;
       display: flex;
@@ -845,7 +855,7 @@
         </div>
 
         <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Each scan will be saved automatically into this queue.</div>
+          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>
@@ -857,6 +867,9 @@
         </div>
 
         <div id="inventoryModeSection" class="mode-panel" hidden>
+          <div class="actions">
+            <button id="openInventoryPageBtn">Open Inventory Page</button>
+          </div>
           <div class="actions">
             <div class="action-row">
               <button id="addCurrentBtn">Add Current Scan</button>

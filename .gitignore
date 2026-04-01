@@ -2,16 +2,5 @@
 apps/web/nvc-bundle.json
 apps/extension/nvc_bundle.json
 tmp/
-node_modules/
-dist/
-build/
-out/
-coverage/
-.next/
-.next_stale_*/
-*.tsbuildinfo
-
-# macOS metadata
-.DS_Store
-**/.DS_Store
-.env.local
+apps/web-next/node_modules/                                                                                                                                         
+apps/web-next/.next/ 

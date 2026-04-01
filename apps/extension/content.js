@@ -28,6 +28,9 @@ let lastHandledScanValue = '';
 let lastHandledScanAt = 0;
 let lastInputCandidate = '';
 let lastInputCandidateAt = 0;
+let audioContextRef = null;
+let expiryGuardHost = null;
+let expiryGuardRoot = null;
 
 const SCAN_MIN_LENGTH = 8;
 const SCAN_MAX_DURATION_MS = 6000;
@@ -420,6 +423,8 @@ function getExpiryStatus(value) {
 }
 
 function buildInventoryRecordFromParsed(data, rawBarcode) {
+  const totalDoses = getPositiveInt(data.total_doses, null);
+  const fallbackDose = getPositiveInt(totalDoses, 1);
   const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
@@ -449,10 +454,33 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
     strength: data.strength || '',
     dose_value: data.dose_value || '',
     dose_unit: data.dose_unit || '',
+    total_doses: totalDoses,
+    remaining_doses: getPositiveInt(data.remaining_doses, fallbackDose),
+    dose_tracking: data.dose_tracking || 'manual',
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || ''
   };
+}
+
+function getPositiveInt(value, fallback = null) {
+  if (value === null || value === undefined || value === '') {
+    return fallback;
+  }
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function getQueueRemainingDoses(row, fallback = 1) {
+  const remaining = getPositiveInt(row && row.remaining_doses, null);
+  if (remaining !== null) {
+    return remaining;
+  }
+  const total = getPositiveInt(row && row.total_doses, null);
+  return total !== null ? total : fallback;
 }
 
 async function saveScanToQueue(data, rawBarcode, storageKey) {
@@ -579,6 +607,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     });
   } catch (error) {
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
+    playAudioCue('error');
     logAnalyticsEvent('parse_error', {
       workflow: activeWorkflowMode,
       source,
@@ -619,6 +648,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
     if (lookupAttempted) {
       const lookupExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+      if (!vaccineInfo) {
+        playAudioCue('error');
+      }
       logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
         workflow: activeWorkflowMode,
         source,
