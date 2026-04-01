@@ -1,3 +1,4 @@
+import { buildLegacyQueueRecord } from './inventory/model.js';
 import { escapeHtml } from './popup-ui.js';
 
 export const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
@@ -377,35 +378,15 @@ export class ScanQueueManager {
 }
 
 export function buildQueueRecord(data, rawBarcode) {
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    scanned_at: data.scanned_at || new Date().toISOString(),
-    raw_barcode: rawBarcode || '',
-    name: data.name || '',
-    tradename: data.tradename || '',
-    generic_name: data.generic_name || '',
-    disease: data.disease || '',
-    antigen: data.antigen || '',
-    manufacturer: data.manufacturer || '',
-    gtin: data.gtin || '',
-    lot: data.lot || '',
-    serial: data.serial || '',
-    barcode_expiry: data.expiry || '',
-    inventory_expiry: data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '',
-    nvc_lot_expiry: data.nvc_lot_expiry || '',
-    expiry_flag: data.expiry_flag || '',
-    expiry_days_remaining: data.expiry_days_remaining ?? '',
-    expiry_source: data.expiry_source || '',
-    route: data.route || '',
-    strength: data.strength || '',
-    dose_value: data.dose_value || '',
-    dose_unit: data.dose_unit || '',
+  return buildLegacyQueueRecord({
+    ...data,
     total_doses: normalizeDoseCount(data.total_doses, null),
-    remaining_doses: normalizeDoseCount(data.remaining_doses, normalizeDoseCount(data.total_doses, null)) || 1,
-    din: data.din || '',
-    drug_code: data.drug_code || data.din || '',
-    lookup_error: data.lookup_error || ''
-  };
+    remaining_doses:
+      normalizeDoseCount(
+        data.remaining_doses,
+        normalizeDoseCount(data.total_doses, null)
+      ) || 1
+  }, rawBarcode);
 }
 
 export function buildMultipleInjectSummary(rows) {
