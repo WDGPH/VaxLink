@@ -62,6 +62,83 @@
       padding: 14px 16px 18px;
       display: grid;
       gap: 10px;
+      min-width: 0;
+    }
+    .dashboard-shell {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      min-height: 78vh;
+    }
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.12), transparent 38%),
+        linear-gradient(180deg, #f8fbfb 0%, #f2f6f7 100%);
+      padding: 18px 14px;
+      display: grid;
+      align-content: start;
+      gap: 16px;
+    }
+    .sidebar-block {
+      display: grid;
+      gap: 8px;
+    }
+    .sidebar-label {
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: #6b7280;
+      font-weight: 700;
+    }
+    .sidebar-copy {
+      margin: 0;
+      font-size: 12px;
+      color: #526171;
+      line-height: 1.55;
+    }
+    .tab-nav {
+      display: grid;
+      gap: 8px;
+    }
+    .tab-button {
+      width: 100%;
+      text-align: left;
+      border: 1px solid #d7e3e6;
+      background: rgba(255, 255, 255, 0.76);
+      color: #24424c;
+      padding: 11px 12px;
+      border-radius: 12px;
+      display: grid;
+      gap: 2px;
+      transition: border-color 120ms ease, background 120ms ease, transform 80ms ease;
+    }
+    .tab-button:hover {
+      border-color: #9dc8c5;
+      background: #ffffff;
+    }
+    .tab-button.active {
+      background: linear-gradient(180deg, #0f766e 0%, #145f65 100%);
+      color: #ffffff;
+      border-color: #0f766e;
+      box-shadow: 0 10px 22px rgba(15, 118, 110, 0.18);
+    }
+    .tab-button-label {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+    .tab-button-copy {
+      font-size: 11px;
+      opacity: 0.9;
+      line-height: 1.45;
+    }
+    .sidebar-card {
+      border: 1px solid #dbe7ea;
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.7);
+      display: grid;
+      gap: 6px;
     }
     .section {
       border: 1px solid var(--line);
@@ -209,6 +286,7 @@
       margin-top: 8px;
     }
     .field-row input[type="text"],
+    .field-row input[type="date"],
     .field-row input[type="datetime-local"],
     .field-row select {
       border: 1px solid var(--line);
@@ -276,6 +354,74 @@
       color: #0f766e;
       font-weight: 700;
     }
+    .comparison-summary {
+      margin-bottom: 10px;
+      display: grid;
+      gap: 4px;
+    }
+    .split-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .tab-panel {
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .tab-panel[hidden] {
+      display: none;
+    }
+    .hero-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .hero-card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafb 100%);
+      display: grid;
+      gap: 6px;
+    }
+    .hero-card strong {
+      font-size: 14px;
+      color: #123547;
+    }
+    .hero-card p {
+      margin: 0;
+      font-size: 12px;
+      color: #607080;
+      line-height: 1.5;
+    }
+    @media (max-width: 980px) {
+      .dashboard-shell {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .tab-nav {
+        grid-template-columns: repeat(5, minmax(150px, 1fr));
+        overflow-x: auto;
+        padding-bottom: 4px;
+      }
+    }
+    @media (max-width: 720px) {
+      body {
+        padding: 12px;
+      }
+      .content {
+        padding: 12px;
+      }
+      .hero-grid {
+        grid-template-columns: 1fr;
+      }
+      .tab-nav {
+        grid-template-columns: repeat(5, minmax(180px, 1fr));
+      }
+    }
   </style>
 </head>
 <body>
@@ -288,103 +434,208 @@
           <div class="workflow-strip">Receive stock -> Use FEFO board -> Reconcile count -> Sign-off -> Export handoff.</div>
         </div>
       </div>
-      <div class="content">
-        <div class="section">
-          <h2>Receive Stock</h2>
-          <p class="section-note">Scan one barcode per line. VaxLink will parse GS1, enrich with NVC lot data, and add records into local inventory.</p>
-          <textarea id="receiveInput" placeholder="Scan or paste barcode lines..."></textarea>
-          <div class="toggle-row">
-            <label><input id="ultraFastToggle" type="checkbox"> Ultra-fast scanner mode (Enter = instant receive)</label>
-            <label><input id="scannerBeepsToggle" type="checkbox"> Scanner beeps (success/error)</label>
-          </div>
-          <div id="scanLiveIndicator" class="scan-live-indicator"></div>
-          <div class="btn-group" style="margin-top:8px;">
-            <button id="receiveBtn" type="button">Receive Into Inventory</button>
-          </div>
-        </div>
-        <div class="toolbar">
-          <div id="summary" class="summary">Loading...</div>
-          <div class="btn-group">
-            <button id="refreshBtn" type="button">Refresh</button>
-            <button id="exportPackageBtn" type="button">Export Clinical CSV Pack</button>
-            <button id="exportBtn" type="button">Export Inventory CSV</button>
-            <button id="exportJsonBtn" type="button">Advanced JSON Export</button>
-            <button id="clearBtn" type="button">Clear Inventory</button>
-          </div>
-        </div>
-        <div class="section">
-          <h2>Clinical Actions</h2>
-          <p class="section-note">Prioritize expiring stock and quarantine unsafe lots.</p>
-          <div id="fefoHost"></div>
-          <div class="field-row">
-            <input id="doNotUseLotInput" type="text" placeholder="Lot to quarantine / do not use">
-            <input id="doNotUseReasonInput" type="text" placeholder="Reason (recall, incident, etc.)">
-            <button id="markDoNotUseBtn" type="button">Mark Do Not Use</button>
-            <button id="clearDoNotUseBtn" type="button">Clear Lot Flag</button>
-          </div>
-          <div id="doNotUseHost" class="warning-row"></div>
-        </div>
-        <div class="section">
-          <h2>Reconciliation</h2>
-          <p class="section-note">For each vaccine/lot, compare expected remaining doses in VaxLink with the physical count in fridge stock.</p>
-          <div id="reconHost"></div>
-          <div class="btn-group" style="margin-top:8px;">
-            <button id="signoffReconBtn" type="button">Save Reconciliation Sign-off</button>
-          </div>
-          <p class="micro-note" style="margin-top:8px;">Tip: fill physical count only for lots you counted now; pending fields stay highlighted as follow-up.</p>
-        </div>
-        <details class="fold">
-          <summary>Wastage (Advanced)</summary>
-          <div class="section-body">
-            <p class="section-note">Record wasted doses by lot and reason. This updates inventory and logs an auditable transaction.</p>
-            <div class="field-row">
-              <input id="wastageLotInput" type="text" placeholder="Lot number">
-              <input id="wastageQtyInput" type="number" min="1" placeholder="Qty">
-              <select id="wastageReasonSelect">
-                <option value="expired">Expired</option>
-                <option value="cold_chain_excursion">Cold chain excursion</option>
-                <option value="broken_vial">Broken vial</option>
-                <option value="partial_vial_discard">Partial vial discard</option>
-                <option value="contamination">Contamination</option>
-                <option value="other">Other</option>
-              </select>
-              <input id="wastageNoteInput" type="text" placeholder="Optional note">
-              <button id="saveWastageBtn" type="button">Record Wastage</button>
+      <div class="dashboard-shell">
+        <aside class="sidebar">
+          <div class="sidebar-block">
+            <div class="sidebar-label">Inventory Views</div>
+            <div class="tab-nav" role="tablist" aria-label="Inventory dashboard views">
+              <button id="inventory-tab-overview" class="tab-button active" type="button" role="tab" aria-selected="true" aria-controls="overviewPanel" data-tab-btn data-tab-target="overviewPanel">
+                <span class="tab-button-label">Overview</span>
+                <span class="tab-button-copy">FEFO, flags, current inventory, and export controls.</span>
+              </button>
+              <button id="inventory-tab-receiving" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="receivingPanel" data-tab-btn data-tab-target="receivingPanel">
+                <span class="tab-button-label">Receiving</span>
+                <span class="tab-button-copy">Receive stock with scan input and shipment references.</span>
+              </button>
+              <button id="inventory-tab-shipments" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="shipmentsPanel" data-tab-btn data-tab-target="shipmentsPanel">
+                <span class="tab-button-label">Shipments</span>
+                <span class="tab-button-copy">Compare received batches against OGB or packing slips.</span>
+              </button>
+              <button id="inventory-tab-monitoring" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="monitoringPanel" data-tab-btn data-tab-target="monitoringPanel">
+                <span class="tab-button-label">Monitoring</span>
+                <span class="tab-button-copy">Track holiday storage cases for provider-owned vaccine.</span>
+              </button>
+              <button id="inventory-tab-operations" class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="operationsPanel" data-tab-btn data-tab-target="operationsPanel">
+                <span class="tab-button-label">Operations</span>
+                <span class="tab-button-copy">Reconciliation, wastage, incidents, and handoff.</span>
+              </button>
             </div>
           </div>
-        </details>
-        <details class="fold">
-          <summary>Cold Chain Incident (Advanced)</summary>
-          <div class="section-body">
-            <p class="section-note">Capture excursion details and outcome for reporting and follow-up.</p>
-            <div class="field-row">
-              <input id="incidentLotInput" type="text" placeholder="Lot (optional)">
-              <input id="incidentMinTempInput" type="text" placeholder="Min temp (C)">
-              <input id="incidentMaxTempInput" type="text" placeholder="Max temp (C)">
-              <input id="incidentStartInput" type="datetime-local">
-              <input id="incidentEndInput" type="datetime-local">
-              <select id="incidentOutcomeSelect">
-                <option value="quarantine">Quarantine pending guidance</option>
-                <option value="use_allowed">Use allowed</option>
-                <option value="discarded">Discarded</option>
-              </select>
-              <input id="incidentNoteInput" type="text" placeholder="Optional note">
-              <button id="saveIncidentBtn" type="button">Log Incident</button>
+          <div class="sidebar-card">
+            <div class="sidebar-label">Workflow</div>
+            <p class="sidebar-copy">Use the dashboard flow: receive stock, compare shipments, manage holiday monitoring, then reconcile and export handoff records.</p>
+          </div>
+        </aside>
+        <div class="content">
+          <div class="toolbar">
+            <div id="summary" class="summary">Loading...</div>
+            <div class="btn-group">
+              <button id="refreshBtn" type="button">Refresh</button>
+              <button id="exportPackageBtn" type="button">Export Clinical CSV Pack</button>
+              <button id="exportBtn" type="button">Export Inventory CSV</button>
+              <button id="exportJsonBtn" type="button">Advanced JSON Export</button>
+              <button id="clearBtn" type="button">Clear Inventory</button>
             </div>
           </div>
-        </details>
-        <details class="fold">
-          <summary>Transaction Ledger & Handoff (Advanced)</summary>
-          <div class="section-body">
-            <p class="section-note">Most recent inventory transactions (receive, wastage, incidents, reconciliation sign-offs).</p>
-            <div id="ledgerHost" class="ledger"></div>
-            <div class="btn-group" style="margin-top:8px;">
-              <button id="exportHandoffBtn" type="button">Export Shift Handoff</button>
+
+          <section id="overviewPanel" class="tab-panel" role="tabpanel" aria-labelledby="inventory-tab-overview" data-tab-panel>
+            <div class="hero-grid">
+              <div class="hero-card">
+                <strong>Inventory Snapshot</strong>
+                <p>Review FEFO priorities, current inventory state, and quarantine flags without leaving the dashboard.</p>
+              </div>
+              <div class="hero-card">
+                <strong>Export Ready</strong>
+                <p>Clinical CSV pack, advanced JSON, and current inventory export stay available from the top toolbar on every tab.</p>
+              </div>
             </div>
-          </div>
-        </details>
-        <div id="tableHost"></div>
-        <div id="status" class="status"></div>
+            <div class="section">
+              <h2>Clinical Actions</h2>
+              <p class="section-note">Prioritize expiring stock and quarantine unsafe lots.</p>
+              <div id="fefoHost"></div>
+              <div class="field-row">
+                <input id="doNotUseLotInput" type="text" placeholder="Lot to quarantine / do not use">
+                <input id="doNotUseReasonInput" type="text" placeholder="Reason (recall, incident, etc.)">
+                <button id="markDoNotUseBtn" type="button">Mark Do Not Use</button>
+                <button id="clearDoNotUseBtn" type="button">Clear Lot Flag</button>
+              </div>
+              <div id="doNotUseHost" class="warning-row"></div>
+            </div>
+            <div class="section">
+              <h2>Inventory Table</h2>
+              <p class="section-note">Current locally tracked inventory rows across receiving, monitoring intake, and other captured stock actions.</p>
+              <div id="tableHost"></div>
+            </div>
+          </section>
+
+          <section id="receivingPanel" class="tab-panel" role="tabpanel" aria-labelledby="inventory-tab-receiving" data-tab-panel hidden>
+            <div class="section">
+              <h2>Receive Stock</h2>
+              <p class="section-note">Scan one barcode per line. VaxLink will parse GS1, enrich with NVC lot data, and add records into local inventory.</p>
+              <div class="field-row" style="margin-top:0;">
+                <input id="receiveSessionLabelInput" type="text" placeholder="Optional shipment / packing slip reference">
+              </div>
+              <textarea id="receiveInput" placeholder="Scan or paste barcode lines..."></textarea>
+              <div class="toggle-row">
+                <label><input id="ultraFastToggle" type="checkbox"> Ultra-fast scanner mode (Enter = instant receive)</label>
+                <label><input id="scannerBeepsToggle" type="checkbox"> Scanner beeps (success/error)</label>
+              </div>
+              <div id="scanLiveIndicator" class="scan-live-indicator"></div>
+              <div class="btn-group" style="margin-top:8px;">
+                <button id="receiveBtn" type="button">Receive Into Inventory</button>
+              </div>
+            </div>
+          </section>
+
+          <section id="shipmentsPanel" class="tab-panel" role="tabpanel" aria-labelledby="inventory-tab-shipments" data-tab-panel hidden>
+            <div class="section">
+              <h2>Shipment Comparison</h2>
+              <p class="section-note">Paste expected shipment lines from OGB or a packing slip, then compare them against the latest receive batch. Supported line formats: barcode line, <code>LOT,QTY</code>, <code>LOT,QTY,EXPIRY</code>, or <code>VACCINE,LOT,QTY,EXPIRY</code>.</p>
+              <div class="field-row">
+                <input id="shipmentCompareLabelInput" type="text" placeholder="Shipment / OGB reference">
+                <input id="shipmentCompareSignedByInput" type="text" placeholder="Reviewed / signed by">
+                <input id="shipmentCompareNoteInput" type="text" placeholder="Optional sign-off note">
+              </div>
+              <textarea id="shipmentCompareInput" placeholder="Paste expected shipment lines..."></textarea>
+              <p id="shipmentCompareTarget" class="micro-note" style="margin-top:8px;">Comparison target loading...</p>
+              <div class="btn-group" style="margin-top:8px;">
+                <button id="buildShipmentCompareBtn" type="button">Create Shipment Comparison</button>
+                <button id="saveShipmentCompareSignoffBtn" type="button">Save Comparison Sign-off</button>
+                <button id="exportShipmentCompareBtn" type="button">Export Comparison Report</button>
+              </div>
+              <div id="shipmentCompareHost" style="margin-top:10px;"></div>
+            </div>
+          </section>
+
+          <section id="monitoringPanel" class="tab-panel" role="tabpanel" aria-labelledby="inventory-tab-monitoring" data-tab-panel hidden>
+            <div class="section">
+              <h2>Holiday Monitoring</h2>
+              <p class="section-note">Capture provider-owned vaccine dropped off for storage monitoring during holidays or closures, then track overdue returns and export a monitoring report.</p>
+              <div class="field-row">
+                <input id="monitoringProviderInput" type="text" placeholder="Provider / clinic profile">
+                <input id="monitoringLocationInput" type="text" placeholder="Storage location">
+                <input id="monitoringCustodyInput" type="text" placeholder="Custody contact">
+                <input id="monitoringDropoffDateInput" type="date">
+                <input id="monitoringReturnDateInput" type="date">
+                <input id="monitoringIntakeByInput" type="text" placeholder="Intake by / received from">
+              </div>
+              <div class="field-row">
+                <input id="monitoringNoteInput" type="text" placeholder="Optional intake note">
+              </div>
+              <textarea id="monitoringItemsInput" placeholder="Scan monitored vaccine lines or paste LOT,QTY,EXPIRY entries..."></textarea>
+              <div id="monitoringSummary" class="summary" style="margin-top:8px;">No holiday monitoring cases yet.</div>
+              <div class="btn-group" style="margin-top:8px;">
+                <button id="createMonitoringCaseBtn" type="button">Create Monitoring Case</button>
+                <button id="exportMonitoringBtn" type="button">Export Monitoring Report</button>
+              </div>
+              <div id="monitoringHost" style="margin-top:10px;"></div>
+            </div>
+          </section>
+
+          <section id="operationsPanel" class="tab-panel" role="tabpanel" aria-labelledby="inventory-tab-operations" data-tab-panel hidden>
+            <div class="section">
+              <h2>Reconciliation</h2>
+              <p class="section-note">For each vaccine/lot, compare expected remaining doses in VaxLink with the physical count in fridge stock.</p>
+              <div id="reconHost"></div>
+              <div class="btn-group" style="margin-top:8px;">
+                <button id="signoffReconBtn" type="button">Save Reconciliation Sign-off</button>
+              </div>
+              <p class="micro-note" style="margin-top:8px;">Tip: fill physical count only for lots you counted now; pending fields stay highlighted as follow-up.</p>
+            </div>
+            <details class="fold">
+              <summary>Wastage (Advanced)</summary>
+              <div class="section-body">
+                <p class="section-note">Record wasted doses by lot and reason. This updates inventory and logs an auditable transaction.</p>
+                <div class="field-row">
+                  <input id="wastageLotInput" type="text" placeholder="Lot number">
+                  <input id="wastageQtyInput" type="number" min="1" placeholder="Qty">
+                  <select id="wastageReasonSelect">
+                    <option value="expired">Expired</option>
+                    <option value="cold_chain_excursion">Cold chain excursion</option>
+                    <option value="broken_vial">Broken vial</option>
+                    <option value="partial_vial_discard">Partial vial discard</option>
+                    <option value="contamination">Contamination</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <input id="wastageNoteInput" type="text" placeholder="Optional note">
+                  <button id="saveWastageBtn" type="button">Record Wastage</button>
+                </div>
+              </div>
+            </details>
+            <details class="fold">
+              <summary>Cold Chain Incident (Advanced)</summary>
+              <div class="section-body">
+                <p class="section-note">Capture excursion details and outcome for reporting and follow-up.</p>
+                <div class="field-row">
+                  <input id="incidentLotInput" type="text" placeholder="Lot (optional)">
+                  <input id="incidentMinTempInput" type="text" placeholder="Min temp (C)">
+                  <input id="incidentMaxTempInput" type="text" placeholder="Max temp (C)">
+                  <input id="incidentStartInput" type="datetime-local">
+                  <input id="incidentEndInput" type="datetime-local">
+                  <select id="incidentOutcomeSelect">
+                    <option value="quarantine">Quarantine pending guidance</option>
+                    <option value="use_allowed">Use allowed</option>
+                    <option value="discarded">Discarded</option>
+                  </select>
+                  <input id="incidentNoteInput" type="text" placeholder="Optional note">
+                  <button id="saveIncidentBtn" type="button">Log Incident</button>
+                </div>
+              </div>
+            </details>
+            <details class="fold" open>
+              <summary>Transaction Ledger & Handoff</summary>
+              <div class="section-body">
+                <p class="section-note">Most recent inventory transactions (receive, wastage, incidents, reconciliation sign-offs).</p>
+                <div id="ledgerHost" class="ledger"></div>
+                <div class="btn-group" style="margin-top:8px;">
+                  <button id="exportHandoffBtn" type="button">Export Shift Handoff</button>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <div id="status" class="status"></div>
+        </div>
       </div>
     </div>
   </div>
