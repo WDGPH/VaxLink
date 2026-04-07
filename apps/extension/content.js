@@ -1430,13 +1430,22 @@ function isShortAgentCandidate(value) {
   return compact.length > 0 && compact.length <= 3;
 }
 
-function isAgentCandidateAccepted(candidate, field) {
+function fieldFilledTextMatchesCandidate(field, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
   const filledNorm = normalizeForMatch(getFieldFilledText(field));
   if (!filledNorm) return false;
   if (filledNorm === candidateNorm) return true;
   if (filledNorm.includes(candidateNorm)) return true;
+
+  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
+  return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+}
+
+function isAgentCandidateAccepted(candidate, field) {
+  const candidateNorm = normalizeForMatch(candidate);
+  const filledNorm = normalizeForMatch(getFieldFilledText(field));
+  if (fieldFilledTextMatchesCandidate(field, candidate)) return true;
 
   if (isShortAgentCandidate(candidate)) {
     const token = candidateNorm.replace(/[^a-z0-9]/g, '');
@@ -1538,15 +1547,29 @@ function getPanoramaTradeCandidates(data) {
   return values;
 }
 
-function fillPanoramaTradeName(data) {
-  const candidates = getPanoramaTradeCandidates(data);
-  if (!candidates.length) return false;
-  const selectors = [
+function getPanoramaTradeSelectors() {
+  return [
     'select[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_input"]',
     'input[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_focus"]',
     'select[id*="createImms_tradenameinput:selectOneMenu_input"]',
     'input[id*="createImms_tradenameinput:selectOneMenu_focus"]'
   ];
+}
+
+function hasPanoramaTradeSelection(data) {
+  const candidates = getPanoramaTradeCandidates(data);
+  if (!candidates.length) return false;
+  const fields = getFields(getPanoramaTradeSelectors()).filter(canFillPanoramaControl);
+  if (!fields.length) return false;
+  return fields.some((field) => (
+    candidates.some((candidate) => fieldFilledTextMatchesCandidate(field, candidate))
+  ));
+}
+
+function fillPanoramaTradeName(data) {
+  const candidates = getPanoramaTradeCandidates(data);
+  if (!candidates.length) return false;
+  const selectors = getPanoramaTradeSelectors();
   for (const candidate of candidates) {
     if (fillFirstMatchingField(selectors, candidate)) {
       return true;
@@ -1591,6 +1614,29 @@ function hasPanoramaDeferredDetailData(data) {
   return !!(administered.date || administered.time);
 }
 
+function getPanoramaAdministeredDateTimeFields() {
+  return {
+    dateField: getFields([
+      'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
+      'input[id*="dateAdministedDate:dateInput_input"]'
+    ]).find(field => canFillPanoramaControl(field) && isVisible(field)),
+    timeField: getFields([
+      'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
+      'input[id*="dateAdministedDate:timeInput:timeInput"]'
+    ]).find(field => canFillPanoramaControl(field) && isVisible(field))
+  };
+}
+
+function hasPanoramaDeferredDetailFieldsFilled(data) {
+  const administered = getPanoramaAdministeredDateTimeValues(data);
+  if (!administered.date && !administered.time) return true;
+
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
+  const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
+  const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
+  return dateMatches && timeMatches;
+}
+
 function fillPanoramaMaskedTextInput(field, nextValue) {
   if (!field || !nextValue) return false;
   const value = String(nextValue).trim();
@@ -1610,15 +1656,7 @@ function fillPanoramaAdministeredDateTimeFields(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (!administered.date && !administered.time) return 0;
 
-  const dateField = getFields([
-    'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
-    'input[id*="dateAdministedDate:dateInput_input"]'
-  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
-
-  const timeField = getFields([
-    'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
-    'input[id*="dateAdministedDate:timeInput:timeInput"]'
-  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
 
   let fillCount = 0;
   if (administered.date && fillPanoramaMaskedTextInput(dateField, administered.date)) {
@@ -1798,6 +1836,34 @@ function tryFillPanoramaLotOrTrade(data) {
   return fillPanoramaTradeName(data);
 }
 
+function hasPanoramaLotSelection(lotValue) {
+  if (!lotValue) return false;
+
+  const selectFields = getFields([
+    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
+  ]).filter(canFillPanoramaControl);
+  if (selectFields.some((field) => optionTextContainsLot(getFieldFilledText(field), lotValue))) {
+    return true;
+  }
+
+  const selectedLotLabels = getFields([
+    'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
+  ]);
+  return selectedLotLabels.some((label) => optionTextContainsLot(label?.textContent || '', lotValue));
+}
+
+function hasPanoramaLotOrTradeSelection(data) {
+  if (!data) return false;
+  if (data.lot) {
+    return hasPanoramaLotSelection(data.lot);
+  }
+  return hasPanoramaTradeSelection(data);
+}
+
 let stopPanoramaLotTradeWatcher = null;
 
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
@@ -1823,6 +1889,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   const timers = [];
   let stopped = false;
   let lastAttemptAt = 0;
+  let stablePasses = 0;
 
   const stop = () => {
     if (stopped) return;
@@ -1846,29 +1913,43 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
     const now = Date.now();
     if ((now - lastAttemptAt) < minAttemptGapMs) return;
     lastAttemptAt = now;
+    const busy = isPrimeFacesAjaxBusy();
 
     let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
-    if (!hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+    if (!hasResolvedAgent && !busy) {
       hasResolvedAgent = tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
     }
 
-    let resolved = false;
-    if (shouldTryLotOrTrade && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
-      resolved = tryFillPanoramaLotOrTrade(data);
+    let resolved = !shouldTryLotOrTrade;
+    if (!resolved && hasResolvedAgent) {
+      resolved = hasPanoramaLotOrTradeSelection(data);
+    }
+    if (!resolved && hasResolvedAgent && !busy) {
+      resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
     }
 
-    if (!resolved && hasLot && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
-      openPanoramaLotDropdown();
-      resolved = fillPanoramaLotFromPanelItems(data?.lot) || resolved;
+    if (!resolved && hasLot && hasResolvedAgent && !busy) {
+      if (!hasPanoramaLotSelection(data?.lot)) {
+        openPanoramaLotDropdown();
+      }
+      resolved = fillPanoramaLotFromPanelItems(data?.lot) || hasPanoramaLotSelection(data?.lot) || resolved;
     }
 
-    if (shouldFillDeferredFields && !isPrimeFacesAjaxBusy()) {
+    let deferredResolved = !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
+    if (!deferredResolved && !busy) {
       fillPanoramaDeferredDetailFields(data);
+      deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
-    // Keep watcher alive when deferred detail fields are requested, because PrimeFaces
-    // updates after agent/lot selection can overwrite date/time fields.
-    if (resolved && !shouldFillDeferredFields) {
+    // Require a stable follow-up pass before stopping so we do not exit while
+    // PrimeFaces is still applying dependent field refreshes.
+    if (!busy && resolved && deferredResolved) {
+      stablePasses += 1;
+    } else {
+      stablePasses = 0;
+    }
+
+    if (stablePasses >= 2) {
       stop();
     }
   };
@@ -2455,9 +2536,12 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._commandMode) {
     const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
+    const sourceDetail = data._commandSource === 'hud'
+      ? 'Switched from VaxLink HUD'
+      : 'Switched via scanner command';
     root.innerHTML = `<div class="vl-toast info show">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
-      <div class="vl-toast-detail">Switched via scanner command</div>
+      <div class="vl-toast-detail">${sourceDetail}</div>
     </div>`;
     toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
     return;
@@ -2514,6 +2598,44 @@ let hudShadow = null;
 let hudCountEl = null;
 let hudApplyBtn = null;
 let hudContainer = null;
+let hudModeToggleBtn = null;
+let hudQueueWrap = null;
+
+function setHudModeToggleState(button, activeMode) {
+  if (!button) return;
+  const mode = activeMode === 'multiple' ? 'multiple' : 'single';
+  const nextMode = mode === 'multiple' ? 'single' : 'multiple';
+  const label = mode === 'multiple' ? 'Multiple' : 'Single';
+  const targetLabel = nextMode === 'multiple' ? 'Multiple' : 'Single';
+  button.innerHTML = `
+    <span class="vl-hud-mode-top">Chart Mode</span>
+    <span class="vl-hud-mode-main">
+      <span class="vl-hud-mode-current">${label}</span>
+      <span class="vl-hud-mode-next">Switch to ${targetLabel}</span>
+    </span>
+  `;
+  button.dataset.mode = mode;
+  button.setAttribute('aria-label', `Switch to ${targetLabel} mode`);
+  button.setAttribute('title', `Switch to ${targetLabel} mode`);
+}
+
+async function setHudWorkflowMode(newMode) {
+  const nextMode = newMode === 'multiple' ? 'multiple' : 'single';
+  if (activeWorkflowMode === nextMode) {
+    updateHudState();
+    return;
+  }
+
+  activeWorkflowMode = nextMode;
+  updateHudState();
+  try {
+    await setLocalStorage({ [WORKFLOW_MODE_KEY]: nextMode });
+    logAnalyticsEvent('workflow_mode_set', { workflow: nextMode, source: 'hud_toggle' });
+    showVaxlinkToast({ _commandMode: nextMode, _commandSource: 'hud' });
+  } catch (error) {
+    console.warn('VaxLink HUD mode switch error:', error);
+  }
+}
 
 function initHud() {
   if (hudInitialized) return;
@@ -2528,56 +2650,184 @@ function initHud() {
   style.textContent = `
     :host { all: initial; }
     .vl-hud {
+      position: relative;
       position: fixed;
       bottom: 16px;
       right: 16px;
       z-index: 2147483647;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
       display: flex;
-      align-items: center;
-      gap: 8px;
-      background: #164e63;
-      color: #fff;
-      padding: 6px 12px;
-      border-radius: 24px;
-      box-shadow: 0 2px 12px rgba(0,0,0,.3);
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      background:
+        radial-gradient(circle at top left, rgba(125, 211, 252, .22), transparent 42%),
+        linear-gradient(180deg, rgba(15, 58, 79, .96) 0%, rgba(12, 44, 61, .96) 100%);
+      color: #f4fbff;
+      padding: 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(173, 216, 230, .16);
+      box-shadow: 0 16px 34px rgba(3, 20, 30, .34);
       font-size: 13px;
       cursor: default;
       user-select: none;
-      transition: opacity .2s;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: opacity .2s, transform .2s;
+      min-width: 188px;
     }
     .vl-hud.hidden { display: none; }
+    .vl-hud-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .vl-hud-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%);
+      box-shadow: 0 0 0 4px rgba(103, 232, 249, .12);
+      flex: 0 0 auto;
+    }
+    .vl-hud-queue {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .vl-hud-queue.hidden { display: none; }
     .vl-hud-count {
-      background: rgba(255,255,255,.2);
-      border-radius: 12px;
-      padding: 2px 8px;
-      font-weight: 600;
-      min-width: 18px;
+      background: rgba(207, 250, 254, .14);
+      color: #dffaff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-weight: 700;
+      min-width: 20px;
       text-align: center;
+      box-shadow: inset 0 0 0 1px rgba(207, 250, 254, .08);
     }
     .vl-hud-btn {
       background: #ecfeff;
-      color: #164e63;
+      color: #0f4357;
       border: none;
-      border-radius: 14px;
-      padding: 4px 12px;
+      border-radius: 16px;
+      padding: 6px 12px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       white-space: nowrap;
+      letter-spacing: .01em;
+      transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease;
     }
-    .vl-hud-btn:hover { background: #fff; }
+    .vl-hud-mode-toggle {
+      width: 100%;
+      position: relative;
+      overflow: hidden;
+      text-align: left;
+      padding: 11px 12px 12px;
+      background: linear-gradient(180deg, rgba(240, 253, 255, .18) 0%, rgba(224, 247, 250, .08) 100%);
+      color: #f4fbff;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.12),
+        0 10px 22px rgba(7, 29, 40, .22);
+    }
+    .vl-hud-mode-toggle[data-mode="multiple"] {
+      background: linear-gradient(180deg, rgba(236, 254, 255, .98) 0%, rgba(194, 244, 248, .94) 100%);
+      color: #0f4357;
+      box-shadow: 0 12px 22px rgba(8, 58, 77, .18);
+    }
+    .vl-hud-mode-toggle::before {
+      content: "";
+      position: absolute;
+      inset: auto -18% -42% auto;
+      width: 118px;
+      height: 118px;
+      border-radius: 999px;
+      background: rgba(125, 211, 252, .14);
+      pointer-events: none;
+    }
+    .vl-hud-btn:hover {
+      background: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(9, 40, 53, .18);
+    }
+    .vl-hud-mode-toggle:hover {
+      background: linear-gradient(180deg, rgba(240, 253, 255, .24) 0%, rgba(224, 247, 250, .12) 100%);
+      color: #f4fbff;
+    }
+    .vl-hud-mode-toggle[data-mode="multiple"]:hover {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(214, 248, 251, .98) 100%);
+      color: #0f4357;
+    }
     .vl-hud-btn:disabled { opacity: .5; cursor: default; }
-    .vl-hud-label { font-size: 11px; opacity: .8; }
+    .vl-hud-btn:active { transform: translateY(0); }
+    .vl-hud-label {
+      font-size: 11px;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      color: rgba(232, 249, 253, .82);
+    }
+    .vl-hud-mode-top {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      opacity: .72;
+      margin-bottom: 5px;
+    }
+    .vl-hud-mode-main {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+    .vl-hud-mode-current {
+      display: inline-block;
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .vl-hud-mode-next {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: .78;
+      white-space: nowrap;
+    }
   `;
   hudShadow.appendChild(style);
 
   hudContainer = document.createElement('div');
-  hudContainer.className = 'vl-hud hidden';
+  hudContainer.className = 'vl-hud';
+
+  const head = document.createElement('div');
+  head.className = 'vl-hud-head';
+
+  const dot = document.createElement('span');
+  dot.className = 'vl-hud-dot';
 
   const label = document.createElement('span');
   label.className = 'vl-hud-label';
   label.textContent = 'VaxLink';
+
+  head.appendChild(dot);
+  head.appendChild(label);
+  hudContainer.appendChild(head);
+
+  hudModeToggleBtn = document.createElement('button');
+  hudModeToggleBtn.className = 'vl-hud-btn vl-hud-mode-toggle';
+  hudModeToggleBtn.addEventListener('click', () => {
+    const nextMode = activeWorkflowMode === 'multiple' ? 'single' : 'multiple';
+    void setHudWorkflowMode(nextMode);
+  });
+  hudContainer.appendChild(hudModeToggleBtn);
+
+  hudQueueWrap = document.createElement('div');
+  hudQueueWrap.className = 'vl-hud-queue hidden';
 
   hudCountEl = document.createElement('span');
   hudCountEl.className = 'vl-hud-count';
@@ -2588,15 +2838,21 @@ function initHud() {
   hudApplyBtn.textContent = 'Apply Next';
   hudApplyBtn.addEventListener('click', applyNextQueueItem);
 
-  hudContainer.appendChild(label);
-  hudContainer.appendChild(hudCountEl);
-  hudContainer.appendChild(hudApplyBtn);
+  hudQueueWrap.appendChild(hudCountEl);
+  hudQueueWrap.appendChild(hudApplyBtn);
+  hudContainer.appendChild(hudQueueWrap);
   hudShadow.appendChild(hudContainer);
   document.body.appendChild(hudHost);
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+    if (
+      MULTIPLE_INJECT_QUEUE_KEY in changes ||
+      WORKFLOW_MODE_KEY in changes ||
+      LEGACY_POPUP_MODE_KEY in changes ||
+      LEGACY_REMOTE_MODE_KEY in changes ||
+      LEGACY_HANDS_FREE_KEY in changes
+    ) {
       updateHudState();
     }
   });
@@ -2609,11 +2865,15 @@ function updateHudState() {
     const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
       ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
     const count = rows.length;
-    const shouldShow = activeWorkflowMode === 'multiple' && count > 0
-      && isPanoramaImmunizationPage();
+    const shouldShow = isHandsFreeSupportedPage();
+    const showQueueControls = activeWorkflowMode === 'multiple' && count > 0 && isPanoramaImmunizationPage();
 
     if (hudContainer) {
       hudContainer.classList.toggle('hidden', !shouldShow);
+    }
+    setHudModeToggleState(hudModeToggleBtn, activeWorkflowMode);
+    if (hudQueueWrap) {
+      hudQueueWrap.classList.toggle('hidden', !showQueueControls);
     }
     if (hudCountEl) {
       hudCountEl.textContent = String(count);
