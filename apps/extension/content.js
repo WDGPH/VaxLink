@@ -877,7 +877,9 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
-    const isPanorama = host === 'panorama.prod.ehealthontario.ca';
+    const isPanorama =
+      host === 'www.panorama.prod.ehealthontario.ca' ||
+      host === 'panorama.prod.ehealthontario.ca';
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
