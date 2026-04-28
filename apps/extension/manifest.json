@@ -2,18 +2,15 @@
   "manifest_version": 3,
   "name": "VaxLink",
   "version": "1.0.4",
-  "description": "Parse GS1 vaccine barcodes and auto-fill Telus health chart",
+  "description": "Parse GS1 vaccine barcodes and auto-fill Panorama and InputHealth charts",
   "permissions": [
     "activeTab",
     "scripting",
-    "clipboardRead",
     "storage",
     "alarms"
   ],
   "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*",
-    "<all_urls>"
+    "https://nvc-cnv.canada.ca/*"
   ],
   "icons": {
     "16": "assets/icon-16.png",
@@ -32,19 +29,16 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*", "file:///*"],
+      "matches": [
+        "https://panorama.prod.ehealthontario.ca/*",
+        "https://inputhealth.com/*",
+        "https://*.inputhealth.com/*"
+      ],
       "js": ["panorama-agent-rules.js", "content.js"],
-      "run_at": "document_start",
-      "all_frames": true
+      "run_at": "document_start"
     }
   ],
   "background": {
     "service_worker": "background.js"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["nvc_bundle.json"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

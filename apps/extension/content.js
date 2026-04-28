@@ -877,7 +877,7 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
-    const isPanorama = host.includes('panorama.') || host.includes('ehealthontario.ca');
+    const isPanorama = host === 'panorama.prod.ehealthontario.ca';
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
@@ -1433,9 +1433,15 @@ function isShortAgentCandidate(value) {
 function fieldFilledTextMatchesCandidate(field, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
-  const filledNorm = normalizeForMatch(getFieldFilledText(field));
+  const filledRaw = getFieldFilledText(field);
+  const filledNorm = normalizeForMatch(filledRaw);
   if (!filledNorm) return false;
   if (filledNorm === candidateNorm) return true;
+  // Reject if the filled text is a compound variant of the candidate (e.g. "HB-pediatric" for "HB").
+  // normalizeForMatch converts dashes to spaces, so "HB-pediatric" → "hb pediatric", which would
+  // otherwise pass the .includes("hb") check below and falsely accept the pediatric agent for adults.
+  const candidateRaw = String(candidate || '').trim();
+  if (candidateRaw && filledRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
   if (filledNorm.includes(candidateNorm)) return true;
 
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
@@ -1449,8 +1455,14 @@ function isAgentCandidateAccepted(candidate, field) {
 
   if (isShortAgentCandidate(candidate)) {
     const token = candidateNorm.replace(/[^a-z0-9]/g, '');
-    const filledTokens = filledNorm.split(' ').map(t => t.replace(/[^a-z0-9]/g, '')).filter(Boolean);
-    return filledTokens.includes(token);
+    // Exact compact match: field shows precisely this code (e.g. "HB").
+    const filledCompact = filledNorm.replace(/[^a-z0-9]/g, '');
+    if (filledCompact === token) return true;
+    // Bracket code match: field shows a display name with code in brackets (e.g. "Hepatitis B [HB]").
+    // filledTokens.includes(token) is intentionally NOT used here — it would accept "HB-pediatric"
+    // (normalized to "hb pediatric") for the adult "HB" candidate since "hb" appears as a token.
+    const bracketMatch = filledNorm.match(/\[([^\]]+)\]/);
+    return !!(bracketMatch && normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token);
   }
 
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
@@ -3040,10 +3052,14 @@ function getPanoramaMultipleGridDate1Field(rowIndex) {
 }
 
 function gridAgentLabelMatchesCandidate(rowIndex, candidate) {
-  const labelText = normalizeForMatch(getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '');
+  const labelRaw = getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '';
+  const labelText = normalizeForMatch(labelRaw);
   const candidateNorm = normalizeForMatch(candidate);
   if (!labelText || !candidateNorm) return false;
   if (labelText === candidateNorm) return true;
+  // Reject if label is a compound variant of the candidate (e.g. "HB-pediatric" label for "HB").
+  const candidateRaw = String(candidate || '').trim();
+  if (candidateRaw && labelRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
   if (labelText.includes(candidateNorm)) return true;
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
   return candidateTokens.length > 0 && candidateTokens.every(t => labelText.includes(t));
