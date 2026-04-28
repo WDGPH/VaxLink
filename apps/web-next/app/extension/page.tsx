@@ -15,6 +15,7 @@ import {
   siteConfig,
   troubleshootingItems,
 } from '@/content/site'
+import { withBasePath } from '@/lib/base-path'
 
 export const metadata = extensionMetadata
 
@@ -160,7 +161,14 @@ export default function ExtensionPage() {
               <p>Bundle data is cached in browser storage to support repeat lookups and offline fallback behavior.</p>
             </PanelFrame>
             <PanelFrame tone="reference" eyebrow="Charts" title="No chart backend" className="note-card">
-              <p>The website does not persist patient chart data. The extension acts only on the active page fields needed for autofill.</p>
+              <p>
+                The website does not persist patient chart data. The extension acts only on the active page fields needed
+                for autofill. See the{' '}
+                <Link href={withBasePath('/privacy')} className="text-link-button">
+                  privacy policy
+                </Link>{' '}
+                for local storage and network details.
+              </p>
             </PanelFrame>
             <PanelFrame tone="panel" eyebrow="Refresh" title="Bundle check interval" className="note-card">
               <p>Bundle checks run about every 24 hours, with the last local snapshot available if a refresh fails.</p>
