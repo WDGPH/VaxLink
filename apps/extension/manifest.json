@@ -30,6 +30,7 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.panorama.prod.ehealthontario.ca/*",
         "https://panorama.prod.ehealthontario.ca/*",
         "https://inputhealth.com/*",
         "https://*.inputhealth.com/*"

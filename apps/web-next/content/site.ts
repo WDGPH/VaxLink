@@ -234,7 +234,7 @@ export const permissions: PermissionRow[] = [
   },
   {
     permission: 'supported chart site access',
-    reason: 'Loads the hands-free scanner and autofill logic only on panorama.prod.ehealthontario.ca and supported InputHealth domains.',
+    reason: 'Loads the hands-free scanner and autofill logic only on approved Panorama hosts and supported InputHealth domains.',
     optional: false,
     leavesBrowser: false,
   },
