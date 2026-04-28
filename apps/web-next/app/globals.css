@@ -2232,65 +2232,74 @@ select {
   margin-top: 0.85rem;
 }
 
-.privacy-page-shell {
-  background: linear-gradient(180deg, rgba(245, 251, 251, 0.9), rgba(237, 244, 244, 0.98));
+.policy-page {
+  padding: 6.5rem 0 4rem;
+  background: linear-gradient(180deg, #f6fbfb 0%, #edf4f4 100%);
 }
 
-.privacy-page-hero {
-  padding: 4rem 0 2rem;
+.policy-doc {
+  width: min(820px, 92vw);
+  margin: 0 auto;
+  padding: 3.5rem min(4.5vw, 3rem);
+  background: rgba(248, 251, 251, 0.94);
+  border: 1px solid var(--line-soft);
+  border-radius: 24px;
+  box-shadow: var(--shadow-panel);
+  color: var(--text-secondary);
 }
 
-.privacy-hero-card .panel-frame-body {
-  padding-top: 0.6rem;
+.policy-header {
+  margin-bottom: 2.5rem;
 }
 
-.privacy-hero-copy,
-.privacy-copy {
-  display: grid;
-  gap: 1rem;
+.policy-kicker {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent-blue);
 }
 
-.privacy-hero-copy p,
-.privacy-copy p,
-.privacy-card p {
+.policy-header h1 {
   margin: 0;
-  line-height: 1.75;
+  color: var(--text-primary);
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  line-height: 1.02;
 }
 
-.privacy-hero-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.9rem;
-  margin-top: 0.35rem;
+.policy-updated {
+  margin: 1rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
 }
 
-.privacy-grid,
-.privacy-detail-grid {
-  display: grid;
-  gap: 1.35rem;
+.policy-doc section + section {
+  margin-top: 2rem;
 }
 
-.privacy-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.policy-doc h2 {
+  margin: 0 0 0.85rem;
+  color: var(--text-primary);
+  font-size: clamp(1.2rem, 2.5vw, 1.6rem);
 }
 
-.privacy-detail-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.policy-doc p {
+  margin: 0 0 1rem;
+  line-height: 1.8;
 }
 
-.privacy-card .panel-frame-body {
-  padding-top: 0.45rem;
+.policy-doc ul {
+  margin: 0 0 1rem;
+  padding-left: 1.3rem;
 }
 
-.privacy-list {
-  margin: 0;
-  padding-left: 1.2rem;
-  display: grid;
-  gap: 0.75rem;
-  line-height: 1.65;
+.policy-doc li {
+  margin-bottom: 0.7rem;
+  line-height: 1.7;
 }
 
-.privacy-card code {
+.policy-doc code {
   font-family: var(--font-plex-mono), ui-monospace, monospace;
   font-size: 0.92em;
   color: var(--text-primary);
@@ -2343,8 +2352,6 @@ select {
   .feature-panel-grid,
   .proof-grid,
   .compatibility-notes,
-  .privacy-grid,
-  .privacy-detail-grid,
   .faq-grid,
   .trouble-grid,
   .mode-switcher,
@@ -2413,5 +2420,14 @@ select {
 
   .site-footer-inner {
     padding-top: 3rem;
+  }
+
+  .policy-page {
+    padding-top: 5.5rem;
+  }
+
+  .policy-doc {
+    padding: 2.25rem 1.2rem;
+    border-radius: 18px;
   }
 }
