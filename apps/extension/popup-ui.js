@@ -87,11 +87,11 @@ export function initHandsFreeToggle(outputDiv, showOutput) {
 
   const renderHint = (mode) => {
     if (mode === 'autofill') {
-      hint.textContent = 'Scans on Panorama or InputHealth fill the current chart immediately without opening the popup.';
+      hint.textContent = 'Scans on Panorama and web-based EMR platforms fill the current chart immediately without opening the popup.';
       return;
     }
     if (mode === 'tray') {
-      hint.textContent = 'Scans on Panorama or InputHealth are saved into the inventory tray automatically, so clinicians can scan several vaccines with no extra clicks.';
+      hint.textContent = 'Scans on Panorama and web-based EMR platforms are saved into the inventory tray automatically, so clinicians can scan several vaccines with no extra clicks.';
       return;
     }
     hint.textContent = 'Scanner input is ignored by the hands-free listener until you turn a mode on.';
