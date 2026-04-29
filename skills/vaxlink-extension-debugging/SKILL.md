@@ -22,12 +22,10 @@ Trace the path from scan input to parsed payload to background queue to content-
 
 - `apps/extension/popup.js`
 - `apps/extension/popup-inventory.js`
+- `apps/extension/queue-record.js`
 - `apps/extension/popup-parser.js`
 - `apps/extension/background.js`
 - `apps/extension/content.js`
-- `apps/extension/inventory/page-controller.js`
-- `apps/extension/inventory/repository.js`
-- `apps/extension/inventory/model.js`
 
 ## What To Check First
 
@@ -35,7 +33,7 @@ Trace the path from scan input to parsed payload to background queue to content-
 - Did the popup include `administered_at` only when the setting is enabled?
 - Is `workflow_mode` correct for single, multiple, or inventory flows?
 - Did the popup/content flow update the legacy queue key as expected?
-- Did the inventory page mirror or import the queue into IndexedDB correctly?
+- Did the queue record keep the expected legacy row shape for popup reuse and CSV export?
 - Did background storage keep the last-known-good bundle and analytics state?
 - Is the content script on the right host and page type before autofill starts?
 - Are there runtime errors from `chrome.runtime.lastError` or missing permissions?
