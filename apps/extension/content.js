@@ -1036,7 +1036,12 @@ function getFields(selectors) {
 
 function isPanoramaAgentControl(field) {
   const hint = `${field?.id || ''} ${field?.name || ''}`.toLowerCase();
-  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || /\bagent\b/.test(hint);
+  // 'agentiterm'       → single-immunization detail page (immsDetailssection_recordImms_agentiterm)
+  // 'recordimms_agent' → legacy selector variant
+  // 'agentmenu'        → multi-immunization grid page  (historicalfactoryTable:…:immsAgentMenu)
+  //                      NOTE: \bagent\b does NOT fire here because 'immsAgentMenu' lowercases to
+  //                      'immsagentmenu' where 'agent' has no word boundaries on either side.
+  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || hint.includes('agentmenu') || /\bagent\b/.test(hint);
 }
 
 function extractBracketAgentCode(optionText) {
@@ -3192,6 +3197,12 @@ function isImmunizationFormEmpty() {
 async function tryAutoDrain() {
   if (activeWorkflowMode !== 'multiple') return;
   if (!isPanoramaImmunizationPage()) return;
+  // Never pop queue items while the multi-immunization grid page is active.
+  // That page uses maybeAutoFillPanoramaMultipleGrid to read queue items by
+  // index WITHOUT consuming them.  Popping here shifts all entries down by one,
+  // so the next grid repaint (triggered by any PrimeFaces DOM mutation) fills
+  // every row with the vaccine that belongs one position later → wrong agents.
+  if (isPanoramaMultipleImmunizationGridPage()) return;
   if (isPrimeFacesAjaxBusy()) return;
 
   const now = Date.now();
