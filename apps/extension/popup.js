@@ -46,6 +46,8 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
+let testModeAddBtn;
+let testModeBarcode;
 let parsedData = null;
 let activeParseRequestId = 0;
 let autoParseTimer = null;
@@ -122,6 +124,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
+  testModeAddBtn = document.getElementById('testModeAddBtn');
+  testModeBarcode = document.getElementById('testModeBarcode');
+  // Only show test mode panel when running as an unpacked (developer) extension.
+  // Store-installed builds always have update_url in the manifest; unpacked builds never do.
+  const testModePanel = document.getElementById('testModePanel');
+  if (testModePanel && !chrome.runtime.getManifest().update_url) {
+    testModePanel.hidden = false;
+  }
 
   multipleInjectManager = new ScanQueueManager({
     storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -241,6 +251,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       await multipleInjectManager.clear();
       logAnalyticsEvent('queue_cleared', { workflow: 'multiple', queue: 'multiple', source: 'popup_button' });
       writeOutput('Multiple Inject queue cleared.', 'info');
+    });
+  }
+
+  if (testModeAddBtn && testModeBarcode) {
+    testModeAddBtn.addEventListener('click', () => addManualScanToMultipleQueue());
+    testModeBarcode.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        addManualScanToMultipleQueue();
+      }
     });
   }
 
@@ -1321,6 +1341,49 @@ async function addPreviewScanToInventory() {
   } finally {
     if (requestId === activeParseRequestId) {
       setButtonBusy(addCurrentBtn, false);
+    }
+  }
+}
+
+async function addManualScanToMultipleQueue() {
+  const rawBarcode = testModeBarcode ? testModeBarcode.value.trim() : '';
+  if (!rawBarcode) {
+    writeOutput('Paste a barcode into the Manual Add field first.', 'error');
+    return;
+  }
+
+  const requestId = ++activeParseRequestId;
+  setButtonBusy(testModeAddBtn, true, 'Adding...');
+  try {
+    const baseData = parseInputData(rawBarcode);
+    if (!baseData.scanned_at) {
+      baseData.scanned_at = new Date().toISOString();
+    }
+    const enriched = await enrichParsedData(baseData);
+    if (requestId !== activeParseRequestId) {
+      return;
+    }
+
+    const record = buildQueueRecord(enriched, rawBarcode);
+    await multipleInjectManager.add(record);
+    logAnalyticsEvent('queue_saved', {
+      workflow: 'multiple',
+      queue: 'multiple',
+      source: 'popup_test_mode',
+      count: 1,
+      queueSizeAfter: multipleInjectManager.count,
+      vaccineLabel: enriched.tradename || enriched.generic_name || enriched.name || enriched.lot || '',
+      manufacturer: enriched.manufacturer || '',
+      expiryFlag: enriched.expiry_flag || getExpiryStatus(enriched.inventory_expiry || enriched.expiry).flag
+    });
+    testModeBarcode.value = '';
+    const label = enriched.tradename || enriched.generic_name || enriched.lot || 'Unknown vaccine';
+    writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
+  } catch (error) {
+    writeOutput(`Test mode error: ${error.message}`, 'error');
+  } finally {
+    if (requestId === activeParseRequestId) {
+      setButtonBusy(testModeAddBtn, false);
     }
   }
 }
