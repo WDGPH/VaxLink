@@ -962,6 +962,25 @@ function initHandsFreeScanner() {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
+
+    // On Panorama SPA navigations the page is already fully loaded when this
+    // content script injects, so document.readyState is NOT 'loading'.
+    // initClickReductionFeatures() therefore ran synchronously — BEFORE this
+    // callback fired.  At that point activeWorkflowMode was still the default
+    // 'single', so every mode guard in checkGrid() and the tryAutoDrain
+    // setTimeout evaluated false and bailed.
+    //
+    // Now that the real mode is known, re-kick both paths:
+    //  • maybeAutoFillPanoramaMultipleGrid – fills the agent+date grid
+    //  • tryAutoDrain – fills the single-immunization form after save
+    //
+    // A 250 ms head-start lets PrimeFaces settle; both functions guard
+    // internally (isPrimeFacesAjaxBusy, multiGridFillPending, etc.) and
+    // the MutationObserver catches any subsequent retry-worthy mutations.
+    if (activeWorkflowMode === 'multiple') {
+      setTimeout(() => void maybeAutoFillPanoramaMultipleGrid(), 250);
+      setTimeout(() => tryAutoDrain(), 1200);
+    }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1036,7 +1055,12 @@ function getFields(selectors) {
 
 function isPanoramaAgentControl(field) {
   const hint = `${field?.id || ''} ${field?.name || ''}`.toLowerCase();
-  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || /\bagent\b/.test(hint);
+  // 'agentiterm'       → single-immunization detail page (immsDetailssection_recordImms_agentiterm)
+  // 'recordimms_agent' → legacy selector variant
+  // 'agentmenu'        → multi-immunization grid page  (historicalfactoryTable:…:immsAgentMenu)
+  //                      NOTE: \bagent\b does NOT fire here because 'immsAgentMenu' lowercases to
+  //                      'immsagentmenu' where 'agent' has no word boundaries on either side.
+  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || hint.includes('agentmenu') || /\bagent\b/.test(hint);
 }
 
 function extractBracketAgentCode(optionText) {
@@ -3192,6 +3216,12 @@ function isImmunizationFormEmpty() {
 async function tryAutoDrain() {
   if (activeWorkflowMode !== 'multiple') return;
   if (!isPanoramaImmunizationPage()) return;
+  // Never pop queue items while the multi-immunization grid page is active.
+  // That page uses maybeAutoFillPanoramaMultipleGrid to read queue items by
+  // index WITHOUT consuming them.  Popping here shifts all entries down by one,
+  // so the next grid repaint (triggered by any PrimeFaces DOM mutation) fills
+  // every row with the vaccine that belongs one position later → wrong agents.
+  if (isPanoramaMultipleImmunizationGridPage()) return;
   if (isPrimeFacesAjaxBusy()) return;
 
   const now = Date.now();
@@ -3597,7 +3627,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 if (document.readyState === 'loading') {
+  // Normal page load: DOMContentLoaded fires well after chrome.storage.local.get
+  // resolves, so activeWorkflowMode will be correctly set by the time
+  // initClickReductionFeatures runs.
   document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
 } else {
-  initClickReductionFeatures();
+  // Page is already loaded (PrimeFaces SPA navigation, or content script injected
+  // late).  initHandsFreeScanner's chrome.storage.local.get callback is async and
+  // hasn't fired yet, so activeWorkflowMode is still the default 'single'.
+  // Deferring by one task tick gives the storage callback a chance to set the real
+  // mode before initClickReductionFeatures reads it.  The storage callback also
+  // schedules its own re-kick (maybeAutoFillPanoramaMultipleGrid + tryAutoDrain)
+  // as a safety net in case even this deferred call races.
+  setTimeout(initClickReductionFeatures, 0);
 }

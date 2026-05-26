@@ -549,6 +549,56 @@
       font-size: 11px;
     }
 
+    /* ── Test Mode (manual barcode add in Multiple Inject) ── */
+    .test-mode-panel {
+      margin-top: 10px;
+      border-radius: 14px;
+      border: 1px dashed #b6d4e0;
+      background: #f4fafc;
+      overflow: hidden;
+    }
+
+    .test-mode-panel > summary {
+      list-style: none;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0e6e88;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .test-mode-panel > summary::-webkit-details-marker { display: none; }
+    .test-mode-panel > summary::before {
+      content: '▶ ';
+      font-size: 10px;
+    }
+    .test-mode-panel[open] > summary::before { content: '▼ '; }
+
+    .test-mode-body {
+      padding: 0 12px 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .test-mode-body label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #476173;
+    }
+
+    .test-mode-body textarea {
+      width: 100%;
+      min-height: 56px;
+      box-sizing: border-box;
+      resize: vertical;
+    }
+
+    #testModeAddBtn {
+      background: #0e7490;
+      color: #fff;
+    }
+
     .settings-panel[hidden] {
       display: none !important;
     }
@@ -859,6 +909,16 @@
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>
+
+          <details id="testModePanel" class="test-mode-panel" hidden>
+            <summary>🧪 Manual Add (no scanner)</summary>
+            <div class="test-mode-body">
+              <label for="testModeBarcode">Paste a GS1 barcode to add directly to the queue:</label>
+              <textarea id="testModeBarcode" rows="2" placeholder="e.g. ]d2010305718580811211609302110HN1234"></textarea>
+              <button id="testModeAddBtn" type="button">Add to Queue</button>
+            </div>
+          </details>
+
           <div class="inventory">
             <div class="result-heading">Multiple Inject Queue</div>
             <div id="multipleQueueSummary" class="inventory-summary">No saved vaccines yet.</div>
