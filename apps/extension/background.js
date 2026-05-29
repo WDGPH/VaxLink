@@ -16,9 +16,21 @@ const NVC_FETCH_HEADERS = {
   'x-app-desc': 'PHAC NVC Client'
 };
 const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
-  // RECOMBIVAX HB lot Y016312 is ambiguous in NVC lot->tradename links.
-  // This GTIN is treated as regular/adult RECOMBIVAX HB in pilot workflows.
+  // RECOMBIVAX HB adult lots scanned with this GTIN are ambiguous in NVC.
+  // Force adult tradename code (6951000087100) so the GTIN path is always reliable.
   '00067055046339': '6951000087100'
+});
+
+// Lot numbers known to be mislinked in the NVC bundle: the NVC associates these
+// adult RECOMBIVAX HB lots with the pediatric tradename. The lot override fires
+// when no GTIN is present in the barcode (the GTIN_TRADENAME_CODE_OVERRIDES path
+// only activates when AI(01) is scanned). Both mechanisms resolve to the same
+// adult tradename code; having both ensures the override works regardless of
+// barcode format. Add new lots here as they are discovered.
+const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
+  // RECOMBIVAX HB adult — NVC incorrectly links to pediatric tradename
+  'Y016312': '6951000087100',
+  'Y020519': '6951000087100'
 });
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',
@@ -1175,6 +1187,12 @@ function resolveTradenameCodeOverrideByGtin(gtin) {
   return normalizeCodeKey(GTIN_TRADENAME_CODE_OVERRIDES[gtinKey] || '');
 }
 
+function resolveTradenameCodeOverrideByLot(lot) {
+  const lotKey = normalizeLotMapKey(lot);
+  if (!lotKey) return '';
+  return normalizeCodeKey(LOT_TRADENAME_CODE_OVERRIDES[lotKey] || '');
+}
+
 function normalizeNameKey(value) {
   return String(value || '')
     .toLowerCase()
@@ -1437,7 +1455,10 @@ function lookupVaccineLot(lotNumber, options = {}) {
     // Get tradename info
     const tradenameRefs = getLotTradenameReferences(concept);
     bgLog('Lot tradename references:', tradenameRefs);
+    // GTIN override takes priority; lot override fires when no GTIN in the barcode.
     const gtinOverrideCode = resolveTradenameCodeOverrideByGtin(options.gtin);
+    const lotOverrideCode = resolveTradenameCodeOverrideByLot(lotNumber);
+    const effectiveOverrideCode = gtinOverrideCode || lotOverrideCode;
     const byCodeCandidates = [];
     let resolvedTradename = null;
     for (const ref of tradenameRefs) {
@@ -1448,11 +1469,12 @@ function lookupVaccineLot(lotNumber, options = {}) {
       }
     }
 
-    if (gtinOverrideCode && byCodeCandidates.length > 0) {
-      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === gtinOverrideCode);
+    if (effectiveOverrideCode && byCodeCandidates.length > 0) {
+      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === effectiveOverrideCode);
       if (overrideMatch) {
         resolvedTradename = overrideMatch.info;
-        bgLog('Tradename resolved from GTIN override:', options.gtin, '->', overrideMatch.ref.code);
+        const overrideSource = gtinOverrideCode ? `GTIN ${options.gtin}` : `lot ${lotNumber}`;
+        bgLog('Tradename resolved from override (', overrideSource, '):', overrideMatch.ref.code);
       }
     }
 
