@@ -426,7 +426,7 @@ function getExpiryStatus(value) {
 
 function buildInventoryRecordFromParsed(data, rawBarcode) {
   const totalDoses = getPositiveInt(data.total_doses, null);
-  const fallbackDose = getPositiveInt(totalDoses, 1);
+  const fallbackDose = getPositiveInt(totalDoses, null);
   const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
@@ -3157,6 +3157,16 @@ async function applyNextQueueItem() {
     }
 
     const record = rows.shift();
+    // Re-queue the record if it still has doses remaining.
+    // null remaining_doses means unknown/unlimited (multi-dose vial with no count
+    // tracked) — put it back at the head so it can be used again.
+    const remaining = getQueueRemainingDoses(record, null);
+    if (remaining === null) {
+      rows.unshift(record);
+    } else if (remaining > 1) {
+      rows.unshift({ ...record, remaining_doses: remaining - 1 });
+    }
+    // else remaining <= 1: record is consumed, don't re-queue
     await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
 
     const data = buildAutofillPayloadFromQueueRecord(record);
