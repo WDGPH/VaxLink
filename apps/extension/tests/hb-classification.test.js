@@ -304,30 +304,42 @@ test('HB-pediatric: disease field containing pediatric hepatitis B', () => {
 // 5. HB-pediatric — strength-based fallback (no "pediatric" keyword)
 // ===========================================================================
 
-test('HB-pediatric strength: RECOMBIVAX HB with strength=5 mcg (pediatric dose, NVC extension)', () => {
-  const info = { tradename: 'RECOMBIVAX HB', strength: '5 mcg' };
-  assert.equal(hasCandidate(info, 'HB-pediatric'), true);
-  // HB adult rule must NOT also fire (5 mcg is unambiguously pediatric)
-  assert.equal(hasCandidate(info, 'HB'), false);
-});
+// NVC stores strength as a bare number in the nvc-strength extension (e.g. "5" not "5 mcg").
+// extractTradenameStrength returns that bare number, which appears as a standalone token
+// in buildPanoramaAgentSourceText. Rules must therefore match the bare number, not "5 mcg".
 
-test('HB-pediatric strength: recombivax + 5 mcg without HB in name', () => {
-  const info = { tradename: 'recombivax', strength: '5 mcg' };
+test('HB-pediatric strength: RECOMBIVAX HB with NVC bare-number strength="5"', () => {
+  const info = { tradename: 'RECOMBIVAX HB', strength: '5' };
   assert.equal(hasCandidate(info, 'HB-pediatric'), true);
   assert.equal(hasCandidate(info, 'HB'), false);
 });
 
-test('HB-pediatric strength: hepatitis b generic with 5 mcg dose', () => {
-  const info = { generic_name: 'hepatitis b vaccine recombinant', strength: '5 mcg' };
+test('HB-pediatric strength: recombivax + bare strength "5" without HB in tradename', () => {
+  const info = { tradename: 'recombivax', strength: '5' };
   assert.equal(hasCandidate(info, 'HB-pediatric'), true);
   assert.equal(hasCandidate(info, 'HB'), false);
 });
 
-test('HB-pediatric strength: 5 mcg in tradename display string (NVC display-derived strength)', () => {
-  // extractStrengthFromTradenameDisplay pulls the mcg number; simulate that result
-  // being placed into the strength field that buildPanoramaAgentSourceText reads.
+test('HB-pediatric strength: Engerix B with NVC bare-number strength="10" (pediatric dose)', () => {
+  // Engerix B pediatric = 10 mcg/0.5 mL; adult = 20 mcg/mL. Both have picklist "Engerix B".
+  // The bare "10" token is the only strength-based discriminator when "pediatric" is absent.
+  const info = { tradename: 'Engerix B', strength: '10' };
+  assert.equal(hasCandidate(info, 'HB-pediatric'), true);
+  assert.equal(hasCandidate(info, 'HB'), false);
+});
+
+test('HB-pediatric strength: generic hepatitis b vaccine with bare strength "5"', () => {
+  const info = { generic_name: 'hepatitis b vaccine recombinant', strength: '5' };
+  assert.equal(hasCandidate(info, 'HB-pediatric'), true);
+  assert.equal(hasCandidate(info, 'HB'), false);
+});
+
+test('HB-pediatric strength: 5 mcg phrase in tradename display string (non-NVC fallback)', () => {
+  // If NVC strength extension is absent, extractStrengthFromTradenameDisplay parses
+  // the display string and returns just the number. But some external sources may
+  // provide the full "5 mcg" phrase in the tradename field directly.
   const info = { tradename: 'RECOMBIVAX HB PEDIATRIC 5 MCG/0.5 ML' };
-  // "5 mcg" phrase is in the normalised tradename string, so both name and strength signals fire.
+  // "5 mcg" phrase → normalised source includes "5" as a token → rule fires.
   assert.equal(hasCandidate(info, 'HB-pediatric'), true);
   assert.equal(hasCandidate(info, 'HB'), false);
 });
@@ -372,14 +384,20 @@ test('HB adult: generic_name=hepatitis b with strength=10 mcg (Recombivax adult 
 // 7. HB (adult) strength-based fallback
 // ===========================================================================
 
-test('HB adult strength: Engerix-B 20 mcg (explicit adult strength)', () => {
-  const info = { tradename: 'ENGERIX-B', strength: '20 mcg' };
+test('HB adult strength: Engerix-B with bare NVC strength="20" (adult dose)', () => {
+  const info = { tradename: 'ENGERIX-B', strength: '20' };
   assert.equal(hasCandidate(info, 'HB'), true);
   assert.equal(hasCandidate(info, 'HB-pediatric'), false);
 });
 
-test('HB adult strength: Recombivax 10 mcg without "HB" in tradename', () => {
-  const info = { tradename: 'Recombivax', strength: '10 mcg' };
+test('HB adult strength: Recombivax with bare NVC strength="10" (adult dose)', () => {
+  const info = { tradename: 'Recombivax', strength: '10' };
+  assert.equal(hasCandidate(info, 'HB'), true);
+  assert.equal(hasCandidate(info, 'HB-pediatric'), false);
+});
+
+test('HB adult: Engerix B with strength="20" is NOT classified as pediatric (no "10" in source)', () => {
+  const info = { tradename: 'Engerix B', strength: '20' };
   assert.equal(hasCandidate(info, 'HB'), true);
   assert.equal(hasCandidate(info, 'HB-pediatric'), false);
 });
