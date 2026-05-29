@@ -84,9 +84,27 @@
     { outputs: ['HA'], clauses: [{ any: ['havrix', 'vaqta', 'avaxim', 'hepatitis a'], notAny: ['hepatitis b', 'typhoid', 'pediatric'] }] },
     { outputs: ['HA-unspecified'], clauses: [{ any: ['hepatitis a'], notAny: ['havrix', 'vaqta', 'avaxim', 'hepatitis b', 'typhoid', 'pediatric'] }] },
     { outputs: ['HB-dialysis'], clauses: [{ any: ['engerix b dialysis', 'hepatitis b dialysis'] }] },
-    { outputs: ['HB-pediatric'], clauses: [{ any: ['engerix b pediatric', 'recombivax pediatric', 'hepatitis b pediatric'] }] },
-    { outputs: ['HB'], clauses: [{ any: ['engerix b', 'recombivax hb', 'heplisav', 'hepatitis b'], notAny: ['dialysis', 'pediatric', 'hepatitis a'] }] },
-    { outputs: ['HB-unspecified'], clauses: [{ any: ['hepatitis b'], notAny: ['engerix b', 'recombivax hb', 'heplisav', 'dialysis', 'pediatric', 'hepatitis a'] }] },
+    { outputs: ['HB-pediatric'], clauses: [
+      // Primary: tradename / generic name explicitly identifies pediatric formulation.
+      // 'recombivax pediatric' matches 'recombivax hb pediatric' via token fallback.
+      { any: ['engerix b pediatric', 'recombivax pediatric', 'hepatitis b pediatric', 'hepatitis b recombinant pediatric'] },
+      // Strength fallback: Recombivax HB Pediatric = 5 mcg antigen/dose.
+      // Adult Recombivax HB = 10 mcg — these doses never overlap, so 5 mcg is
+      // an unambiguous pediatric indicator regardless of brand naming.
+      { all: ['recombivax', '5 mcg'] },
+      // Strength fallback: any hepatitis B vaccine at 5 mcg = pediatric dose.
+      { all: ['hepatitis b', '5 mcg'], notAny: ['hepatitis a', 'dialysis'] },
+    ] },
+    { outputs: ['HB'], clauses: [
+      // Primary: tradename identifies brand; block on dialysis, pediatric, or 5 mcg
+      // (5 mcg is the unambiguous Recombivax pediatric dose).
+      { any: ['engerix b', 'recombivax hb', 'heplisav', 'hepatitis b'], notAny: ['dialysis', 'pediatric', 'hepatitis a', '5 mcg'] },
+      // Strength fallback: Engerix-B 20 mcg = adult dose (pediatric = 10 mcg).
+      { all: ['engerix', '20 mcg'], notAny: ['dialysis', 'pediatric'] },
+      // Strength fallback: Recombivax HB 10 mcg = adult dose (pediatric = 5 mcg).
+      { all: ['recombivax', '10 mcg'], notAny: ['dialysis', '5 mcg', 'pediatric'] },
+    ] },
+    { outputs: ['HB-unspecified'], clauses: [{ any: ['hepatitis b'], notAny: ['engerix b', 'recombivax hb', 'heplisav', 'dialysis', 'pediatric', 'hepatitis a', '5 mcg'] }] },
     { outputs: ['HBIg'], clauses: [{ any: ['hepatitis b immune globulin', 'hbig'] }] },
     { outputs: ['Hib-HB'], clauses: [{ any: ['hib hb', 'haemophilus influenzae type b hepatitis b'] }] },
     { outputs: ['Hib'], clauses: [{ any: ['act hib', 'hiberix', 'haemophilus influenzae type b'], notAny: ['hepatitis b', 'meningococcal'] }] },
