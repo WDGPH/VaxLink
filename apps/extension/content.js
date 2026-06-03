@@ -793,9 +793,25 @@ function onHandsFreePaste(event) {
   if (!text || text.length < SCAN_MIN_LENGTH) return;
   if (!isCandidateGS1Text(text)) return;
 
+  // isCandidateGS1Text is intentionally loose — it flags any text containing
+  // "01" as a candidate, which is correct for incremental keystrokes but too
+  // broad for paste. Dates ("01/01/2024"), patient IDs, or notes that happen
+  // to contain "01" would otherwise have their paste blocked. Require the text
+  // to actually parse as a complete, numeric GS1 barcode before intercepting.
+  let parsed;
+  try {
+    parsed = parseGS1BarcodeFromScanner(text);
+  } catch (_) {
+    return;
+  }
+  if (!parsed) return;
+  // A non-numeric GTIN means the parser found "01" inside normal prose and
+  // treated the next 14 characters as a GTIN. Real GTINs are always 14 digits.
+  if (parsed.gtin && !/^\d{14}$/.test(parsed.gtin)) return;
+
   event.preventDefault();
   rememberRecentInputCandidate(text);
-    vlog('hands-free paste');
+  vlog('hands-free paste');
   handleHandsFreeScan(text, 'paste');
 }
 
