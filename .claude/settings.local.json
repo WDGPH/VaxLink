@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk grep *)",
+      "Bash(rtk ls *)",
+      "Bash(rtk git *)",
+      "Bash(python3 *)",
+      "Bash(npm test *)",
+      "Bash(node --check /home/jovyan/VaxLink/apps/extension/background.js)",
+      "Bash(node --check /home/jovyan/VaxLink/apps/extension/panorama-agent-rules.js)",
+      "Bash(rtk read *)",
+      "Bash(bash scripts/fetch-nvc.sh)",
+      "Bash(node *)",
+      "Bash(git checkout *)"
+    ]
+  }
+}
