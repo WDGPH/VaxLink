@@ -1,4 +1,8 @@
-export const basePath = process.env.NEXT_PUBLIC_BASE_PATH || process.env.PAGES_BASE_PATH || process.env.BASE_PATH || ''
+export const basePath =
+  process.env.NEXT_PUBLIC_BASE_PATH ??
+  process.env.PAGES_BASE_PATH ??
+  process.env.BASE_PATH ??
+  ''
 
 export function withBasePath(path: string) {
   if (!basePath) {
