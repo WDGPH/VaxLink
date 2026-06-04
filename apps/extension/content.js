@@ -508,6 +508,7 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   parsed.dose_value = vaccineInfo.dose_value;
   parsed.dose_unit = vaccineInfo.dose_unit;
   parsed.drug_code = vaccineInfo.din;
+  parsed.nvc_override = vaccineInfo.nvc_override || null;
   parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
 
   if (!parsed.lot && vaccineInfo.lot_number) {
@@ -2571,6 +2572,16 @@ function ensureToastHost() {
     .vl-toast.info     { background: #0e7490; }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
+    .vl-toast-override {
+      margin-top: 7px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      background: rgba(0,0,0,.25);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      color: #fef08a;
+    }
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
@@ -2622,12 +2633,16 @@ function showVaxlinkToast(data, durationMs = 4000) {
   }
   const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+  const overrideNote = data.nvc_override
+    ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
+    : '';
 
   root.innerHTML = `<div class="vl-toast ${cssClass} show">
     <div class="vl-toast-title">${escapeToastHtml(label)}</div>
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    ${overrideNote}
   </div>`;
-  toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+  toastDismissTimer = setTimeout(() => dismissToast(root), data.nvc_override ? durationMs + 4000 : durationMs);
 }
 
 function dismissToast(root) {

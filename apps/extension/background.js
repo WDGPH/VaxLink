@@ -1475,6 +1475,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
         resolvedTradename = overrideMatch.info;
         const overrideSource = gtinOverrideCode ? `GTIN ${options.gtin}` : `lot ${lotNumber}`;
         bgLog('Tradename resolved from override (', overrideSource, '):', overrideMatch.ref.code);
+        vaccineInfo.nvc_override = gtinOverrideCode ? 'gtin' : 'lot';
       }
     }
 
