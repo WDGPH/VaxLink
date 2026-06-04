@@ -22,6 +22,7 @@ Trace the path from scan input to parsed payload to background queue to content-
 
 - `apps/extension/popup.js`
 - `apps/extension/popup-inventory.js`
+- `apps/extension/queue-record.js`
 - `apps/extension/popup-parser.js`
 - `apps/extension/background.js`
 - `apps/extension/content.js`

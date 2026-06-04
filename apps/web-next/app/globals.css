@@ -2232,6 +2232,79 @@ select {
   margin-top: 0.85rem;
 }
 
+.policy-page {
+  padding: 6.5rem 0 4rem;
+  background: linear-gradient(180deg, #f6fbfb 0%, #edf4f4 100%);
+}
+
+.policy-doc {
+  width: min(820px, 92vw);
+  margin: 0 auto;
+  padding: 3.5rem min(4.5vw, 3rem);
+  background: rgba(248, 251, 251, 0.94);
+  border: 1px solid var(--line-soft);
+  border-radius: 24px;
+  box-shadow: var(--shadow-panel);
+  color: var(--text-secondary);
+}
+
+.policy-header {
+  margin-bottom: 2.5rem;
+}
+
+.policy-kicker {
+  margin: 0 0 0.8rem;
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent-blue);
+}
+
+.policy-header h1 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  line-height: 1.02;
+}
+
+.policy-updated {
+  margin: 1rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.policy-doc section + section {
+  margin-top: 2rem;
+}
+
+.policy-doc h2 {
+  margin: 0 0 0.85rem;
+  color: var(--text-primary);
+  font-size: clamp(1.2rem, 2.5vw, 1.6rem);
+}
+
+.policy-doc p {
+  margin: 0 0 1rem;
+  line-height: 1.8;
+}
+
+.policy-doc ul {
+  margin: 0 0 1rem;
+  padding-left: 1.3rem;
+}
+
+.policy-doc li {
+  margin-bottom: 0.7rem;
+  line-height: 1.7;
+}
+
+.policy-doc code {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.92em;
+  color: var(--text-primary);
+}
+
 .trouble-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2347,5 +2420,14 @@ select {
 
   .site-footer-inner {
     padding-top: 3rem;
+  }
+
+  .policy-page {
+    padding-top: 5.5rem;
+  }
+
+  .policy-doc {
+    padding: 2.25rem 1.2rem;
+    border-radius: 18px;
   }
 }

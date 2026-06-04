@@ -233,9 +233,9 @@ export const permissions: PermissionRow[] = [
     leavesBrowser: false,
   },
   {
-    permission: 'clipboardRead',
-    reason: 'Supports scanners and setups that deliver barcode payloads through paste actions.',
-    optional: true,
+    permission: 'supported chart site access',
+    reason: 'Loads the hands-free scanner and autofill logic only on approved Panorama hosts and supported InputHealth domains.',
+    optional: false,
     leavesBrowser: false,
   },
   {
@@ -249,6 +249,12 @@ export const permissions: PermissionRow[] = [
     reason: 'Checks for bundle refreshes roughly every 24 hours so local lot lookups stay current.',
     optional: false,
     leavesBrowser: false,
+  },
+  {
+    permission: 'https://nvc-cnv.canada.ca/*',
+    reason: 'Fetches the National Vaccine Catalogue bundle used for local vaccine and lot lookups.',
+    optional: false,
+    leavesBrowser: true,
   },
 ]
 
@@ -283,7 +289,7 @@ export const faqItems: FAQItem[] = [
   {
     question: 'Does VaxLink send chart data anywhere?',
     answer:
-      'No patient chart data is sent by the website. The extension operates in the browser and stores the NVC bundle locally for lookups.',
+      'No patient chart data is sent to VaxLink-operated servers. The extension works in the browser, keeps workflow data locally, and only contacts the National Vaccine Catalogue source for bundle refreshes.',
   },
   {
     question: 'Which scanners and barcode formats work?',
@@ -373,6 +379,7 @@ export const footerColumns = [
     links: [
       { label: 'Permissions', href: '/extension#permissions' },
       { label: 'Data Source', href: '/extension#data-handling' },
+      { label: 'Privacy Policy', href: '/privacy' },
       { label: 'Internal Use Note', href: '/extension#faq' },
       { label: 'Troubleshooting', href: '/extension#troubleshooting' },
     ],
@@ -446,4 +453,11 @@ export const extensionMetadata = buildMetadata({
   description:
     'Install the VaxLink Chrome extension to parse vaccine barcodes, resolve NVC-backed lot metadata, and autofill Panorama or InputHealth.',
   path: '/extension',
+})
+
+export const privacyMetadata = buildMetadata({
+  title: 'VaxLink Privacy Policy',
+  description:
+    'Privacy policy for the VaxLink website and Chrome extension, including local storage, NVC refreshes, and supported chart-entry workflows.',
+  path: '/privacy',
 })

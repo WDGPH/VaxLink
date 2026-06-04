@@ -14,6 +14,8 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
+const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
 let hudInitialized = false;
@@ -424,7 +426,7 @@ function getExpiryStatus(value) {
 
 function buildInventoryRecordFromParsed(data, rawBarcode) {
   const totalDoses = getPositiveInt(data.total_doses, null);
-  const fallbackDose = getPositiveInt(totalDoses, 1);
+  const fallbackDose = getPositiveInt(totalDoses, null);
   const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
@@ -506,6 +508,7 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   parsed.dose_value = vaccineInfo.dose_value;
   parsed.dose_unit = vaccineInfo.dose_unit;
   parsed.drug_code = vaccineInfo.din;
+  parsed.nvc_override = vaccineInfo.nvc_override || null;
   parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
 
   if (!parsed.lot && vaccineInfo.lot_number) {
@@ -877,7 +880,9 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
-    const isPanorama = host.includes('panorama.') || host.includes('ehealthontario.ca');
+    const isPanorama =
+      host === 'www.panorama.prod.ehealthontario.ca' ||
+      host === 'panorama.prod.ehealthontario.ca';
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
@@ -958,6 +963,25 @@ function initHandsFreeScanner() {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
+
+    // On Panorama SPA navigations the page is already fully loaded when this
+    // content script injects, so document.readyState is NOT 'loading'.
+    // initClickReductionFeatures() therefore ran synchronously — BEFORE this
+    // callback fired.  At that point activeWorkflowMode was still the default
+    // 'single', so every mode guard in checkGrid() and the tryAutoDrain
+    // setTimeout evaluated false and bailed.
+    //
+    // Now that the real mode is known, re-kick both paths:
+    //  • maybeAutoFillPanoramaMultipleGrid – fills the agent+date grid
+    //  • tryAutoDrain – fills the single-immunization form after save
+    //
+    // A 250 ms head-start lets PrimeFaces settle; both functions guard
+    // internally (isPrimeFacesAjaxBusy, multiGridFillPending, etc.) and
+    // the MutationObserver catches any subsequent retry-worthy mutations.
+    if (activeWorkflowMode === 'multiple') {
+      setTimeout(() => void maybeAutoFillPanoramaMultipleGrid(), 250);
+      setTimeout(() => tryAutoDrain(), 1200);
+    }
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
@@ -1032,7 +1056,12 @@ function getFields(selectors) {
 
 function isPanoramaAgentControl(field) {
   const hint = `${field?.id || ''} ${field?.name || ''}`.toLowerCase();
-  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || /\bagent\b/.test(hint);
+  // 'agentiterm'       → single-immunization detail page (immsDetailssection_recordImms_agentiterm)
+  // 'recordimms_agent' → legacy selector variant
+  // 'agentmenu'        → multi-immunization grid page  (historicalfactoryTable:…:immsAgentMenu)
+  //                      NOTE: \bagent\b does NOT fire here because 'immsAgentMenu' lowercases to
+  //                      'immsagentmenu' where 'agent' has no word boundaries on either side.
+  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || hint.includes('agentmenu') || /\bagent\b/.test(hint);
 }
 
 function extractBracketAgentCode(optionText) {
@@ -1430,18 +1459,39 @@ function isShortAgentCandidate(value) {
   return compact.length > 0 && compact.length <= 3;
 }
 
-function isAgentCandidateAccepted(candidate, field) {
+function fieldFilledTextMatchesCandidate(field, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
-  const filledNorm = normalizeForMatch(getFieldFilledText(field));
+  const filledRaw = getFieldFilledText(field);
+  const filledNorm = normalizeForMatch(filledRaw);
   if (!filledNorm) return false;
   if (filledNorm === candidateNorm) return true;
+  // Reject if the filled text is a compound variant of the candidate (e.g. "HB-pediatric" for "HB").
+  // normalizeForMatch converts dashes to spaces, so "HB-pediatric" → "hb pediatric", which would
+  // otherwise pass the .includes("hb") check below and falsely accept the pediatric agent for adults.
+  const candidateRaw = String(candidate || '').trim();
+  if (candidateRaw && filledRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
   if (filledNorm.includes(candidateNorm)) return true;
+
+  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
+  return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+}
+
+function isAgentCandidateAccepted(candidate, field) {
+  const candidateNorm = normalizeForMatch(candidate);
+  const filledNorm = normalizeForMatch(getFieldFilledText(field));
+  if (fieldFilledTextMatchesCandidate(field, candidate)) return true;
 
   if (isShortAgentCandidate(candidate)) {
     const token = candidateNorm.replace(/[^a-z0-9]/g, '');
-    const filledTokens = filledNorm.split(' ').map(t => t.replace(/[^a-z0-9]/g, '')).filter(Boolean);
-    return filledTokens.includes(token);
+    // Exact compact match: field shows precisely this code (e.g. "HB").
+    const filledCompact = filledNorm.replace(/[^a-z0-9]/g, '');
+    if (filledCompact === token) return true;
+    // Bracket code match: field shows a display name with code in brackets (e.g. "Hepatitis B [HB]").
+    // filledTokens.includes(token) is intentionally NOT used here — it would accept "HB-pediatric"
+    // (normalized to "hb pediatric") for the adult "HB" candidate since "hb" appears as a token.
+    const bracketMatch = filledNorm.match(/\[([^\]]+)\]/);
+    return !!(bracketMatch && normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token);
   }
 
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
@@ -1538,15 +1588,29 @@ function getPanoramaTradeCandidates(data) {
   return values;
 }
 
-function fillPanoramaTradeName(data) {
-  const candidates = getPanoramaTradeCandidates(data);
-  if (!candidates.length) return false;
-  const selectors = [
+function getPanoramaTradeSelectors() {
+  return [
     'select[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_input"]',
     'input[id*="immsDetailssection_createImms_tradenameinput:selectOneMenu_focus"]',
     'select[id*="createImms_tradenameinput:selectOneMenu_input"]',
     'input[id*="createImms_tradenameinput:selectOneMenu_focus"]'
   ];
+}
+
+function hasPanoramaTradeSelection(data) {
+  const candidates = getPanoramaTradeCandidates(data);
+  if (!candidates.length) return false;
+  const fields = getFields(getPanoramaTradeSelectors()).filter(canFillPanoramaControl);
+  if (!fields.length) return false;
+  return fields.some((field) => (
+    candidates.some((candidate) => fieldFilledTextMatchesCandidate(field, candidate))
+  ));
+}
+
+function fillPanoramaTradeName(data) {
+  const candidates = getPanoramaTradeCandidates(data);
+  if (!candidates.length) return false;
+  const selectors = getPanoramaTradeSelectors();
   for (const candidate of candidates) {
     if (fillFirstMatchingField(selectors, candidate)) {
       return true;
@@ -1591,6 +1655,29 @@ function hasPanoramaDeferredDetailData(data) {
   return !!(administered.date || administered.time);
 }
 
+function getPanoramaAdministeredDateTimeFields() {
+  return {
+    dateField: getFields([
+      'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
+      'input[id*="dateAdministedDate:dateInput_input"]'
+    ]).find(field => canFillPanoramaControl(field) && isVisible(field)),
+    timeField: getFields([
+      'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
+      'input[id*="dateAdministedDate:timeInput:timeInput"]'
+    ]).find(field => canFillPanoramaControl(field) && isVisible(field))
+  };
+}
+
+function hasPanoramaDeferredDetailFieldsFilled(data) {
+  const administered = getPanoramaAdministeredDateTimeValues(data);
+  if (!administered.date && !administered.time) return true;
+
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
+  const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
+  const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
+  return dateMatches && timeMatches;
+}
+
 function fillPanoramaMaskedTextInput(field, nextValue) {
   if (!field || !nextValue) return false;
   const value = String(nextValue).trim();
@@ -1610,15 +1697,7 @@ function fillPanoramaAdministeredDateTimeFields(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (!administered.date && !administered.time) return 0;
 
-  const dateField = getFields([
-    'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
-    'input[id*="dateAdministedDate:dateInput_input"]'
-  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
-
-  const timeField = getFields([
-    'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
-    'input[id*="dateAdministedDate:timeInput:timeInput"]'
-  ]).find(field => canFillPanoramaControl(field) && isVisible(field));
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
 
   let fillCount = 0;
   if (administered.date && fillPanoramaMaskedTextInput(dateField, administered.date)) {
@@ -1798,6 +1877,34 @@ function tryFillPanoramaLotOrTrade(data) {
   return fillPanoramaTradeName(data);
 }
 
+function hasPanoramaLotSelection(lotValue) {
+  if (!lotValue) return false;
+
+  const selectFields = getFields([
+    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
+  ]).filter(canFillPanoramaControl);
+  if (selectFields.some((field) => optionTextContainsLot(getFieldFilledText(field), lotValue))) {
+    return true;
+  }
+
+  const selectedLotLabels = getFields([
+    'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
+  ]);
+  return selectedLotLabels.some((label) => optionTextContainsLot(label?.textContent || '', lotValue));
+}
+
+function hasPanoramaLotOrTradeSelection(data) {
+  if (!data) return false;
+  if (data.lot) {
+    return hasPanoramaLotSelection(data.lot);
+  }
+  return hasPanoramaTradeSelection(data);
+}
+
 let stopPanoramaLotTradeWatcher = null;
 
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
@@ -1823,6 +1930,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   const timers = [];
   let stopped = false;
   let lastAttemptAt = 0;
+  let stablePasses = 0;
 
   const stop = () => {
     if (stopped) return;
@@ -1846,29 +1954,43 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
     const now = Date.now();
     if ((now - lastAttemptAt) < minAttemptGapMs) return;
     lastAttemptAt = now;
+    const busy = isPrimeFacesAjaxBusy();
 
     let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
-    if (!hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+    if (!hasResolvedAgent && !busy) {
       hasResolvedAgent = tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
     }
 
-    let resolved = false;
-    if (shouldTryLotOrTrade && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
-      resolved = tryFillPanoramaLotOrTrade(data);
+    let resolved = !shouldTryLotOrTrade;
+    if (!resolved && hasResolvedAgent) {
+      resolved = hasPanoramaLotOrTradeSelection(data);
+    }
+    if (!resolved && hasResolvedAgent && !busy) {
+      resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
     }
 
-    if (!resolved && hasLot && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
-      openPanoramaLotDropdown();
-      resolved = fillPanoramaLotFromPanelItems(data?.lot) || resolved;
+    if (!resolved && hasLot && hasResolvedAgent && !busy) {
+      if (!hasPanoramaLotSelection(data?.lot)) {
+        openPanoramaLotDropdown();
+      }
+      resolved = fillPanoramaLotFromPanelItems(data?.lot) || hasPanoramaLotSelection(data?.lot) || resolved;
     }
 
-    if (shouldFillDeferredFields && !isPrimeFacesAjaxBusy()) {
+    let deferredResolved = !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
+    if (!deferredResolved && !busy) {
       fillPanoramaDeferredDetailFields(data);
+      deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
-    // Keep watcher alive when deferred detail fields are requested, because PrimeFaces
-    // updates after agent/lot selection can overwrite date/time fields.
-    if (resolved && !shouldFillDeferredFields) {
+    // Require a stable follow-up pass before stopping so we do not exit while
+    // PrimeFaces is still applying dependent field refreshes.
+    if (!busy && resolved && deferredResolved) {
+      stablePasses += 1;
+    } else {
+      stablePasses = 0;
+    }
+
+    if (stablePasses >= 2) {
       stop();
     }
   };
@@ -1895,6 +2017,19 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   };
 
   timers.push(setTimeout(start, Math.max(0, Number(initialDelayMs) || 0)));
+}
+
+function isPanoramaRecordImmsPage() {
+  try {
+    const host = String(window.location.hostname || '').toLowerCase();
+    const isPanorama =
+      host === 'www.panorama.prod.ehealthontario.ca' ||
+      host === 'panorama.prod.ehealthontario.ca';
+    if (!isPanorama) return false;
+    return window.location.pathname.toLowerCase().includes('/recordimms/');
+  } catch {
+    return false;
+  }
 }
 
 function isPanoramaImmunizationPage() {
@@ -2437,6 +2572,16 @@ function ensureToastHost() {
     .vl-toast.info     { background: #0e7490; }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
+    .vl-toast-override {
+      margin-top: 7px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      background: rgba(0,0,0,.25);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      color: #fef08a;
+    }
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
@@ -2455,9 +2600,12 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._commandMode) {
     const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
+    const sourceDetail = data._commandSource === 'hud'
+      ? 'Switched from VaxLink HUD'
+      : 'Switched via scanner command';
     root.innerHTML = `<div class="vl-toast info show">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
-      <div class="vl-toast-detail">Switched via scanner command</div>
+      <div class="vl-toast-detail">${sourceDetail}</div>
     </div>`;
     toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
     return;
@@ -2485,12 +2633,16 @@ function showVaxlinkToast(data, durationMs = 4000) {
   }
   const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+  const overrideNote = data.nvc_override
+    ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
+    : '';
 
   root.innerHTML = `<div class="vl-toast ${cssClass} show">
     <div class="vl-toast-title">${escapeToastHtml(label)}</div>
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    ${overrideNote}
   </div>`;
-  toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+  toastDismissTimer = setTimeout(() => dismissToast(root), data.nvc_override ? durationMs + 4000 : durationMs);
 }
 
 function dismissToast(root) {
@@ -2514,6 +2666,57 @@ let hudShadow = null;
 let hudCountEl = null;
 let hudApplyBtn = null;
 let hudContainer = null;
+let hudModeToggleBtn = null;
+let hudQueueWrap = null;
+let hudMiniEl = null;
+let hudUserHidden = false;
+let hudCurrentLeft = null;
+let hudCurrentTop = null;
+let hudIsDragging = false;
+let hudDragOffsetX = 0;
+let hudDragOffsetY = 0;
+let hudMiniPointerDown = false;
+let hudMiniDidDrag = false;
+let hudMiniDragOffsetX = 0;
+let hudMiniDragOffsetY = 0;
+let hudMiniDownX = 0;
+let hudMiniDownY = 0;
+
+function setHudModeToggleState(button, activeMode) {
+  if (!button) return;
+  const mode = activeMode === 'multiple' ? 'multiple' : 'single';
+  const nextMode = mode === 'multiple' ? 'single' : 'multiple';
+  const label = mode === 'multiple' ? 'Multiple' : 'Single';
+  const targetLabel = nextMode === 'multiple' ? 'Multiple' : 'Single';
+  button.innerHTML = `
+    <span class="vl-hud-mode-top">Chart Mode</span>
+    <span class="vl-hud-mode-main">
+      <span class="vl-hud-mode-current">${label}</span>
+      <span class="vl-hud-mode-next">Switch to ${targetLabel}</span>
+    </span>
+  `;
+  button.dataset.mode = mode;
+  button.setAttribute('aria-label', `Switch to ${targetLabel} mode`);
+  button.setAttribute('title', `Switch to ${targetLabel} mode`);
+}
+
+async function setHudWorkflowMode(newMode) {
+  const nextMode = newMode === 'multiple' ? 'multiple' : 'single';
+  if (activeWorkflowMode === nextMode) {
+    updateHudState();
+    return;
+  }
+
+  activeWorkflowMode = nextMode;
+  updateHudState();
+  try {
+    await setLocalStorage({ [WORKFLOW_MODE_KEY]: nextMode });
+    logAnalyticsEvent('workflow_mode_set', { workflow: nextMode, source: 'hud_toggle' });
+    showVaxlinkToast({ _commandMode: nextMode, _commandSource: 'hud' });
+  } catch (error) {
+    console.warn('VaxLink HUD mode switch error:', error);
+  }
+}
 
 function initHud() {
   if (hudInitialized) return;
@@ -2528,56 +2731,252 @@ function initHud() {
   style.textContent = `
     :host { all: initial; }
     .vl-hud {
+      position: relative;
       position: fixed;
       bottom: 16px;
       right: 16px;
       z-index: 2147483647;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
       display: flex;
-      align-items: center;
-      gap: 8px;
-      background: #164e63;
-      color: #fff;
-      padding: 6px 12px;
-      border-radius: 24px;
-      box-shadow: 0 2px 12px rgba(0,0,0,.3);
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      background:
+        radial-gradient(circle at top left, rgba(125, 211, 252, .22), transparent 42%),
+        linear-gradient(180deg, rgba(15, 58, 79, .96) 0%, rgba(12, 44, 61, .96) 100%);
+      color: #f4fbff;
+      padding: 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(173, 216, 230, .16);
+      box-shadow: 0 16px 34px rgba(3, 20, 30, .34);
       font-size: 13px;
       cursor: default;
       user-select: none;
-      transition: opacity .2s;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: opacity .2s, transform .2s;
+      min-width: 188px;
     }
     .vl-hud.hidden { display: none; }
+    .vl-hud-head {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .vl-hud-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%);
+      box-shadow: 0 0 0 4px rgba(103, 232, 249, .12);
+      flex: 0 0 auto;
+    }
+    .vl-hud-queue {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .vl-hud-queue.hidden { display: none; }
     .vl-hud-count {
-      background: rgba(255,255,255,.2);
-      border-radius: 12px;
-      padding: 2px 8px;
-      font-weight: 600;
-      min-width: 18px;
+      background: rgba(207, 250, 254, .14);
+      color: #dffaff;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-weight: 700;
+      min-width: 20px;
       text-align: center;
+      box-shadow: inset 0 0 0 1px rgba(207, 250, 254, .08);
     }
     .vl-hud-btn {
       background: #ecfeff;
-      color: #164e63;
+      color: #0f4357;
       border: none;
-      border-radius: 14px;
-      padding: 4px 12px;
+      border-radius: 16px;
+      padding: 6px 12px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 700;
       cursor: pointer;
       white-space: nowrap;
+      letter-spacing: .01em;
+      transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease;
     }
-    .vl-hud-btn:hover { background: #fff; }
+    .vl-hud-mode-toggle {
+      width: 100%;
+      position: relative;
+      overflow: hidden;
+      text-align: left;
+      padding: 11px 12px 12px;
+      background: linear-gradient(180deg, rgba(240, 253, 255, .18) 0%, rgba(224, 247, 250, .08) 100%);
+      color: #f4fbff;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.12),
+        0 10px 22px rgba(7, 29, 40, .22);
+    }
+    .vl-hud-mode-toggle[data-mode="multiple"] {
+      background: linear-gradient(180deg, rgba(236, 254, 255, .98) 0%, rgba(194, 244, 248, .94) 100%);
+      color: #0f4357;
+      box-shadow: 0 12px 22px rgba(8, 58, 77, .18);
+    }
+    .vl-hud-mode-toggle::before {
+      content: "";
+      position: absolute;
+      inset: auto -18% -42% auto;
+      width: 118px;
+      height: 118px;
+      border-radius: 999px;
+      background: rgba(125, 211, 252, .14);
+      pointer-events: none;
+    }
+    .vl-hud-btn:hover {
+      background: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 8px 18px rgba(9, 40, 53, .18);
+    }
+    .vl-hud-mode-toggle:hover {
+      background: linear-gradient(180deg, rgba(240, 253, 255, .24) 0%, rgba(224, 247, 250, .12) 100%);
+      color: #f4fbff;
+    }
+    .vl-hud-mode-toggle[data-mode="multiple"]:hover {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(214, 248, 251, .98) 100%);
+      color: #0f4357;
+    }
     .vl-hud-btn:disabled { opacity: .5; cursor: default; }
-    .vl-hud-label { font-size: 11px; opacity: .8; }
+    .vl-hud-btn:active { transform: translateY(0); }
+    .vl-hud-label {
+      font-size: 11px;
+      letter-spacing: .03em;
+      text-transform: uppercase;
+      color: rgba(232, 249, 253, .82);
+    }
+    .vl-hud-mode-top {
+      display: block;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      opacity: .72;
+      margin-bottom: 5px;
+    }
+    .vl-hud-mode-main {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+    .vl-hud-mode-current {
+      display: inline-block;
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 800;
+      letter-spacing: -.02em;
+    }
+    .vl-hud-mode-next {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      opacity: .78;
+      white-space: nowrap;
+    }
+    .vl-hud-head {
+      cursor: grab;
+    }
+    .vl-hud-head.dragging {
+      cursor: grabbing;
+    }
+    .vl-hud-hide-btn {
+      margin-left: auto;
+      background: transparent;
+      color: rgba(232, 249, 253, .55);
+      font-size: 18px;
+      line-height: 1;
+      padding: 0 5px;
+      border-radius: 8px;
+      font-weight: 300;
+      min-width: unset;
+      flex-shrink: 0;
+    }
+    .vl-hud-hide-btn:hover {
+      background: rgba(232, 249, 253, .12);
+      color: #f4fbff;
+      transform: none;
+      box-shadow: none;
+    }
+    .vl-hud-mini {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 2147483647;
+      width: 36px;
+      height: 36px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at top left, rgba(125, 211, 252, .22), transparent 42%),
+        linear-gradient(180deg, rgba(15, 58, 79, .96) 0%, rgba(12, 44, 61, .96) 100%);
+      border: 1px solid rgba(173, 216, 230, .2);
+      box-shadow: 0 8px 18px rgba(3, 20, 30, .3);
+      cursor: grab;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      transition: transform .16s ease, box-shadow .16s ease;
+    }
+    .vl-hud-mini.visible { display: flex; }
+    .vl-hud-mini:hover {
+      transform: scale(1.1);
+      box-shadow: 0 10px 24px rgba(3, 20, 30, .44);
+    }
+    .vl-hud-mini-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%);
+      box-shadow: 0 0 0 4px rgba(103, 232, 249, .18);
+    }
   `;
   hudShadow.appendChild(style);
 
   hudContainer = document.createElement('div');
   hudContainer.className = 'vl-hud hidden';
 
+  const head = document.createElement('div');
+  head.className = 'vl-hud-head';
+
+  const dot = document.createElement('span');
+  dot.className = 'vl-hud-dot';
+
   const label = document.createElement('span');
   label.className = 'vl-hud-label';
   label.textContent = 'VaxLink';
+
+  const hideBtn = document.createElement('button');
+  hideBtn.className = 'vl-hud-btn vl-hud-hide-btn';
+  hideBtn.title = 'Hide VaxLink HUD';
+  hideBtn.setAttribute('aria-label', 'Hide VaxLink HUD');
+  hideBtn.textContent = '−';
+  hideBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setHudHidden(true);
+  });
+
+  head.appendChild(dot);
+  head.appendChild(label);
+  head.appendChild(hideBtn);
+  hudContainer.appendChild(head);
+
+  hudModeToggleBtn = document.createElement('button');
+  hudModeToggleBtn.className = 'vl-hud-btn vl-hud-mode-toggle';
+  hudModeToggleBtn.addEventListener('click', () => {
+    const nextMode = activeWorkflowMode === 'multiple' ? 'single' : 'multiple';
+    void setHudWorkflowMode(nextMode);
+  });
+  hudContainer.appendChild(hudModeToggleBtn);
+
+  hudQueueWrap = document.createElement('div');
+  hudQueueWrap.className = 'vl-hud-queue hidden';
 
   hudCountEl = document.createElement('span');
   hudCountEl.className = 'vl-hud-count';
@@ -2588,20 +2987,149 @@ function initHud() {
   hudApplyBtn.textContent = 'Apply Next';
   hudApplyBtn.addEventListener('click', applyNextQueueItem);
 
-  hudContainer.appendChild(label);
-  hudContainer.appendChild(hudCountEl);
-  hudContainer.appendChild(hudApplyBtn);
+  hudQueueWrap.appendChild(hudCountEl);
+  hudQueueWrap.appendChild(hudApplyBtn);
+  hudContainer.appendChild(hudQueueWrap);
   hudShadow.appendChild(hudContainer);
+
+  hudMiniEl = document.createElement('button');
+  hudMiniEl.className = 'vl-hud-mini';
+  hudMiniEl.title = 'Show VaxLink HUD';
+  hudMiniEl.setAttribute('aria-label', 'Show VaxLink HUD');
+  const miniDot = document.createElement('span');
+  miniDot.className = 'vl-hud-mini-dot';
+  hudMiniEl.appendChild(miniDot);
+  // Mini: mousedown starts potential drag; mouseup without movement restores HUD
+  hudMiniEl.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    hudMiniPointerDown = true;
+    hudMiniDidDrag = false;
+    const rect = hudMiniEl.getBoundingClientRect();
+    hudMiniDragOffsetX = e.clientX - rect.left;
+    hudMiniDragOffsetY = e.clientY - rect.top;
+    hudMiniDownX = e.clientX;
+    hudMiniDownY = e.clientY;
+    hudMiniEl.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+  hudShadow.appendChild(hudMiniEl);
+
   document.body.appendChild(hudHost);
 
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
-    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
-      updateHudState();
+  // Drag-to-move: drag the head to reposition the HUD
+  head.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    hudIsDragging = true;
+    const rect = hudContainer.getBoundingClientRect();
+    hudDragOffsetX = e.clientX - rect.left;
+    hudDragOffsetY = e.clientY - rect.top;
+    head.classList.add('dragging');
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (hudIsDragging) {
+      let newLeft = e.clientX - hudDragOffsetX;
+      let newTop = e.clientY - hudDragOffsetY;
+      newLeft = Math.max(0, Math.min(window.innerWidth - hudContainer.offsetWidth, newLeft));
+      newTop = Math.max(0, Math.min(window.innerHeight - hudContainer.offsetHeight, newTop));
+      applyHudPosition({ left: newLeft, top: newTop });
+    } else if (hudMiniPointerDown) {
+      const dx = e.clientX - hudMiniDownX;
+      const dy = e.clientY - hudMiniDownY;
+      if (!hudMiniDidDrag && (Math.abs(dx) + Math.abs(dy) > 4)) {
+        hudMiniDidDrag = true;
+      }
+      if (hudMiniDidDrag) {
+        let newLeft = e.clientX - hudMiniDragOffsetX;
+        let newTop = e.clientY - hudMiniDragOffsetY;
+        newLeft = Math.max(0, Math.min(window.innerWidth - 36, newLeft));
+        newTop = Math.max(0, Math.min(window.innerHeight - 36, newTop));
+        hudCurrentLeft = newLeft;
+        hudCurrentTop = newTop;
+        applyMiniPosition();
+      }
     }
   });
 
-  updateHudState();
+  document.addEventListener('mouseup', () => {
+    if (hudIsDragging) {
+      hudIsDragging = false;
+      head.classList.remove('dragging');
+      if (hudCurrentLeft !== null && hudCurrentTop !== null) {
+        chrome.storage.local.set({ [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop } });
+      }
+    } else if (hudMiniPointerDown) {
+      hudMiniPointerDown = false;
+      hudMiniEl.style.cursor = '';
+      if (hudMiniDidDrag) {
+        chrome.storage.local.set({ [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop } });
+      } else {
+        setHudHidden(false);
+      }
+    }
+  });
+
+  // Restore saved position and hidden state
+  chrome.storage.local.get([HUD_POSITION_KEY, HUD_HIDDEN_KEY], (stored) => {
+    if (stored && stored[HUD_POSITION_KEY]) {
+      applyHudPosition(stored[HUD_POSITION_KEY]);
+    }
+    if (stored && stored[HUD_HIDDEN_KEY]) {
+      hudUserHidden = true;
+      hudContainer.classList.add('hidden');
+      hudMiniEl.classList.add('visible');
+      applyMiniPosition();
+    }
+    updateHudState();
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (
+      MULTIPLE_INJECT_QUEUE_KEY in changes ||
+      WORKFLOW_MODE_KEY in changes ||
+      LEGACY_POPUP_MODE_KEY in changes ||
+      LEGACY_REMOTE_MODE_KEY in changes ||
+      LEGACY_HANDS_FREE_KEY in changes
+    ) {
+      updateHudState();
+    }
+  });
+}
+
+function applyHudPosition({ left, top }) {
+  hudCurrentLeft = left;
+  hudCurrentTop = top;
+  hudContainer.style.bottom = 'auto';
+  hudContainer.style.right = 'auto';
+  hudContainer.style.left = left + 'px';
+  hudContainer.style.top = top + 'px';
+}
+
+function applyMiniPosition() {
+  if (!hudMiniEl) return;
+  if (hudCurrentLeft !== null && hudCurrentTop !== null) {
+    hudMiniEl.style.removeProperty('bottom');
+    hudMiniEl.style.removeProperty('right');
+    hudMiniEl.style.left = hudCurrentLeft + 'px';
+    hudMiniEl.style.top = hudCurrentTop + 'px';
+  } else {
+    hudMiniEl.style.removeProperty('left');
+    hudMiniEl.style.removeProperty('top');
+    hudMiniEl.style.bottom = '16px';
+    hudMiniEl.style.right = '16px';
+  }
+}
+
+function setHudHidden(hidden) {
+  hudUserHidden = hidden;
+  if (hudContainer) hudContainer.classList.toggle('hidden', hidden);
+  if (hudMiniEl) {
+    hudMiniEl.classList.toggle('visible', hidden);
+    if (hidden) applyMiniPosition();
+  }
+  chrome.storage.local.set({ [HUD_HIDDEN_KEY]: hidden });
 }
 
 function updateHudState() {
@@ -2609,11 +3137,18 @@ function updateHudState() {
     const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
       ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
     const count = rows.length;
-    const shouldShow = activeWorkflowMode === 'multiple' && count > 0
-      && isPanoramaImmunizationPage();
+    const shouldShow = isPanoramaRecordImmsPage();
+    const showQueueControls = activeWorkflowMode === 'multiple' && count > 0 && isPanoramaImmunizationPage();
 
     if (hudContainer) {
-      hudContainer.classList.toggle('hidden', !shouldShow);
+      hudContainer.classList.toggle('hidden', !shouldShow || hudUserHidden);
+    }
+    if (hudMiniEl) {
+      hudMiniEl.classList.toggle('visible', shouldShow && hudUserHidden);
+    }
+    setHudModeToggleState(hudModeToggleBtn, activeWorkflowMode);
+    if (hudQueueWrap) {
+      hudQueueWrap.classList.toggle('hidden', !showQueueControls);
     }
     if (hudCountEl) {
       hudCountEl.textContent = String(count);
@@ -2637,6 +3172,16 @@ async function applyNextQueueItem() {
     }
 
     const record = rows.shift();
+    // Re-queue the record if it still has doses remaining.
+    // null remaining_doses means unknown/unlimited (multi-dose vial with no count
+    // tracked) — put it back at the head so it can be used again.
+    const remaining = getQueueRemainingDoses(record, null);
+    if (remaining === null) {
+      rows.unshift(record);
+    } else if (remaining > 1) {
+      rows.unshift({ ...record, remaining_doses: remaining - 1 });
+    }
+    // else remaining <= 1: record is consumed, don't re-queue
     await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
 
     const data = buildAutofillPayloadFromQueueRecord(record);
@@ -2677,30 +3222,6 @@ async function applyNextQueueItem() {
   }
 }
 
-function getLocalStorage(keys) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get(keys, (result) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(result);
-    });
-  });
-}
-
-function setLocalStorage(values) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set(values, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve();
-    });
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Auto-drain: auto-apply queue head when an empty immunization form is detected
 // ---------------------------------------------------------------------------
@@ -2720,6 +3241,12 @@ function isImmunizationFormEmpty() {
 async function tryAutoDrain() {
   if (activeWorkflowMode !== 'multiple') return;
   if (!isPanoramaImmunizationPage()) return;
+  // Never pop queue items while the multi-immunization grid page is active.
+  // That page uses maybeAutoFillPanoramaMultipleGrid to read queue items by
+  // index WITHOUT consuming them.  Popping here shifts all entries down by one,
+  // so the next grid repaint (triggered by any PrimeFaces DOM mutation) fills
+  // every row with the vaccine that belongs one position later → wrong agents.
+  if (isPanoramaMultipleImmunizationGridPage()) return;
   if (isPrimeFacesAjaxBusy()) return;
 
   const now = Date.now();
@@ -2739,6 +3266,243 @@ async function tryAutoDrain() {
 
 let postSaveObserver = null;
 let lastAgentFilledState = false;
+let multiGridObserver = null;
+let multiGridFillPending = false;
+let multiStepObserver = null;
+let lastObservedPanoramaStepKey = '';
+let lastAutoFilledPanoramaStepKey = '';
+let multiStepAutoFillPending = false;
+
+function isPanoramaMultipleImmunizationGridPage() {
+  if (!isHandsFreeSupportedPage()) return false;
+  const tableBody = document.querySelector('tbody[id*="historicalfactoryTable:dataTable_data"]');
+  if (!tableBody) return false;
+  const hasAddRowsButton = !!document.querySelector('button[id*="historicalfactoryTable:addButtonId:commandButtonId"]');
+  if (!hasAddRowsButton) return false;
+  const hasAgentField = !!document.querySelector('select[id*="historicalfactoryTable:dataTable:0:immsAgentMenu:selectOneMenu_input"]');
+  const hasDateField = !!document.querySelector('input[id*="historicalfactoryTable:dataTable:0:dateIn1:dateInput_input"]');
+  return hasAgentField && hasDateField;
+}
+
+function getPanoramaMultipleGridRows() {
+  const body = document.querySelector('tbody[id*="historicalfactoryTable:dataTable_data"]');
+  if (!body) return [];
+  return Array.from(body.querySelectorAll('tr[data-ri]'));
+}
+
+function getPanoramaMultipleGridAgentField(rowIndex) {
+  return document.querySelector(`select[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_input"]`);
+}
+
+function getPanoramaMultipleGridAgentFocusField(rowIndex) {
+  return document.querySelector(`input[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_focus"]`);
+}
+
+function getPanoramaMultipleGridAgentLabel(rowIndex) {
+  return document.querySelector(`label[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_label"]`);
+}
+
+function getPanoramaMultipleGridDate1Field(rowIndex) {
+  return document.querySelector(`input[id*="historicalfactoryTable:dataTable:${rowIndex}:dateIn1:dateInput_input"]`);
+}
+
+function gridAgentLabelMatchesCandidate(rowIndex, candidate) {
+  const labelRaw = getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '';
+  const labelText = normalizeForMatch(labelRaw);
+  const candidateNorm = normalizeForMatch(candidate);
+  if (!labelText || !candidateNorm) return false;
+  if (labelText === candidateNorm) return true;
+  // Reject if label is a compound variant of the candidate (e.g. "HB-pediatric" label for "HB").
+  const candidateRaw = String(candidate || '').trim();
+  if (candidateRaw && labelRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
+  if (labelText.includes(candidateNorm)) return true;
+  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
+  return candidateTokens.length > 0 && candidateTokens.every(t => labelText.includes(t));
+}
+
+function getPanoramaMultipleGridRowState(rowIndex) {
+  const agentField = getPanoramaMultipleGridAgentField(rowIndex);
+  const agentFocusField = getPanoramaMultipleGridAgentFocusField(rowIndex);
+  const agentLabel = getPanoramaMultipleGridAgentLabel(rowIndex);
+  const dateField = getPanoramaMultipleGridDate1Field(rowIndex);
+  const labelText = normalizeForMatch(agentLabel?.textContent || '');
+  const selectText = normalizeForMatch(getFieldFilledText(agentField));
+  const focusText = normalizeForMatch(getFieldFilledText(agentFocusField));
+  return {
+    agentField,
+    agentFocusField,
+    agentLabel,
+    dateField,
+    agentText: labelText || selectText || focusText,
+    dateText: String(dateField?.value || '').trim()
+  };
+}
+
+function fillPanoramaMultipleGridAgent(rowIndex, data) {
+  const agentField = getPanoramaMultipleGridAgentField(rowIndex);
+  const agentFocusField = getPanoramaMultipleGridAgentFocusField(rowIndex);
+  const agentLabel = getPanoramaMultipleGridAgentLabel(rowIndex);
+  if (!agentField || !canFillPanoramaControl(agentField)) return false;
+  const candidates = getPanoramaAgentCandidates(data);
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    if (fillField(agentField, candidate) && isAgentCandidateAccepted(candidate, agentField)) {
+      return true;
+    }
+    if (agentLabel && gridAgentLabelMatchesCandidate(rowIndex, candidate)) {
+      return true;
+    }
+    if (agentFocusField && fillField(agentFocusField, candidate) && isAgentCandidateAccepted(candidate, agentFocusField)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function fillPanoramaMultipleGridDate1(rowIndex, data) {
+  const dateField = getPanoramaMultipleGridDate1Field(rowIndex);
+  if (!dateField || !canFillPanoramaControl(dateField)) return false;
+  const administered = getPanoramaAdministeredDateTimeValues(data);
+  if (!administered.date) return false;
+  return fillPanoramaMaskedTextInput(dateField, administered.date);
+}
+
+function fillPanoramaMultipleGridRow(rowIndex, data) {
+  if (!data) return false;
+  const rowState = getPanoramaMultipleGridRowState(rowIndex);
+  const agentNeeded = !rowState.agentText;
+  const dateNeeded = !rowState.dateText;
+  let changed = false;
+
+  if (agentNeeded) {
+    changed = fillPanoramaMultipleGridAgent(rowIndex, data) || changed;
+  }
+  if (dateNeeded) {
+    changed = fillPanoramaMultipleGridDate1(rowIndex, data) || changed;
+  }
+  return changed;
+}
+
+async function maybeAutoFillPanoramaMultipleGrid() {
+  if (multiGridFillPending) return;
+  if (activeWorkflowMode !== 'multiple') return;
+  if (!isPanoramaMultipleImmunizationGridPage()) return;
+  if (isPrimeFacesAjaxBusy()) return;
+
+  multiGridFillPending = true;
+  try {
+    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    if (!rows.length) return;
+    if (!isPanoramaMultipleImmunizationGridPage()) return;
+
+    const gridRows = getPanoramaMultipleGridRows();
+    if (!gridRows.length) return;
+
+    const limit = Math.min(rows.length, gridRows.length);
+    for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
+      const payload = buildAutofillPayloadFromQueueRecord(rows[rowIndex]);
+      if (!payload) continue;
+      fillPanoramaMultipleGridRow(rowIndex, payload);
+    }
+  } catch (error) {
+    console.warn('VaxLink multi-grid autofill error:', error);
+  } finally {
+    multiGridFillPending = false;
+  }
+}
+
+function getPanoramaCurrentTradeSelectionText() {
+  const fields = getFields(getPanoramaTradeSelectors()).filter(canFillPanoramaControl);
+  for (const field of fields) {
+    const text = normalizeForMatch(getFieldFilledText(field));
+    if (text && text !== 'select') {
+      return text;
+    }
+  }
+  return '';
+}
+
+function getPanoramaCurrentLotSelectionText() {
+  const selectFields = getFields([
+    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
+  ]).filter(canFillPanoramaControl);
+  for (const field of selectFields) {
+    const text = normalizeForMatch(getFieldFilledText(field));
+    if (text && text !== 'select') {
+      return text;
+    }
+  }
+
+  const selectedLotLabels = getFields([
+    'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+    'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
+  ]);
+  for (const label of selectedLotLabels) {
+    const text = normalizeForMatch(label?.textContent || '');
+    if (text && text !== 'select') {
+      return text;
+    }
+  }
+  return '';
+}
+
+function getPanoramaMultiStepIndicatorKey() {
+  const nodes = Array.from(document.querySelectorAll('div, span, td, th, strong, label'));
+  for (const node of nodes) {
+    const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/\b(\d+)\s+of\s+(\d+)\s+immunizations?\b/i);
+    if (match) {
+      return `${match[1]}-of-${match[2]}`;
+    }
+  }
+  return '';
+}
+
+function isPanoramaMultiStepDetailPageReadyForAutofill() {
+  if (activeWorkflowMode !== 'multiple') return false;
+  if (!isPanoramaImmunizationPage()) return false;
+  if (isPrimeFacesAjaxBusy()) return false;
+  if (!getPanoramaMultiStepIndicatorKey()) return false;
+  if (!hasPanoramaAgentSelection(null)) return false;
+
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
+  const hasDateTime = !!String(dateField?.value || '').trim() || !!String(timeField?.value || '').trim();
+  if (!hasDateTime) return false;
+
+  const hasTrade = !!getPanoramaCurrentTradeSelectionText();
+  const hasLot = !!getPanoramaCurrentLotSelectionText();
+  return !hasTrade && !hasLot;
+}
+
+async function maybeAutoFillPanoramaMultiStepDetailPage() {
+  if (multiStepAutoFillPending) return;
+  if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
+
+  const stepKey = getPanoramaMultiStepIndicatorKey();
+  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey) return;
+  if ((Date.now() - lastVaxlinkFillAt) < 1200) return;
+
+  multiStepAutoFillPending = true;
+  try {
+    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    if (!rows.length) return;
+    if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
+
+    await applyNextQueueItem();
+    lastAutoFilledPanoramaStepKey = stepKey;
+  } catch (error) {
+    console.warn('VaxLink multi-step autofill error:', error);
+  } finally {
+    multiStepAutoFillPending = false;
+  }
+}
 
 function initPostSaveWatcher() {
   if (!isHandsFreeSupportedPage()) return;
@@ -2775,6 +3539,78 @@ function initPostSaveWatcher() {
   });
 }
 
+function initPanoramaMultipleGridWatcher() {
+  if (!isHandsFreeSupportedPage()) return;
+  if (multiGridObserver) return;
+
+  const checkGrid = () => {
+    if (activeWorkflowMode !== 'multiple') return;
+    if (!isPanoramaMultipleImmunizationGridPage()) return;
+    setTimeout(() => {
+      void maybeAutoFillPanoramaMultipleGrid();
+    }, 250);
+  };
+
+  const targetNode = document.body;
+  if (!targetNode) return;
+
+  multiGridObserver = new MutationObserver(() => {
+    checkGrid();
+  });
+  multiGridObserver.observe(targetNode, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'value', 'aria-expanded']
+  });
+
+  checkGrid();
+}
+
+function initPanoramaMultiStepWatcher() {
+  if (!isHandsFreeSupportedPage()) return;
+  if (multiStepObserver) return;
+
+  const checkForStepTransition = () => {
+    if (activeWorkflowMode !== 'multiple') return;
+
+    const stepKey = getPanoramaMultiStepIndicatorKey();
+    if (!stepKey) {
+      lastObservedPanoramaStepKey = '';
+      return;
+    }
+
+    if (stepKey !== lastObservedPanoramaStepKey) {
+      lastObservedPanoramaStepKey = stepKey;
+      setTimeout(() => {
+        void maybeAutoFillPanoramaMultiStepDetailPage();
+      }, 350);
+      return;
+    }
+
+    if (stepKey !== lastAutoFilledPanoramaStepKey && isPanoramaMultiStepDetailPageReadyForAutofill()) {
+      setTimeout(() => {
+        void maybeAutoFillPanoramaMultiStepDetailPage();
+      }, 200);
+    }
+  };
+
+  const targetNode = document.body;
+  if (!targetNode) return;
+
+  multiStepObserver = new MutationObserver(() => {
+    checkForStepTransition();
+  });
+  multiStepObserver.observe(targetNode, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'value', 'aria-expanded']
+  });
+
+  checkForStepTransition();
+}
+
 // ---------------------------------------------------------------------------
 // Initialize new features after DOM is ready
 // ---------------------------------------------------------------------------
@@ -2785,6 +3621,8 @@ function initClickReductionFeatures() {
   if (document.body) {
     initHud();
     initPostSaveWatcher();
+    initPanoramaMultipleGridWatcher();
+    initPanoramaMultiStepWatcher();
     // Initial auto-drain attempt after a short settle delay
     if (activeWorkflowMode === 'multiple') {
       setTimeout(() => tryAutoDrain(), 1200);
@@ -2793,6 +3631,8 @@ function initClickReductionFeatures() {
     document.addEventListener('DOMContentLoaded', () => {
       initHud();
       initPostSaveWatcher();
+      initPanoramaMultipleGridWatcher();
+      initPanoramaMultiStepWatcher();
       if (activeWorkflowMode === 'multiple') {
         setTimeout(() => tryAutoDrain(), 1200);
       }
@@ -2812,7 +3652,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 if (document.readyState === 'loading') {
+  // Normal page load: DOMContentLoaded fires well after chrome.storage.local.get
+  // resolves, so activeWorkflowMode will be correctly set by the time
+  // initClickReductionFeatures runs.
   document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
 } else {
-  initClickReductionFeatures();
+  // Page is already loaded (PrimeFaces SPA navigation, or content script injected
+  // late).  initHandsFreeScanner's chrome.storage.local.get callback is async and
+  // hasn't fired yet, so activeWorkflowMode is still the default 'single'.
+  // Deferring by one task tick gives the storage callback a chance to set the real
+  // mode before initClickReductionFeatures reads it.  The storage callback also
+  // schedules its own re-kick (maybeAutoFillPanoramaMultipleGrid + tryAutoDrain)
+  // as a safety net in case even this deferred call races.
+  setTimeout(initClickReductionFeatures, 0);
 }

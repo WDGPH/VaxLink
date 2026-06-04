@@ -13,13 +13,26 @@ function trimTrailingSlash(value = '') {
   return value.replace(/\/+$/, '')
 }
 
-function resolveBasePath() {
-  const explicitBasePath =
-    process.env.PAGES_BASE_PATH ||
-    process.env.BASE_PATH ||
-    process.env.NEXT_PUBLIC_BASE_PATH
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value
+    }
+  }
 
-  if (explicitBasePath) {
+  return undefined
+}
+
+function resolveBasePath() {
+  const explicitBasePath = firstDefined(
+    process.env.PAGES_BASE_PATH,
+    process.env.BASE_PATH,
+    process.env.NEXT_PUBLIC_BASE_PATH
+  )
+
+  // Preserve an explicitly empty Pages base path so GitHub Pages root deploys
+  // do not fall back to notebook-only proxy settings from local env files.
+  if (explicitBasePath !== undefined) {
     return trimTrailingSlash(explicitBasePath)
   }
 
