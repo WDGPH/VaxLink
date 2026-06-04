@@ -59,7 +59,11 @@ function getTotalDoseCount(row) {
 }
 
 function formatDoseSummary(row) {
-  const remaining = getRemainingDoseCount(row, 0);
+  const remaining = getRemainingDoseCount(row, null);
+  if (remaining === null) {
+    // No dose count known — vial is treated as unlimited (multi-dose)
+    return 'multi-dose';
+  }
   const total = getTotalDoseCount(row);
   if (!Number.isFinite(remaining) || remaining <= 0) {
     return '';
@@ -215,7 +219,11 @@ export class ScanQueueManager {
       return null;
     }
 
-    const remaining = getRemainingDoseCount(row, 1);
+    const remaining = getRemainingDoseCount(row, null);
+    if (remaining === null) {
+      // Unknown dose count — vial is unlimited; keep record alive unchanged
+      return row;
+    }
     if (remaining <= 1) {
       await this.remove(targetId);
       return null;
@@ -385,7 +393,7 @@ export function buildQueueRecord(data, rawBarcode) {
       normalizeDoseCount(
         data.remaining_doses,
         normalizeDoseCount(data.total_doses, null)
-      ) || 1
+      )
   }, rawBarcode);
 }
 
