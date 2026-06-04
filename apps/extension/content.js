@@ -1782,6 +1782,18 @@ function fillPanoramaLotFromSelect(lotValue) {
   return false;
 }
 
+function resetPanoramaFundedRadioToShowAll() {
+  const radio = document.querySelector('input[id*="fundedRadio:selectOneRadio"][value="SHOW_ALL"]');
+  if (!radio) return 'not_found';
+  if (radio.checked) return 'already';
+  const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
+  if (box) box.click();
+  radio.checked = true;
+  radio.dispatchEvent(new Event('change', { bubbles: true }));
+  vlog('VaxLink: funded radio reset to Show All');
+  return 'clicked';
+}
+
 function openPanoramaLotDropdown() {
   const selectors = [
     '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
@@ -1931,6 +1943,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   let stopped = false;
   let lastAttemptAt = 0;
   let stablePasses = 0;
+  let fundedRadioEnsured = false;
 
   const stop = () => {
     if (stopped) return;
@@ -1966,6 +1979,11 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
       resolved = hasPanoramaLotOrTradeSelection(data);
     }
     if (!resolved && hasResolvedAgent && !busy) {
+      if (!fundedRadioEnsured) {
+        const radioResult = resetPanoramaFundedRadioToShowAll();
+        fundedRadioEnsured = true;
+        if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
+      }
       resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
     }
 
