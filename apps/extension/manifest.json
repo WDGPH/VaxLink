@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "VaxLink",
-  "version": "1.0.1",
-  "version_name": "1.0.1",
+  "name": "VaxLink Alpha",
+  "version": "1.0.3",
+  "version_name": "1.0.3",
   "description": "Parse GS1 vaccine barcodes and auto-fill Panorama and web-based EMR platforms",
   "permissions": [
     "activeTab",
@@ -21,7 +21,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "VaxLink",
+    "default_title": "VaxLink Alpha",
     "default_icon": {
       "16": "assets/icon-16.png",
       "24": "assets/icon-24.png",
