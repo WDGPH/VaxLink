@@ -1,13 +1,8 @@
-// Tests that verify the Tab/Enter key interception gate in onHandsFreeKeydown.
+// Tests that verify the paste-interception gate in onHandsFreePaste.
 //
-// getActiveElementScanCandidate() guards whether a focused field's value is
-// treated as a scanned barcode when Tab or Enter is pressed. Before this fix,
-// it only used the loose isCandidateGS1Text() check — any field value
-// containing "01" (dates, patient IDs, lot numbers) would cause Tab to be
-// intercepted, blocking nurses from navigating between Panorama fields.
-//
-// The fix mirrors the paste-interception guard (PR #14): require a full GS1
-// parse with a numeric 14-digit GTIN before intercepting.
+// The functions below are pure copies of the GS1 parsing utilities in
+// content.js (no Chrome/DOM deps). They exist here to test the exact logic
+// that guards event.preventDefault() in onHandsFreePaste.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -130,97 +125,110 @@ function parseGS1BarcodeFromScanner(rawScan) {
   return data;
 }
 
-// ── Simulate the getActiveElementScanCandidate gate logic ─────────────────
+// ── Simulate the onHandsFreePaste gate logic ──────────────────────────────
 
-// Returns the value that would be passed to handleHandsFreeScan (non-empty
-// means Tab is intercepted), or '' if Tab is allowed through normally.
-function wouldInterceptTab(fieldValue) {
+// Returns true if the paste would be intercepted (preventDefault called), or
+// false if the paste is allowed to reach the target element normally.
+function wouldInterceptPaste(text) {
   const SCAN_MIN_LENGTH = 8;
-  const raw = String(fieldValue || '').trim();
-  if (raw.length < SCAN_MIN_LENGTH) return '';
+  if (!text || text.length < SCAN_MIN_LENGTH) return false;
 
   // isCandidateGS1Text loose check
-  const GS = String.fromCharCode(0x1d);
-  let normalized = raw
-    .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
-    .replace(/\(/g, '')
-    .replace(/\)/g, '')
-    .replace(/[^\x20-\x7E\x1D]/g, '');
-  if (!normalized.startsWith('01')) {
-    const first01 = normalized.indexOf('01');
-    if (first01 > 0) normalized = normalized.substring(first01);
-  }
-  if (!normalized) return '';
+  const normalized = (() => {
+    const GS = String.fromCharCode(0x1d);
+    let s = String(text).trim()
+      .replace(/[\t\r\n]/g, GS)
+      .replace(/^\]C1/i, '')
+      .replace(/\(/g, '')
+      .replace(/\)/g, '')
+      .replace(/[^\x20-\x7E\x1D]/g, '');
+    if (!s.startsWith('01')) {
+      const first01 = s.indexOf('01');
+      if (first01 > 0) s = s.substring(first01);
+    }
+    return s;
+  })();
+  if (!normalized) return false;
   const looseMatch =
-    normalized.startsWith('01') || normalized.includes('01') ||
-    normalized.startsWith('17') || normalized.startsWith('10') || normalized.startsWith('21');
-  if (!looseMatch) return '';
+    normalized.startsWith('01') ||
+    normalized.startsWith('17') ||
+    normalized.startsWith('10') ||
+    normalized.startsWith('21');
+  if (!looseMatch) return false;
 
-  // Strict gate added by this fix: require full GS1 parse with numeric GTIN
+  // Strict gate: parse as complete GS1 barcode and require a numeric 14-digit
+  // GTIN. IDs starting with "10" parse as AI(10) lot barcodes (gtin=null) —
+  // null also fails this check, so they are correctly allowed through.
   let parsed;
   try {
-    parsed = parseGS1BarcodeFromScanner(raw);
+    parsed = parseGS1BarcodeFromScanner(text);
   } catch (_) {
-    return '';
+    return false;
   }
-  if (!parsed) return '';
-  // Require a numeric 14-digit GTIN. IDs starting with "10" parse as AI(10)
-  // lot barcodes (gtin=null) — null also fails this check, so they pass through.
-  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return '';
-
-  return raw;
+  if (!parsed) return false;
+  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return false;
+  return true;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-test('real GS1 barcode in focused field IS intercepted on Tab', () => {
+test('real GS1 vaccine barcode (GTIN + lot + expiry) is intercepted', () => {
   const barcode = '010001234567890510LOT-ABC17240101';
-  assert.equal(wouldInterceptTab(barcode), barcode);
+  assert.ok(wouldInterceptPaste(barcode));
+  const result = parseGS1BarcodeFromScanner(barcode);
+  assert.equal(result.gtin, '00012345678905');
+  assert.equal(result.lot, 'LOT-ABC');
+  assert.equal(result.expiry, '01/01/2024');
 });
 
-test('GS1 barcode with only GTIN IS intercepted on Tab', () => {
-  const barcode = '0100012345678905';
-  assert.equal(wouldInterceptTab(barcode), barcode);
+test('GS1 barcode with only GTIN (no lot/expiry) is intercepted', () => {
+  const gtinOnly = '0100012345678905';
+  assert.ok(wouldInterceptPaste(gtinOnly));
+  const result = parseGS1BarcodeFromScanner(gtinOnly);
+  assert.equal(result.gtin, '00012345678905');
 });
 
-test('date "06/01/2026" in a field does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('06/01/2026'), '');
+test('GS1 barcode with GS separator before variable AI is intercepted', () => {
+  const GS = String.fromCharCode(0x1d);
+  const barcode = `0100012345678905${GS}17251201`;
+  assert.ok(wouldInterceptPaste(barcode));
+  const result = parseGS1BarcodeFromScanner(barcode);
+  assert.equal(result.gtin, '00012345678905');
+  assert.ok(result.expiry);
 });
 
-test('date "01/15/2025" in a field does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('01/15/2025'), '');
-});
-
-test('patient ID containing "01" does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('PTH01234567'), '');
-});
-
-test('lot number like "LOT01-2024" does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('LOT01-2024'), '');
-});
-
-test('clinical note containing "01" does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('Dose 01 administered today at clinic'), '');
-});
-
-test('health card number starting with "01" does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('0123456789012'), '');
-});
-
-test('short field value below minimum length does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('01AB'), '');
-});
-
-test('empty field does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab(''), '');
-});
-
-test('client ID starting with "10" does NOT intercept Tab', () => {
+test('client ID starting with "10" is NOT intercepted', () => {
   // "10" is GS1 AI(10) (lot number) — parses with gtin=null, must not intercept
-  assert.equal(wouldInterceptTab('1012345678901'), '');
+  assert.ok(!wouldInterceptPaste('1012345678901'));
+  assert.ok(!wouldInterceptPaste('10987654321098'));
 });
 
-test('client ID starting with "10" longer variant does NOT intercept Tab', () => {
-  assert.equal(wouldInterceptTab('10987654321098'), '');
+test('date string "01/01/2024" is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('01/01/2024'));
+});
+
+test('natural language containing "01" is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('Administered 01 dose of vaccine today'));
+  assert.ok(!wouldInterceptPaste('Chart note: visit #0156, dose #01'));
+});
+
+test('date of birth with "01" prefix is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('DOB: 01-15-1985, health card 01234'));
+});
+
+test('patient ID starting with "01" but too short for GTIN is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('0123456789'));
+});
+
+test('phone number starting with "01" is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('Phone: 0123456789012'));
+});
+
+test('short text below SCAN_MIN_LENGTH is NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste('01AB'));
+});
+
+test('empty and null paste are NOT intercepted', () => {
+  assert.ok(!wouldInterceptPaste(''));
+  assert.ok(!wouldInterceptPaste(null));
 });
