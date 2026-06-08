@@ -785,7 +785,9 @@ function getActiveElementScanCandidate() {
     return '';
   }
   if (!parsed) return '';
-  if (parsed.gtin && !/^\d{14}$/.test(parsed.gtin)) return '';
+  // Require a numeric 14-digit GTIN. IDs starting with "10" parse as AI(10)
+  // lot barcodes (gtin=null) — null also fails this check, so they pass through.
+  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return '';
 
   return raw;
 }
@@ -805,9 +807,22 @@ function onHandsFreePaste(event) {
   if (!text || text.length < SCAN_MIN_LENGTH) return;
   if (!isCandidateGS1Text(text)) return;
 
+  // isCandidateGS1Text is too loose for paste — it matches dates, patient IDs,
+  // and any text containing "01" or starting with "10"/"17"/"21". IDs starting
+  // with "10" parse as AI(10) lot barcodes (gtin=null) which must also be
+  // rejected. Require a full parse with a numeric 14-digit GTIN.
+  let parsed;
+  try {
+    parsed = parseGS1BarcodeFromScanner(text);
+  } catch (_) {
+    return;
+  }
+  if (!parsed) return;
+  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
+
   event.preventDefault();
   rememberRecentInputCandidate(text);
-    vlog('hands-free paste');
+  vlog('hands-free paste');
   handleHandsFreeScan(text, 'paste');
 }
 
