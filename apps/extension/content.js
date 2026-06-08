@@ -773,9 +773,20 @@ function getActiveElementScanCandidate() {
   // Field values on app forms can be truncated by maxlength/masks.
   // Accept short AI-only GS1 payloads too (e.g., 17+10 without AI01).
   if (raw.length < 8) return '';
-  if (!isCandidateGS1Text(raw)) {
+  if (!isCandidateGS1Text(raw)) return '';
+
+  // isCandidateGS1Text is too loose for Tab/Enter interception — it matches any
+  // text containing "01" (dates, patient IDs, lot numbers). Require a full parse
+  // just like onHandsFreePaste does, so nurses can Tab through fields normally.
+  let parsed;
+  try {
+    parsed = parseGS1BarcodeFromScanner(raw);
+  } catch (_) {
     return '';
   }
+  if (!parsed) return '';
+  if (parsed.gtin && !/^\d{14}$/.test(parsed.gtin)) return '';
+
   return raw;
 }
 
