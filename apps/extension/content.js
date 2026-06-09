@@ -907,8 +907,9 @@ function isHandsFreeSupportedPage() {
     }
 
     const isPanorama =
-      host === 'www.panorama.prod.ehealthontario.ca' ||
-      host === 'panorama.prod.ehealthontario.ca';
+      (host === 'www.panorama.prod.ehealthontario.ca' ||
+       host === 'panorama.prod.ehealthontario.ca') &&
+      window.location.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
