@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VaxLink Scanner Setup</title>
+  <style>
+    :root {
+      --bg: #eef5f8;
+      --panel: #ffffff;
+      --ink: #102135;
+      --subtle: #5d6b7a;
+      --line: #d4dce6;
+      --accent: #0f8b8d;
+      --danger: #b42318;
+      --warning: #9a3412;
+      --success: #10683e;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 720px;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+    }
+
+    .shell {
+      width: min(920px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 24px 0 32px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: 0;
+      color: #0b3d4f;
+    }
+
+    .lead {
+      margin: 6px 0 0;
+      max-width: 720px;
+      color: var(--subtle);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 10px 22px rgba(16, 33, 53, 0.08);
+      padding: 14px;
+    }
+
+    .card.wide { grid-column: 1 / -1; }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+      color: #12364a;
+    }
+
+    label {
+      display: block;
+      margin: 0 0 6px;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      color: #174d5f;
+    }
+
+    select,
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 13px;
+      color: #0e2b41;
+      background: #fbfdff;
+    }
+
+    .actions {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    button {
+      width: auto;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 12px;
+      background: #0e7490;
+      color: #ffffff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      background: #e7f3f4;
+      border: 1px solid #bddadd;
+      color: #14505f;
+    }
+
+    button.warning {
+      background: #fff7ed;
+      border: 1px solid #f4cda5;
+      color: var(--warning);
+    }
+
+    button:disabled {
+      opacity: 0.58;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid #c8d9e8;
+      border-radius: 8px;
+      background: #f7fbff;
+      color: #1f3d58;
+      font-size: 13px;
+      line-height: 1.45;
+      min-height: 42px;
+    }
+
+    .status.success {
+      border-color: #b8e3cf;
+      background: #eefbf4;
+      color: var(--success);
+    }
+
+    .status.warning {
+      border-color: #f2d3a6;
+      background: #fff7ed;
+      color: var(--warning);
+    }
+
+    .status.error {
+      border-color: #efc2c4;
+      background: #fff4f4;
+      color: var(--danger);
+    }
+
+    .kv {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 8px 12px;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .kv dt {
+      font-weight: 800;
+      color: #476173;
+    }
+
+    .kv dd {
+      margin: 0;
+      color: #17344d;
+      word-break: break-word;
+    }
+
+    pre {
+      margin: 0;
+      padding: 10px;
+      min-height: 92px;
+      max-height: 180px;
+      overflow: auto;
+      border-radius: 8px;
+      border: 1px solid #dce7ef;
+      background: #f8fbfd;
+      color: #15354b;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .hint {
+      margin: 8px 0 0;
+      color: var(--subtle);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>Scanner Setup</h1>
+        <p class="lead">Connect a scanner through Web Serial so scan data arrives through a dedicated browser channel instead of normal CHR page keyboard events.</p>
+      </div>
+    </header>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Connection</h2>
+        <label for="profileSelect">Scanner Profile</label>
+        <select id="profileSelect"></select>
+        <p id="profileNote" class="hint"></p>
+        <div class="actions">
+          <button id="requestPortBtn">Select Scanner</button>
+          <button id="connectGrantedBtn" class="secondary">Reconnect Granted Port</button>
+          <button id="disconnectBtn" class="warning" disabled>Disconnect</button>
+        </div>
+        <div id="connectionStatus" class="status">Web Serial support is being checked...</div>
+      </div>
+
+      <div class="card">
+        <h2>Device</h2>
+        <dl class="kv">
+          <dt>Profile</dt>
+          <dd id="deviceProfile">Not connected</dd>
+          <dt>Vendor ID</dt>
+          <dd id="deviceVendor">Unknown</dd>
+          <dt>Product ID</dt>
+          <dd id="deviceProduct">Unknown</dd>
+          <dt>State</dt>
+          <dd id="deviceState">Disconnected</dd>
+        </dl>
+      </div>
+
+      <div class="card">
+        <h2>Latest Scan</h2>
+        <pre id="decodedOutput">No scan received yet.</pre>
+      </div>
+
+      <div class="card">
+        <h2>Raw Bytes</h2>
+        <pre id="rawBytesOutput">No bytes received yet.</pre>
+      </div>
+
+      <div class="card wide">
+        <h2>Keyboard Leakage Test</h2>
+        <label for="leakageInput">Focus this field, then scan one barcode</label>
+        <input id="leakageInput" type="text" autocomplete="off" spellcheck="false">
+        <p class="hint">A correctly configured serial scanner should produce a Web Serial scan without typing into this field.</p>
+        <div id="leakageStatus" class="status">No leakage test has run yet.</div>
+      </div>
+
+      <div class="card wide">
+        <h2>Routing</h2>
+        <div id="routeStatus" class="status">Scans will be routed to an open Panorama or InputHealth tab when received.</div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="scanner-setup.js"></script>
+</body>
+</html>

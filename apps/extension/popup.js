@@ -48,6 +48,7 @@ let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
 let scannerInputModeSelect;
 let scannerInputModeHint;
+let scannerSetupBtn;
 let testModeAddBtn;
 let testModeBarcode;
 let parsedData = null;
@@ -138,6 +139,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
   scannerInputModeSelect = document.getElementById('scannerInputModeSelect');
   scannerInputModeHint = document.getElementById('scannerInputModeHint');
+  scannerSetupBtn = document.getElementById('scannerSetupBtn');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
   // Only show test mode panel when running as an unpacked (developer) extension.
@@ -225,6 +227,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (scannerInputModeSelect) {
     scannerInputModeSelect.addEventListener('change', () => {
       void setScannerInputModeSetting(scannerInputModeSelect.value);
+    });
+  }
+  if (scannerSetupBtn) {
+    scannerSetupBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('scanner-setup.html') });
     });
   }
 
