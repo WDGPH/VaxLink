@@ -617,12 +617,11 @@ function loadNVCBundle(forceReload = false) {
         applyBundleData(stored[STORAGE_KEYS.bundle], stored[STORAGE_KEYS.sourceUrl] || 'storage');
         return true;
       }
-      return fetch(chrome.runtime.getURL('nvc_bundle.json'))
-        .then(response => response.json())
-        .then(data => {
-          applyBundleData(data, 'packaged');
-          return true;
-        });
+      // No packaged bundle is shipped (raw NVC bundles are never committed);
+      // first-run lookups stay unavailable until the remote sync in
+      // maybeAutoRefreshNVCBundle populates storage.
+      bgLog('No cached NVC bundle yet; waiting for remote sync');
+      return false;
     })
     .catch(error => {
       console.error('Failed to load NVC bundle:', error);

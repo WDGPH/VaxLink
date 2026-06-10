@@ -19,6 +19,6 @@
 ## Minimal validation
 
 - Run `node --check` on the changed extension file.
-- Run `cd apps/extension && npm test` when inventory model or export behavior changes.
+- Run `cd apps/extension-tests && npm test` when inventory model or export behavior changes.
 - Trace the same scan through popup, background, and content logs.
 - Verify `chrome.runtime.lastError` is handled, not ignored.

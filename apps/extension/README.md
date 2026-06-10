@@ -50,10 +50,11 @@ node --check popup-inventory.js
 node --check inventory/page-controller.js
 ```
 
-Focused inventory tests:
+Focused inventory tests (the suite lives in `apps/extension-tests/`, outside this
+directory, so it never ships in the Chrome Web Store zip):
 
 ```bash
-cd apps/extension
+cd apps/extension-tests
 npm test
 ```
 
