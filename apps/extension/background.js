@@ -217,6 +217,27 @@ function queryTabs(queryInfo) {
   });
 }
 
+function isSupportedChartUrl(urlValue) {
+  try {
+    const url = new URL(String(urlValue || ''));
+    const host = url.hostname.toLowerCase();
+    const isPanorama =
+      (host === 'www.panorama.prod.ehealthontario.ca' ||
+       host === 'panorama.prod.ehealthontario.ca') &&
+      url.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+    const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
+    return isPanorama || isInputHealth;
+  } catch (_) {
+    return false;
+  }
+}
+
+function tabMayBeSupportedChart(tab) {
+  if (!tab || tab.id === undefined) return false;
+  if (!tab.url) return true;
+  return isSupportedChartUrl(tab.url);
+}
+
 function sendScanToTab(tabId, scan) {
   return new Promise((resolve, reject) => {
     if (!tabId && tabId !== 0) {
@@ -263,12 +284,36 @@ async function enqueuePendingScan(scan) {
   return nextRows.length;
 }
 
+async function drainPendingScansToTab(tabId) {
+  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+    ? stored[PENDING_SCAN_INBOX_KEY]
+    : [];
+  if (!rows.length) {
+    return { drained: 0, remaining: 0 };
+  }
+
+  const remaining = [];
+  let drained = 0;
+  for (const row of rows) {
+    try {
+      await sendScanToTab(tabId, normalizeScanEvent(row));
+      drained += 1;
+    } catch (_) {
+      remaining.push(row);
+    }
+  }
+
+  await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
+  return { drained, remaining: remaining.length };
+}
+
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = normalizeScanEvent(rawScan);
   const tried = new Set();
   const activeTabs = await queryTabs({ active: true, currentWindow: true });
   const allTabs = await queryTabs({});
-  const candidates = [...activeTabs, ...allTabs];
+  const candidates = [...activeTabs, ...allTabs].filter(tabMayBeSupportedChart);
 
   for (const tab of candidates) {
     if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
@@ -1781,6 +1826,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan routing failed' }));
+    return true;
+  }
+
+  if (request.action === 'drainPendingScannerScans') {
+    const tabId = sender?.tab?.id;
+    if (tabId === undefined || (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))) {
+      sendResponse({ success: false, error: 'Pending scans can only drain to a supported chart tab' });
+      return false;
+    }
+    drainPendingScansToTab(tabId)
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Pending scan drain failed' }));
     return true;
   }
 

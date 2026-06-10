@@ -38,6 +38,7 @@ let expiryGuardHost = null;
 let expiryGuardRoot = null;
 let activeScannerInputMode = 'web-serial';
 let legacyScannerListenersRegistered = false;
+let pendingScannerDrainRequested = false;
 
 const SCAN_MIN_LENGTH = 8;
 const SCAN_MAX_DURATION_MS = 6000;
@@ -155,6 +156,10 @@ function usesLegacyKeyboardWedgeCapture() {
   return activeScannerInputMode === 'legacy-keyboard-wedge';
 }
 
+function isLegacyScannerSource(source) {
+  return ['keyboard-buffer', 'focused-input', 'paste', 'input-event'].includes(source);
+}
+
 function logAnalyticsEvent(eventType, payload = {}) {
   try {
     chrome.runtime.sendMessage({ action: 'logAnalyticsEvent', eventType, payload }, () => {
@@ -162,6 +167,18 @@ function logAnalyticsEvent(eventType, payload = {}) {
     });
   } catch (_) {
     // Ignore analytics failures on client pages.
+  }
+}
+
+function requestPendingScannerScans() {
+  if (pendingScannerDrainRequested || !isHandsFreeSupportedPage()) return;
+  pendingScannerDrainRequested = true;
+  try {
+    chrome.runtime.sendMessage({ action: 'drainPendingScannerScans' }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {
+    // Pending scan drain is best effort.
   }
 }
 
@@ -176,6 +193,10 @@ function setupMessageListener() {
     if (request.action === 'vaxlinkScanCaptured') {
       if (window.top !== window.self) {
         return false;
+      }
+      if (!isHandsFreeSupportedPage()) {
+        sendResponse({ success: false, error: 'Unsupported chart page' });
+        return true;
       }
       Promise.resolve(handleHandsFreeScan(request.scan?.rawText || '', request.scan?.source || 'scanner-channel'))
         .then(() => sendResponse({ success: true }))
@@ -560,7 +581,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
 
-  if (!parsed.lot && !parsed.expiry && !parsed.serial) {
+  if (isLegacyScannerSource(source) && !parsed.lot && !parsed.expiry && !parsed.serial) {
     const recovered = getRecentRichScanCandidate(parsed.gtin);
     if (recovered) {
       parsed = mergeParsedScanFields(parsed, recovered.parsed);
@@ -971,6 +992,7 @@ function initHandsFreeScanner() {
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
     syncLegacyScannerCaptureListeners();
+    requestPendingScannerScans();
     vlog('active workflow mode', activeWorkflowMode, 'scanner input mode', activeScannerInputMode);
 
     // On Panorama SPA navigations the page is already fully loaded when this
