@@ -4,7 +4,7 @@
  *
  * This drives the REAL data layer end-to-end for a realistic basket of vaccines
  * pulled from the live NVC catalogue:
- *   scanner wedge text  → popup-parser.parseInputData
+ *   scanner payload text  → popup-parser.parseInputData
  *                       → background.js lookupVaccineInfo (mocked chrome)
  *                       → queue-record / popup-inventory record + CSV export
  *
@@ -105,7 +105,7 @@ if (!bundle) {
       basket.map((b) => b.label).join(', '));
   });
 
-  // --- Helper: simulate one vial scan from wedge text to resolved vaccine ----
+  // --- Helper: simulate one vial scan from payload text to resolved vaccine ---
   let scanSeed = 0;
   async function scanVial(lot) {
     // A vial's 2D DataMatrix always carries AI(01) GTIN; use a synthetic one.

@@ -14,8 +14,6 @@ import {
   requestSerialScannerPort
 } from './scanner/serial-provider.js';
 
-const SCANNER_INPUT_MODE_KEY = 'vaxlink_scanner_input_mode_v1';
-
 let activeConnection = null;
 let lastLeakageInputAt = 0;
 
@@ -163,7 +161,6 @@ async function startPort(port, profile) {
   });
 
   chrome.storage.local.set({
-    [SCANNER_INPUT_MODE_KEY]: 'web-serial',
     [SCANNER_PROFILE_STORAGE_KEY]: profile.id,
     [SCANNER_PORT_INFO_STORAGE_KEY]: port.getInfo()
   });

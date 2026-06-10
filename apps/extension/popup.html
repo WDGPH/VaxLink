@@ -887,16 +887,7 @@
               <span>Auto-fill Date Administered from scan time</span>
             </label>
             <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
-            <div class="analytics-field">
-              <label for="scannerInputModeSelect">Scanner Input</label>
-              <select id="scannerInputModeSelect">
-                <option value="web-serial">Web Serial dedicated scanner</option>
-                <option value="manual">Manual popup entry only</option>
-                <option value="native">Native helper channel</option>
-                <option value="legacy-keyboard-wedge">Legacy keyboard wedge listener</option>
-              </select>
-              <p id="scannerInputModeHint" class="settings-hint">Loading scanner input mode...</p>
-            </div>
+            <p class="settings-hint">Scanner capture uses Web Serial only. Configure a USB CDC scanner in the setup page.</p>
             <div class="actions">
               <button id="scannerSetupBtn" type="button">Open Scanner Setup</button>
             </div>
@@ -939,20 +930,20 @@
 
         <div id="scannerInputSection" class="scanner-input">
           <label id="scannedInputLabel" for="scannedData">Scanned Barcode</label>
-          <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
+          <textarea id="scannedData" placeholder="Paste barcode text here..."></textarea>
         </div>
 
-        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Scan into the field below to preview, or connect a dedicated scanner channel for hands-free auto-fill.</p>
+        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.</p>
 
         <div id="singleModeSection" class="mode-panel">
-          <div class="workflow-note">Dedicated scanner capture fills the open chart in Single Inject. Legacy keyboard-wedge page listening is off unless enabled in settings.</div>
+          <div class="workflow-note">Web Serial scanner capture fills the open chart in Single Inject and saves scans automatically in Multiple Inject or Inventory.</div>
           <div class="actions">
             <button id="autoFillBtn">Auto-fill CHR</button>
           </div>
         </div>
 
         <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">With a dedicated scanner channel connected, scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
+          <div class="workflow-note">With a Web Serial scanner connected, scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>

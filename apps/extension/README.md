@@ -38,14 +38,13 @@ The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup in
 
 - Legacy queue key: `inventory_scan_batch_v1`
 - Scanner settings: `inventory_ultrafast_scanner_v1`, `inventory_scanner_beeps_v1`
-- Scanner input mode: `vaxlink_scanner_input_mode_v1`
 - Serial scanner profile: `vaxlink_serial_scanner_profile_v1`
 - Pending dedicated-channel scans: `vaxlink_pending_scan_inbox_v1`
 - IndexedDB database: `vaxlink_inventory_ops_v2`
 
 ## Dedicated Scanner Channel
 
-Default scanner capture uses a browser-visible serial channel instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to select a Web Serial device, test the raw framed scan, and confirm the scanner is not also typing into a focused input.
+Scanner capture uses a browser-visible Web Serial channel instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to select a Web Serial device, test the raw framed scan, and confirm the scanner is not also typing into a focused input.
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 

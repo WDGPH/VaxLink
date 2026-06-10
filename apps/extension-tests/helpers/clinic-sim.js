@@ -73,7 +73,7 @@ export function extractCatalogueLots(bundle) {
 }
 
 // ---------------------------------------------------------------------------
-// GS1 barcode synthesis (what a vial's DataMatrix scanner wedge emits)
+// GS1 barcode synthesis (what a vial's DataMatrix scanner emits)
 // ---------------------------------------------------------------------------
 
 export const GS = String.fromCharCode(0x1d);
@@ -97,7 +97,7 @@ export function isoToYYMMDD(iso) {
 }
 
 /**
- * Build the keyboard-wedge text for a vial scan:
+ * Build the raw GS1 payload text for a vial scan:
  *   (01) GTIN-14, (17) expiry, (10) lot, optional GS + (21) serial.
  * AI(01) and AI(17) are fixed-length so no separator precedes (10); the lot is
  * the final variable-length field unless a serial follows after a GS.

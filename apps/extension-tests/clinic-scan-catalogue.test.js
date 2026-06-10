@@ -2,7 +2,7 @@
  * Clinic simulation: scan EVERY vaccine lot in the NVC catalogue.
  *
  * For each of the ~4k lots in the live NVC FHIR bundle this suite synthesizes
- * the GS1 DataMatrix wedge output a nurse's scanner would emit
+ * the GS1 DataMatrix payload a nurse's scanner would emit
  * (01 GTIN / 17 expiry / 10 lot), runs it through the real popup parser
  * (popup-parser.js), then resolves it through the REAL background.js lookup
  * pipeline (evaluated under a mocked chrome API with the bundle cached in

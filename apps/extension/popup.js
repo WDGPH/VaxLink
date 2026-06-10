@@ -46,8 +46,6 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
-let scannerInputModeSelect;
-let scannerInputModeHint;
 let scannerSetupBtn;
 let testModeAddBtn;
 let testModeBarcode;
@@ -58,7 +56,6 @@ let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
-let scannerInputMode = 'web-serial';
 
 const lotLookupCache = new Map();
 const LOT_LOOKUP_CACHE_MAX = 64;
@@ -69,29 +66,28 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const SCANNER_INPUT_MODE_KEY = 'vaxlink_scanner_input_mode_v1';
 
 const MODE_CONFIG = {
   single: {
     title: 'Single Inject',
     subtitle: 'One scan fills the current chart immediately.',
-    helper: 'Use this when one vaccine is being charted now. Scan into the field below to preview, or connect a dedicated scanner channel for hands-free auto-fill.',
+    helper: 'Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.',
     inputLabel: 'Scanned Barcode',
-    inputPlaceholder: 'Paste barcode here or scan with device...',
+    inputPlaceholder: 'Paste barcode text here...',
     usesScannerInput: true
   },
   multiple: {
     title: 'Multiple Inject',
     subtitle: 'Scan several vaccines now, choose them for chart fill later.',
-    helper: 'Leave this mode active with a dedicated scanner channel connected. Each scan is saved automatically, then you can choose Use for Chart on each saved vaccine.',
+    helper: 'Leave this mode active with a Web Serial scanner connected. Each scan is saved automatically, then you can choose Use for Chart on each saved vaccine.',
     usesScannerInput: false
   },
   inventory: {
     title: 'Inventory',
     subtitle: 'Capture vaccines into an export tray.',
-    helper: 'Use this for stock or export work. Scan into the field below and add to the inventory tray, or use a dedicated scanner channel to save scans automatically.',
+    helper: 'Use this for stock or export work. Paste barcode text below and add to the inventory tray, or use a Web Serial scanner to save scans automatically.',
     inputLabel: 'Inventory Barcode Input',
-    inputPlaceholder: 'Scan one barcode per line or paste a batch...',
+    inputPlaceholder: 'Paste one barcode per line...',
     usesScannerInput: true
   }
 };
@@ -137,8 +133,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
-  scannerInputModeSelect = document.getElementById('scannerInputModeSelect');
-  scannerInputModeHint = document.getElementById('scannerInputModeHint');
   scannerSetupBtn = document.getElementById('scannerSetupBtn');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
@@ -178,7 +172,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
-  await loadScannerInputModeSetting();
   await loadAnalyticsSummary();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
 
@@ -222,11 +215,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
-    });
-  }
-  if (scannerInputModeSelect) {
-    scannerInputModeSelect.addEventListener('change', () => {
-      void setScannerInputModeSetting(scannerInputModeSelect.value);
     });
   }
   if (scannerSetupBtn) {
@@ -466,62 +454,6 @@ async function setAdminDateTimeAutofillSetting(enabled) {
     );
   } catch (error) {
     writeOutput(error.message || 'Could not update Date Administered auto-fill setting.', 'error');
-  }
-}
-
-function normalizeScannerInputModeSetting(stored) {
-  const mode = stored && stored[SCANNER_INPUT_MODE_KEY];
-  if (mode === 'legacy-keyboard-wedge' || mode === 'manual' || mode === 'web-serial' || mode === 'native') {
-    return mode;
-  }
-  return 'web-serial';
-}
-
-function getScannerInputModeHint(mode) {
-  if (mode === 'legacy-keyboard-wedge') {
-    return 'Legacy mode listens to page keydown, paste, and input events. Use only as a temporary fallback.';
-  }
-  if (mode === 'manual') {
-    return 'Only the popup barcode field is parsed. Chart pages are never monitored for scanner input.';
-  }
-  if (mode === 'native') {
-    return 'Reserved for a managed native messaging helper. Chart pages are not monitored by the legacy listener.';
-  }
-  return 'Dedicated scanner capture uses Web Serial setup. Chart pages are not monitored by the legacy listener.';
-}
-
-function applyScannerInputModeSetting(mode) {
-  scannerInputMode = mode;
-  if (scannerInputModeSelect) {
-    scannerInputModeSelect.value = scannerInputMode;
-  }
-  if (scannerInputModeHint) {
-    scannerInputModeHint.textContent = getScannerInputModeHint(scannerInputMode);
-  }
-}
-
-async function loadScannerInputModeSetting() {
-  try {
-    const stored = await getLocalStorage([SCANNER_INPUT_MODE_KEY]);
-    applyScannerInputModeSetting(normalizeScannerInputModeSetting(stored));
-  } catch (_) {
-    applyScannerInputModeSetting('web-serial');
-  }
-}
-
-async function setScannerInputModeSetting(mode) {
-  const nextMode = normalizeScannerInputModeSetting({ [SCANNER_INPUT_MODE_KEY]: mode });
-  applyScannerInputModeSetting(nextMode);
-  try {
-    await setLocalStorage({ [SCANNER_INPUT_MODE_KEY]: nextMode });
-    writeOutput(
-      nextMode === 'legacy-keyboard-wedge'
-        ? 'Legacy keyboard-wedge page listener is enabled.'
-        : 'Legacy keyboard-wedge page listener is disabled.',
-      nextMode === 'legacy-keyboard-wedge' ? 'warning' : 'info'
-    );
-  } catch (error) {
-    writeOutput(error.message || 'Could not update scanner input mode.', 'error');
   }
 }
 
