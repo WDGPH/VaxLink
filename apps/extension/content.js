@@ -245,167 +245,15 @@ function isLikelyScannerSequence() {
   return avgInterval <= SCAN_MAX_AVG_INTERVAL_MS;
 }
 
-function parseScannerDate(yymmdd) {
-  if (!yymmdd || yymmdd.length !== 6) return null;
-  const yy = yymmdd.substring(0, 2);
-  const mm = yymmdd.substring(2, 4);
-  let dd = yymmdd.substring(4, 6);
-  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
-  // downstream date math doesn't roll back into the previous month.
-  if (dd === '00') {
-    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
-    dd = String(lastDay).padStart(2, '0');
+function getGS1Parser() {
+  if (!globalThis.VaxLinkGS1Parser) {
+    throw new Error('VaxLink GS1 parser is not loaded');
   }
-  return `${mm}/${dd}/20${yy}`;
-}
-
-function parseScannerIsLikelyAIStart(s, idx) {
-  if (idx < 0 || idx > s.length - 2) return false;
-  const ai = s.substring(idx, idx + 2);
-  if (ai === '17') {
-    if (idx + 8 > s.length) return false;
-    return /^\d{6}$/.test(s.substring(idx + 2, idx + 8));
-  }
-  return ai === '10' || ai === '21';
-}
-
-function parseScannerCanParseTailNoGS(s, idx, memo) {
-  if (idx >= s.length) return true;
-  if (memo.has(idx)) return memo.get(idx);
-
-  let ok = false;
-  const ai = s.substring(idx, idx + 2);
-  if (ai === '17') {
-    ok = idx + 8 <= s.length &&
-      /^\d{6}$/.test(s.substring(idx + 2, idx + 8)) &&
-      parseScannerCanParseTailNoGS(s, idx + 8, memo);
-  } else if (ai === '10' || ai === '21') {
-    const valueStart = idx + 2;
-    if (valueStart < s.length) {
-      const next = parseScannerFindNextAINoGS(s, valueStart, memo, ai);
-      ok = next === -1 ? true : (next > valueStart && parseScannerCanParseTailNoGS(s, next, memo));
-    }
-  } else {
-    ok = false;
-  }
-
-  memo.set(idx, ok);
-  return ok;
-}
-
-function parseScannerFindNextAINoGS(s, startIdx, memo, currentVariableAI = null) {
-  for (let i = startIdx + 1; i < s.length - 1; i++) {
-    if (!parseScannerIsLikelyAIStart(s, i)) continue;
-    const candidateAI = s.substring(i, i + 2);
-    if (currentVariableAI && candidateAI === currentVariableAI) continue;
-    if (parseScannerCanParseTailNoGS(s, i, memo)) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-function parseScannerFindNextAI(s, startIdx, GS, currentVariableAI = null) {
-  if (GS && s.includes(GS) && s.substring(startIdx).includes(GS)) {
-    const ais = ['17', '10', '21'];
-    for (let i = startIdx; i < s.length - 1; i++) {
-      const twoChar = s.substring(i, i + 2);
-      if (ais.includes(twoChar) && i > 0 && s.charAt(i - 1) === GS) {
-        return i;
-      }
-    }
-  }
-
-  const memo = new Map();
-  return parseScannerFindNextAINoGS(s, startIdx, memo, currentVariableAI);
+  return globalThis.VaxLinkGS1Parser;
 }
 
 function parseGS1BarcodeFromScanner(rawScan) {
-  const GS = String.fromCharCode(0x1d);
-  let s = String(rawScan || '')
-    .trim()
-    .replace(/[\t\r\n]/g, GS)
-    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
-    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Lot-only
-    // barcodes have no "01" to re-anchor on, so strip generically.
-    .replace(/^\][A-Za-z]\d/, '')
-    .replace(/\(/g, '')
-    .replace(/\)/g, '')
-    .replace(/[^\x20-\x7E\x1D]/g, '');
-
-  if (!s.startsWith('01')) {
-    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
-    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
-    // "10Y016312") and truncate the payload to garbage.
-    const first01 = s.indexOf('01');
-    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
-      s = s.substring(first01);
-    }
-  }
-
-  if (!s) {
-    throw new Error('Empty scan payload');
-  }
-
-  const data = { gtin: null, expiry: null, lot: null, serial: null };
-  let idx = 0;
-  if (s.startsWith('01')) {
-    if (s.length < 16) {
-      throw new Error('AI(01) GTIN incomplete');
-    }
-    data.gtin = s.substring(2, 16);
-    idx = 16;
-  } else if (!parseScannerIsLikelyAIStart(s, 0)) {
-    throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
-  }
-
-  while (idx < s.length) {
-    // Skip explicit separators.
-    if (s.charAt(idx) === GS) {
-      idx += 1;
-      continue;
-    }
-
-    const currentAI = s.substring(idx, idx + 2);
-    if (currentAI === '17') {
-      if (s.length < idx + 8) {
-        throw new Error('AI(17) expiry date incomplete');
-      }
-      const yymmdd = s.substring(idx + 2, idx + 8);
-      data.expiry = parseScannerDate(yymmdd);
-      idx += 8;
-    } else if (currentAI === '10') {
-      idx += 2;
-      let lotEnd = parseScannerFindNextAI(s, idx, GS, '10');
-      if (lotEnd === -1) {
-        lotEnd = s.length;
-      }
-      data.lot = s.substring(idx, lotEnd).replace(/\x1d/g, '');
-      idx = lotEnd;
-    } else if (currentAI === '21') {
-      idx += 2;
-      let serialEnd = parseScannerFindNextAI(s, idx, GS, '21');
-      if (serialEnd === -1) {
-        serialEnd = s.length;
-      }
-      data.serial = s.substring(idx, serialEnd).replace(/\x1d/g, '');
-      idx = serialEnd;
-    } else {
-      // Recover from unknown/intermediate AIs by finding the next recognized AI.
-      const nextKnownAI = parseScannerFindNextAI(s, idx, GS, null);
-      if (nextKnownAI > idx) {
-        idx = nextKnownAI;
-        continue;
-      }
-      break;
-    }
-  }
-
-  if (!data.gtin && !data.expiry && !data.lot && !data.serial) {
-    throw new Error('No recognized GS1 fields found');
-  }
-
-  return data;
+  return getGS1Parser().parseGS1Barcode(rawScan);
 }
 
 function lookupVaccineInfoByLot(lot, gtin) {
@@ -939,38 +787,11 @@ function onHandsFreePaste(event) {
 }
 
 function isCandidateGS1Text(value) {
-  const text = String(value || '').trim();
-  if (text.length < SCAN_MIN_LENGTH) return false;
-  const normalized = normalizeScannerCandidate(text);
-  if (!normalized) return false;
-  if (normalized.startsWith('01') || normalized.includes('01')) return true;
-  if (normalized.startsWith('17')) {
-    return normalized.length >= 8 && /^\d{6}$/.test(normalized.substring(2, 8));
-  }
-  if (normalized.startsWith('10') || normalized.startsWith('21')) {
-    return normalized.length > 2;
-  }
-  return parseScannerIsLikelyAIStart(normalized, 0);
+  return getGS1Parser().isCandidateGS1Text(value);
 }
 
 function normalizeScannerCandidate(value) {
-  const GS = String.fromCharCode(0x1d);
-  let s = String(value || '')
-    .trim()
-    .replace(/[\t\r\n]/g, GS)
-    .replace(/^\][A-Za-z]\d/, '')
-    .replace(/\(/g, '')
-    .replace(/\)/g, '')
-    .replace(/[^\x20-\x7E\x1D]/g, '');
-  if (!s.startsWith('01')) {
-    // Same guarded re-anchor as parseGS1BarcodeFromScanner: only jump to an
-    // embedded "01" when a full 14-digit GTIN follows it.
-    const first01 = s.indexOf('01');
-    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
-      s = s.substring(first01);
-    }
-  }
-  return s;
+  return getGS1Parser().normalizeGS1BarcodeText(value);
 }
 
 function hasPostGTINAI(value) {
