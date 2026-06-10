@@ -1,0 +1,8 @@
+{
+  "name": "vaxlink",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npm --prefix apps/extension-tests test"
+  }
+}
