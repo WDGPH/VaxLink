@@ -11,6 +11,7 @@ const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
 const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const SCANNER_INPUT_MODE_KEY = 'vaxlink_scanner_input_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
@@ -35,6 +36,8 @@ let lastInputCandidateAt = 0;
 let audioContextRef = null;
 let expiryGuardHost = null;
 let expiryGuardRoot = null;
+let activeScannerInputMode = 'web-serial';
+let legacyScannerListenersRegistered = false;
 
 const SCAN_MIN_LENGTH = 8;
 const SCAN_MAX_DURATION_MS = 6000;
@@ -130,6 +133,14 @@ function normalizeWorkflowMode(stored) {
   return 'single';
 }
 
+function normalizeScannerInputMode(stored) {
+  const mode = stored && stored[SCANNER_INPUT_MODE_KEY];
+  if (mode === 'legacy-keyboard-wedge' || mode === 'manual' || mode === 'web-serial' || mode === 'native') {
+    return mode;
+  }
+  return 'web-serial';
+}
+
 function getQueueStorageKeyForWorkflow(mode) {
   if (mode === 'multiple') {
     return MULTIPLE_INJECT_QUEUE_KEY;
@@ -138,6 +149,10 @@ function getQueueStorageKeyForWorkflow(mode) {
     return INVENTORY_BATCH_KEY;
   }
   return '';
+}
+
+function usesLegacyKeyboardWedgeCapture() {
+  return activeScannerInputMode === 'legacy-keyboard-wedge';
 }
 
 function logAnalyticsEvent(eventType, payload = {}) {
@@ -889,6 +904,7 @@ function clearActiveElementValue() {
 
 function onHandsFreePaste(event) {
   if (!isHandsFreeSupportedPage()) return;
+  if (!usesLegacyKeyboardWedgeCapture()) return;
 
   const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
   if (!text || text.length < SCAN_MIN_LENGTH) return;
@@ -957,6 +973,7 @@ function hasPostGTINAI(value) {
 
 function onHandsFreeInput(event) {
   if (!isHandsFreeSupportedPage()) return;
+  if (!usesLegacyKeyboardWedgeCapture()) return;
 
   const target = event && event.target;
   if (!target || !isTextEntryElement(target) || !('value' in target)) return;
@@ -1020,6 +1037,7 @@ function isHandsFreeSupportedPage() {
 
 function onHandsFreeKeydown(event) {
   if (!isHandsFreeSupportedPage()) return;
+  if (!usesLegacyKeyboardWedgeCapture()) return;
   if (event.defaultPrevented) return;
   if (event.ctrlKey || event.metaKey || event.altKey) return;
 
@@ -1079,6 +1097,27 @@ function onHandsFreeKeydown(event) {
   scheduleScannerFlush();
 }
 
+function syncLegacyScannerCaptureListeners() {
+  const shouldRegister = isHandsFreeSupportedPage() && usesLegacyKeyboardWedgeCapture();
+  if (shouldRegister && !legacyScannerListenersRegistered) {
+    window.addEventListener('keydown', onHandsFreeKeydown, true);
+    window.addEventListener('paste', onHandsFreePaste, true);
+    window.addEventListener('input', onHandsFreeInput, true);
+    legacyScannerListenersRegistered = true;
+    vlog('legacy keyboard-wedge scanner listeners enabled');
+    return;
+  }
+
+  if (!shouldRegister && legacyScannerListenersRegistered) {
+    window.removeEventListener('keydown', onHandsFreeKeydown, true);
+    window.removeEventListener('paste', onHandsFreePaste, true);
+    window.removeEventListener('input', onHandsFreeInput, true);
+    legacyScannerListenersRegistered = false;
+    resetScannerBuffer();
+    vlog('legacy keyboard-wedge scanner listeners disabled');
+  }
+}
+
 function initHandsFreeScanner() {
   if (window.__vaxlinkHandsFreeInitialized) {
     return;
@@ -1093,13 +1132,16 @@ function initHandsFreeScanner() {
     LEGACY_POPUP_MODE_KEY,
     LEGACY_REMOTE_MODE_KEY,
     LEGACY_HANDS_FREE_KEY,
+    SCANNER_INPUT_MODE_KEY,
     ADMIN_DATETIME_AUTOFILL_KEY,
     AUDIO_FEEDBACK_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
+    activeScannerInputMode = normalizeScannerInputMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
-    vlog('active workflow mode', activeWorkflowMode);
+    syncLegacyScannerCaptureListeners();
+    vlog('active workflow mode', activeWorkflowMode, 'scanner input mode', activeScannerInputMode);
 
     // On Panorama SPA navigations the page is already fully loaded when this
     // content script injects, so document.readyState is NOT 'loading'.
@@ -1128,6 +1170,7 @@ function initHandsFreeScanner() {
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
+      !(SCANNER_INPUT_MODE_KEY in changes) &&
       !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
       !(AUDIO_FEEDBACK_KEY in changes)
     ) {
@@ -1138,6 +1181,9 @@ function initHandsFreeScanner() {
       [LEGACY_POPUP_MODE_KEY]: LEGACY_POPUP_MODE_KEY in changes ? changes[LEGACY_POPUP_MODE_KEY].newValue : undefined,
       [LEGACY_REMOTE_MODE_KEY]: LEGACY_REMOTE_MODE_KEY in changes ? changes[LEGACY_REMOTE_MODE_KEY].newValue : undefined,
       [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
+      [SCANNER_INPUT_MODE_KEY]: SCANNER_INPUT_MODE_KEY in changes
+        ? changes[SCANNER_INPUT_MODE_KEY].newValue
+        : activeScannerInputMode,
       [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
         ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
         : adminDateTimeAutofillEnabled,
@@ -1146,15 +1192,14 @@ function initHandsFreeScanner() {
         : audioFeedbackEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
+    activeScannerInputMode = normalizeScannerInputMode(nextState);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     resetScannerBuffer();
-    vlog('workflow mode changed', activeWorkflowMode);
+    syncLegacyScannerCaptureListeners();
+    vlog('workflow mode changed', activeWorkflowMode, 'scanner input mode', activeScannerInputMode);
   });
 
-  window.addEventListener('keydown', onHandsFreeKeydown, true);
-  window.addEventListener('paste', onHandsFreePaste, true);
-  window.addEventListener('input', onHandsFreeInput, true);
   document.addEventListener('pointerdown', cancelPanoramaFillRetriesForManualEdit, true);
   document.addEventListener('change', cancelPanoramaFillRetriesForManualEdit, true);
 }

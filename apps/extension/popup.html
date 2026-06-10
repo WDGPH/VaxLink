@@ -238,6 +238,22 @@
       box-shadow: 0 0 0 3px var(--ring);
     }
 
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 9px 10px;
+      font-size: 12px;
+      color: #0e2b41;
+      background: #fbfdff;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--ring);
+    }
+
     .scan-helper {
       margin: 8px 2px 0;
       font-size: 11px;
@@ -871,6 +887,16 @@
               <span>Auto-fill Date Administered from scan time</span>
             </label>
             <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
+            <div class="analytics-field">
+              <label for="scannerInputModeSelect">Scanner Input</label>
+              <select id="scannerInputModeSelect">
+                <option value="web-serial">Web Serial dedicated scanner</option>
+                <option value="manual">Manual popup entry only</option>
+                <option value="native">Native helper channel</option>
+                <option value="legacy-keyboard-wedge">Legacy keyboard wedge listener</option>
+              </select>
+              <p id="scannerInputModeHint" class="settings-hint">Loading scanner input mode...</p>
+            </div>
             <div id="nvcStatus"></div>
           </div>
           <div class="analytics">
@@ -913,17 +939,17 @@
           <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
         </div>
 
-        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.</p>
+        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Scan into the field below to preview, or connect a dedicated scanner channel for hands-free auto-fill.</p>
 
         <div id="singleModeSection" class="mode-panel">
-          <div class="workflow-note">Hands-free is active in Single Inject. Keep the chart page open and scan directly there to auto-fill one vaccine at a time.</div>
+          <div class="workflow-note">Dedicated scanner capture fills the open chart in Single Inject. Legacy keyboard-wedge page listening is off unless enabled in settings.</div>
           <div class="actions">
             <button id="autoFillBtn">Auto-fill CHR</button>
           </div>
         </div>
 
         <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
+          <div class="workflow-note">With a dedicated scanner channel connected, scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>
