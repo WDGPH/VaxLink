@@ -46,6 +46,8 @@ const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let iconInitPromise = null;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
+const PENDING_SCAN_INBOX_LIMIT = 25;
 const BADGE_COLOR = '#0891b2';
 
 // Load NVC bundle on installation/startup
@@ -200,6 +202,95 @@ async function appendQueueRecord(storageKey, record) {
   return {
     ...record,
     queueSizeAfter: rows.length
+  };
+}
+
+function queryTabs(queryInfo) {
+  return new Promise((resolve) => {
+    chrome.tabs.query(queryInfo, (tabs) => {
+      if (chrome.runtime.lastError) {
+        resolve([]);
+        return;
+      }
+      resolve(Array.isArray(tabs) ? tabs : []);
+    });
+  });
+}
+
+function sendScanToTab(tabId, scan) {
+  return new Promise((resolve, reject) => {
+    if (!tabId && tabId !== 0) {
+      reject(new Error('Missing tab id'));
+      return;
+    }
+    chrome.tabs.sendMessage(tabId, { action: 'vaxlinkScanCaptured', scan }, { frameId: 0 }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!response || response.success !== true) {
+        reject(new Error(response?.error || 'Tab did not accept scan'));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+function normalizeScanEvent(scan) {
+  const rawText = String(scan?.rawText || '').trim();
+  if (!rawText) {
+    throw new Error('Scan event missing raw text');
+  }
+  return {
+    type: 'vaxlink.scan',
+    rawText,
+    source: scan?.source || 'unknown',
+    device: scan?.device || null,
+    rawBytesHex: String(scan?.rawBytesHex || ''),
+    capturedAt: scan?.capturedAt || new Date().toISOString()
+  };
+}
+
+async function enqueuePendingScan(scan) {
+  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+    ? stored[PENDING_SCAN_INBOX_KEY]
+    : [];
+  rows.push(scan);
+  const nextRows = rows.slice(-PENDING_SCAN_INBOX_LIMIT);
+  await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
+  return nextRows.length;
+}
+
+async function routeScanToActiveSupportedTab(rawScan) {
+  const scan = normalizeScanEvent(rawScan);
+  const tried = new Set();
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const allTabs = await queryTabs({});
+  const candidates = [...activeTabs, ...allTabs];
+
+  for (const tab of candidates) {
+    if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
+    tried.add(tab.id);
+    try {
+      const response = await sendScanToTab(tab.id, scan);
+      return {
+        routed: true,
+        queued: false,
+        tabId: tab.id,
+        response
+      };
+    } catch (_) {
+      // Try the next tab; unsupported pages simply do not have the content script.
+    }
+  }
+
+  const pendingCount = await enqueuePendingScan(scan);
+  return {
+    routed: false,
+    queued: true,
+    pendingCount
   };
 }
 
@@ -1683,6 +1774,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     appendQueueRecord(request.storageKey || '', request.record || null)
       .then((record) => sendResponse({ success: true, record }))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Queue append failed' }));
+    return true;
+  }
+
+  if (request.action === 'scannerScanCaptured') {
+    routeScanToActiveSupportedTab(request.scan || null)
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan routing failed' }));
     return true;
   }
 
