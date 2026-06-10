@@ -21,7 +21,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const rulesPath = path.resolve(
   fileURLToPath(import.meta.url),
-  '../../panorama-agent-rules.js'
+  '../../extension/panorama-agent-rules.js'
 );
 require(rulesPath);
 const PANORAMA_AGENT_RULES = globalThis.VAXLINK_PANORAMA_AGENT_RULES;

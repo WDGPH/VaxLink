@@ -169,7 +169,13 @@ function parseScannerDate(yymmdd) {
   if (!yymmdd || yymmdd.length !== 6) return null;
   const yy = yymmdd.substring(0, 2);
   const mm = yymmdd.substring(2, 4);
-  const dd = yymmdd.substring(4, 6);
+  let dd = yymmdd.substring(4, 6);
+  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
+  // downstream date math doesn't roll back into the previous month.
+  if (dd === '00') {
+    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
+    dd = String(lastDay).padStart(2, '0');
+  }
   return `${mm}/${dd}/20${yy}`;
 }
 
@@ -288,7 +294,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
       if (lotEnd === -1) {
         lotEnd = s.length;
       }
-      data.lot = s.substring(idx, lotEnd);
+      data.lot = s.substring(idx, lotEnd).replace(/\x1d/g, '');
       idx = lotEnd;
     } else if (currentAI === '21') {
       idx += 2;
@@ -296,7 +302,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
       if (serialEnd === -1) {
         serialEnd = s.length;
       }
-      data.serial = s.substring(idx, serialEnd);
+      data.serial = s.substring(idx, serialEnd).replace(/\x1d/g, '');
       idx = serialEnd;
     } else {
       // Recover from unknown/intermediate AIs by finding the next recognized AI.
@@ -884,6 +890,17 @@ function onHandsFreeInput(event) {
   scannerInputTimer = setTimeout(() => {
     const latest = String(target.value || '').trim();
     if (!isCandidateGS1Text(latest)) return;
+    // isCandidateGS1Text is too loose to justify wiping the field — it matches
+    // dates, patient IDs, and any text containing "01". Mirror the paste path:
+    // require a full parse with a numeric 14-digit GTIN before clearing, so
+    // manually typed values are never destroyed.
+    let parsed;
+    try {
+      parsed = parseGS1BarcodeFromScanner(latest);
+    } catch (_) {
+      return;
+    }
+    if (!parsed || !parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
     target.value = '';
     target.dispatchEvent(new Event('input', { bubbles: true }));
     target.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1768,6 +1785,16 @@ function normalizePanoramaLotToken(value) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+function optionTextMatchesLotExactly(optionText, lotValue) {
+  const lotToken = normalizePanoramaLotToken(lotValue);
+  if (!lotToken) return false;
+  const rawText = String(optionText || '');
+  // Panorama options look like "LOT123 - Exp. 2026-01-31"; the lot is the
+  // left-of-dash token. Exact equality avoids "ABC1" selecting "ABC12".
+  const leftPart = rawText.split('-')[0] || rawText;
+  return normalizePanoramaLotToken(leftPart) === lotToken;
+}
+
 function optionTextContainsLot(optionText, lotValue) {
   const lotToken = normalizePanoramaLotToken(lotValue);
   if (!lotToken) return false;
@@ -1779,6 +1806,15 @@ function optionTextContainsLot(optionText, lotValue) {
   return leftToken === lotToken || leftToken.includes(lotToken);
 }
 
+// Prefer an exact lot match across all candidates before falling back to a
+// substring match, so a scanned lot that prefixes a longer lot in the
+// dropdown never selects the wrong one.
+function findBestLotMatch(candidates, getText, lotValue) {
+  return candidates.find(c => optionTextMatchesLotExactly(getText(c), lotValue))
+    || candidates.find(c => optionTextContainsLot(getText(c), lotValue))
+    || null;
+}
+
 function fillPanoramaLotFromSelect(lotValue) {
   const selectors = [
     'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
@@ -1788,7 +1824,7 @@ function fillPanoramaLotFromSelect(lotValue) {
   const fields = getFields(selectors).filter(canFillPanoramaControl);
   for (const field of fields) {
     const options = Array.from(field.options || []).filter(opt => opt && opt.value !== '');
-    const matched = options.find(opt => optionTextContainsLot(opt.text, lotValue));
+    const matched = findBestLotMatch(options, opt => opt.text, lotValue);
     if (!matched) continue;
 
     field.focus();
@@ -1872,15 +1908,13 @@ function fillPanoramaLotFromPanelItems(lotValue) {
         ).trim();
         return isVisible(item) && text.length > 0;
       });
-    const matched = items.find((item) => {
-      const itemText = String(
-        item.getAttribute?.('data-label')
-        || item.getAttribute?.('title')
-        || item.textContent
-        || ''
-      );
-      return optionTextContainsLot(itemText, lotValue);
-    });
+    const getItemText = (item) => String(
+      item.getAttribute?.('data-label')
+      || item.getAttribute?.('title')
+      || item.textContent
+      || ''
+    );
+    const matched = findBestLotMatch(items, getItemText, lotValue);
     if (!matched) continue;
     matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     matched.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -3204,7 +3238,15 @@ function updateHudState() {
   });
 }
 
+// Guards the read-shift-write sequence below: tryAutoDrain, the multi-step
+// observer, and the HUD apply button can all fire close together, and without
+// this flag two callers would shift the same queue head (double-fill) or
+// clobber each other's setLocalStorage (dropped record).
+let applyQueueInFlight = false;
+
 async function applyNextQueueItem() {
+  if (applyQueueInFlight) return;
+  applyQueueInFlight = true;
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
@@ -3264,6 +3306,8 @@ async function applyNextQueueItem() {
   } catch (error) {
     console.warn('VaxLink HUD apply error:', error);
     if (hudApplyBtn) hudApplyBtn.disabled = false;
+  } finally {
+    applyQueueInFlight = false;
   }
 }
 

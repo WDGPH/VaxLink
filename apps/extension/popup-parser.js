@@ -119,7 +119,7 @@ export function parseGS1Barcode(barcode) {
       if (lotEnd === -1) {
         lotEnd = scan.length;
       }
-      data.lot = scan.substring(idx, lotEnd);
+      data.lot = scan.substring(idx, lotEnd).replace(/\x1d/g, '');
       idx = lotEnd;
     } else if (currentAI === '21') {
       idx += 2;
@@ -127,7 +127,7 @@ export function parseGS1Barcode(barcode) {
       if (serialEnd === -1) {
         serialEnd = scan.length;
       }
-      data.serial = scan.substring(idx, serialEnd);
+      data.serial = scan.substring(idx, serialEnd).replace(/\x1d/g, '');
       idx = serialEnd;
     } else {
       const nextKnownAI = findNextAI(scan, idx, GS, null);
@@ -211,7 +211,13 @@ export function formatDate(yymmdd) {
   }
   const yy = yymmdd.substring(0, 2);
   const mm = yymmdd.substring(2, 4);
-  const dd = yymmdd.substring(4, 6);
+  let dd = yymmdd.substring(4, 6);
+  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
+  // downstream date math doesn't roll back into the previous month.
+  if (dd === '00') {
+    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
+    dd = String(lastDay).padStart(2, '0');
+  }
   return `${mm}/${dd}/20${yy}`;
 }
 

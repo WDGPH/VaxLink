@@ -15,7 +15,7 @@ You are working inside the **VaxLink** repository — a Chrome extension (Manife
 - Three messaging contexts: background service worker, content script, popup
 - Chrome storage (`chrome.storage.local`) is the state layer
 - Panorama autofill is order-dependent: agent → lot → (deferred) date/time, gated on `!isPrimeFacesAjaxBusy()`
-- Tests use Node.js built-in `node:test` runner in `apps/extension/tests/`
+- Tests use Node.js built-in `node:test` runner in `apps/extension-tests/`
 
 ## Workflow
 
@@ -47,7 +47,7 @@ For each suspected bug:
 - Prefer failing tests, command output, or static proof. Do not speculate without tracing.
 
 ### Step 4: Run Verification
-- Run existing tests: `cd apps/extension && npm test`
+- Run existing tests: `cd apps/extension-tests && npm test`
 - Syntax-check modified files: `node --check apps/extension/<file>.js`
 - Run Next.js lint if relevant: `cd apps/web-next && npm run lint`
 - Add temporary focused tests only if they directly confirm a suspected bug.

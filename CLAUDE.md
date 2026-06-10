@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Path | What it is |
 |---|---|
 | `apps/extension/` | Chrome extension (Manifest V3) — no build step, plain JS |
+| `apps/extension-tests/` | Extension test suite (kept outside `apps/extension/` so the Chrome Web Store zip stays clean) |
 | `apps/web/` | Static landing page + NVC bundle explorer (no build step) |
 | `apps/web-next/` | Next.js 14 marketing site, deployed to GitHub Pages |
 | `scripts/` | Shell utilities (e.g. `fetch-nvc.sh` to download NVC bundle locally) |
@@ -23,8 +24,8 @@ node --check apps/extension/content.js
 node --check apps/extension/popup.js
 node --check apps/extension/popup-inventory.js
 
-# Run automated tests
-cd apps/extension && npm test
+# Run automated tests (suite lives in apps/extension-tests/, outside the packaged extension)
+cd apps/extension-tests && npm test     # or `npm test` from the repo root
 ```
 
 Install for manual testing: load `apps/extension/` as an unpacked extension in `chrome://extensions` with Developer mode on.
@@ -123,4 +124,5 @@ GitHub Actions (`.github/workflows/deploy-web-next-pages.yml`) builds `apps/web-
 - `apps/web/nvc-bundle.json` is in `.gitignore` — never commit raw NVC bundle files.
 - If Panorama DOM changes, update selectors in `apps/extension/content.js`. Use `pano1.html` / `pano2.html` as fixtures.
 - The extension has no build step — files are loaded directly by Chrome. No bundler, no transpilation.
-- `apps/extension/tests/` uses Node.js built-in `node:test` runner (no Jest/Vitest).
+- `apps/extension-tests/` uses Node.js built-in `node:test` runner (no Jest/Vitest). Tests must stay outside `apps/extension/` so they are never packaged into the Chrome Web Store upload.
+- The repo-root `package.json` exists to mark the tree `"type": "module"` so Node parses the extension's ESM sources correctly in tests — don't delete it.
