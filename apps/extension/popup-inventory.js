@@ -139,38 +139,42 @@ export class ScanQueueManager {
     this.render();
   }
 
-  async add(record) {
-    this.rows.push(record);
+  // Every mutation re-reads storage first: the background worker appends
+  // hands-free scans to the same key while the popup is open, and a mutation
+  // computed from a stale in-memory copy would silently clobber them.
+  async mutateRows(mutator) {
+    const stored = await getLocalStorage([this.storageKey]);
+    const current = (stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [])
+      .filter((row) => row && typeof row === 'object');
+    const next = mutator(current);
+    this.rows = Array.isArray(next) ? next.filter((row) => row && typeof row === 'object') : [];
     await this.persist();
     this.render();
+  }
+
+  async add(record) {
+    await this.mutateRows((rows) => [...rows, record]);
   }
 
   async addMany(records) {
-    this.rows.push(...records);
-    await this.persist();
-    this.render();
+    await this.mutateRows((rows) => [...rows, ...records]);
   }
 
   async clear() {
-    this.rows = [];
     this.activeUseId = '';
-    await this.persist();
-    this.render();
+    await this.mutateRows(() => []);
   }
 
   async remove(id) {
-    this.rows = this.rows.filter((row) => row.id !== id);
     if (this.activeUseId === id) {
       this.activeUseId = '';
     }
-    await this.persist();
-    this.render();
+    await this.mutateRows((rows) => rows.filter((row) => row.id !== id));
   }
 
   async replaceRows(rows) {
-    this.rows = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
-    await this.persist();
-    this.render();
+    const sanitized = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+    await this.mutateRows(() => sanitized);
   }
 
   async updateById(id, patch) {
@@ -178,14 +182,13 @@ export class ScanQueueManager {
     if (!targetId || !patch || typeof patch !== 'object') {
       return null;
     }
-    const index = this.rows.findIndex((row) => row && row.id === targetId);
-    if (index === -1) {
-      return null;
-    }
-    const nextRows = [...this.rows];
-    nextRows[index] = { ...nextRows[index], ...patch };
-    await this.replaceRows(nextRows);
-    return nextRows[index];
+    let updated = null;
+    await this.mutateRows((rows) => rows.map((row) => {
+      if (!row || row.id !== targetId) return row;
+      updated = { ...row, ...patch };
+      return updated;
+    }));
+    return updated;
   }
 
   async setDoseCounts(id, totalDoses) {
@@ -229,21 +232,19 @@ export class ScanQueueManager {
       return null;
     }
 
-    const index = this.rows.findIndex((item) => item && item.id === targetId);
-    if (index < 0) {
-      return null;
-    }
-
-    const nextRows = [...this.rows];
-    const total = getTotalDoseCount(row) || remaining;
-    nextRows[index] = {
-      ...row,
-      total_doses: total,
-      remaining_doses: remaining - 1,
-      dose_tracking: 'manual'
-    };
-    await this.replaceRows(nextRows);
-    return nextRows[index];
+    let updated = null;
+    await this.mutateRows((rows) => rows.map((item) => {
+      if (!item || item.id !== targetId) return item;
+      const total = getTotalDoseCount(item) || remaining;
+      updated = {
+        ...item,
+        total_doses: total,
+        remaining_doses: remaining - 1,
+        dose_tracking: 'manual'
+      };
+      return updated;
+    }));
+    return updated;
   }
 
   get count() {
