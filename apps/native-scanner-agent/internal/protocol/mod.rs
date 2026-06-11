@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 
 use crate::config::AgentConfig;
 use crate::queue::JsonlQueue;
@@ -9,6 +10,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(dead_code)]
 #[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
 pub enum Request {
     #[serde(rename = "hello")]
     Hello { protocol_version: Option<u32> },
@@ -75,4 +77,60 @@ impl StatusResponse {
             last_scan_at: state.last_scan_at.or(stats.last_scan_at),
         })
     }
+}
+
+pub fn handle_request(
+    version: &str,
+    config: &AgentConfig,
+    queue: &JsonlQueue,
+    state_store: &AgentStateStore,
+    request: Request,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    match request {
+        Request::Hello { protocol_version } => Ok(json!({
+            "ok": true,
+            "type": "hello",
+            "protocolVersion": PROTOCOL_VERSION,
+            "agentVersion": version,
+            "compatible": protocol_version.unwrap_or(PROTOCOL_VERSION) == PROTOCOL_VERSION
+        })),
+        Request::StatusGet => Ok(serde_json::to_value(StatusResponse::from_config_queue_and_state(
+            version,
+            config,
+            queue,
+            state_store,
+        )?)?),
+        Request::QueuePeek { limit } | Request::ScanPoll { limit } => {
+            let scans = queue.peek(limit.unwrap_or(25).clamp(1, 100))?;
+            Ok(json!({
+                "ok": true,
+                "protocolVersion": PROTOCOL_VERSION,
+                "scans": scans
+            }))
+        }
+        Request::QueueAck { ids } => {
+            let changed = queue.ack(&ids)?;
+            Ok(json!({
+                "ok": true,
+                "protocolVersion": PROTOCOL_VERSION,
+                "acked": changed
+            }))
+        }
+        Request::QueueNack { ids, reason } => {
+            let changed = queue.nack(&ids, reason)?;
+            Ok(json!({
+                "ok": true,
+                "protocolVersion": PROTOCOL_VERSION,
+                "nacked": changed
+            }))
+        }
+    }
+}
+
+pub fn error_response(message: &str) -> Value {
+    json!({
+        "ok": false,
+        "protocolVersion": PROTOCOL_VERSION,
+        "error": message
+    })
 }

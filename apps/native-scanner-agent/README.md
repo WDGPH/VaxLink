@@ -8,6 +8,7 @@ This crate is intentionally small at this stage:
 - `--status` loads per-user config paths and reports queue/status fields.
 - `--list-ports` prints visible serial ports as JSON.
 - `--run` opens the configured serial port, frames scans on CR/LF/CRLF, and queues them.
+- `--native-messaging` serves Chrome/Edge native messaging frames on stdin/stdout.
 - Queue primitives are implemented before scanner I/O so reliability can be tested independently.
 - Runtime state is persisted in `agent-state.json` so status survives process restarts.
 - Scanner logs rotate at 1 MiB in the per-user `logs/` directory.
@@ -29,6 +30,19 @@ VAXLINK_SCANNER_PORT=COM4 ~/.cargo/bin/cargo run --manifest-path apps/native-sca
 ```
 
 On Linux, the crate builds without optional `libudev` support so it does not require system development packages in this repo environment. Direct configured-port capture still works; richer USB metadata can be enabled later in installer/build environments that include `libudev`.
+
+## Native Messaging
+
+The native messaging mode supports:
+
+- `hello`
+- `status.get`
+- `queue.peek`
+- `queue.ack`
+- `queue.nack`
+- `scan.poll`
+
+Responses are JSON objects wrapped in Chrome/Edge native messaging frames. The extension should ack a native scan only after the background accepts responsibility for it.
 
 ## Data Directory
 

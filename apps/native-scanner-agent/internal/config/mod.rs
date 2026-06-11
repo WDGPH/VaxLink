@@ -42,6 +42,25 @@ impl AgentConfig {
                 .unwrap_or(default_profile.baud_rate),
         })
     }
+
+    #[cfg(test)]
+    pub fn load_for_test(data_dir: &std::path::Path) -> Result<Self, Box<dyn Error>> {
+        let data_dir = data_dir.to_path_buf();
+        fs::create_dir_all(&data_dir)?;
+        let queue_path = data_dir.join("scan-queue.jsonl");
+        let state_path = data_dir.join("agent-state.json");
+        let log_dir = data_dir.join("logs");
+        fs::create_dir_all(&log_dir)?;
+        Ok(Self {
+            data_dir,
+            queue_path,
+            state_path,
+            log_dir,
+            profile_id: "zebra-ds8178-usb-cdc".to_string(),
+            port: Some("COM4".to_string()),
+            baud_rate: 9600,
+        })
+    }
 }
 
 fn default_data_dir() -> Result<PathBuf, Box<dyn Error>> {
