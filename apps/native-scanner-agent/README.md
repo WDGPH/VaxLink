@@ -6,6 +6,8 @@ This crate is intentionally small at this stage:
 
 - `--version` prints the agent version.
 - `--status` loads per-user config paths and reports queue/status fields.
+- `--list-ports` prints visible serial ports as JSON.
+- `--run` opens the configured serial port, frames scans on CR/LF/CRLF, and queues them.
 - Queue primitives are implemented before scanner I/O so reliability can be tested independently.
 
 The first deployment target is a user-session process, not a Windows Service. It can keep running while the workstation is locked as long as the user session remains active.
@@ -20,7 +22,11 @@ The first deployment target is a user-session process, not a Windows Service. It
 
 ```bash
 ~/.cargo/bin/cargo run --manifest-path apps/native-scanner-agent/Cargo.toml -- --status
+~/.cargo/bin/cargo run --manifest-path apps/native-scanner-agent/Cargo.toml -- --list-ports
+VAXLINK_SCANNER_PORT=COM4 ~/.cargo/bin/cargo run --manifest-path apps/native-scanner-agent/Cargo.toml -- --run
 ```
+
+On Linux, the crate builds without optional `libudev` support so it does not require system development packages in this repo environment. Direct configured-port capture still works; richer USB metadata can be enabled later in installer/build environments that include `libudev`.
 
 ## Data Directory
 

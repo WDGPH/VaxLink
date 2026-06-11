@@ -10,8 +10,10 @@ name = "vaxlink-scanner-agent"
 path = "src/main.rs"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serialport = { version = "4", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
