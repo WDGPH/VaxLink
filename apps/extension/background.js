@@ -140,7 +140,12 @@ function setStorage(values) {
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
 // exempt: repeated identical scans there are legitimate stock counting.
-const DUPLICATE_SCAN_WINDOW_MS = 10000;
+//
+// The window must stay short: vaccine barcodes carry no per-unit serial, so two
+// patients vaccinated back-to-back from the same lot scan as identical
+// barcodes. 3s catches scanner double-fires (content.js additionally suppresses
+// identical scans under 1.5s) without swallowing a deliberate next-patient scan.
+const DUPLICATE_SCAN_WINDOW_MS = 3000;
 
 function scanIdentityKey(record) {
   if (!record || typeof record !== 'object') return '';

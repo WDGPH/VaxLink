@@ -4,8 +4,11 @@
  * queued twice, only noticed at the 'enter details' step).
  *
  * The guard lives in background.js appendQueueRecord: an identical scan
- * identity (raw barcode, else gtin+lot+serial) within 10 s of an existing
+ * identity (raw barcode, else gtin+lot+serial) within 3 s of an existing
  * queue row is rejected with duplicate_ignored instead of being appended.
+ * The window must stay short because vaccine barcodes carry no per-unit
+ * serial: two patients vaccinated back-to-back from the same lot scan as
+ * identical barcodes and must both be queued.
  * Inventory mode is exempt — repeated identical scans there are stock counts.
  */
 
@@ -43,7 +46,19 @@ async function append(harness, storageKey, record) {
   return response.record;
 }
 
-test('double-fire of the same barcode within 10s is ignored in multiple mode', async () => {
+test('two patients, same lot, scanned 8s apart must both be queued', async () => {
+  const harness = createBackgroundHarness(EMPTY_BUNDLE);
+  const first = makeRecord();
+  await append(harness, MULTIPLE_KEY, first);
+
+  // Same lot, same barcode (no per-unit serial on vaccine packs), next patient.
+  const second = makeRecord({ scanned_at: new Date(Date.parse(first.scanned_at) + 8000).toISOString() });
+  const result = await append(harness, MULTIPLE_KEY, second);
+  assert.equal(result.duplicate_ignored, undefined, 'a next-patient same-lot scan must not be dropped');
+  assert.equal(harness.storageData.get(MULTIPLE_KEY).length, 2);
+});
+
+test('double-fire of the same barcode within 3s is ignored in multiple mode', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE);
   const first = makeRecord();
   const firstResult = await append(harness, MULTIPLE_KEY, first);
