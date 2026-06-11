@@ -2719,6 +2719,11 @@ function handleVaxlinkCommand(value) {
 
 let toastHost = null;
 let toastRoot = null;
+// Two stacked slots so a persistent expired warning and routine feedback
+// (queued / duplicate / mode switch) can coexist instead of clobbering each
+// other (issue #28): warning on top, routine toasts below it.
+let toastWarningSlot = null;
+let toastRoutineSlot = null;
 let toastDismissTimer = null;
 
 function ensureToastHost() {
@@ -2729,11 +2734,18 @@ function ensureToastHost() {
   const style = document.createElement('style');
   style.textContent = `
     :host { all: initial; }
-    .vl-toast {
+    .vl-toast-stack {
       position: fixed;
       top: 12px;
       right: 12px;
       z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .vl-toast {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       line-height: 1.4;
@@ -2785,6 +2797,11 @@ function ensureToastHost() {
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
+  toastRoot.className = 'vl-toast-stack';
+  toastWarningSlot = document.createElement('div');
+  toastRoutineSlot = document.createElement('div');
+  toastRoot.appendChild(toastWarningSlot);
+  toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
   return toastRoot;
@@ -2792,52 +2809,44 @@ function ensureToastHost() {
 
 function showVaxlinkToast(data, durationMs = 4000) {
   if (!isHandsFreeSupportedPage()) return;
-  const root = ensureToastHost();
+  ensureToastHost();
 
-  // An undismissed expired warning must not be silently replaced by a routine
-  // toast (issue #28); only another expired warning may take its place.
-  if (root.querySelector('.vl-toast.persistent')) {
-    const incomingFlag = data.expiry_flag
-      || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
-    const incomingIsExpired = !data._commandMode && !data._queueEmpty
-      && !data._manualSelectionKept && !data._duplicateIgnored
-      && incomingFlag === 'expired';
-    if (!incomingIsExpired) return;
-  }
-
-  if (toastDismissTimer) {
-    clearTimeout(toastDismissTimer);
-    toastDismissTimer = null;
-  }
+  // Routine toasts share one slot and one auto-dismiss timer; the persistent
+  // expired warning lives in its own slot above and is never replaced by them.
+  const showRoutineToast = (html, ms) => {
+    if (toastDismissTimer) {
+      clearTimeout(toastDismissTimer);
+      toastDismissTimer = null;
+    }
+    toastRoutineSlot.innerHTML = html;
+    toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
+  };
 
   if (data._commandMode) {
     const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
     const sourceDetail = data._commandSource === 'hud'
       ? 'Switched from VaxLink HUD'
       : 'Switched via scanner command';
-    root.innerHTML = `<div class="vl-toast info show">
+    showRoutineToast(`<div class="vl-toast info show">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
       <div class="vl-toast-detail">${sourceDetail}</div>
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    </div>`, durationMs);
     return;
   }
 
   if (data._queueEmpty) {
-    root.innerHTML = `<div class="vl-toast info show">
+    showRoutineToast(`<div class="vl-toast info show">
       <div class="vl-toast-title">Queue empty</div>
       <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    </div>`, durationMs);
     return;
   }
 
   if (data._manualSelectionKept) {
-    root.innerHTML = `<div class="vl-toast info show">
+    showRoutineToast(`<div class="vl-toast info show">
       <div class="vl-toast-title">Kept your selection</div>
       <div class="vl-toast-detail">The agent on screen differs from the next queued scan — VaxLink did not change it. Remove the queued item if it is no longer needed.</div>
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs + 2000);
+    </div>`, durationMs + 2000);
     return;
   }
 
@@ -2855,12 +2864,11 @@ function showVaxlinkToast(data, durationMs = 4000) {
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
 
   if (data._duplicateIgnored) {
-    root.innerHTML = `<div class="vl-toast duplicate show">
+    showRoutineToast(`<div class="vl-toast duplicate show">
       <div class="vl-toast-title">Duplicate scan ignored</div>
       <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
       ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    </div>`, durationMs);
     return;
   }
 
@@ -2873,7 +2881,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
     : '';
 
-  root.innerHTML = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
+  const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
     <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
@@ -2883,19 +2891,21 @@ function showVaxlinkToast(data, durationMs = 4000) {
   </div>`;
 
   if (isExpired) {
+    // Persistent: own slot, no timer \u2014 stays until the nurse dismisses it
+    // (issue #28). Routine toasts keep flowing in the slot below.
+    toastWarningSlot.innerHTML = toastHtml;
     playAudioCue('expiry_warning');
-    const dismissBtn = root.querySelector('.vl-toast-dismiss');
-    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(root));
-    // Persistent: stays on screen until the nurse dismisses it (issue #28).
+    const dismissBtn = toastWarningSlot.querySelector('.vl-toast-dismiss');
+    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
     return;
   }
-  toastDismissTimer = setTimeout(() => dismissToast(root), data.nvc_override ? durationMs + 4000 : durationMs);
+  showRoutineToast(toastHtml, data.nvc_override ? durationMs + 4000 : durationMs);
 }
 
-function dismissToast(root) {
-  const el = root && root.querySelector('.vl-toast');
+function dismissToast(slot) {
+  const el = slot && slot.querySelector('.vl-toast');
   if (el) el.classList.remove('show');
-  setTimeout(() => { if (root) root.innerHTML = ''; }, 300);
+  setTimeout(() => { if (slot) slot.innerHTML = ''; }, 300);
 }
 
 function escapeToastHtml(text) {
