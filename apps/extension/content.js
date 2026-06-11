@@ -301,14 +301,20 @@ function parseGS1BarcodeFromScanner(rawScan) {
   let s = String(rawScan || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
+    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Lot-only
+    // barcodes have no "01" to re-anchor on, so strip generically.
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
 
   if (!s.startsWith('01')) {
+    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
+    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
+    // "10Y016312") and truncate the payload to garbage.
     const first01 = s.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
       s = s.substring(first01);
     }
   }
@@ -927,13 +933,15 @@ function normalizeScannerCandidate(value) {
   let s = String(value || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
   if (!s.startsWith('01')) {
+    // Same guarded re-anchor as parseGS1BarcodeFromScanner: only jump to an
+    // embedded "01" when a full 14-digit GTIN follows it.
     const first01 = s.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
       s = s.substring(first01);
     }
   }
