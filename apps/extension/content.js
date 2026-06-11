@@ -3542,10 +3542,13 @@ async function applyNextQueueItem() {
     // from the multi-grid or chosen manually) and it does not match the queue
     // head, the nurse picked a different vaccine for this entry. Filling now
     // would silently revert her change — keep the form and the queue intact.
+    // isImmunizationFormEmpty (not hasPanoramaAgentSelection(null)) because the
+    // latter counts the "Select"/"--" placeholder option as a selection, which
+    // would block draining into a genuinely empty form.
     const headPayload = buildAutofillPayloadFromQueueRecord(rows[0]);
     if (
       headPayload &&
-      hasPanoramaAgentSelection(null) &&
+      !isImmunizationFormEmpty() &&
       !hasPanoramaAgentSelection(headPayload)
     ) {
       vlog('auto-fill skipped: existing agent selection differs from queue head');
