@@ -754,6 +754,20 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
       const queueKey = activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
+      if (record.duplicate_ignored) {
+        playAudioCue('duplicate');
+        showVaxlinkToast({ ...parsed, _duplicateIgnored: true });
+        vlog('duplicate scan ignored', { mode: activeWorkflowMode, source, lot: record.lot });
+        logAnalyticsEvent('queue_duplicate_ignored', {
+          workflow: activeWorkflowMode,
+          queue: queueKey,
+          source,
+          vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+          manufacturer: record.manufacturer || '',
+          expiryFlag: record.expiry_flag || finalExpiryFlag
+        });
+        return;
+      }
       vlog('workflow scan saved to queue', {
         mode: activeWorkflowMode,
         source,
@@ -2712,6 +2726,7 @@ function ensureToastHost() {
     .vl-toast.expiring { background: #b45309; }
     .vl-toast.expired  { background: #b91c1c; }
     .vl-toast.info     { background: #0e7490; }
+    .vl-toast.duplicate { background: #52525b; }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
     .vl-toast-override {
@@ -2773,8 +2788,19 @@ function showVaxlinkToast(data, durationMs = 4000) {
     const flagLabels = { valid: 'Valid', expiring_soon: 'Expiring soon', expired: 'Expired' };
     expiryText = `${flagLabels[flag] || 'Unknown'} (exp ${friendlyDate})`;
   }
-  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+
+  if (data._duplicateIgnored) {
+    root.innerHTML = `<div class="vl-toast duplicate show">
+      <div class="vl-toast-title">Duplicate scan ignored</div>
+      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
+      ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    </div>`;
+    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    return;
+  }
+
+  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const overrideNote = data.nvc_override
     ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
     : '';
