@@ -1,5 +1,6 @@
 if (typeof importScripts === 'function') {
   importScripts('scanner/scanner-events.js');
+  importScripts('native/native-scanner-client.js');
 }
 
 const VAXLINK_BG_DEBUG = false;
@@ -271,6 +272,60 @@ async function drainPendingScannerScans(limit = 25) {
   remaining.push(...pending.slice(max));
   await savePendingScannerScans(remaining);
   return { success: true, delivered, pendingCount: remaining.length };
+}
+
+async function getNativeScannerStatus() {
+  return VaxLinkNativeScannerClient.getStatus();
+}
+
+async function drainNativeScannerScans(limit = 25) {
+  const pollResult = await VaxLinkNativeScannerClient.pollScans(limit);
+  if (!pollResult.ok) {
+    return pollResult;
+  }
+
+  const scans = Array.isArray(pollResult.scans) ? pollResult.scans : [];
+  const acceptedIds = [];
+  const rejected = [];
+
+  for (const nativeScan of scans) {
+    const nativeQueueId = nativeScan.nativeQueueId || nativeScan.id || '';
+    try {
+      const routed = await scannerScanCaptured({
+        rawText: nativeScan.rawText,
+        source: nativeScan.source || 'native-serial',
+        device: nativeScan.scanner || nativeScan.device || null,
+        rawBytesHex: nativeScan.rawBytesHex || null,
+        capturedAt: nativeScan.capturedAt || null,
+        nativeQueueId
+      });
+      if (routed.success && nativeQueueId) {
+        acceptedIds.push(nativeQueueId);
+      }
+    } catch (error) {
+      if (nativeQueueId) {
+        rejected.push({ id: nativeQueueId, reason: error?.message || 'extension-rejected' });
+      }
+    }
+  }
+
+  let ackResult = null;
+  if (acceptedIds.length) {
+    ackResult = await VaxLinkNativeScannerClient.ack(acceptedIds);
+  }
+
+  for (const item of rejected) {
+    await VaxLinkNativeScannerClient.nack([item.id], item.reason);
+  }
+
+  return {
+    ok: true,
+    installed: true,
+    received: scans.length,
+    accepted: acceptedIds.length,
+    rejected: rejected.length,
+    ackResult
+  };
 }
 
 function buildAnalyticsId() {
@@ -1758,6 +1813,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     drainPendingScannerScans(request.limit)
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Pending scan drain failed' }));
+    return true;
+  }
+
+  if (request.action === 'getNativeScannerStatus') {
+    getNativeScannerStatus()
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, installed: false, error: error?.message || 'Native scanner status failed' }));
+    return true;
+  }
+
+  if (request.action === 'drainNativeScannerScans') {
+    drainNativeScannerScans(request.limit)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ ok: false, installed: false, error: error?.message || 'Native scanner drain failed' }));
     return true;
   }
 

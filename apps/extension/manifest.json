@@ -8,7 +8,8 @@
     "activeTab",
     "scripting",
     "storage",
-    "alarms"
+    "alarms",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://nvc-cnv.canada.ca/*"
