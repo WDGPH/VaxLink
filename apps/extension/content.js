@@ -768,6 +768,11 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         });
         return;
       }
+      // Expired records get the expiry_warning cue from the persistent toast.
+      if (record.expiry_flag !== 'expired') {
+        playAudioCue('success');
+      }
+      showVaxlinkToast({ ...parsed, _queuedCount: record.queueSizeAfter || 0 });
       vlog('workflow scan saved to queue', {
         mode: activeWorkflowMode,
         source,
@@ -2852,11 +2857,15 @@ function showVaxlinkToast(data, durationMs = 4000) {
   const overrideNote = data.nvc_override
     ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
     : '';
+  const queuedNote = data._queuedCount
+    ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
+    : '';
 
   root.innerHTML = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
     <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    ${queuedNote}
     ${overrideNote}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
@@ -2894,6 +2903,8 @@ let hudApplyBtn = null;
 let hudContainer = null;
 let hudModeToggleBtn = null;
 let hudQueueWrap = null;
+let hudQueueListEl = null;
+let hudClearBtn = null;
 let hudMiniEl = null;
 let hudUserHidden = false;
 let hudCurrentLeft = null;
@@ -3013,6 +3024,49 @@ function initHud() {
       text-align: center;
       box-shadow: inset 0 0 0 1px rgba(207, 250, 254, .08);
     }
+    .vl-hud-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .vl-hud-list.hidden { display: none; }
+    .vl-hud-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: rgba(207, 250, 254, .08);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 11.5px;
+      color: #dffaff;
+    }
+    .vl-hud-item-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .vl-hud-item-label.expired { color: #fca5a5; font-weight: 700; }
+    .vl-hud-item-remove {
+      background: transparent;
+      border: none;
+      color: rgba(232, 249, 253, .6);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .vl-hud-item-remove:hover { background: rgba(248, 113, 113, .25); color: #fff; }
+    .vl-hud-clear-btn {
+      background: transparent;
+      color: rgba(232, 249, 253, .75);
+      box-shadow: inset 0 0 0 1px rgba(232, 249, 253, .25);
+    }
+    .vl-hud-clear-btn:hover { background: rgba(248, 113, 113, .2); color: #fff; }
     .vl-hud-btn {
       background: #ecfeff;
       color: #0f4357;
@@ -3213,9 +3267,34 @@ function initHud() {
   hudApplyBtn.textContent = 'Apply Next';
   hudApplyBtn.addEventListener('click', applyNextQueueItem);
 
+  hudClearBtn = document.createElement('button');
+  hudClearBtn.className = 'vl-hud-btn vl-hud-clear-btn';
+  hudClearBtn.textContent = 'Clear';
+  hudClearBtn.title = 'Clear the multiple-inject queue';
+  hudClearBtn.addEventListener('click', () => {
+    // Two-step confirm so a stray click cannot wipe a clinic's scans.
+    if (hudClearBtn.dataset.confirming === 'true') {
+      delete hudClearBtn.dataset.confirming;
+      hudClearBtn.textContent = 'Clear';
+      void clearHudQueue();
+      return;
+    }
+    hudClearBtn.dataset.confirming = 'true';
+    hudClearBtn.textContent = 'Sure?';
+    setTimeout(() => {
+      delete hudClearBtn.dataset.confirming;
+      hudClearBtn.textContent = 'Clear';
+    }, 3000);
+  });
+
   hudQueueWrap.appendChild(hudCountEl);
   hudQueueWrap.appendChild(hudApplyBtn);
+  hudQueueWrap.appendChild(hudClearBtn);
   hudContainer.appendChild(hudQueueWrap);
+
+  hudQueueListEl = document.createElement('div');
+  hudQueueListEl.className = 'vl-hud-list hidden';
+  hudContainer.appendChild(hudQueueListEl);
   hudShadow.appendChild(hudContainer);
 
   hudMiniEl = document.createElement('button');
@@ -3382,7 +3461,61 @@ function updateHudState() {
     if (hudApplyBtn) {
       hudApplyBtn.disabled = count === 0;
     }
+    renderHudQueueList(rows, showQueueControls);
   });
+}
+
+function renderHudQueueList(rows, visible) {
+  if (!hudQueueListEl) return;
+  hudQueueListEl.classList.toggle('hidden', !visible || rows.length === 0);
+  hudQueueListEl.textContent = '';
+  if (!visible) return;
+
+  for (const row of rows) {
+    if (!row) continue;
+    const item = document.createElement('div');
+    item.className = 'vl-hud-item';
+
+    const label = document.createElement('span');
+    label.className = 'vl-hud-item-label';
+    const name = row.tradename || row.generic_name || row.name || 'Vaccine';
+    label.textContent = row.lot ? `${name} · ${row.lot}` : name;
+    label.title = label.textContent;
+    if (row.expiry_flag === 'expired') {
+      label.classList.add('expired');
+      label.title += ' — EXPIRED';
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'vl-hud-item-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = `Remove ${name} from queue`;
+    removeBtn.setAttribute('aria-label', removeBtn.title);
+    removeBtn.addEventListener('click', () => {
+      void removeHudQueueRow(row.id);
+    });
+
+    item.appendChild(label);
+    item.appendChild(removeBtn);
+    hudQueueListEl.appendChild(item);
+  }
+}
+
+async function removeHudQueueRow(id) {
+  if (!id || applyQueueInFlight) return;
+  const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+  const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+    ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+  const next = rows.filter((row) => row && row.id !== id);
+  if (next.length === rows.length) return;
+  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: next });
+  updateHudState();
+}
+
+async function clearHudQueue() {
+  if (applyQueueInFlight) return;
+  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: [] });
+  updateHudState();
 }
 
 // Guards the read-shift-write sequence below: tryAutoDrain, the multi-step
