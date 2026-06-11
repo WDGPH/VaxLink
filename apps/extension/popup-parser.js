@@ -76,14 +76,21 @@ export function parseGS1Barcode(barcode) {
   let scan = String(barcode || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
+    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Scanners with
+    // AIM IDs enabled prefix every read; lot-only barcodes have no "01" to
+    // re-anchor on, so the prefix must be stripped generically.
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
 
   if (!scan.startsWith('01')) {
+    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
+    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
+    // "10Y016312") and truncate the payload to garbage.
     const first01 = scan.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(scan.substring(first01 + 2))) {
       scan = scan.substring(first01);
     }
   }
