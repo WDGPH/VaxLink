@@ -14,10 +14,12 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
 let lastVaxlinkFillAt = 0;
@@ -43,6 +45,60 @@ const INPUT_CANDIDATE_TTL_MS = 5000;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+}
+
+function normalizeAudioFeedbackSetting(stored) {
+  return !(stored && stored[AUDIO_FEEDBACK_KEY] === false);
+}
+
+function getAudioContext() {
+  if (audioContextRef) return audioContextRef;
+  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  audioContextRef = new AudioContextCtor();
+  return audioContextRef;
+}
+
+function playAudioCue(kind) {
+  if (!audioFeedbackEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch(() => undefined);
+  }
+
+  const playTone = (frequency, durationMs, type = 'sine', gainValue = 0.06, delayMs = 0) => {
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000));
+    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + (delayMs / 1000) + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000) + (durationMs / 1000));
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(ctx.currentTime + (delayMs / 1000));
+    oscillator.stop(ctx.currentTime + (delayMs / 1000) + (durationMs / 1000) + 0.02);
+  };
+
+  if (kind === 'success') {
+    playTone(880, 90, 'sine', 0.045, 0);
+    playTone(1175, 120, 'sine', 0.05, 95);
+    return;
+  }
+  if (kind === 'error') {
+    playTone(220, 220, 'square', 0.055, 0);
+    return;
+  }
+  if (kind === 'duplicate') {
+    playTone(440, 90, 'square', 0.05, 0);
+    playTone(330, 110, 'square', 0.05, 120);
+    return;
+  }
+  if (kind === 'expiry_warning') {
+    playTone(980, 110, 'square', 0.06, 0);
+    playTone(980, 110, 'square', 0.06, 170);
+  }
 }
 
 function normalizeWorkflowMode(stored) {
@@ -1002,10 +1058,12 @@ function initHandsFreeScanner() {
     LEGACY_POPUP_MODE_KEY,
     LEGACY_REMOTE_MODE_KEY,
     LEGACY_HANDS_FREE_KEY,
-    ADMIN_DATETIME_AUTOFILL_KEY
+    ADMIN_DATETIME_AUTOFILL_KEY,
+    AUDIO_FEEDBACK_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
+    audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
 
     // On Panorama SPA navigations the page is already fully loaded when this
@@ -1035,7 +1093,8 @@ function initHandsFreeScanner() {
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
-      !(ADMIN_DATETIME_AUTOFILL_KEY in changes)
+      !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
+      !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
     }
@@ -1046,10 +1105,14 @@ function initHandsFreeScanner() {
       [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
       [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
         ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
-        : adminDateTimeAutofillEnabled
+        : adminDateTimeAutofillEnabled,
+      [AUDIO_FEEDBACK_KEY]: AUDIO_FEEDBACK_KEY in changes
+        ? changes[AUDIO_FEEDBACK_KEY].newValue
+        : audioFeedbackEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
+    audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
   });
