@@ -1,3 +1,7 @@
+if (typeof importScripts === 'function') {
+  importScripts('scanner/scanner-events.js');
+}
+
 const VAXLINK_BG_DEBUG = false;
 function bgLog(...args) {
   if (VAXLINK_BG_DEBUG) console.log('[VaxLink]', ...args);
@@ -43,6 +47,8 @@ const STORAGE_KEYS = {
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
+const PENDING_SCANNER_SCANS_KEY = 'vaxlink_pending_scanner_scans_v1';
+const PENDING_SCANNER_SCANS_MAX = 250;
 let analyticsWriteQueue = Promise.resolve();
 let iconInitPromise = null;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
@@ -153,6 +159,118 @@ async function appendQueueRecord(storageKey, record) {
     ...record,
     queueSizeAfter: rows.length
   };
+}
+
+function buildScannerInboxId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `scan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function isSupportedChartUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    const host = parsed.hostname.toLowerCase();
+    const isPanorama =
+      (host === 'www.panorama.prod.ehealthontario.ca' ||
+       host === 'panorama.prod.ehealthontario.ca') &&
+      parsed.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+    const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
+    return isPanorama || isInputHealth;
+  } catch (_) {
+    return false;
+  }
+}
+
+function queryTabs(queryInfo) {
+  return new Promise((resolve) => chrome.tabs.query(queryInfo, resolve));
+}
+
+function sendScanToTab(tabId, scan) {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, { action: 'vaxlinkScanCaptured', scan }, { frameId: 0 }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response && response.success
+        ? { success: true, response }
+        : { success: false, error: response?.error || 'Scan not accepted by content script' });
+    });
+  });
+}
+
+async function getPendingScannerScans() {
+  const stored = await getStorage([PENDING_SCANNER_SCANS_KEY]);
+  return Array.isArray(stored[PENDING_SCANNER_SCANS_KEY]) ? stored[PENDING_SCANNER_SCANS_KEY] : [];
+}
+
+async function savePendingScannerScans(scans) {
+  const normalized = Array.isArray(scans) ? scans.slice(-PENDING_SCANNER_SCANS_MAX) : [];
+  await setStorage({ [PENDING_SCANNER_SCANS_KEY]: normalized });
+  return normalized;
+}
+
+async function appendPendingScannerScan(scan, reason = 'no-chart') {
+  const pending = await getPendingScannerScans();
+  const pendingScan = {
+    ...scan,
+    pendingId: scan.pendingId || buildScannerInboxId(),
+    pendingReason: reason,
+    pendingAt: new Date().toISOString()
+  };
+  pending.push(pendingScan);
+  await savePendingScannerScans(pending);
+  return pendingScan;
+}
+
+async function routeScanToActiveSupportedTab(scan) {
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const candidates = activeTabs.filter((tab) => tab && tab.id && isSupportedChartUrl(tab.url));
+  if (!candidates.length) {
+    const allTabs = await queryTabs({});
+    candidates.push(...allTabs.filter((tab) => tab && tab.id && isSupportedChartUrl(tab.url)));
+  }
+
+  for (const tab of candidates) {
+    const result = await sendScanToTab(tab.id, scan);
+    if (result.success) {
+      return { success: true, tabId: tab.id };
+    }
+  }
+
+  return { success: false, error: 'No supported chart tab accepted the scan' };
+}
+
+async function scannerScanCaptured(rawScan) {
+  const scan = VaxLinkScannerEvents.normalizeScanEvent(rawScan);
+  const routed = await routeScanToActiveSupportedTab(scan);
+  if (routed.success) {
+    return { success: true, routed: true, tabId: routed.tabId, scan };
+  }
+  const pending = await appendPendingScannerScan(scan, routed.error || 'no-chart');
+  return { success: true, routed: false, pendingId: pending.pendingId, scan: pending };
+}
+
+async function drainPendingScannerScans(limit = 25) {
+  const pending = await getPendingScannerScans();
+  const max = Math.max(1, Math.min(Number(limit) || 25, 100));
+  const remaining = [];
+  const delivered = [];
+  const attempted = pending.slice(0, max);
+
+  for (const scan of attempted) {
+    const routed = await routeScanToActiveSupportedTab(scan);
+    if (routed.success) {
+      delivered.push({ pendingId: scan.pendingId || null, tabId: routed.tabId });
+    } else {
+      remaining.push(scan);
+    }
+  }
+  remaining.push(...pending.slice(max));
+  await savePendingScannerScans(remaining);
+  return { success: true, delivered, pendingCount: remaining.length };
 }
 
 function buildAnalyticsId() {
@@ -1626,6 +1744,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     appendQueueRecord(request.storageKey || '', request.record || null)
       .then((record) => sendResponse({ success: true, record }))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Queue append failed' }));
+    return true;
+  }
+
+  if (request.action === 'scannerScanCaptured') {
+    scannerScanCaptured(request.scan || request)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner scan routing failed' }));
+    return true;
+  }
+
+  if (request.action === 'drainPendingScannerScans') {
+    drainPendingScannerScans(request.limit)
+      .then((result) => sendResponse(result))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Pending scan drain failed' }));
     return true;
   }
 

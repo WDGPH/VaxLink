@@ -1,4 +1,4 @@
-// Tests that verify the Tab/Enter key interception gate in onHandsFreeKeydown.
+// Tests that verify VaxLink no longer intercepts Tab/Enter in content.js.
 //
 // getActiveElementScanCandidate() guards whether a focused field's value is
 // treated as a scanned barcode when Tab or Enter is pressed. Before this fix,
@@ -135,6 +135,9 @@ function parseGS1BarcodeFromScanner(rawScan) {
 // Returns the value that would be passed to handleHandsFreeScan (non-empty
 // means Tab is intercepted), or '' if Tab is allowed through normally.
 function wouldInterceptTab(fieldValue) {
+  void fieldValue;
+  return '';
+  /*
   const SCAN_MIN_LENGTH = 8;
   const raw = String(fieldValue || '').trim();
   if (raw.length < SCAN_MIN_LENGTH) return '';
@@ -170,18 +173,19 @@ function wouldInterceptTab(fieldValue) {
   if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return '';
 
   return raw;
+  */
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-test('real GS1 barcode in focused field IS intercepted on Tab', () => {
+test('real GS1 barcode in focused field is NOT intercepted on Tab', () => {
   const barcode = '010001234567890510LOT-ABC17240101';
-  assert.equal(wouldInterceptTab(barcode), barcode);
+  assert.equal(wouldInterceptTab(barcode), '');
 });
 
-test('GS1 barcode with only GTIN IS intercepted on Tab', () => {
+test('GS1 barcode with only GTIN is NOT intercepted on Tab', () => {
   const barcode = '0100012345678905';
-  assert.equal(wouldInterceptTab(barcode), barcode);
+  assert.equal(wouldInterceptTab(barcode), '');
 });
 
 test('date "06/01/2026" in a field does NOT intercept Tab', () => {

@@ -1,4 +1,4 @@
-// Tests that verify the paste-interception gate in onHandsFreePaste.
+// Tests that verify VaxLink no longer intercepts paste events in content.js.
 //
 // The functions below are pure copies of the GS1 parsing utilities in
 // content.js (no Chrome/DOM deps). They exist here to test the exact logic
@@ -130,6 +130,9 @@ function parseGS1BarcodeFromScanner(rawScan) {
 // Returns true if the paste would be intercepted (preventDefault called), or
 // false if the paste is allowed to reach the target element normally.
 function wouldInterceptPaste(text) {
+  void text;
+  return false;
+  /*
   const SCAN_MIN_LENGTH = 8;
   if (!text || text.length < SCAN_MIN_LENGTH) return false;
 
@@ -168,30 +171,31 @@ function wouldInterceptPaste(text) {
   if (!parsed) return false;
   if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return false;
   return true;
+  */
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
-test('real GS1 vaccine barcode (GTIN + lot + expiry) is intercepted', () => {
+test('real GS1 vaccine barcode (GTIN + lot + expiry) is NOT intercepted', () => {
   const barcode = '010001234567890510LOT-ABC17240101';
-  assert.ok(wouldInterceptPaste(barcode));
+  assert.ok(!wouldInterceptPaste(barcode));
   const result = parseGS1BarcodeFromScanner(barcode);
   assert.equal(result.gtin, '00012345678905');
   assert.equal(result.lot, 'LOT-ABC');
   assert.equal(result.expiry, '01/01/2024');
 });
 
-test('GS1 barcode with only GTIN (no lot/expiry) is intercepted', () => {
+test('GS1 barcode with only GTIN (no lot/expiry) is NOT intercepted', () => {
   const gtinOnly = '0100012345678905';
-  assert.ok(wouldInterceptPaste(gtinOnly));
+  assert.ok(!wouldInterceptPaste(gtinOnly));
   const result = parseGS1BarcodeFromScanner(gtinOnly);
   assert.equal(result.gtin, '00012345678905');
 });
 
-test('GS1 barcode with GS separator before variable AI is intercepted', () => {
+test('GS1 barcode with GS separator before variable AI is NOT intercepted', () => {
   const GS = String.fromCharCode(0x1d);
   const barcode = `0100012345678905${GS}17251201`;
-  assert.ok(wouldInterceptPaste(barcode));
+  assert.ok(!wouldInterceptPaste(barcode));
   const result = parseGS1BarcodeFromScanner(barcode);
   assert.equal(result.gtin, '00012345678905');
   assert.ok(result.expiry);
