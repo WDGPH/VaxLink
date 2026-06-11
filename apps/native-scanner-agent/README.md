@@ -1,0 +1,33 @@
+# VaxLink Native Scanner Agent
+
+Per-user native helper for serial/USB CDC barcode scanners. The agent owns the scanner connection, stores scans in a local durable queue, and exposes status plus queue operations to the browser extension through native messaging.
+
+This crate is intentionally small at this stage:
+
+- `--version` prints the agent version.
+- `--status` loads per-user config paths and reports queue/status fields.
+- Queue primitives are implemented before scanner I/O so reliability can be tested independently.
+
+The first deployment target is a user-session process, not a Windows Service. It can keep running while the workstation is locked as long as the user session remains active.
+
+## Build
+
+```bash
+~/.cargo/bin/cargo build --manifest-path apps/native-scanner-agent/Cargo.toml
+```
+
+## Run
+
+```bash
+~/.cargo/bin/cargo run --manifest-path apps/native-scanner-agent/Cargo.toml -- --status
+```
+
+## Data Directory
+
+Default per-user data roots:
+
+- Windows: `%LOCALAPPDATA%\WDGPH\VaxLinkScannerAgent\`
+- macOS: `~/Library/Application Support/WDGPH/VaxLinkScannerAgent/`
+- Linux: `~/.local/share/wdgph-vaxlink-scanner-agent/`
+
+Set `VAXLINK_SCANNER_AGENT_HOME` to override the data root for tests or development.
