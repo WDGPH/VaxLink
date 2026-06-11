@@ -818,6 +818,51 @@
       color: #5f7283;
     }
 
+    .native-scanner-status {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .native-scanner-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .native-scanner-metric {
+      padding: 8px;
+      border-radius: 12px;
+      border: 1px solid #d7e5ef;
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .native-scanner-label {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      color: #597081;
+    }
+
+    .native-scanner-value {
+      margin-top: 3px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #12364a;
+      word-break: break-word;
+    }
+
+    .native-scanner-error {
+      padding: 8px;
+      border-radius: 12px;
+      border: 1px solid #f4cda5;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
     #saveAnalyticsLabelBtn {
       background: #d9f0ef;
       border: 1px solid #b6dcda;
@@ -871,6 +916,17 @@
             <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
             <div id="nvcStatus"></div>
           </div>
+          <div class="settings-card">
+            <div class="result-heading">Native Scanner Agent</div>
+            <div id="nativeScannerStatus" class="native-scanner-status">Checking scanner agent...</div>
+            <div class="actions">
+              <div class="action-row">
+                <button id="checkNativeScannerBtn" type="button">Check Status</button>
+                <button id="drainNativeScannerBtn" type="button">Drain Queued Scans</button>
+              </div>
+              <button id="openNativeScannerHelpBtn" type="button">Open Install Help</button>
+            </div>
+          </div>
           <div class="analytics">
             <div class="result-heading">Local Analytics</div>
             <div id="analyticsSummary" class="analytics-summary">Loading analytics...</div>
@@ -908,20 +964,20 @@
 
         <div id="scannerInputSection" class="scanner-input">
           <label id="scannedInputLabel" for="scannedData">Scanned Barcode</label>
-          <textarea id="scannedData" placeholder="Paste barcode here or scan with device..."></textarea>
+          <textarea id="scannedData" placeholder="Paste barcode here for manual preview..."></textarea>
         </div>
 
-        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.</p>
+        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Paste a barcode below to preview manually, or keep the native scanner agent running to route scanner events to the active chart.</p>
 
         <div id="singleModeSection" class="mode-panel">
-          <div class="workflow-note">Hands-free is active in Single Inject. Keep the chart page open and scan directly there to auto-fill one vaccine at a time.</div>
+          <div class="workflow-note">Native scanner capture is active in Single Inject when the local agent is running. Keep the chart page open to auto-fill one vaccine at a time.</div>
           <div class="actions">
             <button id="autoFillBtn">Auto-fill CHR</button>
           </div>
         </div>
 
         <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">Keep the chart page open, leave this mode selected, and scan vaccines while away from the desk. Scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
+          <div class="workflow-note">Keep this mode selected and scan vaccines with the native scanner agent while away from the desk. Scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
           <div class="actions">
             <button id="clearMultipleBtn">Clear Queue</button>
           </div>

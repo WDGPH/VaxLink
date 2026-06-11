@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>VaxLink Native Scanner Agent</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      color: #102135;
+      background: #f2f7fb;
+    }
+
+    main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 32px 22px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      color: #0b3d4f;
+    }
+
+    h2 {
+      margin-top: 28px;
+      font-size: 18px;
+      color: #0f4c5c;
+    }
+
+    p,
+    li {
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    code,
+    pre {
+      font-family: Consolas, "Courier New", monospace;
+    }
+
+    pre {
+      padding: 14px;
+      border: 1px solid #d4dce6;
+      border-radius: 8px;
+      overflow-x: auto;
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>VaxLink Native Scanner Agent</h1>
+    <p>The native scanner agent captures serial/USB CDC scanner input outside the browser and passes confirmed scan events to VaxLink. It does not inject keystrokes into Panorama or other EMR pages.</p>
+
+    <h2>Windows User Install</h2>
+    <ol>
+      <li>Build or obtain <code>vaxlink-scanner-agent.exe</code>.</li>
+      <li>Run <code>install-user.ps1</code> with this extension's Chrome or Edge extension ID.</li>
+      <li>Configure the scanner as USB CDC / virtual COM, not keyboard wedge.</li>
+      <li>Set <code>VAXLINK_SCANNER_PORT</code> for the user session, for example <code>COM4</code>.</li>
+    </ol>
+    <pre>cargo build --release
+.\install\windows\install-user.ps1 -ExtensionId "&lt;extension-id&gt;" -RegisterEdge</pre>
+
+    <h2>Runtime Limits</h2>
+    <p>The user-session agent can continue while the workstation is locked if the user session remains active. It does not capture before login, after full logout, during sleep or hibernate, or after shutdown. Those cases require a future admin-installed service.</p>
+  </main>
+</body>
+</html>

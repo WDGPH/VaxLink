@@ -9,6 +9,8 @@ import {
 import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-parser.js';
 import {
   buildParsedOutputMarkup,
+  escapeHtml,
+  formatDateTime,
   renderNVCStatus,
   setButtonBusy,
   showOutput
@@ -46,6 +48,10 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
+let nativeScannerStatusDiv;
+let checkNativeScannerBtn;
+let drainNativeScannerBtn;
+let openNativeScannerHelpBtn;
 let testModeAddBtn;
 let testModeBarcode;
 let parsedData = null;
@@ -69,24 +75,24 @@ const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
 const MODE_CONFIG = {
   single: {
     title: 'Single Inject',
-    subtitle: 'One scan fills the current chart immediately.',
-    helper: 'Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.',
+    subtitle: 'Native scanner events fill the current chart immediately.',
+    helper: 'Use this when one vaccine is being charted now. Paste a barcode below to preview manually, or keep the native scanner agent running to route scanner events to the active chart.',
     inputLabel: 'Scanned Barcode',
-    inputPlaceholder: 'Paste barcode here or scan with device...',
+    inputPlaceholder: 'Paste barcode here for manual preview...',
     usesScannerInput: true
   },
   multiple: {
     title: 'Multiple Inject',
     subtitle: 'Scan several vaccines now, choose them for chart fill later.',
-    helper: 'Leave this mode active while walking to the fridge. Each scan on the live chart page is saved automatically. When you come back, open the queue and choose Use for Chart on each saved vaccine.',
+    helper: 'Leave this mode active while walking to the fridge. Native scanner events are saved automatically. When you come back, open the queue and choose Use for Chart on each saved vaccine.',
     usesScannerInput: false
   },
   inventory: {
     title: 'Inventory',
     subtitle: 'Capture vaccines into an export tray.',
-    helper: 'Use this for stock or export work. Scan into the field below and add to the inventory tray, or leave this mode active to save each live scan into the inventory export list automatically.',
+    helper: 'Use this for stock or export work. Paste barcodes below for manual entry, or keep the native scanner agent running to save scanner events into the inventory export list automatically.',
     inputLabel: 'Inventory Barcode Input',
-    inputPlaceholder: 'Scan one barcode per line or paste a batch...',
+    inputPlaceholder: 'Paste one barcode per line...',
     usesScannerInput: true
   }
 };
@@ -124,6 +130,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
+  nativeScannerStatusDiv = document.getElementById('nativeScannerStatus');
+  checkNativeScannerBtn = document.getElementById('checkNativeScannerBtn');
+  drainNativeScannerBtn = document.getElementById('drainNativeScannerBtn');
+  openNativeScannerHelpBtn = document.getElementById('openNativeScannerHelpBtn');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
   // Only show test mode panel when running as an unpacked (developer) extension.
@@ -142,7 +152,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showUseAction: true,
     useButtonLabel: 'Use for Chart',
     emptySummary: 'No saved vaccines yet.',
-    emptyMessage: 'Leave Multiple Inject active, scan several vaccines on the live chart page, then come back and choose one to fill.',
+    emptyMessage: 'Leave Multiple Inject active, scan several vaccines with the native scanner agent, then come back and choose one to fill.',
     summaryBuilder: buildMultipleInjectSummary
   });
 
@@ -205,6 +215,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
+    });
+  }
+  if (checkNativeScannerBtn) {
+    checkNativeScannerBtn.addEventListener('click', () => {
+      void loadNativeScannerStatus({ announce: true });
+    });
+  }
+  if (drainNativeScannerBtn) {
+    drainNativeScannerBtn.addEventListener('click', () => {
+      void drainNativeScannerQueue();
+    });
+  }
+  if (openNativeScannerHelpBtn) {
+    openNativeScannerHelpBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('native-scanner-help.html') });
     });
   }
 
@@ -371,6 +396,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   loadNVCStatus();
+  void loadNativeScannerStatus();
 });
 
 function writeOutput(message, type = 'info') {
@@ -1238,6 +1264,73 @@ function loadNVCStatus() {
     }
     renderNVCStatus(status, nvcStatusDiv);
   });
+}
+
+async function loadNativeScannerStatus(options = {}) {
+  if (nativeScannerStatusDiv) {
+    nativeScannerStatusDiv.textContent = 'Checking scanner agent...';
+  }
+  try {
+    const status = await sendRuntimeMessage({ action: 'getNativeScannerStatus' });
+    renderNativeScannerStatus(status);
+    if (options.announce) {
+      writeOutput(status?.ok ? 'Scanner agent status updated.' : 'Scanner agent is not reachable.', status?.ok ? 'info' : 'error');
+    }
+  } catch (error) {
+    renderNativeScannerStatus({ ok: false, installed: false, error: error.message });
+    if (options.announce) {
+      writeOutput(error.message || 'Scanner agent is not reachable.', 'error');
+    }
+  }
+}
+
+function renderNativeScannerStatus(status) {
+  if (!nativeScannerStatusDiv) return;
+  const ok = !!status?.ok;
+  const installed = status?.installed !== false && (ok || !!status?.agent_version || !!status?.agentVersion);
+  const scanner = status?.scanner || {};
+  const connected = !!(scanner.device_connected || scanner.deviceConnected);
+  const queueDepth = Number(status?.queue_depth ?? status?.queueDepth ?? 0) || 0;
+  const lastScanAt = status?.last_scan_at || status?.lastScanAt || '';
+  const lastSeenAt = scanner.last_seen_at || scanner.lastSeenAt || '';
+  const error = status?.error ? `<div class="native-scanner-error">${escapeHtml(String(status.error))}</div>` : '';
+
+  nativeScannerStatusDiv.innerHTML = `
+    <div class="native-scanner-grid">
+      ${buildNativeScannerMetric('Scanner agent', installed ? 'Installed' : 'Not installed')}
+      ${buildNativeScannerMetric('Agent status', ok ? 'Running' : 'Not reachable')}
+      ${buildNativeScannerMetric('Scanner', connected ? 'Connected' : 'Disconnected')}
+      ${buildNativeScannerMetric('Queue depth', String(queueDepth))}
+      ${buildNativeScannerMetric('Last scan', lastScanAt ? formatDateTime(lastScanAt) : 'Never')}
+      ${buildNativeScannerMetric('Last seen', lastSeenAt ? formatDateTime(lastSeenAt) : 'Never')}
+    </div>
+    ${error}
+  `;
+}
+
+function buildNativeScannerMetric(label, value) {
+  return `
+    <div class="native-scanner-metric">
+      <div class="native-scanner-label">${escapeHtml(label)}</div>
+      <div class="native-scanner-value">${escapeHtml(value)}</div>
+    </div>
+  `;
+}
+
+async function drainNativeScannerQueue() {
+  setButtonBusy(drainNativeScannerBtn, true, 'Draining...');
+  try {
+    const result = await sendRuntimeMessage({ action: 'drainNativeScannerScans', limit: 25 });
+    if (!result?.ok) {
+      throw new Error(result?.error || 'Native scanner queue drain failed');
+    }
+    await loadNativeScannerStatus();
+    writeOutput(`Drained ${result.accepted || 0} native scanner scan(s).`, 'success');
+  } catch (error) {
+    writeOutput(error.message || 'Native scanner queue drain failed', 'error');
+  } finally {
+    setButtonBusy(drainNativeScannerBtn, false);
+  }
 }
 
 async function sendAutoFillToActiveTab(data, options = {}) {
