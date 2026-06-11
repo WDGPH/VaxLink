@@ -9,6 +9,7 @@ use crate::scanner::ScannerProfile;
 pub struct AgentConfig {
     pub data_dir: PathBuf,
     pub queue_path: PathBuf,
+    pub state_path: PathBuf,
     pub log_dir: PathBuf,
     pub profile_id: String,
     pub port: Option<String>,
@@ -21,6 +22,7 @@ impl AgentConfig {
         fs::create_dir_all(&data_dir)?;
 
         let queue_path = data_dir.join("scan-queue.jsonl");
+        let state_path = data_dir.join("agent-state.json");
         let log_dir = data_dir.join("logs");
         fs::create_dir_all(&log_dir)?;
 
@@ -29,6 +31,7 @@ impl AgentConfig {
         Ok(Self {
             data_dir,
             queue_path,
+            state_path,
             log_dir,
             profile_id: env::var("VAXLINK_SCANNER_PROFILE")
                 .unwrap_or_else(|_| default_profile.profile_id.clone()),

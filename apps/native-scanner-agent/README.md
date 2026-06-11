@@ -9,6 +9,8 @@ This crate is intentionally small at this stage:
 - `--list-ports` prints visible serial ports as JSON.
 - `--run` opens the configured serial port, frames scans on CR/LF/CRLF, and queues them.
 - Queue primitives are implemented before scanner I/O so reliability can be tested independently.
+- Runtime state is persisted in `agent-state.json` so status survives process restarts.
+- Scanner logs rotate at 1 MiB in the per-user `logs/` directory.
 
 The first deployment target is a user-session process, not a Windows Service. It can keep running while the workstation is locked as long as the user session remains active.
 

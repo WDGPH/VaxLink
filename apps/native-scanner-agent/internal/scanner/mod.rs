@@ -1,5 +1,7 @@
 use std::error::Error;
 use std::io::{self, Read};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -7,7 +9,9 @@ use chrono::Utc;
 use serde::Serialize;
 
 use crate::config::AgentConfig;
+use crate::logging::AgentLogger;
 use crate::queue::{new_scan_id, JsonlQueue, ScanRecord, ScannerDevice};
+use crate::state::AgentStateStore;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -109,31 +113,51 @@ pub fn list_serial_ports() -> Result<Vec<SerialPortInfo>, Box<dyn Error>> {
         .collect())
 }
 
-pub fn capture_forever(config: &AgentConfig, queue: &JsonlQueue) -> Result<(), Box<dyn Error>> {
+pub fn capture_forever(
+    config: &AgentConfig,
+    queue: &JsonlQueue,
+    state_store: &AgentStateStore,
+) -> Result<(), Box<dyn Error>> {
     let port_name = config
         .port
         .as_deref()
         .ok_or("VAXLINK_SCANNER_PORT must be set before --run can capture scans")?;
+    let logger = AgentLogger::open(config.log_dir.clone())?;
+    let running = Arc::new(AtomicBool::new(true));
+    {
+        let running = Arc::clone(&running);
+        ctrlc::set_handler(move || {
+            running.store(false, Ordering::SeqCst);
+        })?;
+    }
 
     let mut backoff = Duration::from_millis(500);
-    loop {
-        match capture_until_disconnect(config, queue, port_name) {
+    logger.info(&format!("starting scanner capture on {port_name}"));
+    while running.load(Ordering::SeqCst) {
+        match capture_until_disconnect(config, queue, state_store, port_name, &running) {
             Ok(()) => {
                 backoff = Duration::from_millis(500);
             }
             Err(error) => {
-                eprintln!("scanner disconnected or unavailable: {error}");
-                thread::sleep(backoff);
+                let message = error.to_string();
+                let _ = state_store.mark_disconnected(Some(port_name), &message);
+                logger.warn(&format!("scanner disconnected or unavailable: {message}"));
+                sleep_interruptibly(backoff, &running);
                 backoff = (backoff * 2).min(Duration::from_secs(30));
             }
         }
     }
+    let _ = state_store.mark_disconnected(Some(port_name), "agent stopped");
+    logger.info("scanner capture stopped");
+    Ok(())
 }
 
 fn capture_until_disconnect(
     config: &AgentConfig,
     queue: &JsonlQueue,
+    state_store: &AgentStateStore,
     port_name: &str,
+    running: &AtomicBool,
 ) -> Result<(), Box<dyn Error>> {
     let mut port = serialport::new(port_name, config.baud_rate)
         .data_bits(serialport::DataBits::Eight)
@@ -141,17 +165,19 @@ fn capture_until_disconnect(
         .stop_bits(serialport::StopBits::One)
         .timeout(Duration::from_millis(250))
         .open()?;
+    state_store.mark_connected(port_name)?;
 
     let mut decoder = FrameDecoder::default();
     let mut buffer = [0u8; 256];
 
-    loop {
+    while running.load(Ordering::SeqCst) {
         match port.read(&mut buffer) {
             Ok(count) => {
                 for byte in &buffer[..count] {
                     if let Some(frame) = decoder.push(*byte) {
                         let record = scan_record_from_frame(config, port_name, frame);
                         queue.enqueue(record)?;
+                        state_store.mark_scan()?;
                     }
                 }
             }
@@ -159,6 +185,7 @@ fn capture_until_disconnect(
             Err(error) => return Err(Box::new(error)),
         }
     }
+    Ok(())
 }
 
 fn scan_record_from_frame(config: &AgentConfig, port_name: &str, frame: ScanFrame) -> ScanRecord {
@@ -187,6 +214,17 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         output.push(HEX[(byte & 0x0F) as usize] as char);
     }
     output
+}
+
+fn sleep_interruptibly(duration: Duration, running: &AtomicBool) {
+    let step = Duration::from_millis(100);
+    let mut elapsed = Duration::from_millis(0);
+    while running.load(Ordering::SeqCst) && elapsed < duration {
+        let remaining = duration.saturating_sub(elapsed);
+        let nap = remaining.min(step);
+        thread::sleep(nap);
+        elapsed += nap;
+    }
 }
 
 #[cfg(test)]
