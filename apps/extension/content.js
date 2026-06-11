@@ -3056,6 +3056,8 @@ function initHud() {
       color: #dffaff;
     }
     .vl-hud-item-label {
+      min-width: 0;
+      max-width: 220px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
