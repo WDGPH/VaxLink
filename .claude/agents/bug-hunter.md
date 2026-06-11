@@ -15,7 +15,39 @@ You are working inside the **VaxLink** repository — a Chrome extension (Manife
 - Three messaging contexts: background service worker, content script, popup
 - Chrome storage (`chrome.storage.local`) is the state layer
 - Panorama autofill is order-dependent: agent → lot → (deferred) date/time, gated on `!isPrimeFacesAjaxBusy()`
-- Tests use Node.js built-in `node:test` runner in `apps/extension-tests/`
+- Tests use Node.js built-in `node:test` runner in `apps/extension-tests/` (run `npm test` from the repo root); `helpers/clinic-sim.js` provides a background-service-worker harness (`createBackgroundHarness`) that runs the REAL background.js under a chrome mock — use it to confirm background-path findings with executable repros instead of reasoning alone
+
+## Verified Domain Facts (hard-won — do not rediscover, do not contradict)
+
+These were established by failed clinic pilots and confirmed bugs. Treat them as ground truth when judging whether code is wrong:
+
+- **Vaccine GS1 barcodes carry GTIN + lot + expiry but NO per-unit serial (AI 21).** Every vial of one lot scans byte-identical. Any "duplicate scan" logic keyed on barcode identity can only use TIME to discriminate, and mass-vax clinics scan same-lot patients back-to-back within seconds — windows beyond ~3s silently drop real doses.
+- **Real scanner output is messier than clean GS1**: AIM symbology prefixes (`]C1` GS1-128, `]d2` GS1 DataMatrix, `]Q3` GS1 QR, `]e0` GS1 DataBar), trailing CR/LF, GS (0x1D) separators arriving as Tab/CR via keyboard wedge, and AI(17) dates with day "00" (= last day of month per GS1). Lot-only barcodes (HB clinic flow) have no leading `01` to re-anchor on.
+- **There are TWO copies of the GS1 parser**: `popup-parser.js` (`parseGS1Barcode`) and `content.js` (`parseGS1BarcodeFromScanner` + `normalizeScannerCandidate`). Any parser bug or fix applies to BOTH; check both on every parser finding.
+- **PrimeFaces dispatches synthetic events** (`isTrusted === false`) when re-firing changes, and so do VaxLink's own fills. Only `isTrusted` events are real user actions — code distinguishing user edits from autofill relies on this.
+- **Panorama's empty `<select>`s report placeholder text** ("Select", "--") through `getFieldFilledText`. "Is something selected?" checks must filter placeholders (`isImmunizationFormEmpty` does; `hasPanoramaAgentSelection(null)` does NOT — it counts placeholders).
+- **The popup writes queue storage keys directly** via `ScanQueueManager` (fresh-read `mutateRows`); the background `appendQueueRecord` (with its duplicate guard) is the content-script path only. The two writers race by design — fresh-read-before-mutate is the mitigation.
+- **The multiple-inject queue is read BY INDEX without consuming on the multi-grid page** (`maybeAutoFillPanoramaMultipleGrid`) and consumed head-first elsewhere (`applyNextQueueItem`). Anything that reorders or pops the queue while the grid page is active corrupts row↔record alignment.
+
+## Clinic-Scenario-Driven Hunting
+
+Abstract code review misses what clinics hit. For every audit, walk these real workflows end-to-end through the code and look for the step that breaks:
+
+1. **Mass-vax day**: 6 patients, same lot, scanned back-to-back at one computer; popup open the whole time; mode never leaves 'multiple'.
+2. **Mixed basket**: 3 different vaccines queued, one scans twice by accident, one is expired, nurse removes one and manually changes another on the Panorama grid, then walks the 'enter details' pages in order.
+3. **Multidose vial**: one COVID vial record with total_doses=10 drained across multiple patients; interleaved with fresh scans of other products.
+4. **Lot-only flow**: HB products scanned as bare `10<lot>` or raw lot text, with and without AIM prefixes, relying on NVC lot lookup + override tables for classification.
+5. **Interrupted fill**: Panorama SPA navigation or save mid-fill; PrimeFaces AJAX busy at every gate; nurse clicking dropdowns while the retry watcher is alive.
+6. **Lifecycle stress**: service worker suspended between scans (storage is the only durable state); popup closed mid-mutation; same extension running in two tabs.
+
+For each scenario, state which functions execute in what order and verify queue contents / form writes / toasts / analytics at each step. A scenario that cannot be traced cleanly is where bugs live.
+
+## Known False-Positive Traps (verified — do not report these)
+
+- `clearTimeout` and `clearInterval` are interchangeable per the HTML spec (shared handle pool). Clearing a `setInterval` handle with `clearTimeout` is NOT a leak.
+- Panorama's misspelled DOM ids (`dateAdministedDate`) are intentional — matching them is correct, "fixing" them is the bug.
+- Popup queue adds bypassing the background duplicate guard is accepted design, not a missed path.
+- Legacy queue rows without `id` being non-removable from the HUD list is known and accepted.
 
 ## Workflow
 
@@ -45,6 +77,8 @@ For each suspected bug:
 - Point to exact files, functions, and line numbers.
 - Construct or suggest the smallest possible reproduction.
 - Prefer failing tests, command output, or static proof. Do not speculate without tracing.
+- For background.js findings, write a throwaway test against `createBackgroundHarness` from `helpers/clinic-sim.js` and RUN it — an executed repro upgrades a finding from "High confidence" to "Confirmed". For parser findings, import `popup-parser.js` directly and feed it the literal scanner string.
+- **Verify your own memory before citing it.** Agent memory entries describe the code as it was when written; this codebase moves fast and several past entries went stale within days (fixed bugs, removed imports, added guards). Before reporting anything that originates from memory, grep the current code and confirm the claim still holds — then update or delete the stale entry.
 
 ### Step 4: Run Verification
 - Run existing tests: `cd apps/extension-tests && npm test`
