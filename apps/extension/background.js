@@ -138,6 +138,34 @@ function setStorage(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
 
+// A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
+// exempt: repeated identical scans there are legitimate stock counting.
+const DUPLICATE_SCAN_WINDOW_MS = 10000;
+
+function scanIdentityKey(record) {
+  if (!record || typeof record !== 'object') return '';
+  const raw = String(record.raw_barcode || '').trim();
+  if (raw) return `raw:${raw}`;
+  const gtin = String(record.gtin || '').trim();
+  const lot = String(record.lot || '').trim().toUpperCase();
+  const serial = String(record.serial || '').trim();
+  if (!gtin && !lot) return '';
+  return `ids:${gtin}|${lot}|${serial}`;
+}
+
+function findRecentDuplicateQueueRow(rows, record, nowMs) {
+  const key = scanIdentityKey(record);
+  if (!key) return null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (scanIdentityKey(row) !== key) continue;
+    const scannedAt = Date.parse(row && row.scanned_at);
+    if (!Number.isFinite(scannedAt)) continue;
+    if (Math.abs(nowMs - scannedAt) <= DUPLICATE_SCAN_WINDOW_MS) return row;
+  }
+  return null;
+}
+
 async function appendQueueRecord(storageKey, record) {
   if (!storageKey) {
     throw new Error('Missing queue storage key');
@@ -147,6 +175,21 @@ async function appendQueueRecord(storageKey, record) {
   }
   const stored = await getStorage([storageKey]);
   const rows = stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+
+  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
+    const recordScannedAt = Date.parse(record.scanned_at);
+    const nowMs = Number.isFinite(recordScannedAt) ? recordScannedAt : Date.now();
+    const duplicate = findRecentDuplicateQueueRow(rows, record, nowMs);
+    if (duplicate) {
+      return {
+        ...record,
+        duplicate_ignored: true,
+        duplicate_of: duplicate.id || '',
+        queueSizeAfter: rows.length
+      };
+    }
+  }
+
   rows.push(record);
   await setStorage({ [storageKey]: rows });
   return {
