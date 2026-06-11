@@ -1134,6 +1134,8 @@ function initHandsFreeScanner() {
   window.addEventListener('keydown', onHandsFreeKeydown, true);
   window.addEventListener('paste', onHandsFreePaste, true);
   window.addEventListener('input', onHandsFreeInput, true);
+  document.addEventListener('pointerdown', cancelPanoramaFillRetriesForManualEdit, true);
+  document.addEventListener('change', cancelPanoramaFillRetriesForManualEdit, true);
 }
 
 // Register listener immediately
@@ -2057,6 +2059,28 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
+// Issue #26: a real user interaction with the agent/lot/tradename widgets means
+// the nurse is taking over — pending VaxLink fill retries must not overwrite
+// her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
+// and so do VaxLink's own fills, so only trusted events count as manual.
+const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN = /agentiterm|tradenameinput|lotnumberselect/i;
+
+function isPanoramaAgentLotWidgetNode(node) {
+  if (!node || typeof node.closest !== 'function') return false;
+  const widget = node.closest('.ui-selectonemenu, .ui-selectonemenu-panel, select');
+  if (!widget) return false;
+  return PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN.test(String(widget.id || ''));
+}
+
+function cancelPanoramaFillRetriesForManualEdit(event) {
+  if (!event.isTrusted) return;
+  if (typeof stopPanoramaLotTradeWatcher !== 'function') return;
+  if (!isPanoramaAgentLotWidgetNode(event.target)) return;
+  stopPanoramaLotTradeWatcher();
+  stopPanoramaLotTradeWatcher = null;
+  vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
+}
+
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   if (!data) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
@@ -2791,6 +2815,15 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
+  if (data._manualSelectionKept) {
+    root.innerHTML = `<div class="vl-toast info show">
+      <div class="vl-toast-title">Kept your selection</div>
+      <div class="vl-toast-detail">The agent on screen differs from the next queued scan — VaxLink did not change it. Remove the queued item if it is no longer needed.</div>
+    </div>`;
+    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs + 2000);
+    return;
+  }
+
   const label = data.tradename || data.generic_name || data.name || data.lot || 'Vaccine';
   const lot = data.lot || '';
   const flag = data.expiry_flag || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
@@ -3368,6 +3401,22 @@ async function applyNextQueueItem() {
       ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
     if (!rows.length) {
       showVaxlinkToast({ _queueEmpty: true });
+      updateHudState();
+      return;
+    }
+
+    // Issue #26: if an agent is already selected on this form (carried over
+    // from the multi-grid or chosen manually) and it does not match the queue
+    // head, the nurse picked a different vaccine for this entry. Filling now
+    // would silently revert her change — keep the form and the queue intact.
+    const headPayload = buildAutofillPayloadFromQueueRecord(rows[0]);
+    if (
+      headPayload &&
+      hasPanoramaAgentSelection(null) &&
+      !hasPanoramaAgentSelection(headPayload)
+    ) {
+      vlog('auto-fill skipped: existing agent selection differs from queue head');
+      showVaxlinkToast({ _manualSelectionKept: true });
       updateHudState();
       return;
     }
