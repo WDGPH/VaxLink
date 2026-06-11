@@ -2727,6 +2727,20 @@ function ensureToastHost() {
     .vl-toast.expired  { background: #b91c1c; }
     .vl-toast.info     { background: #0e7490; }
     .vl-toast.duplicate { background: #52525b; }
+    .vl-toast.persistent { pointer-events: auto; }
+    .vl-toast-dismiss {
+      margin-top: 8px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255,255,255,.6);
+      border-radius: 5px;
+      background: rgba(0,0,0,.25);
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .vl-toast-dismiss:hover { background: rgba(0,0,0,.4); }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
     .vl-toast-override {
@@ -2801,15 +2815,26 @@ function showVaxlinkToast(data, durationMs = 4000) {
   }
 
   const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
+  const isExpired = flag === 'expired';
   const overrideNote = data.nvc_override
     ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
     : '';
 
-  root.innerHTML = `<div class="vl-toast ${cssClass} show">
-    <div class="vl-toast-title">${escapeToastHtml(label)}</div>
+  root.innerHTML = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
+    <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
+    ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${overrideNote}
+    ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
+
+  if (isExpired) {
+    playAudioCue('expiry_warning');
+    const dismissBtn = root.querySelector('.vl-toast-dismiss');
+    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(root));
+    // Persistent: stays on screen until the nurse dismisses it (issue #28).
+    return;
+  }
   toastDismissTimer = setTimeout(() => dismissToast(root), data.nvc_override ? durationMs + 4000 : durationMs);
 }
 
