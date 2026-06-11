@@ -2793,6 +2793,18 @@ function ensureToastHost() {
 function showVaxlinkToast(data, durationMs = 4000) {
   if (!isHandsFreeSupportedPage()) return;
   const root = ensureToastHost();
+
+  // An undismissed expired warning must not be silently replaced by a routine
+  // toast (issue #28); only another expired warning may take its place.
+  if (root.querySelector('.vl-toast.persistent')) {
+    const incomingFlag = data.expiry_flag
+      || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
+    const incomingIsExpired = !data._commandMode && !data._queueEmpty
+      && !data._manualSelectionKept && !data._duplicateIgnored
+      && incomingFlag === 'expired';
+    if (!incomingIsExpired) return;
+  }
+
   if (toastDismissTimer) {
     clearTimeout(toastDismissTimer);
     toastDismissTimer = null;
