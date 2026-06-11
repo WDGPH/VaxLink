@@ -13,6 +13,11 @@ Recommended first target:
 - Optionally register the Edge native messaging host under HKCU.
 - Avoid admin rights.
 
+The first Windows user-install scripts live in `apps/native-scanner-agent/install/windows/`:
+
+- `install-user.ps1` copies the binary, writes the native messaging manifest, registers Chrome/Edge HKCU native messaging keys, and creates the HKCU startup entry.
+- `uninstall-user.ps1` removes the startup entry and native messaging keys, with an optional data-directory cleanup.
+
 Equivalent user-level packaging can be added later:
 
 - macOS: `~/Library/LaunchAgents/` plus user native messaging host manifest.

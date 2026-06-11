@@ -44,6 +44,25 @@ The native messaging mode supports:
 
 Responses are JSON objects wrapped in Chrome/Edge native messaging frames. The extension should ack a native scan only after the background accepts responsibility for it.
 
+## Windows User Install
+
+Build a release binary, then run the per-user installer without admin rights:
+
+```powershell
+cargo build --release
+.\install\windows\install-user.ps1 -ExtensionId "<chrome-extension-id>" -RegisterEdge
+```
+
+The installer copies the binary to `%LOCALAPPDATA%\WDGPH\VaxLinkScannerAgent\`, writes the native messaging manifest, registers Chrome under HKCU, optionally registers Edge under HKCU, and creates an HKCU Run startup entry.
+
+Uninstall:
+
+```powershell
+.\install\windows\uninstall-user.ps1
+```
+
+Add `-RemoveData` to remove the per-user queue, state, and logs.
+
 ## Data Directory
 
 Default per-user data roots:
