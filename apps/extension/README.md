@@ -6,8 +6,8 @@ Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, CHR autofill, 
 
 - `popup.js` drives popup workflow state, scan parsing, queue management, and inventory page launch.
 - `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
-- `content.js` handles hands-free page scanning and autofill on supported chart pages.
-- `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
+- `content.js` handles explicit scanner events and autofill on supported chart pages.
+- `background.js` owns NVC bundle refresh, lot lookup, analytics logging, native scanner routing, and queue append helpers.
 - `inventory-manager.html` + `inventory-manager.js` open the full inventory operations page in its own extension tab.
 
 ## Inventory Architecture
@@ -27,7 +27,7 @@ The inventory page was split out of the old monolithic `inventory-manager.js` in
 There are now two storage layers by design:
 
 - `chrome.storage.local`
-  Used by the popup and hands-free flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
+  Used by the popup, native scanner routing, legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
 - IndexedDB
   Used by the inventory manager page for normalized inventory items, transactions, incidents, reconciliation sign-offs, and lot quarantine flags.
 

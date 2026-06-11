@@ -68,7 +68,7 @@ export function initHandsFreeToggle(outputDiv, showOutput) {
   ].join('');
 
   const textWrap = document.createElement('span');
-  textWrap.textContent = 'Choose what a scanner does when barcodes are read on the live chart page.';
+  textWrap.textContent = 'Choose what VaxLink does when native scanner events arrive.';
   section.appendChild(label);
   section.appendChild(select);
   section.appendChild(textWrap);
@@ -87,14 +87,14 @@ export function initHandsFreeToggle(outputDiv, showOutput) {
 
   const renderHint = (mode) => {
     if (mode === 'autofill') {
-      hint.textContent = 'Scans on Panorama and web-based EMR platforms fill the current chart immediately without opening the popup.';
+      hint.textContent = 'Native scanner events fill the current chart immediately without opening the popup.';
       return;
     }
     if (mode === 'tray') {
-      hint.textContent = 'Scans on Panorama and web-based EMR platforms are saved into the inventory tray automatically, so clinicians can scan several vaccines with no extra clicks.';
+      hint.textContent = 'Native scanner events are saved into the tray automatically, so clinicians can scan several vaccines with no extra clicks.';
       return;
     }
-    hint.textContent = 'Scanner input is ignored by the hands-free listener until you turn a mode on.';
+    hint.textContent = 'Native scanner events are ignored until you turn a mode on.';
   };
 
   chrome.storage.local.get([HANDS_FREE_SCAN_KEY, HANDS_FREE_SCAN_MODE_KEY], (stored) => {
