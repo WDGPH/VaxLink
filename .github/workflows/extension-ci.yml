@@ -1,0 +1,58 @@
+name: Extension CI
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "apps/extension/**"
+      - "apps/extension-tests/**"
+      - "scripts/package-extension.sh"
+      - "package.json"
+      - ".github/workflows/extension-ci.yml"
+  pull_request:
+    paths:
+      - "apps/extension/**"
+      - "apps/extension-tests/**"
+      - "scripts/package-extension.sh"
+      - "package.json"
+      - ".github/workflows/extension-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Syntax-check extension sources
+        run: |
+          for f in apps/extension/*.js; do
+            node --check "$f"
+          done
+
+      # Best-effort: the NVC-dependent suites (clinic catalogue/workflow, HB
+      # lots) skip gracefully when the bundle is absent, but run with full
+      # coverage when the PHAC endpoint is reachable.
+      - name: Fetch NVC bundle (best effort)
+        continue-on-error: true
+        run: ./scripts/fetch-nvc.sh
+
+      - name: Run tests
+        run: npm test
+
+      - name: Package alpha and prod zips
+        run: |
+          ./scripts/package-extension.sh alpha
+          ./scripts/package-extension.sh prod
+
+      - name: Upload packaged extension zips
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaxlink-extension-zips-${{ github.sha }}
+          path: dist/*.zip
+          retention-days: 30
+          if-no-files-found: error
