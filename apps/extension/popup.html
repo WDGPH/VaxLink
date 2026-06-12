@@ -850,7 +850,9 @@
           <div class="brand-copy">
             <img class="brand-logo" src="assets/vaxlink-icon.svg" alt="VaxLink logo">
             <div>
-              <h2 class="title">VaxLink <span class="alpha-badge">Alpha</span></h2>
+              <!-- Channel badge: hidden by default; popup.js reveals it when the
+                   manifest name (stamped by scripts/package-extension.sh) says Alpha. -->
+              <h2 class="title">VaxLink <span id="alphaBadge" class="alpha-badge" hidden>Alpha</span></h2>
               <p class="tagline">Scan once. Parse automatically. Chart faster.</p>
             </div>
           </div>
