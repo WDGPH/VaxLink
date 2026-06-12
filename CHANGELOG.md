@@ -101,6 +101,17 @@ Alpha-only iterations between the 1.0.1 prod release and the June pilot rounds.
 
 ---
 
+## [Unreleased]
+
+---
+
+## [1.0.2] – 2026-06-03
+
+### Fixed
+- **Paste interception false positive** — `onHandsFreePaste` was calling `event.preventDefault()` for any clipboard content containing the substring `"01"`, silently swallowing patient notes, dates, health card numbers, and other clinical text pasted into Panorama fields. The fix gates paste interception on `parseGS1BarcodeFromScanner` succeeding and the extracted GTIN being 14 numeric digits (#14). See `docs/paste-interception-false-positive.md`.
+
+---
+
 ## [1.0.1] – 2026-05-26
 
 ### Fixed
