@@ -95,6 +95,12 @@
       line-height: 1.4;
     }
 
+    /* The class's display rule outranks the UA's [hidden] rule — without this,
+       the badge renders on the prod channel despite the hidden attribute. */
+    .alpha-badge[hidden] {
+      display: none;
+    }
+
     .header-icon-btn {
       width: 36px;
       height: 36px;
