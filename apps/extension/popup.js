@@ -1297,11 +1297,15 @@ async function lookupVaccineInfo(lot, gtin) {
     message.gtin = gtin;
   }
   const response = await sendRuntimeMessage(message);
-  if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
-    const oldest = lotLookupCache.keys().next().value;
-    if (oldest !== undefined) lotLookupCache.delete(oldest);
+  // Cache successes only: a transient error (cold service worker, bundle not
+  // yet loaded) must not poison this lot for the popup's whole lifetime.
+  if (response && !response.error) {
+    if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
+      const oldest = lotLookupCache.keys().next().value;
+      if (oldest !== undefined) lotLookupCache.delete(oldest);
+    }
+    lotLookupCache.set(cacheKey, response);
   }
-  lotLookupCache.set(cacheKey, response);
   return response;
 }
 
