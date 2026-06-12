@@ -14,10 +14,12 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
 let lastVaxlinkFillAt = 0;
@@ -43,6 +45,60 @@ const INPUT_CANDIDATE_TTL_MS = 5000;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+}
+
+function normalizeAudioFeedbackSetting(stored) {
+  return !(stored && stored[AUDIO_FEEDBACK_KEY] === false);
+}
+
+function getAudioContext() {
+  if (audioContextRef) return audioContextRef;
+  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!AudioContextCtor) return null;
+  audioContextRef = new AudioContextCtor();
+  return audioContextRef;
+}
+
+function playAudioCue(kind) {
+  if (!audioFeedbackEnabled) return;
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    void ctx.resume().catch(() => undefined);
+  }
+
+  const playTone = (frequency, durationMs, type = 'sine', gainValue = 0.06, delayMs = 0) => {
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = type;
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000));
+    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + (delayMs / 1000) + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000) + (durationMs / 1000));
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start(ctx.currentTime + (delayMs / 1000));
+    oscillator.stop(ctx.currentTime + (delayMs / 1000) + (durationMs / 1000) + 0.02);
+  };
+
+  if (kind === 'success') {
+    playTone(880, 90, 'sine', 0.045, 0);
+    playTone(1175, 120, 'sine', 0.05, 95);
+    return;
+  }
+  if (kind === 'error') {
+    playTone(220, 220, 'square', 0.055, 0);
+    return;
+  }
+  if (kind === 'duplicate') {
+    playTone(440, 90, 'square', 0.05, 0);
+    playTone(330, 110, 'square', 0.05, 120);
+    return;
+  }
+  if (kind === 'expiry_warning') {
+    playTone(980, 110, 'square', 0.06, 0);
+    playTone(980, 110, 'square', 0.06, 170);
+  }
 }
 
 function normalizeWorkflowMode(stored) {
@@ -169,7 +225,13 @@ function parseScannerDate(yymmdd) {
   if (!yymmdd || yymmdd.length !== 6) return null;
   const yy = yymmdd.substring(0, 2);
   const mm = yymmdd.substring(2, 4);
-  const dd = yymmdd.substring(4, 6);
+  let dd = yymmdd.substring(4, 6);
+  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
+  // downstream date math doesn't roll back into the previous month.
+  if (dd === '00') {
+    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
+    dd = String(lastDay).padStart(2, '0');
+  }
   return `${mm}/${dd}/20${yy}`;
 }
 
@@ -239,14 +301,20 @@ function parseGS1BarcodeFromScanner(rawScan) {
   let s = String(rawScan || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
+    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Lot-only
+    // barcodes have no "01" to re-anchor on, so strip generically.
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
 
   if (!s.startsWith('01')) {
+    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
+    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
+    // "10Y016312") and truncate the payload to garbage.
     const first01 = s.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
       s = s.substring(first01);
     }
   }
@@ -288,7 +356,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
       if (lotEnd === -1) {
         lotEnd = s.length;
       }
-      data.lot = s.substring(idx, lotEnd);
+      data.lot = s.substring(idx, lotEnd).replace(/\x1d/g, '');
       idx = lotEnd;
     } else if (currentAI === '21') {
       idx += 2;
@@ -296,7 +364,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
       if (serialEnd === -1) {
         serialEnd = s.length;
       }
-      data.serial = s.substring(idx, serialEnd);
+      data.serial = s.substring(idx, serialEnd).replace(/\x1d/g, '');
       idx = serialEnd;
     } else {
       // Recover from unknown/intermediate AIs by finding the next recognized AI.
@@ -426,7 +494,7 @@ function getExpiryStatus(value) {
 
 function buildInventoryRecordFromParsed(data, rawBarcode) {
   const totalDoses = getPositiveInt(data.total_doses, null);
-  const fallbackDose = getPositiveInt(totalDoses, 1);
+  const fallbackDose = getPositiveInt(totalDoses, null);
   const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
@@ -508,6 +576,7 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   parsed.dose_value = vaccineInfo.dose_value;
   parsed.dose_unit = vaccineInfo.dose_unit;
   parsed.drug_code = vaccineInfo.din;
+  parsed.nvc_override = vaccineInfo.nvc_override || null;
   parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
 
   if (!parsed.lot && vaccineInfo.lot_number) {
@@ -691,6 +760,25 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
       const queueKey = activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
+      if (record.duplicate_ignored) {
+        playAudioCue('duplicate');
+        showVaxlinkToast({ ...parsed, _duplicateIgnored: true });
+        vlog('duplicate scan ignored', { mode: activeWorkflowMode, source, lot: record.lot });
+        logAnalyticsEvent('queue_duplicate_ignored', {
+          workflow: activeWorkflowMode,
+          queue: queueKey,
+          source,
+          vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+          manufacturer: record.manufacturer || '',
+          expiryFlag: record.expiry_flag || finalExpiryFlag
+        });
+        return;
+      }
+      // Expired records get the expiry_warning cue from the persistent toast.
+      if (record.expiry_flag !== 'expired') {
+        playAudioCue('success');
+      }
+      showVaxlinkToast({ ...parsed, _queuedCount: record.queueSizeAfter || 0 });
       vlog('workflow scan saved to queue', {
         mode: activeWorkflowMode,
         source,
@@ -772,9 +860,22 @@ function getActiveElementScanCandidate() {
   // Field values on app forms can be truncated by maxlength/masks.
   // Accept short AI-only GS1 payloads too (e.g., 17+10 without AI01).
   if (raw.length < 8) return '';
-  if (!isCandidateGS1Text(raw)) {
+  if (!isCandidateGS1Text(raw)) return '';
+
+  // isCandidateGS1Text is too loose for Tab/Enter interception — it matches any
+  // text containing "01" (dates, patient IDs, lot numbers). Require a full parse
+  // just like onHandsFreePaste does, so nurses can Tab through fields normally.
+  let parsed;
+  try {
+    parsed = parseGS1BarcodeFromScanner(raw);
+  } catch (_) {
     return '';
   }
+  if (!parsed) return '';
+  // Require a numeric 14-digit GTIN. IDs starting with "10" parse as AI(10)
+  // lot barcodes (gtin=null) — null also fails this check, so they pass through.
+  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return '';
+
   return raw;
 }
 
@@ -793,11 +894,10 @@ function onHandsFreePaste(event) {
   if (!text || text.length < SCAN_MIN_LENGTH) return;
   if (!isCandidateGS1Text(text)) return;
 
-  // isCandidateGS1Text is intentionally loose — it flags any text containing
-  // "01" as a candidate, which is correct for incremental keystrokes but too
-  // broad for paste. Dates ("01/01/2024"), patient IDs, or notes that happen
-  // to contain "01" would otherwise have their paste blocked. Require the text
-  // to actually parse as a complete, numeric GS1 barcode before intercepting.
+  // isCandidateGS1Text is too loose for paste — it matches dates, patient IDs,
+  // and any text containing "01" or starting with "10"/"17"/"21". IDs starting
+  // with "10" parse as AI(10) lot barcodes (gtin=null) which must also be
+  // rejected. Require a full parse with a numeric 14-digit GTIN.
   let parsed;
   try {
     parsed = parseGS1BarcodeFromScanner(text);
@@ -805,9 +905,7 @@ function onHandsFreePaste(event) {
     return;
   }
   if (!parsed) return;
-  // A non-numeric GTIN means the parser found "01" inside normal prose and
-  // treated the next 14 characters as a GTIN. Real GTINs are always 14 digits.
-  if (parsed.gtin && !/^\d{14}$/.test(parsed.gtin)) return;
+  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
 
   event.preventDefault();
   rememberRecentInputCandidate(text);
@@ -835,13 +933,15 @@ function normalizeScannerCandidate(value) {
   let s = String(value || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
   if (!s.startsWith('01')) {
+    // Same guarded re-anchor as parseGS1BarcodeFromScanner: only jump to an
+    // embedded "01" when a full 14-digit GTIN follows it.
     const first01 = s.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
       s = s.substring(first01);
     }
   }
@@ -873,6 +973,17 @@ function onHandsFreeInput(event) {
   scannerInputTimer = setTimeout(() => {
     const latest = String(target.value || '').trim();
     if (!isCandidateGS1Text(latest)) return;
+    // isCandidateGS1Text is too loose to justify wiping the field — it matches
+    // dates, patient IDs, and any text containing "01". Mirror the paste path:
+    // require a full parse with a numeric 14-digit GTIN before clearing, so
+    // manually typed values are never destroyed.
+    let parsed;
+    try {
+      parsed = parseGS1BarcodeFromScanner(latest);
+    } catch (_) {
+      return;
+    }
+    if (!parsed || !parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
     target.value = '';
     target.dispatchEvent(new Event('input', { bubbles: true }));
     target.dispatchEvent(new Event('change', { bubbles: true }));
@@ -896,8 +1007,9 @@ function isHandsFreeSupportedPage() {
     }
 
     const isPanorama =
-      host === 'www.panorama.prod.ehealthontario.ca' ||
-      host === 'panorama.prod.ehealthontario.ca';
+      (host === 'www.panorama.prod.ehealthontario.ca' ||
+       host === 'panorama.prod.ehealthontario.ca') &&
+      window.location.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
@@ -921,12 +1033,20 @@ function onHandsFreeKeydown(event) {
     // Many scanner profiles use Tab/Enter as separators between AIs, not only as suffix.
     // Treat them as GS markers and flush only after idle timeout.
     if (scannerBuffer) {
-      scannerLastAt = now;
-      scannerBuffer += String.fromCharCode(0x1d);
-      event.preventDefault();
-      event.stopPropagation();
-      scheduleScannerFlush();
-      return;
+      // Only swallow the key when the buffer was typed at scanner speed
+      // (>= SCAN_MIN_LENGTH chars, machine-fast). Nurses type short values
+      // and Tab/Enter within the 1.5s gap window — unconditionally eating
+      // their navigation key breaks Panorama form entry.
+      if (isLikelyScannerSequence()) {
+        scannerLastAt = now;
+        scannerBuffer += String.fromCharCode(0x1d);
+        event.preventDefault();
+        event.stopPropagation();
+        scheduleScannerFlush();
+        return;
+      }
+      // Manual typing: drop the stale buffer and let the key act normally.
+      resetScannerBuffer();
     }
 
     const activeScan = getActiveElementScanCandidate();
@@ -973,10 +1093,12 @@ function initHandsFreeScanner() {
     LEGACY_POPUP_MODE_KEY,
     LEGACY_REMOTE_MODE_KEY,
     LEGACY_HANDS_FREE_KEY,
-    ADMIN_DATETIME_AUTOFILL_KEY
+    ADMIN_DATETIME_AUTOFILL_KEY,
+    AUDIO_FEEDBACK_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
+    audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
 
     // On Panorama SPA navigations the page is already fully loaded when this
@@ -1006,7 +1128,8 @@ function initHandsFreeScanner() {
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
-      !(ADMIN_DATETIME_AUTOFILL_KEY in changes)
+      !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
+      !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
     }
@@ -1017,10 +1140,14 @@ function initHandsFreeScanner() {
       [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
       [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
         ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
-        : adminDateTimeAutofillEnabled
+        : adminDateTimeAutofillEnabled,
+      [AUDIO_FEEDBACK_KEY]: AUDIO_FEEDBACK_KEY in changes
+        ? changes[AUDIO_FEEDBACK_KEY].newValue
+        : audioFeedbackEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
+    audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
   });
@@ -1028,6 +1155,8 @@ function initHandsFreeScanner() {
   window.addEventListener('keydown', onHandsFreeKeydown, true);
   window.addEventListener('paste', onHandsFreePaste, true);
   window.addEventListener('input', onHandsFreeInput, true);
+  document.addEventListener('pointerdown', cancelPanoramaFillRetriesForManualEdit, true);
+  document.addEventListener('change', cancelPanoramaFillRetriesForManualEdit, true);
 }
 
 // Register listener immediately
@@ -1756,6 +1885,16 @@ function normalizePanoramaLotToken(value) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+function optionTextMatchesLotExactly(optionText, lotValue) {
+  const lotToken = normalizePanoramaLotToken(lotValue);
+  if (!lotToken) return false;
+  const rawText = String(optionText || '');
+  // Panorama options look like "LOT123 - Exp. 2026-01-31"; the lot is the
+  // left-of-dash token. Exact equality avoids "ABC1" selecting "ABC12".
+  const leftPart = rawText.split('-')[0] || rawText;
+  return normalizePanoramaLotToken(leftPart) === lotToken;
+}
+
 function optionTextContainsLot(optionText, lotValue) {
   const lotToken = normalizePanoramaLotToken(lotValue);
   if (!lotToken) return false;
@@ -1767,6 +1906,15 @@ function optionTextContainsLot(optionText, lotValue) {
   return leftToken === lotToken || leftToken.includes(lotToken);
 }
 
+// Prefer an exact lot match across all candidates before falling back to a
+// substring match, so a scanned lot that prefixes a longer lot in the
+// dropdown never selects the wrong one.
+function findBestLotMatch(candidates, getText, lotValue) {
+  return candidates.find(c => optionTextMatchesLotExactly(getText(c), lotValue))
+    || candidates.find(c => optionTextContainsLot(getText(c), lotValue))
+    || null;
+}
+
 function fillPanoramaLotFromSelect(lotValue) {
   const selectors = [
     'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
@@ -1776,7 +1924,7 @@ function fillPanoramaLotFromSelect(lotValue) {
   const fields = getFields(selectors).filter(canFillPanoramaControl);
   for (const field of fields) {
     const options = Array.from(field.options || []).filter(opt => opt && opt.value !== '');
-    const matched = options.find(opt => optionTextContainsLot(opt.text, lotValue));
+    const matched = findBestLotMatch(options, opt => opt.text, lotValue);
     if (!matched) continue;
 
     field.focus();
@@ -1795,6 +1943,18 @@ function fillPanoramaLotFromSelect(lotValue) {
     return true;
   }
   return false;
+}
+
+function resetPanoramaFundedRadioToShowAll() {
+  const radio = document.querySelector('input[id*="fundedRadio:selectOneRadio"][value="SHOW_ALL"]');
+  if (!radio) return 'not_found';
+  if (radio.checked) return 'already';
+  const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
+  if (box) box.click();
+  radio.checked = true;
+  radio.dispatchEvent(new Event('change', { bubbles: true }));
+  vlog('VaxLink: funded radio reset to Show All');
+  return 'clicked';
 }
 
 function openPanoramaLotDropdown() {
@@ -1848,15 +2008,13 @@ function fillPanoramaLotFromPanelItems(lotValue) {
         ).trim();
         return isVisible(item) && text.length > 0;
       });
-    const matched = items.find((item) => {
-      const itemText = String(
-        item.getAttribute?.('data-label')
-        || item.getAttribute?.('title')
-        || item.textContent
-        || ''
-      );
-      return optionTextContainsLot(itemText, lotValue);
-    });
+    const getItemText = (item) => String(
+      item.getAttribute?.('data-label')
+      || item.getAttribute?.('title')
+      || item.textContent
+      || ''
+    );
+    const matched = findBestLotMatch(items, getItemText, lotValue);
     if (!matched) continue;
     matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     matched.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -1922,6 +2080,28 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
+// Issue #26: a real user interaction with the agent/lot/tradename widgets means
+// the nurse is taking over — pending VaxLink fill retries must not overwrite
+// her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
+// and so do VaxLink's own fills, so only trusted events count as manual.
+const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN = /agentiterm|tradenameinput|lotnumberselect/i;
+
+function isPanoramaAgentLotWidgetNode(node) {
+  if (!node || typeof node.closest !== 'function') return false;
+  const widget = node.closest('.ui-selectonemenu, .ui-selectonemenu-panel, select');
+  if (!widget) return false;
+  return PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN.test(String(widget.id || ''));
+}
+
+function cancelPanoramaFillRetriesForManualEdit(event) {
+  if (!event.isTrusted) return;
+  if (typeof stopPanoramaLotTradeWatcher !== 'function') return;
+  if (!isPanoramaAgentLotWidgetNode(event.target)) return;
+  stopPanoramaLotTradeWatcher();
+  stopPanoramaLotTradeWatcher = null;
+  vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
+}
+
 function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   if (!data) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
@@ -1946,6 +2126,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   let stopped = false;
   let lastAttemptAt = 0;
   let stablePasses = 0;
+  let fundedRadioEnsured = false;
 
   const stop = () => {
     if (stopped) return;
@@ -1981,6 +2162,11 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
       resolved = hasPanoramaLotOrTradeSelection(data);
     }
     if (!resolved && hasResolvedAgent && !busy) {
+      if (!fundedRadioEnsured) {
+        const radioResult = resetPanoramaFundedRadioToShowAll();
+        fundedRadioEnsured = true;
+        if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
+      }
       resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
     }
 
@@ -2549,6 +2735,11 @@ function handleVaxlinkCommand(value) {
 
 let toastHost = null;
 let toastRoot = null;
+// Two stacked slots so a persistent expired warning and routine feedback
+// (queued / duplicate / mode switch) can coexist instead of clobbering each
+// other (issue #28): warning on top, routine toasts below it.
+let toastWarningSlot = null;
+let toastRoutineSlot = null;
 let toastDismissTimer = null;
 
 function ensureToastHost() {
@@ -2559,11 +2750,18 @@ function ensureToastHost() {
   const style = document.createElement('style');
   style.textContent = `
     :host { all: initial; }
-    .vl-toast {
+    .vl-toast-stack {
       position: fixed;
       top: 12px;
       right: 12px;
       z-index: 2147483647;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: none;
+    }
+    .vl-toast {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       line-height: 1.4;
@@ -2585,11 +2783,41 @@ function ensureToastHost() {
     .vl-toast.expiring { background: #b45309; }
     .vl-toast.expired  { background: #b91c1c; }
     .vl-toast.info     { background: #0e7490; }
+    .vl-toast.duplicate { background: #52525b; }
+    .vl-toast.persistent { pointer-events: auto; }
+    .vl-toast-dismiss {
+      margin-top: 8px;
+      padding: 4px 10px;
+      border: 1px solid rgba(255,255,255,.6);
+      border-radius: 5px;
+      background: rgba(0,0,0,.25);
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .vl-toast-dismiss:hover { background: rgba(0,0,0,.4); }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
+    .vl-toast-override {
+      margin-top: 7px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      background: rgba(0,0,0,.25);
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.1px;
+      color: #fef08a;
+    }
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
+  toastRoot.className = 'vl-toast-stack';
+  toastWarningSlot = document.createElement('div');
+  toastRoutineSlot = document.createElement('div');
+  toastRoot.appendChild(toastWarningSlot);
+  toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
   return toastRoot;
@@ -2597,31 +2825,44 @@ function ensureToastHost() {
 
 function showVaxlinkToast(data, durationMs = 4000) {
   if (!isHandsFreeSupportedPage()) return;
-  const root = ensureToastHost();
-  if (toastDismissTimer) {
-    clearTimeout(toastDismissTimer);
-    toastDismissTimer = null;
-  }
+  ensureToastHost();
+
+  // Routine toasts share one slot and one auto-dismiss timer; the persistent
+  // expired warning lives in its own slot above and is never replaced by them.
+  const showRoutineToast = (html, ms) => {
+    if (toastDismissTimer) {
+      clearTimeout(toastDismissTimer);
+      toastDismissTimer = null;
+    }
+    toastRoutineSlot.innerHTML = html;
+    toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
+  };
 
   if (data._commandMode) {
     const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
     const sourceDetail = data._commandSource === 'hud'
       ? 'Switched from VaxLink HUD'
       : 'Switched via scanner command';
-    root.innerHTML = `<div class="vl-toast info show">
+    showRoutineToast(`<div class="vl-toast info show">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
       <div class="vl-toast-detail">${sourceDetail}</div>
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    </div>`, durationMs);
     return;
   }
 
   if (data._queueEmpty) {
-    root.innerHTML = `<div class="vl-toast info show">
+    showRoutineToast(`<div class="vl-toast info show">
       <div class="vl-toast-title">Queue empty</div>
       <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
-    </div>`;
-    toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+    </div>`, durationMs);
+    return;
+  }
+
+  if (data._manualSelectionKept) {
+    showRoutineToast(`<div class="vl-toast info show">
+      <div class="vl-toast-title">Kept your selection</div>
+      <div class="vl-toast-detail">The agent on screen differs from the next queued scan — VaxLink did not change it. Remove the queued item if it is no longer needed.</div>
+    </div>`, durationMs + 2000);
     return;
   }
 
@@ -2636,20 +2877,51 @@ function showVaxlinkToast(data, durationMs = 4000) {
     const flagLabels = { valid: 'Valid', expiring_soon: 'Expiring soon', expired: 'Expired' };
     expiryText = `${flagLabels[flag] || 'Unknown'} (exp ${friendlyDate})`;
   }
-  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
 
-  root.innerHTML = `<div class="vl-toast ${cssClass} show">
-    <div class="vl-toast-title">${escapeToastHtml(label)}</div>
+  if (data._duplicateIgnored) {
+    showRoutineToast(`<div class="vl-toast duplicate show">
+      <div class="vl-toast-title">Duplicate scan ignored</div>
+      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
+      ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    </div>`, durationMs);
+    return;
+  }
+
+  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
+  const isExpired = flag === 'expired';
+  const overrideNote = data.nvc_override
+    ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
+    : '';
+  const queuedNote = data._queuedCount
+    ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
+    : '';
+
+  const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
+    <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
+    ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    ${queuedNote}
+    ${overrideNote}
+    ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
-  toastDismissTimer = setTimeout(() => dismissToast(root), durationMs);
+
+  if (isExpired) {
+    // Persistent: own slot, no timer \u2014 stays until the nurse dismisses it
+    // (issue #28). Routine toasts keep flowing in the slot below.
+    toastWarningSlot.innerHTML = toastHtml;
+    playAudioCue('expiry_warning');
+    const dismissBtn = toastWarningSlot.querySelector('.vl-toast-dismiss');
+    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
+    return;
+  }
+  showRoutineToast(toastHtml, data.nvc_override ? durationMs + 4000 : durationMs);
 }
 
-function dismissToast(root) {
-  const el = root && root.querySelector('.vl-toast');
+function dismissToast(slot) {
+  const el = slot && slot.querySelector('.vl-toast');
   if (el) el.classList.remove('show');
-  setTimeout(() => { if (root) root.innerHTML = ''; }, 300);
+  setTimeout(() => { if (slot) slot.innerHTML = ''; }, 300);
 }
 
 function escapeToastHtml(text) {
@@ -2669,6 +2941,8 @@ let hudApplyBtn = null;
 let hudContainer = null;
 let hudModeToggleBtn = null;
 let hudQueueWrap = null;
+let hudQueueListEl = null;
+let hudClearBtn = null;
 let hudMiniEl = null;
 let hudUserHidden = false;
 let hudCurrentLeft = null;
@@ -2788,6 +3062,51 @@ function initHud() {
       text-align: center;
       box-shadow: inset 0 0 0 1px rgba(207, 250, 254, .08);
     }
+    .vl-hud-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .vl-hud-list.hidden { display: none; }
+    .vl-hud-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: rgba(207, 250, 254, .08);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 11.5px;
+      color: #dffaff;
+    }
+    .vl-hud-item-label {
+      min-width: 0;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .vl-hud-item-label.expired { color: #fca5a5; font-weight: 700; }
+    .vl-hud-item-remove {
+      background: transparent;
+      border: none;
+      color: rgba(232, 249, 253, .6);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 4px;
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+    .vl-hud-item-remove:hover { background: rgba(248, 113, 113, .25); color: #fff; }
+    .vl-hud-clear-btn {
+      background: transparent;
+      color: rgba(232, 249, 253, .75);
+      box-shadow: inset 0 0 0 1px rgba(232, 249, 253, .25);
+    }
+    .vl-hud-clear-btn:hover { background: rgba(248, 113, 113, .2); color: #fff; }
     .vl-hud-btn {
       background: #ecfeff;
       color: #0f4357;
@@ -2988,9 +3307,34 @@ function initHud() {
   hudApplyBtn.textContent = 'Apply Next';
   hudApplyBtn.addEventListener('click', applyNextQueueItem);
 
+  hudClearBtn = document.createElement('button');
+  hudClearBtn.className = 'vl-hud-btn vl-hud-clear-btn';
+  hudClearBtn.textContent = 'Clear';
+  hudClearBtn.title = 'Clear the multiple-inject queue';
+  hudClearBtn.addEventListener('click', () => {
+    // Two-step confirm so a stray click cannot wipe a clinic's scans.
+    if (hudClearBtn.dataset.confirming === 'true') {
+      delete hudClearBtn.dataset.confirming;
+      hudClearBtn.textContent = 'Clear';
+      void clearHudQueue();
+      return;
+    }
+    hudClearBtn.dataset.confirming = 'true';
+    hudClearBtn.textContent = 'Sure?';
+    setTimeout(() => {
+      delete hudClearBtn.dataset.confirming;
+      hudClearBtn.textContent = 'Clear';
+    }, 3000);
+  });
+
   hudQueueWrap.appendChild(hudCountEl);
   hudQueueWrap.appendChild(hudApplyBtn);
+  hudQueueWrap.appendChild(hudClearBtn);
   hudContainer.appendChild(hudQueueWrap);
+
+  hudQueueListEl = document.createElement('div');
+  hudQueueListEl.className = 'vl-hud-list hidden';
+  hudContainer.appendChild(hudQueueListEl);
   hudShadow.appendChild(hudContainer);
 
   hudMiniEl = document.createElement('button');
@@ -3157,10 +3501,72 @@ function updateHudState() {
     if (hudApplyBtn) {
       hudApplyBtn.disabled = count === 0;
     }
+    renderHudQueueList(rows, showQueueControls);
   });
 }
 
+function renderHudQueueList(rows, visible) {
+  if (!hudQueueListEl) return;
+  hudQueueListEl.classList.toggle('hidden', !visible || rows.length === 0);
+  hudQueueListEl.textContent = '';
+  if (!visible) return;
+
+  for (const row of rows) {
+    if (!row) continue;
+    const item = document.createElement('div');
+    item.className = 'vl-hud-item';
+
+    const label = document.createElement('span');
+    label.className = 'vl-hud-item-label';
+    const name = row.tradename || row.generic_name || row.name || 'Vaccine';
+    label.textContent = row.lot ? `${name} · ${row.lot}` : name;
+    label.title = label.textContent;
+    if (row.expiry_flag === 'expired') {
+      label.classList.add('expired');
+      label.title += ' — EXPIRED';
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'vl-hud-item-remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = `Remove ${name} from queue`;
+    removeBtn.setAttribute('aria-label', removeBtn.title);
+    removeBtn.addEventListener('click', () => {
+      void removeHudQueueRow(row.id);
+    });
+
+    item.appendChild(label);
+    item.appendChild(removeBtn);
+    hudQueueListEl.appendChild(item);
+  }
+}
+
+async function removeHudQueueRow(id) {
+  if (!id || applyQueueInFlight) return;
+  const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+  const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
+    ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+  const next = rows.filter((row) => row && row.id !== id);
+  if (next.length === rows.length) return;
+  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: next });
+  updateHudState();
+}
+
+async function clearHudQueue() {
+  if (applyQueueInFlight) return;
+  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: [] });
+  updateHudState();
+}
+
+// Guards the read-shift-write sequence below: tryAutoDrain, the multi-step
+// observer, and the HUD apply button can all fire close together, and without
+// this flag two callers would shift the same queue head (double-fill) or
+// clobber each other's setLocalStorage (dropped record).
+let applyQueueInFlight = false;
+
 async function applyNextQueueItem() {
+  if (applyQueueInFlight) return;
+  applyQueueInFlight = true;
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
@@ -3172,7 +3578,36 @@ async function applyNextQueueItem() {
       return;
     }
 
+    // Issue #26: if an agent is already selected on this form (carried over
+    // from the multi-grid or chosen manually) and it does not match the queue
+    // head, the nurse picked a different vaccine for this entry. Filling now
+    // would silently revert her change — keep the form and the queue intact.
+    // isImmunizationFormEmpty (not hasPanoramaAgentSelection(null)) because the
+    // latter counts the "Select"/"--" placeholder option as a selection, which
+    // would block draining into a genuinely empty form.
+    const headPayload = buildAutofillPayloadFromQueueRecord(rows[0]);
+    if (
+      headPayload &&
+      !isImmunizationFormEmpty() &&
+      !hasPanoramaAgentSelection(headPayload)
+    ) {
+      vlog('auto-fill skipped: existing agent selection differs from queue head');
+      showVaxlinkToast({ _manualSelectionKept: true });
+      updateHudState();
+      return;
+    }
+
     const record = rows.shift();
+    // Re-queue the record if it still has doses remaining.
+    // null remaining_doses means unknown/unlimited (multi-dose vial with no count
+    // tracked) — put it back at the head so it can be used again.
+    const remaining = getQueueRemainingDoses(record, null);
+    if (remaining === null) {
+      rows.unshift(record);
+    } else if (remaining > 1) {
+      rows.unshift({ ...record, remaining_doses: remaining - 1 });
+    }
+    // else remaining <= 1: record is consumed, don't re-queue
     await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
 
     const data = buildAutofillPayloadFromQueueRecord(record);
@@ -3210,6 +3645,8 @@ async function applyNextQueueItem() {
   } catch (error) {
     console.warn('VaxLink HUD apply error:', error);
     if (hudApplyBtn) hudApplyBtn.disabled = false;
+  } finally {
+    applyQueueInFlight = false;
   }
 }
 

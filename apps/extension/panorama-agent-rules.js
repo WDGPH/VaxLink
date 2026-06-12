@@ -84,9 +84,37 @@
     { outputs: ['HA'], clauses: [{ any: ['havrix', 'vaqta', 'avaxim', 'hepatitis a'], notAny: ['hepatitis b', 'typhoid', 'pediatric'] }] },
     { outputs: ['HA-unspecified'], clauses: [{ any: ['hepatitis a'], notAny: ['havrix', 'vaqta', 'avaxim', 'hepatitis b', 'typhoid', 'pediatric'] }] },
     { outputs: ['HB-dialysis'], clauses: [{ any: ['engerix b dialysis', 'hepatitis b dialysis'] }] },
-    { outputs: ['HB-pediatric'], clauses: [{ any: ['engerix b pediatric', 'recombivax pediatric', 'hepatitis b pediatric'] }] },
-    { outputs: ['HB'], clauses: [{ any: ['engerix b', 'recombivax hb', 'heplisav', 'hepatitis b'], notAny: ['dialysis', 'pediatric', 'hepatitis a'] }] },
-    { outputs: ['HB-unspecified'], clauses: [{ any: ['hepatitis b'], notAny: ['engerix b', 'recombivax hb', 'heplisav', 'dialysis', 'pediatric', 'hepatitis a'] }] },
+    { outputs: ['HB-pediatric'], clauses: [
+      // Primary: tradename or NVC generic name explicitly identifies pediatric.
+      // The NVC nvc-linked-generic-concept extension for pediatric formulations
+      // always contains "pediatric" (e.g. "[HB] Hepatitis B pediatric strength vaccine"),
+      // so 'hepatitis b pediatric' reliably fires for all NVC-sourced pediatric lots.
+      // 'recombivax pediatric' also matches 'recombivax hb pediatric' via token fallback.
+      { any: ['engerix b pediatric', 'recombivax pediatric', 'hepatitis b pediatric', 'hepatitis b recombinant pediatric'] },
+      // Strength fallback (NVC stores strength as bare number, e.g. "5" not "5 mcg"):
+      // Recombivax HB Pediatric = 5 mcg/dose; adult = 10 mcg/dose. Never overlap.
+      { all: ['recombivax', '5'], notAny: ['dialysis', '10', '40'] },
+      // Engerix-B Pediatric = 10 mcg/0.5 mL; adult = 20 mcg/mL.
+      { all: ['engerix', '10'], notAny: ['dialysis', '20', '40'] },
+      // Generic hepatitis B at 5 mcg dose (bare strength token from NVC).
+      { all: ['hepatitis b', '5'], notAny: ['hepatitis a', 'dialysis', '10', '20', '40'] },
+    ] },
+    { outputs: ['HB'], clauses: [
+      // Engerix-B adult: 20 mcg/mL. Block on '10' (pediatric 10 mcg/0.5 mL) and '5'.
+      // When no strength is present, the adult clause fires on the brand name alone.
+      { all: ['engerix b'], notAny: ['dialysis', 'pediatric', '10', '5'] },
+      // RECOMBIVAX HB adult: 10 mcg/mL. Block on '5' (pediatric 5 mcg/0.5 mL).
+      { all: ['recombivax hb'], notAny: ['dialysis', 'pediatric', '5'] },
+      // Heplisav-B: adult-only product; no pediatric or dialysis formulation.
+      { any: ['heplisav'], notAny: ['dialysis', 'pediatric'] },
+      // Generic hepatitis B adult (no specific brand identified).
+      { any: ['hepatitis b'], notAny: ['dialysis', 'pediatric', 'hepatitis a', '5'] },
+      // Strength fallback: Engerix-B 20 = adult (when brand is 'engerix' not full 'engerix b').
+      { all: ['engerix', '20'], notAny: ['dialysis', 'pediatric'] },
+      // Strength fallback: Recombivax HB 10 = adult (bare number from NVC nvc-strength).
+      { all: ['recombivax', '10'], notAny: ['dialysis', '5', 'pediatric'] },
+    ] },
+    { outputs: ['HB-unspecified'], clauses: [{ any: ['hepatitis b'], notAny: ['engerix b', 'recombivax hb', 'heplisav', 'dialysis', 'pediatric', 'hepatitis a', '5 mcg', '5'] }] },
     { outputs: ['HBIg'], clauses: [{ any: ['hepatitis b immune globulin', 'hbig'] }] },
     { outputs: ['Hib-HB'], clauses: [{ any: ['hib hb', 'haemophilus influenzae type b hepatitis b'] }] },
     { outputs: ['Hib'], clauses: [{ any: ['act hib', 'hiberix', 'haemophilus influenzae type b'], notAny: ['hepatitis b', 'meningococcal'] }] },
