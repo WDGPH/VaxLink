@@ -30,6 +30,14 @@ cd apps/extension-tests && npm test     # or `npm test` from the repo root
 
 Install for manual testing: load `apps/extension/` as an unpacked extension in `chrome://extensions` with Developer mode on.
 
+```bash
+# Package for the Chrome Web Store (stamps channel identity at build time)
+./scripts/package-extension.sh alpha   # dist/vaxlink-alpha-<v>.zip, name "VaxLink Alpha"
+./scripts/package-extension.sh prod    # dist/vaxlink-prod-<v>.zip,  name "VaxLink"
+```
+
+Release channels: `dev` = VaxLink Alpha, `main` = VaxLink (two separate Web Store listings). The extension *name* is stamped by the package script, never edited in `manifest.json` — the manifest must stay identical across branches so `dev → main` merges don't conflict. Only `version` is bumped in git, and it flows through merges.
+
 ### Next.js Site (`apps/web-next`)
 
 ```bash
