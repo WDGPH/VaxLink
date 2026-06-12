@@ -710,7 +710,13 @@ function buildAnalyticsCsv(data) {
 }
 
 function csvEscape(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const text = String(value ?? '');
+  // Neutralize spreadsheet formula injection (cells starting with = + - @);
+  // plain numbers are exempt so counters stay numeric in Excel.
+  const guarded = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
+    ? `'${text}`
+    : text;
+  return `"${guarded.replace(/"/g, '""')}"`;
 }
 
 async function getLocalAnalyticsStore() {
@@ -1297,11 +1303,15 @@ async function lookupVaccineInfo(lot, gtin) {
     message.gtin = gtin;
   }
   const response = await sendRuntimeMessage(message);
-  if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
-    const oldest = lotLookupCache.keys().next().value;
-    if (oldest !== undefined) lotLookupCache.delete(oldest);
+  // Cache successes only: a transient error (cold service worker, bundle not
+  // yet loaded) must not poison this lot for the popup's whole lifetime.
+  if (response && !response.error) {
+    if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
+      const oldest = lotLookupCache.keys().next().value;
+      if (oldest !== undefined) lotLookupCache.delete(oldest);
+    }
+    lotLookupCache.set(cacheKey, response);
   }
-  lotLookupCache.set(cacheKey, response);
   return response;
 }
 
@@ -1481,18 +1491,26 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     await sendAutoFillToActiveTab(data);
-    const remainingDoses = getQueueRemainingDoses(record, 1);
-    const nextRecord = remainingDoses > 1
-      ? await multipleInjectManager.consumeById(record.id)
-      : await multipleInjectManager.remove(record.id);
+    const remainingDoses = getQueueRemainingDoses(record, null);
+    let nextRecord;
+    if (remainingDoses === null) {
+      // Unknown dose count — vial is unlimited; keep record in queue as-is
+      nextRecord = record;
+    } else if (remainingDoses > 1) {
+      nextRecord = await multipleInjectManager.consumeById(record.id);
+    } else {
+      nextRecord = await multipleInjectManager.remove(record.id);
+    }
     if (nextRecord) {
       multipleInjectManager.setActiveUse(nextRecord.id);
     } else {
       multipleInjectManager.setActiveUse('');
     }
-    const updatedRemaining = nextRecord
-      ? getQueueRemainingDoses(nextRecord, 1)
-      : 0;
+    const updatedRemaining = remainingDoses === null
+      ? null
+      : nextRecord
+        ? getQueueRemainingDoses(nextRecord, 1)
+        : 0;
     logAnalyticsEvent('queue_used', {
       workflow: 'multiple',
       queue: 'multiple',
@@ -1512,7 +1530,7 @@ async function handleUseMultipleInjectRecord(record) {
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
-    const dosesMessage = updatedRemaining > 0 && updatedRemaining !== 1
+    const dosesMessage = updatedRemaining !== null && updatedRemaining > 0 && updatedRemaining !== 1
       ? ` ${updatedRemaining} dose(s) remaining in this vial.`
       : '';
     writeOutput(`${label} auto-filled from Multiple Inject queue.${dosesMessage}`, 'success');

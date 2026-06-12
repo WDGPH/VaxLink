@@ -59,7 +59,11 @@ function getTotalDoseCount(row) {
 }
 
 function formatDoseSummary(row) {
-  const remaining = getRemainingDoseCount(row, 0);
+  const remaining = getRemainingDoseCount(row, null);
+  if (remaining === null) {
+    // No dose count known — vial is treated as unlimited (multi-dose)
+    return 'multi-dose';
+  }
   const total = getTotalDoseCount(row);
   if (!Number.isFinite(remaining) || remaining <= 0) {
     return '';
@@ -135,38 +139,42 @@ export class ScanQueueManager {
     this.render();
   }
 
-  async add(record) {
-    this.rows.push(record);
+  // Every mutation re-reads storage first: the background worker appends
+  // hands-free scans to the same key while the popup is open, and a mutation
+  // computed from a stale in-memory copy would silently clobber them.
+  async mutateRows(mutator) {
+    const stored = await getLocalStorage([this.storageKey]);
+    const current = (stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [])
+      .filter((row) => row && typeof row === 'object');
+    const next = mutator(current);
+    this.rows = Array.isArray(next) ? next.filter((row) => row && typeof row === 'object') : [];
     await this.persist();
     this.render();
+  }
+
+  async add(record) {
+    await this.mutateRows((rows) => [...rows, record]);
   }
 
   async addMany(records) {
-    this.rows.push(...records);
-    await this.persist();
-    this.render();
+    await this.mutateRows((rows) => [...rows, ...records]);
   }
 
   async clear() {
-    this.rows = [];
     this.activeUseId = '';
-    await this.persist();
-    this.render();
+    await this.mutateRows(() => []);
   }
 
   async remove(id) {
-    this.rows = this.rows.filter((row) => row.id !== id);
     if (this.activeUseId === id) {
       this.activeUseId = '';
     }
-    await this.persist();
-    this.render();
+    await this.mutateRows((rows) => rows.filter((row) => row.id !== id));
   }
 
   async replaceRows(rows) {
-    this.rows = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
-    await this.persist();
-    this.render();
+    const sanitized = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+    await this.mutateRows(() => sanitized);
   }
 
   async updateById(id, patch) {
@@ -174,14 +182,13 @@ export class ScanQueueManager {
     if (!targetId || !patch || typeof patch !== 'object') {
       return null;
     }
-    const index = this.rows.findIndex((row) => row && row.id === targetId);
-    if (index === -1) {
-      return null;
-    }
-    const nextRows = [...this.rows];
-    nextRows[index] = { ...nextRows[index], ...patch };
-    await this.replaceRows(nextRows);
-    return nextRows[index];
+    let updated = null;
+    await this.mutateRows((rows) => rows.map((row) => {
+      if (!row || row.id !== targetId) return row;
+      updated = { ...row, ...patch };
+      return updated;
+    }));
+    return updated;
   }
 
   async setDoseCounts(id, totalDoses) {
@@ -209,33 +216,49 @@ export class ScanQueueManager {
     if (!targetId) {
       return null;
     }
-
-    const row = this.getById(targetId);
-    if (!row) {
+    if (!this.getById(targetId)) {
       return null;
     }
 
-    const remaining = getRemainingDoseCount(row, 1);
-    if (remaining <= 1) {
-      await this.remove(targetId);
-      return null;
-    }
+    // Decide remove-vs-decrement from the FRESH stored row inside the mutator:
+    // another context (queue drain, second tab) may have decremented this vial
+    // since our last sync, and a stale base would resurrect a consumed dose.
+    let result = null;
+    let removed = false;
+    await this.mutateRows((rows) => {
+      const next = [];
+      for (const item of rows) {
+        if (!item || item.id !== targetId) {
+          next.push(item);
+          continue;
+        }
+        const remaining = getRemainingDoseCount(item, null);
+        if (remaining === null) {
+          // Unknown dose count — vial is unlimited; keep record alive unchanged
+          result = item;
+          next.push(item);
+        } else if (remaining <= 1) {
+          // Last dose consumed — drop the row.
+          removed = true;
+        } else {
+          const total = getTotalDoseCount(item) || remaining;
+          result = {
+            ...item,
+            total_doses: total,
+            remaining_doses: remaining - 1,
+            dose_tracking: 'manual'
+          };
+          next.push(result);
+        }
+      }
+      return next;
+    });
 
-    const index = this.rows.findIndex((item) => item && item.id === targetId);
-    if (index < 0) {
-      return null;
+    if (removed && this.activeUseId === targetId) {
+      this.activeUseId = '';
+      this.render();
     }
-
-    const nextRows = [...this.rows];
-    const total = getTotalDoseCount(row) || remaining;
-    nextRows[index] = {
-      ...row,
-      total_doses: total,
-      remaining_doses: remaining - 1,
-      dose_tracking: 'manual'
-    };
-    await this.replaceRows(nextRows);
-    return nextRows[index];
+    return result;
   }
 
   get count() {
@@ -385,7 +408,7 @@ export function buildQueueRecord(data, rawBarcode) {
       normalizeDoseCount(
         data.remaining_doses,
         normalizeDoseCount(data.total_doses, null)
-      ) || 1
+      )
   }, rawBarcode);
 }
 
@@ -483,5 +506,11 @@ function formatInventoryStatus(row) {
 
 function csvEscape(value) {
   const text = value === undefined || value === null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection: Excel/Sheets evaluate cells
+  // starting with = + - @ even when quote-wrapped. Plain numbers (e.g. a
+  // negative expiry_days_remaining) are exempt so they stay numeric.
+  const guarded = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
+    ? `'${text}`
+    : text;
+  return `"${guarded.replace(/"/g, '""')}"`;
 }
