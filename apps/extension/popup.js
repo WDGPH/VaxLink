@@ -710,7 +710,13 @@ function buildAnalyticsCsv(data) {
 }
 
 function csvEscape(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const text = String(value ?? '');
+  // Neutralize spreadsheet formula injection (cells starting with = + - @);
+  // plain numbers are exempt so counters stay numeric in Excel.
+  const guarded = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
+    ? `'${text}`
+    : text;
+  return `"${guarded.replace(/"/g, '""')}"`;
 }
 
 async function getLocalAnalyticsStore() {
