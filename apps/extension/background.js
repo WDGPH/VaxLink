@@ -211,7 +211,16 @@ function buildAnalyticsId() {
 }
 
 function analyticsDayKey(value = Date.now()) {
-  return new Date(value).toISOString().slice(0, 10);
+  // Bucket by LOCAL calendar day: clinics run evenings, and UTC bucketing
+  // splits a single Ontario clinic day at 8pm EDT (and mis-scopes the
+  // "today" export filter, which uses this same key).
+  let d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    d = new Date();
+  }
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 function safeAnalyticsCount(value, fallback = 1) {
