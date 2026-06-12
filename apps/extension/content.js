@@ -1033,12 +1033,20 @@ function onHandsFreeKeydown(event) {
     // Many scanner profiles use Tab/Enter as separators between AIs, not only as suffix.
     // Treat them as GS markers and flush only after idle timeout.
     if (scannerBuffer) {
-      scannerLastAt = now;
-      scannerBuffer += String.fromCharCode(0x1d);
-      event.preventDefault();
-      event.stopPropagation();
-      scheduleScannerFlush();
-      return;
+      // Only swallow the key when the buffer was typed at scanner speed
+      // (>= SCAN_MIN_LENGTH chars, machine-fast). Nurses type short values
+      // and Tab/Enter within the 1.5s gap window — unconditionally eating
+      // their navigation key breaks Panorama form entry.
+      if (isLikelyScannerSequence()) {
+        scannerLastAt = now;
+        scannerBuffer += String.fromCharCode(0x1d);
+        event.preventDefault();
+        event.stopPropagation();
+        scheduleScannerFlush();
+        return;
+      }
+      // Manual typing: drop the stale buffer and let the key act normally.
+      resetScannerBuffer();
     }
 
     const activeScan = getActiveElementScanCandidate();
