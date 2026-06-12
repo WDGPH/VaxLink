@@ -18,9 +18,14 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       parity: 'none',
       flowControl: 'none'
     },
+    signals: {
+      dataTerminalReady: true,
+      requestToSend: true
+    },
     decoder: {
       encoding: 'ascii',
       delimiters: ['\r\n', '\n', '\r'],
+      idleFlushMs: 150,
       maxFrameLength: 512
     },
     setupNote: 'Use the DS8178 cradle in USB CDC / virtual COM mode, not HID keyboard emulation.'
@@ -39,9 +44,14 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       parity: 'none',
       flowControl: 'none'
     },
+    signals: {
+      dataTerminalReady: true,
+      requestToSend: true
+    },
     decoder: {
       encoding: 'ascii',
       delimiters: ['\r\n', '\n', '\r'],
+      idleFlushMs: 150,
       maxFrameLength: 512
     },
     setupNote: 'Use when the scanner exposes a browser-visible virtual COM port.'

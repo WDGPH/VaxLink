@@ -208,6 +208,11 @@ function routeScan(scan) {
       setStatus(els.routeStatus, `Scan routed to tab ${response.tabId}.`, 'success');
       return;
     }
+    if (response.queuedToWorkflow) {
+      const label = response.workflow === 'inventory' ? 'inventory queue' : 'multi-vaccine queue';
+      setStatus(els.routeStatus, `Scan saved to ${label} (${response.queueSizeAfter || 0}).`, 'success');
+      return;
+    }
     setStatus(els.routeStatus, `No chart tab accepted the scan. Saved to pending inbox (${response.pendingCount || 0}).`, 'warning');
   });
 }

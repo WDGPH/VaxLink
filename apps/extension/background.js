@@ -1,4 +1,6 @@
 const VAXLINK_BG_DEBUG = false;
+importScripts('shared/gs1-parser.js');
+
 function bgLog(...args) {
   if (VAXLINK_BG_DEBUG) console.log('[VaxLink]', ...args);
 }
@@ -45,7 +47,12 @@ const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let iconInitPromise = null;
+const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
+const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
+const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
+const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
 const PENDING_SCAN_INBOX_LIMIT = 25;
 const BADGE_COLOR = '#0891b2';
@@ -273,6 +280,182 @@ function normalizeScanEvent(scan) {
   };
 }
 
+function normalizeWorkflowMode(stored) {
+  const direct = stored && stored[WORKFLOW_MODE_KEY];
+  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
+    return direct;
+  }
+
+  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
+  if (legacyPopup === 'inventory') return 'inventory';
+  if (legacyPopup === 'inject') return 'single';
+
+  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
+  if (legacyRemote === 'tray') return 'multiple';
+  if (legacyRemote === 'autofill') return 'single';
+
+  if (stored && stored[LEGACY_HANDS_FREE_KEY]) return 'single';
+  return 'single';
+}
+
+function getQueueStorageKeyForWorkflow(mode) {
+  if (mode === 'multiple') return MULTIPLE_INJECT_QUEUE_KEY;
+  if (mode === 'inventory') return INVENTORY_BATCH_KEY;
+  return '';
+}
+
+function parseDateToLocal(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+
+  const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) return new Date(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2]));
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
+function getExpiryStatus(value) {
+  const expiry = parseDateToLocal(value);
+  if (!expiry) {
+    return { flag: 'unknown', daysRemaining: null };
+  }
+
+  const today = new Date();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / (24 * 60 * 60 * 1000));
+  if (daysRemaining < 0) return { flag: 'expired', daysRemaining };
+  if (daysRemaining <= 30) return { flag: 'expiring_soon', daysRemaining };
+  return { flag: 'valid', daysRemaining };
+}
+
+function getPositiveInt(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const parsed = Number.parseInt(String(value).trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
+  if (!parsed || !vaccineInfo) return;
+  parsed.tradename = vaccineInfo.tradename;
+  parsed.generic_name = vaccineInfo.generic_name;
+  parsed.disease = vaccineInfo.disease;
+  parsed.antigen = vaccineInfo.antigen;
+  parsed.manufacturer = vaccineInfo.manufacturer;
+  parsed.nvc_lot_expiry = vaccineInfo.lot_expiry;
+  parsed.din = vaccineInfo.din;
+  parsed.route = vaccineInfo.route;
+  parsed.strength = vaccineInfo.strength;
+  parsed.dose_value = vaccineInfo.dose_value;
+  parsed.dose_unit = vaccineInfo.dose_unit;
+  parsed.drug_code = vaccineInfo.din;
+  parsed.nvc_override = vaccineInfo.nvc_override || null;
+  parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
+
+  if (!parsed.lot && vaccineInfo.lot_number) {
+    parsed.lot = vaccineInfo.lot_number;
+  }
+  if (!parsed.expiry && vaccineInfo.lot_expiry) {
+    parsed.expiry = vaccineInfo.lot_expiry || parsed.expiry;
+  }
+}
+
+function buildQueueRecordFromParsed(data, rawBarcode) {
+  const totalDoses = getPositiveInt(data.total_doses, null);
+  const fallbackDose = getPositiveInt(totalDoses, null);
+  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+  const expiryStatus = getExpiryStatus(inventoryExpiry);
+  const expirySource = data.expiry
+    ? 'barcode'
+    : (data.nvc_lot_expiry ? 'nvc' : (data.expiry_source || 'none'));
+
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    scanned_at: data.scanned_at || new Date().toISOString(),
+    raw_barcode: rawBarcode || '',
+    name: data.name || data.generic_name || data.tradename || data.din || '',
+    tradename: data.tradename || '',
+    generic_name: data.generic_name || '',
+    disease: data.disease || '',
+    antigen: data.antigen || '',
+    manufacturer: data.manufacturer || '',
+    gtin: data.gtin || '',
+    lot: data.lot || '',
+    serial: data.serial || '',
+    barcode_expiry: data.expiry || '',
+    inventory_expiry: inventoryExpiry,
+    nvc_lot_expiry: data.nvc_lot_expiry || '',
+    expiry_flag: expiryStatus.flag || '',
+    expiry_days_remaining: expiryStatus.daysRemaining ?? '',
+    expiry_source: expirySource,
+    route: data.route || '',
+    strength: data.strength || '',
+    dose_value: data.dose_value || '',
+    dose_unit: data.dose_unit || '',
+    total_doses: totalDoses,
+    remaining_doses: getPositiveInt(data.remaining_doses, fallbackDose),
+    dose_tracking: data.dose_tracking || 'manual',
+    din: data.din || '',
+    drug_code: data.drug_code || data.din || '',
+    lookup_error: data.lookup_error || ''
+  };
+}
+
+async function saveScannerScanToWorkflowQueue(scan, mode) {
+  const storageKey = getQueueStorageKeyForWorkflow(mode);
+  if (!storageKey) return null;
+
+  const parser = globalThis.VaxLinkGS1Parser;
+  if (!parser || typeof parser.parseGS1Barcode !== 'function') {
+    throw new Error('VaxLink GS1 parser is not loaded');
+  }
+
+  const parsed = parser.parseGS1Barcode(scan.rawText);
+  parsed.scanned_at = scan.capturedAt || new Date().toISOString();
+
+  await Promise.resolve(bundleLoadPromise || loadNVCBundle());
+  if (parsed.lot) {
+    const vaccineInfo = lookupVaccineLot(parsed.lot, { gtin: parsed.gtin });
+    if (vaccineInfo) {
+      mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
+    } else {
+      parsed.lookup_error = 'Vaccine not found in NVC database';
+    }
+  }
+
+  const record = await appendQueueRecord(storageKey, buildQueueRecordFromParsed(parsed, scan.rawText));
+  const expiryFlag = record.expiry_flag || getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+  await logAnalyticsEvent('scan_captured', {
+    workflow: mode,
+    source: scan.source || 'web-serial',
+    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || record.gtin || '',
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  });
+  await logAnalyticsEvent('queue_saved', {
+    workflow: mode,
+    queue: mode === 'inventory' ? 'inventory' : 'multiple',
+    source: scan.source || 'web-serial',
+    count: 1,
+    queueSizeAfter: record.queueSizeAfter || 0,
+    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  });
+
+  return {
+    queuedToWorkflow: true,
+    workflow: mode,
+    storageKey,
+    record
+  };
+}
+
 async function enqueuePendingScan(scan) {
   const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
   const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
@@ -310,6 +493,13 @@ async function drainPendingScansToTab(tabId) {
 
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = normalizeScanEvent(rawScan);
+  const storedWorkflow = await getStorage([
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    LEGACY_REMOTE_MODE_KEY,
+    LEGACY_HANDS_FREE_KEY
+  ]);
+  const workflowMode = normalizeWorkflowMode(storedWorkflow);
   const tried = new Set();
   const activeTabs = await queryTabs({ active: true, currentWindow: true });
   const allTabs = await queryTabs({});
@@ -331,11 +521,30 @@ async function routeScanToActiveSupportedTab(rawScan) {
     }
   }
 
+  const workflowQueueResult = await saveScannerScanToWorkflowQueue(scan, workflowMode).catch((error) => ({
+    queuedToWorkflow: false,
+    workflow: workflowMode,
+    error: error?.message || 'Workflow queue save failed'
+  }));
+  if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
+    return {
+      routed: false,
+      queued: true,
+      queuedToWorkflow: true,
+      workflow: workflowQueueResult.workflow,
+      storageKey: workflowQueueResult.storageKey,
+      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
+    };
+  }
+
   const pendingCount = await enqueuePendingScan(scan);
   return {
     routed: false,
     queued: true,
-    pendingCount
+    queuedToWorkflow: false,
+    workflow: workflowMode,
+    pendingCount,
+    queueError: workflowQueueResult?.error || ''
   };
 }
 

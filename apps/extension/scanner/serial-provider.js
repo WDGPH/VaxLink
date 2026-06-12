@@ -29,10 +29,50 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
   const onStatus = typeof handlers.onStatus === 'function' ? handlers.onStatus : () => {};
   const onError = typeof handlers.onError === 'function' ? handlers.onError : () => {};
   const decoder = createLineFrameDecoder(profile.decoder || {});
+  const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;
   let activeReader = null;
+  let idleFlushTimer = null;
+
+  const clearIdleFlush = () => {
+    if (idleFlushTimer) {
+      clearTimeout(idleFlushTimer);
+      idleFlushTimer = null;
+    }
+  };
+
+  const emitFrames = (frames) => {
+    for (const frame of frames) {
+      const scan = makeScanEvent({
+        rawText: frame.text,
+        source: 'web-serial',
+        rawBytesHex: frame.rawBytesHex,
+        device: {
+          profileId: profile.id,
+          label: profile.label,
+          usbInfo: port.getInfo()
+        }
+      });
+      if (typeof onScan === 'function') {
+        onScan(scan);
+      }
+    }
+  };
+
+  const scheduleIdleFlush = () => {
+    clearIdleFlush();
+    if (!idleFlushMs || !decoder.hasBufferedData()) return;
+    idleFlushTimer = setTimeout(() => {
+      idleFlushTimer = null;
+      if (!keepReading || !decoder.hasBufferedData()) return;
+      emitFrames(decoder.flush());
+    }, idleFlushMs);
+  };
 
   await port.open(profile.serialOptions || { baudRate: 9600 });
+  if (profile.signals && typeof port.setSignals === 'function') {
+    await port.setSignals(profile.signals).catch((error) => onError(error));
+  }
   onStatus({ state: 'open', profile, portInfo: port.getInfo() });
 
   const readLoop = (async () => {
@@ -43,21 +83,8 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
           const { value, done } = await activeReader.read();
           if (done) break;
           const frames = decoder.push(value);
-          for (const frame of frames) {
-            const scan = makeScanEvent({
-              rawText: frame.text,
-              source: 'web-serial',
-              rawBytesHex: frame.rawBytesHex,
-              device: {
-                profileId: profile.id,
-                label: profile.label,
-                usbInfo: port.getInfo()
-              }
-            });
-            if (typeof onScan === 'function') {
-              onScan(scan);
-            }
-          }
+          emitFrames(frames);
+          scheduleIdleFlush();
         }
       } catch (error) {
         if (keepReading) {
@@ -78,6 +105,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     },
     async close() {
       keepReading = false;
+      clearIdleFlush();
       decoder.reset();
       if (activeReader) {
         await activeReader.cancel().catch(() => undefined);

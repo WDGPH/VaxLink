@@ -81,6 +81,10 @@ export function createLineFrameDecoder(options = {}) {
       return frame ? [frame] : [];
     },
 
+    hasBufferedData() {
+      return textBuffer.length > 0 || byteBuffer.length > 0;
+    },
+
     reset() {
       textBuffer = '';
       byteBuffer = [];
