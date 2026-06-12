@@ -107,3 +107,29 @@ test('consumeById decrements doses without losing concurrent appends', async () 
   const stored = store.get(QUEUE_KEY).map((r) => r.id);
   assert.deepEqual(stored, ['vial', 'scan-e']);
 });
+
+test('consumeById decrements from the FRESH remaining count, not the stale copy', async () => {
+  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 })]);
+  const manager = makeManager();
+  await manager.load();
+
+  // Another context (queue drain / second tab) already consumed a dose.
+  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 9 })]);
+
+  const consumed = await manager.consumeById('vial');
+  assert.equal(consumed.remaining_doses, 8, 'must decrement the stored count, not resurrect the stale one');
+  assert.equal(store.get(QUEUE_KEY)[0].remaining_doses, 8);
+});
+
+test('consumeById removes the row when the FRESH count says last dose', async () => {
+  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 5 })]);
+  const manager = makeManager();
+  await manager.load();
+
+  // Concurrent consumption drained it to the last dose.
+  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 1 })]);
+
+  const consumed = await manager.consumeById('vial');
+  assert.equal(consumed, null, 'last dose consumed — row must be removed');
+  assert.deepEqual(store.get(QUEUE_KEY), []);
+});

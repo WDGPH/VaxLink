@@ -216,35 +216,49 @@ export class ScanQueueManager {
     if (!targetId) {
       return null;
     }
-
-    const row = this.getById(targetId);
-    if (!row) {
+    if (!this.getById(targetId)) {
       return null;
     }
 
-    const remaining = getRemainingDoseCount(row, null);
-    if (remaining === null) {
-      // Unknown dose count — vial is unlimited; keep record alive unchanged
-      return row;
-    }
-    if (remaining <= 1) {
-      await this.remove(targetId);
-      return null;
-    }
+    // Decide remove-vs-decrement from the FRESH stored row inside the mutator:
+    // another context (queue drain, second tab) may have decremented this vial
+    // since our last sync, and a stale base would resurrect a consumed dose.
+    let result = null;
+    let removed = false;
+    await this.mutateRows((rows) => {
+      const next = [];
+      for (const item of rows) {
+        if (!item || item.id !== targetId) {
+          next.push(item);
+          continue;
+        }
+        const remaining = getRemainingDoseCount(item, null);
+        if (remaining === null) {
+          // Unknown dose count — vial is unlimited; keep record alive unchanged
+          result = item;
+          next.push(item);
+        } else if (remaining <= 1) {
+          // Last dose consumed — drop the row.
+          removed = true;
+        } else {
+          const total = getTotalDoseCount(item) || remaining;
+          result = {
+            ...item,
+            total_doses: total,
+            remaining_doses: remaining - 1,
+            dose_tracking: 'manual'
+          };
+          next.push(result);
+        }
+      }
+      return next;
+    });
 
-    let updated = null;
-    await this.mutateRows((rows) => rows.map((item) => {
-      if (!item || item.id !== targetId) return item;
-      const total = getTotalDoseCount(item) || remaining;
-      updated = {
-        ...item,
-        total_doses: total,
-        remaining_doses: remaining - 1,
-        dose_tracking: 'manual'
-      };
-      return updated;
-    }));
-    return updated;
+    if (removed && this.activeUseId === targetId) {
+      this.activeUseId = '';
+      this.render();
+    }
+    return result;
   }
 
   get count() {
