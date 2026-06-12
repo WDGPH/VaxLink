@@ -2,5 +2,12 @@
 apps/web/nvc-bundle.json
 apps/extension/nvc_bundle.json
 tmp/
-apps/web-next/node_modules/                                                                                                                                         
-apps/web-next/.next/ 
+apps/web-next/node_modules/
+apps/web-next/.next/
+
+# Packaged extension zips (built by scripts/package-extension.sh)
+dist/
+
+# Claude Code local state (agent memory, local settings)
+**/.claude/agent-memory/
+.claude/settings.local.json

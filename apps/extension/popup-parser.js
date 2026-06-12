@@ -76,14 +76,21 @@ export function parseGS1Barcode(barcode) {
   let scan = String(barcode || '')
     .trim()
     .replace(/[\t\r\n]/g, GS)
-    .replace(/^\]C1/i, '')
+    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
+    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Scanners with
+    // AIM IDs enabled prefix every read; lot-only barcodes have no "01" to
+    // re-anchor on, so the prefix must be stripped generically.
+    .replace(/^\][A-Za-z]\d/, '')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/[^\x20-\x7E\x1D]/g, '');
 
   if (!scan.startsWith('01')) {
+    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
+    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
+    // "10Y016312") and truncate the payload to garbage.
     const first01 = scan.indexOf('01');
-    if (first01 > 0) {
+    if (first01 > 0 && /^\d{14}/.test(scan.substring(first01 + 2))) {
       scan = scan.substring(first01);
     }
   }
@@ -119,7 +126,7 @@ export function parseGS1Barcode(barcode) {
       if (lotEnd === -1) {
         lotEnd = scan.length;
       }
-      data.lot = scan.substring(idx, lotEnd);
+      data.lot = scan.substring(idx, lotEnd).replace(/\x1d/g, '');
       idx = lotEnd;
     } else if (currentAI === '21') {
       idx += 2;
@@ -127,7 +134,7 @@ export function parseGS1Barcode(barcode) {
       if (serialEnd === -1) {
         serialEnd = scan.length;
       }
-      data.serial = scan.substring(idx, serialEnd);
+      data.serial = scan.substring(idx, serialEnd).replace(/\x1d/g, '');
       idx = serialEnd;
     } else {
       const nextKnownAI = findNextAI(scan, idx, GS, null);
@@ -211,7 +218,13 @@ export function formatDate(yymmdd) {
   }
   const yy = yymmdd.substring(0, 2);
   const mm = yymmdd.substring(2, 4);
-  const dd = yymmdd.substring(4, 6);
+  let dd = yymmdd.substring(4, 6);
+  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
+  // downstream date math doesn't roll back into the previous month.
+  if (dd === '00') {
+    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
+    dd = String(lastDay).padStart(2, '0');
+  }
   return `${mm}/${dd}/20${yy}`;
 }
 

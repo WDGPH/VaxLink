@@ -16,9 +16,21 @@ const NVC_FETCH_HEADERS = {
   'x-app-desc': 'PHAC NVC Client'
 };
 const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
-  // RECOMBIVAX HB lot Y016312 is ambiguous in NVC lot->tradename links.
-  // This GTIN is treated as regular/adult RECOMBIVAX HB in pilot workflows.
+  // RECOMBIVAX HB adult lots scanned with this GTIN are ambiguous in NVC.
+  // Force adult tradename code (6951000087100) so the GTIN path is always reliable.
   '00067055046339': '6951000087100'
+});
+
+// Lot numbers known to be mislinked in the NVC bundle: the NVC associates these
+// adult RECOMBIVAX HB lots with the pediatric tradename. The lot override fires
+// when no GTIN is present in the barcode (the GTIN_TRADENAME_CODE_OVERRIDES path
+// only activates when AI(01) is scanned). Both mechanisms resolve to the same
+// adult tradename code; having both ensures the override works regardless of
+// barcode format. Add new lots here as they are discovered.
+const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
+  // RECOMBIVAX HB adult — NVC incorrectly links to pediatric tradename
+  'Y016312': '6951000087100',
+  'Y020519': '6951000087100'
 });
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',
@@ -126,6 +138,39 @@ function setStorage(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
 }
 
+// A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
+// exempt: repeated identical scans there are legitimate stock counting.
+//
+// The window must stay short: vaccine barcodes carry no per-unit serial, so two
+// patients vaccinated back-to-back from the same lot scan as identical
+// barcodes. 3s catches scanner double-fires (content.js additionally suppresses
+// identical scans under 1.5s) without swallowing a deliberate next-patient scan.
+const DUPLICATE_SCAN_WINDOW_MS = 3000;
+
+function scanIdentityKey(record) {
+  if (!record || typeof record !== 'object') return '';
+  const raw = String(record.raw_barcode || '').trim();
+  if (raw) return `raw:${raw}`;
+  const gtin = String(record.gtin || '').trim();
+  const lot = String(record.lot || '').trim().toUpperCase();
+  const serial = String(record.serial || '').trim();
+  if (!gtin && !lot) return '';
+  return `ids:${gtin}|${lot}|${serial}`;
+}
+
+function findRecentDuplicateQueueRow(rows, record, nowMs) {
+  const key = scanIdentityKey(record);
+  if (!key) return null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (scanIdentityKey(row) !== key) continue;
+    const scannedAt = Date.parse(row && row.scanned_at);
+    if (!Number.isFinite(scannedAt)) continue;
+    if (Math.abs(nowMs - scannedAt) <= DUPLICATE_SCAN_WINDOW_MS) return row;
+  }
+  return null;
+}
+
 async function appendQueueRecord(storageKey, record) {
   if (!storageKey) {
     throw new Error('Missing queue storage key');
@@ -135,6 +180,21 @@ async function appendQueueRecord(storageKey, record) {
   }
   const stored = await getStorage([storageKey]);
   const rows = stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+
+  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
+    const recordScannedAt = Date.parse(record.scanned_at);
+    const nowMs = Number.isFinite(recordScannedAt) ? recordScannedAt : Date.now();
+    const duplicate = findRecentDuplicateQueueRow(rows, record, nowMs);
+    if (duplicate) {
+      return {
+        ...record,
+        duplicate_ignored: true,
+        duplicate_of: duplicate.id || '',
+        queueSizeAfter: rows.length
+      };
+    }
+  }
+
   rows.push(record);
   await setStorage({ [storageKey]: rows });
   return {
@@ -151,7 +211,16 @@ function buildAnalyticsId() {
 }
 
 function analyticsDayKey(value = Date.now()) {
-  return new Date(value).toISOString().slice(0, 10);
+  // Bucket by LOCAL calendar day: clinics run evenings, and UTC bucketing
+  // splits a single Ontario clinic day at 8pm EDT (and mis-scopes the
+  // "today" export filter, which uses this same key).
+  let d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    d = new Date();
+  }
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 function safeAnalyticsCount(value, fallback = 1) {
@@ -605,12 +674,11 @@ function loadNVCBundle(forceReload = false) {
         applyBundleData(stored[STORAGE_KEYS.bundle], stored[STORAGE_KEYS.sourceUrl] || 'storage');
         return true;
       }
-      return fetch(chrome.runtime.getURL('nvc_bundle.json'))
-        .then(response => response.json())
-        .then(data => {
-          applyBundleData(data, 'packaged');
-          return true;
-        });
+      // No packaged bundle is shipped (raw NVC bundles are never committed);
+      // first-run lookups stay unavailable until the remote sync in
+      // maybeAutoRefreshNVCBundle populates storage.
+      bgLog('No cached NVC bundle yet; waiting for remote sync');
+      return false;
     })
     .catch(error => {
       console.error('Failed to load NVC bundle:', error);
@@ -1175,6 +1243,12 @@ function resolveTradenameCodeOverrideByGtin(gtin) {
   return normalizeCodeKey(GTIN_TRADENAME_CODE_OVERRIDES[gtinKey] || '');
 }
 
+function resolveTradenameCodeOverrideByLot(lot) {
+  const lotKey = normalizeLotMapKey(lot);
+  if (!lotKey) return '';
+  return normalizeCodeKey(LOT_TRADENAME_CODE_OVERRIDES[lotKey] || '');
+}
+
 function normalizeNameKey(value) {
   return String(value || '')
     .toLowerCase()
@@ -1437,7 +1511,10 @@ function lookupVaccineLot(lotNumber, options = {}) {
     // Get tradename info
     const tradenameRefs = getLotTradenameReferences(concept);
     bgLog('Lot tradename references:', tradenameRefs);
+    // GTIN override takes priority; lot override fires when no GTIN in the barcode.
     const gtinOverrideCode = resolveTradenameCodeOverrideByGtin(options.gtin);
+    const lotOverrideCode = resolveTradenameCodeOverrideByLot(lotNumber);
+    const effectiveOverrideCode = gtinOverrideCode || lotOverrideCode;
     const byCodeCandidates = [];
     let resolvedTradename = null;
     for (const ref of tradenameRefs) {
@@ -1448,11 +1525,13 @@ function lookupVaccineLot(lotNumber, options = {}) {
       }
     }
 
-    if (gtinOverrideCode && byCodeCandidates.length > 0) {
-      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === gtinOverrideCode);
+    if (effectiveOverrideCode && byCodeCandidates.length > 0) {
+      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === effectiveOverrideCode);
       if (overrideMatch) {
         resolvedTradename = overrideMatch.info;
-        bgLog('Tradename resolved from GTIN override:', options.gtin, '->', overrideMatch.ref.code);
+        const overrideSource = gtinOverrideCode ? `GTIN ${options.gtin}` : `lot ${lotNumber}`;
+        bgLog('Tradename resolved from override (', overrideSource, '):', overrideMatch.ref.code);
+        vaccineInfo.nvc_override = gtinOverrideCode ? 'gtin' : 'lot';
       }
     }
 
