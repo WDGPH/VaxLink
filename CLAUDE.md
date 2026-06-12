@@ -125,7 +125,9 @@ The `next.config.js` auto-detects `VSCODE_PROXY_URI` and `NB_PREFIX` to set `bas
 
 ## CI
 
-GitHub Actions (`.github/workflows/deploy-web-next-pages.yml`) builds `apps/web-next` as a static export and deploys to GitHub Pages on every push to `main`.
+GitHub Actions:
+- `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `dev`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and both channel zips uploaded as workflow artifacts. Web Store uploads are manual: download the tested zip from the run.
+- `.github/workflows/deploy-web-next-pages.yml` — builds `apps/web-next` as a static export and deploys to GitHub Pages on every push to `main`.
 
 ## Important Constraints
 
