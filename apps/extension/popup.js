@@ -92,6 +92,14 @@ const MODE_CONFIG = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Channel badge: only the alpha channel shows it. The manifest name is the
+  // channel discriminator — "VaxLink Alpha" in git/unpacked and in alpha zips,
+  // "VaxLink" stamped by scripts/package-extension.sh for prod uploads.
+  const alphaBadge = document.getElementById('alphaBadge');
+  if (alphaBadge && /alpha/i.test(chrome.runtime.getManifest().name || '')) {
+    alphaBadge.hidden = false;
+  }
+
   autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
   addCurrentBtn = document.getElementById('addCurrentBtn');
