@@ -506,5 +506,11 @@ function formatInventoryStatus(row) {
 
 function csvEscape(value) {
   const text = value === undefined || value === null ? '' : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+  // Neutralize spreadsheet formula injection: Excel/Sheets evaluate cells
+  // starting with = + - @ even when quote-wrapped. Plain numbers (e.g. a
+  // negative expiry_days_remaining) are exempt so they stay numeric.
+  const guarded = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
+    ? `'${text}`
+    : text;
+  return `"${guarded.replace(/"/g, '""')}"`;
 }
