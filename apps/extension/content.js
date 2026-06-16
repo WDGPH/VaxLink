@@ -1945,48 +1945,16 @@ function fillPanoramaLotFromSelect(lotValue) {
   return false;
 }
 
-function getPanoramaFundedRadioValue() {
-  const radios = document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]');
-  for (const radio of radios) {
-    if (radio.checked) return radio.value || null;
-  }
-  return null;
-}
-
-function setPanoramaFundedRadio(value) {
-  if (!value) return 'not_found';
-  const targetRadio = document.querySelector(`input[id*="fundedRadio:selectOneRadio"][value="${value}"]`);
-  if (!targetRadio) return 'not_found';
-  if (targetRadio.checked) return 'already';
-
-  // Click the PrimeFaces box to trigger its AJAX submission.
-  const box = targetRadio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
-  if (box) box.click();
-  targetRadio.checked = true;
-  targetRadio.dispatchEvent(new Event('change', { bubbles: true }));
-
-  // Force the visual state for all buttons in the group in case the PrimeFaces
-  // widget does not update the CSS classes in response to a programmatic click.
-  const allRadios = document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]');
-  for (const r of allRadios) {
-    const b = r.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
-    if (!b) continue;
-    const active = r === targetRadio;
-    b.classList.toggle('ui-state-active', active);
-    const icon = b.querySelector('.ui-radiobutton-icon');
-    if (icon) {
-      icon.classList.toggle('ui-icon-bullet', active);
-      icon.classList.toggle('ui-icon-blank', !active);
-    }
-    r.checked = active;
-  }
-
-  vlog('VaxLink: funded radio set to', value);
-  return 'clicked';
-}
-
 function resetPanoramaFundedRadioToShowAll() {
-  return setPanoramaFundedRadio('SHOW_ALL');
+  const radio = document.querySelector('input[id*="fundedRadio:selectOneRadio"][value="SHOW_ALL"]');
+  if (!radio) return 'not_found';
+  if (radio.checked) return 'already';
+  const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
+  if (box) box.click();
+  radio.checked = true;
+  radio.dispatchEvent(new Event('change', { bubbles: true }));
+  vlog('VaxLink: funded radio reset to Show All');
+  return 'clicked';
 }
 
 function openPanoramaLotDropdown() {
@@ -2159,14 +2127,6 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
   let lastAttemptAt = 0;
   let stablePasses = 0;
   let fundedRadioEnsured = !!options.fundedRadioEnsured;
-  // After lot fills, probe each non-SHOW_ALL filter to find which one the lot belongs to.
-  // Nurse's prior filter is tried first; if the lot isn't there we fall through to others.
-  let filterProbePhase = hasLot ? 'init' : 'done'; // 'init'|'probing'|'done'
-  const prevFundedRadio = options.prevFundedRadio || null;
-  let filterProbeValues = [];
-  let filterProbeIdx = 0;
-  let filterProbeChecking = null; // filter we just switched to, waiting for AJAX
-  let matchingFilters = [];       // filters where the lot was found
 
   const stop = () => {
     if (stopped) return;
@@ -2227,66 +2187,9 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
-    // Once lot + date are filled, probe each non-SHOW_ALL filter to determine
-    // which funding group (PF/NPF) the selected lot belongs to, then leave the
-    // radio on that filter so the nurse sees the correct funding context.
-    if (filterProbePhase === 'init' && !busy && resolved && deferredResolved) {
-      const allFilters = Array.from(
-        document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]')
-      ).map(r => r.value).filter(v => v && v !== 'SHOW_ALL');
-      // Try the nurse's prior filter first; fall through to others if the lot isn't there.
-      if (prevFundedRadio && prevFundedRadio !== 'SHOW_ALL' && allFilters.includes(prevFundedRadio)) {
-        filterProbeValues = [prevFundedRadio, ...allFilters.filter(v => v !== prevFundedRadio)];
-      } else {
-        filterProbeValues = allFilters;
-      }
-      filterProbeIdx = 0;
-      if (filterProbeValues.length > 0) {
-        // Switch to the first candidate filter now; check the lot on the next pass
-        // after AJAX settles so we don't falsely match the SHOW_ALL state.
-        const val = filterProbeValues[filterProbeIdx++];
-        filterProbeChecking = val;
-        setPanoramaFundedRadio(val);
-        filterProbePhase = 'probing';
-        stablePasses = 0;
-        return;
-      } else {
-        filterProbePhase = 'done';
-      }
-    }
-
-    if (filterProbePhase === 'probing' && !busy) {
-      // Record whether the lot is visible under the filter we just switched to.
-      if (hasPanoramaLotOrTradeSelection(data) && filterProbeChecking) {
-        matchingFilters.push(filterProbeChecking);
-      }
-      if (filterProbeIdx < filterProbeValues.length) {
-        // More filters to check — switch to next and wait a full pass for AJAX.
-        const val = filterProbeValues[filterProbeIdx++];
-        filterProbeChecking = val;
-        setPanoramaFundedRadio(val);
-        stablePasses = 0;
-        return;
-      } else {
-        // All filters probed — finalize.
-        filterProbePhase = 'done';
-        if (matchingFilters.length === 0) {
-          // Lot not in any specific filter — leave at SHOW_ALL.
-          setPanoramaFundedRadio('SHOW_ALL');
-        } else if (matchingFilters.length === 1) {
-          setPanoramaFundedRadio(matchingFilters[0]);
-        } else {
-          // Lot is in multiple funding groups — pre-select nurse's preferred match
-          // (first in the list, their prior selection leads) and prompt them to confirm.
-          setPanoramaFundedRadio(matchingFilters[0]);
-          showFundingChoiceToast(matchingFilters);
-        }
-      }
-    }
-
     // Require a stable follow-up pass before stopping so we do not exit while
     // PrimeFaces is still applying dependent field refreshes.
-    if (!busy && resolved && deferredResolved && filterProbePhase === 'done') {
+    if (!busy && resolved && deferredResolved) {
       stablePasses += 1;
     } else {
       stablePasses = 0;
@@ -2358,11 +2261,10 @@ function isPanoramaImmunizationPage() {
 }
 
 function fillPanoramaImmunizationFields(data) {
-  // Switch to SHOW_ALL early so all lot options are visible before the agent
-  // AJAX settles. The scheduler will probe PF/NPF after the lot fills to leave
-  // the radio on the filter that matches the selected lot's funding group.
-  // Capture the nurse's prior selection first — it becomes the first probe candidate.
-  const prevFundedRadio = getPanoramaFundedRadioValue();
+  // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
+  // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
+  // expiry not selected after selecting the agent). The scheduler below only
+  // falls back to resetting it again if this attempt found no radio at all.
   const radioResult = resetPanoramaFundedRadioToShowAll();
 
   let agentCount = 0;
@@ -2378,8 +2280,7 @@ function fillPanoramaImmunizationFields(data) {
   // Panorama refreshes lot options and dependent controls asynchronously after selection.
   if (agentCount > 0 || data.lot || hasPanoramaDeferredDetailData(data) || getPanoramaTradeCandidates(data).length > 0) {
     schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350, {
-      fundedRadioEnsured: radioResult !== 'not_found',
-      prevFundedRadio
+      fundedRadioEnsured: radioResult !== 'not_found'
     });
   }
 
@@ -2921,26 +2822,6 @@ function ensureToastHost() {
       letter-spacing: 0.1px;
       color: #fef08a;
     }
-    .vl-toast-choice-row {
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-      flex-wrap: wrap;
-    }
-    .vl-toast-choice-btn {
-      flex: 1;
-      padding: 5px 10px;
-      border: 1px solid rgba(255,255,255,.7);
-      border-radius: 5px;
-      background: rgba(0,0,0,.25);
-      color: #fff;
-      font: inherit;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      text-align: center;
-    }
-    .vl-toast-choice-btn:hover { background: rgba(0,0,0,.45); }
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
@@ -3059,27 +2940,6 @@ function escapeToastHtml(text) {
   const d = document.createElement('span');
   d.textContent = text;
   return d.innerHTML;
-}
-
-function showFundingChoiceToast(matchingFilters) {
-  if (!isHandsFreeSupportedPage()) return;
-  ensureToastHost();
-  const filterLabels = { PF: 'Publicly Funded', NPF: 'Non-Publicly Funded' };
-  const buttonsHtml = matchingFilters
-    .map(f => `<button class="vl-toast-choice-btn" type="button" data-vl-filter="${escapeToastHtml(f)}">${escapeToastHtml(filterLabels[f] || f)}</button>`)
-    .join('');
-  toastWarningSlot.innerHTML = `<div class="vl-toast info persistent show">
-    <div class="vl-toast-title">Which funding type?</div>
-    <div class="vl-toast-detail">This lot appears in both PF and NPF — please choose:</div>
-    <div class="vl-toast-choice-row">${buttonsHtml}</div>
-  </div>`;
-  toastWarningSlot.querySelectorAll('.vl-toast-choice-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const val = btn.dataset.vlFilter;
-      if (val) setPanoramaFundedRadio(val);
-      dismissToast(toastWarningSlot);
-    });
-  });
 }
 
 // ---------------------------------------------------------------------------
