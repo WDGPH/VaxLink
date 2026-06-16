@@ -553,6 +553,20 @@ function getQueueRemainingDoses(row, fallback = 1) {
   return total !== null ? total : fallback;
 }
 
+function buildQueueRowsAfterRecordUse(rows, record, recordIndex) {
+  const nextRows = Array.isArray(rows) ? rows.slice() : [];
+  nextRows.splice(recordIndex, 1);
+
+  const remaining = getQueueRemainingDoses(record, null);
+  if (remaining === null) {
+    nextRows.splice(recordIndex, 0, record);
+  } else if (remaining > 1) {
+    nextRows.splice(recordIndex, 0, { ...record, remaining_doses: remaining - 1 });
+  }
+
+  return nextRows;
+}
+
 async function saveScanToQueue(data, rawBarcode, storageKey) {
   if (!storageKey) {
     throw new Error('No storage key configured for queued scan mode');
@@ -1603,10 +1617,10 @@ function isShortAgentCandidate(value) {
   return compact.length > 0 && compact.length <= 3;
 }
 
-function fieldFilledTextMatchesCandidate(field, candidate) {
+function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
-  const filledRaw = getFieldFilledText(field);
+  const filledRaw = String(filledRawValue || '').trim();
   const filledNorm = normalizeForMatch(filledRaw);
   if (!filledNorm) return false;
   if (filledNorm === candidateNorm) return true;
@@ -1621,10 +1635,11 @@ function fieldFilledTextMatchesCandidate(field, candidate) {
   return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
 }
 
-function isAgentCandidateAccepted(candidate, field) {
+function isAgentTextAccepted(candidate, filledRawValue) {
   const candidateNorm = normalizeForMatch(candidate);
-  const filledNorm = normalizeForMatch(getFieldFilledText(field));
-  if (fieldFilledTextMatchesCandidate(field, candidate)) return true;
+  const filledRaw = String(filledRawValue || '').trim();
+  const filledNorm = normalizeForMatch(filledRaw);
+  if (filledAgentTextMatchesCandidate(filledRaw, candidate)) return true;
 
   if (isShortAgentCandidate(candidate)) {
     const token = candidateNorm.replace(/[^a-z0-9]/g, '');
@@ -1640,6 +1655,14 @@ function isAgentCandidateAccepted(candidate, field) {
 
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
   return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+}
+
+function fieldFilledTextMatchesCandidate(field, candidate) {
+  return filledAgentTextMatchesCandidate(getFieldFilledText(field), candidate);
+}
+
+function isAgentCandidateAccepted(candidate, field) {
+  return isAgentTextAccepted(candidate, getFieldFilledText(field));
 }
 
 function fillPanoramaAgentField(selectors, candidate) {
@@ -1770,6 +1793,18 @@ function getPanoramaAgentSelectors() {
   ];
 }
 
+function getPanoramaCurrentAgentSelectionText() {
+  const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
+  for (const field of fields) {
+    const raw = String(getFieldFilledText(field) || '').trim();
+    const norm = normalizeForMatch(raw);
+    if (norm && norm !== 'select' && norm !== '--') {
+      return raw;
+    }
+  }
+  return '';
+}
+
 function hasPanoramaAgentSelection(data) {
   const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
   if (!fields.length) return false;
@@ -1780,6 +1815,19 @@ function hasPanoramaAgentSelection(data) {
   }
 
   return fields.some((field) => candidates.some((candidate) => isAgentCandidateAccepted(candidate, field)));
+}
+
+function queueRecordMatchesPanoramaAgentText(record, agentText) {
+  const payload = buildAutofillPayloadFromQueueRecord(record);
+  if (!payload) return false;
+  const candidates = getPanoramaAgentCandidates(payload);
+  return candidates.some((candidate) => isAgentTextAccepted(candidate, agentText));
+}
+
+function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
+  const raw = String(agentText || '').trim();
+  if (!raw || !Array.isArray(rows) || !rows.length) return -1;
+  return rows.findIndex((row) => queueRecordMatchesPanoramaAgentText(row, raw));
 }
 
 function tryFillPanoramaAgent(data) {
@@ -2870,10 +2918,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  if (data._manualSelectionKept) {
+  if (data._stepMatchMissing) {
     showRoutineToast(`<div class="vl-toast info show">
-      <div class="vl-toast-title">Kept your selection</div>
-      <div class="vl-toast-detail">The agent on screen differs from the next queued scan — VaxLink did not change it. Remove the queued item if it is no longer needed.</div>
+      <div class="vl-toast-title">No queued match for this agent</div>
+      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the queue. VaxLink left the queue unchanged.</div>
     </div>`, durationMs + 2000);
     return;
   }
@@ -3570,60 +3618,49 @@ async function clearHudQueue() {
   updateHudState();
 }
 
-// Guards the read-shift-write sequence below: tryAutoDrain, the multi-step
+// Guards the read-match-write sequence below: tryAutoDrain, the multi-step
 // observer, and the HUD apply button can all fire close together, and without
-// this flag two callers would shift the same queue head (double-fill) or
+// this flag two callers could consume the same queued record (double-fill) or
 // clobber each other's setLocalStorage (dropped record).
 let applyQueueInFlight = false;
 
-async function applyNextQueueItem() {
+async function applyNextQueueItem(options = {}) {
   if (applyQueueInFlight) return;
   applyQueueInFlight = true;
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
+    const matchCurrentAgent = options.matchCurrentAgent === true;
+    const suppressQueueEmptyToast = options.suppressQueueEmptyToast === true;
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
     const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
       ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
     if (!rows.length) {
-      showVaxlinkToast({ _queueEmpty: true });
+      if (!suppressQueueEmptyToast) {
+        showVaxlinkToast({ _queueEmpty: true });
+      }
       updateHudState();
-      return;
+      return 'queue_empty';
     }
 
-    // Issue #26: if an agent is already selected on this form (carried over
-    // from the multi-grid or chosen manually) and it does not match the queue
-    // head, the nurse picked a different vaccine for this entry. Filling now
-    // would silently revert her change — keep the form and the queue intact.
-    // isImmunizationFormEmpty (not hasPanoramaAgentSelection(null)) because the
-    // latter counts the "Select"/"--" placeholder option as a selection, which
-    // would block draining into a genuinely empty form.
-    const headPayload = buildAutofillPayloadFromQueueRecord(rows[0]);
-    if (
-      headPayload &&
-      !isImmunizationFormEmpty() &&
-      !hasPanoramaAgentSelection(headPayload)
-    ) {
-      vlog('auto-fill skipped: existing agent selection differs from queue head');
-      showVaxlinkToast({ _manualSelectionKept: true });
-      updateHudState();
-      return;
+    const currentAgentText = getPanoramaCurrentAgentSelectionText();
+    const shouldRespectPanoramaAgent = !!currentAgentText && isPanoramaImmunizationPage();
+
+    let recordIndex = 0;
+    if (matchCurrentAgent || shouldRespectPanoramaAgent) {
+      recordIndex = findMatchingQueueRecordIndexForPanoramaAgent(rows, currentAgentText);
+      if (recordIndex < 0) {
+        vlog('auto-fill skipped: no queued vaccine matches current Panorama agent', currentAgentText);
+        showVaxlinkToast({ _stepMatchMissing: true });
+        updateHudState();
+        return 'no_match';
+      }
     }
 
-    const record = rows.shift();
-    // Re-queue the record if it still has doses remaining.
-    // null remaining_doses means unknown/unlimited (multi-dose vial with no count
-    // tracked) — put it back at the head so it can be used again.
-    const remaining = getQueueRemainingDoses(record, null);
-    if (remaining === null) {
-      rows.unshift(record);
-    } else if (remaining > 1) {
-      rows.unshift({ ...record, remaining_doses: remaining - 1 });
-    }
-    // else remaining <= 1: record is consumed, don't re-queue
-    await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
-
+    const record = rows[recordIndex];
     const data = buildAutofillPayloadFromQueueRecord(record);
-    if (!data) return;
+    if (!data) return 'no_data';
+
+    const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
 
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
@@ -3634,6 +3671,9 @@ async function applyNextQueueItem() {
     });
 
     const success = autoFillTelus(data);
+    if (success) {
+      await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: nextRows });
+    }
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'hud',
@@ -3647,16 +3687,20 @@ async function applyNextQueueItem() {
       queue: 'multiple',
       source: 'hud',
       count: 1,
-      queueSizeAfter: rows.length
+      queueSizeAfter: nextRows.length
     });
 
     if (success) {
       showVaxlinkToast(data);
+      updateHudState();
+      return 'success';
     }
     updateHudState();
+    return 'fill_failed';
   } catch (error) {
     console.warn('VaxLink HUD apply error:', error);
     if (hudApplyBtn) hudApplyBtn.disabled = false;
+    return 'error';
   } finally {
     applyQueueInFlight = false;
   }
@@ -3711,6 +3755,7 @@ let multiGridFillPending = false;
 let multiStepObserver = null;
 let lastObservedPanoramaStepKey = '';
 let lastAutoFilledPanoramaStepKey = '';
+let lastSkippedPanoramaAgentKey = '';
 let multiStepAutoFillPending = false;
 
 function isPanoramaMultipleImmunizationGridPage() {
@@ -3924,7 +3969,9 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
   if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
   const stepKey = getPanoramaMultiStepIndicatorKey();
-  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey) return;
+  const currentAgentKey = normalizeForMatch(getPanoramaCurrentAgentSelectionText());
+  const attemptKey = currentAgentKey ? `${stepKey}|${currentAgentKey}` : stepKey;
+  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey || attemptKey === lastSkippedPanoramaAgentKey) return;
   if ((Date.now() - lastVaxlinkFillAt) < 1200) return;
 
   multiStepAutoFillPending = true;
@@ -3935,8 +3982,16 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
     if (!rows.length) return;
     if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
-    await applyNextQueueItem();
-    lastAutoFilledPanoramaStepKey = stepKey;
+    const result = await applyNextQueueItem({
+      matchCurrentAgent: true,
+      suppressQueueEmptyToast: true
+    });
+    if (result === 'success') {
+      lastAutoFilledPanoramaStepKey = stepKey;
+      lastSkippedPanoramaAgentKey = '';
+    } else if (result === 'no_match') {
+      lastSkippedPanoramaAgentKey = attemptKey;
+    }
   } catch (error) {
     console.warn('VaxLink multi-step autofill error:', error);
   } finally {
