@@ -231,7 +231,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         expiryFlag: parsedData.expiry_flag || getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry).flag
       });
       try {
-        await sendAutoFillToActiveTab(parsedData);
+        const response = await sendAutoFillToActiveTab(parsedData);
+        if (response && response.pending) {
+          logAnalyticsEvent('autofill_result', {
+            workflow: activeMode,
+            source: 'popup_button',
+            success: false,
+            pending: true,
+            vaccineLabel: parsedData.tradename || parsedData.generic_name || parsedData.name || parsedData.lot || '',
+            manufacturer: parsedData.manufacturer || '',
+            expiryFlag: parsedData.expiry_flag || getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry).flag
+          });
+          writeOutput('Choose Publicly Funded or Non-Publicly Funded on the chart to continue.', 'info');
+          return;
+        }
         logAnalyticsEvent('autofill_result', {
           workflow: activeMode,
           source: 'popup_button',
@@ -1269,7 +1282,7 @@ async function sendAutoFillToActiveTab(data, options = {}) {
       }
 
       sendAutoFillMessage(tabs[0].id, payload, (response) => {
-        if (response && response.success) {
+        if (response && (response.success || response.pending)) {
           resolve(response);
           return;
         }
@@ -1483,6 +1496,13 @@ async function handleUseMultipleInjectRecord(record) {
     writeOutput('Saved vaccine could not be loaded.', 'error');
     return;
   }
+  data._vaxlinkQueueContext = {
+    storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+    recordId: record.id,
+    workflow: 'multiple',
+    queue: 'multiple',
+    source: 'queue'
+  };
 
   parsedData = data;
   writeOutput(
@@ -1498,7 +1518,23 @@ async function handleUseMultipleInjectRecord(record) {
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
-    await sendAutoFillToActiveTab(data);
+    const response = await sendAutoFillToActiveTab(data);
+    if (response && response.pending) {
+      logAnalyticsEvent('autofill_result', {
+        workflow: 'multiple',
+        source: 'queue',
+        success: false,
+        pending: true,
+        vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+      });
+      writeOutput(
+        'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after the lot is resolved.',
+        'info'
+      );
+      return;
+    }
     const remainingDoses = getQueueRemainingDoses(record, null);
     let nextRecord;
     if (remainingDoses === null) {
@@ -1674,6 +1710,8 @@ function handleAutoFillResponse(response) {
 
   if (response && response.success) {
     writeOutput('Chart auto-filled', 'success');
+  } else if (response && response.pending) {
+    writeOutput('Choose Publicly Funded or Non-Publicly Funded on the chart to continue.', 'info');
   } else if (response && response.error) {
     writeOutput(response.error, 'error');
   } else {
