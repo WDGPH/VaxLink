@@ -2860,16 +2860,6 @@ function ensureToastHost() {
     .vl-toast-dismiss:hover { background: rgba(0,0,0,.4); }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
-    .vl-toast-override {
-      margin-top: 7px;
-      padding: 5px 8px;
-      border-radius: 5px;
-      background: rgba(0,0,0,.25);
-      font-size: 11.5px;
-      font-weight: 600;
-      letter-spacing: 0.1px;
-      color: #fef08a;
-    }
   `;
   shadow.appendChild(style);
   toastRoot = document.createElement('div');
@@ -2950,9 +2940,6 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const isExpired = flag === 'expired';
-  const overrideNote = data.nvc_override
-    ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
-    : '';
   const queuedNote = data._queuedCount
     ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
     : '';
@@ -2962,7 +2949,6 @@ function showVaxlinkToast(data, durationMs = 4000) {
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${queuedNote}
-    ${overrideNote}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
 
@@ -2975,7 +2961,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
     return;
   }
-  showRoutineToast(toastHtml, data.nvc_override ? durationMs + 4000 : durationMs);
+  showRoutineToast(toastHtml, durationMs);
 }
 
 function dismissToast(slot) {
