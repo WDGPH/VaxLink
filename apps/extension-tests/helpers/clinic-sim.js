@@ -120,6 +120,7 @@ const BACKGROUND_PATH = path.resolve(
   fileURLToPath(import.meta.url),
   '../../../extension/background.js'
 );
+const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
 export function createBackgroundHarness(bundle) {
   const storageData = new Map();
@@ -208,6 +209,12 @@ export function createBackgroundHarness(bundle) {
   };
 
   vm.createContext(sandbox);
+  sandbox.importScripts = (...scriptPaths) => {
+    for (const scriptPath of scriptPaths) {
+      const resolvedPath = path.resolve(BACKGROUND_DIR, String(scriptPath || ''));
+      vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, { filename: path.basename(resolvedPath) });
+    }
+  };
   vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, { filename: 'background.js' });
 
   function sendMessage(request) {
