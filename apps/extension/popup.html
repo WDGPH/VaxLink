@@ -278,6 +278,27 @@
       color: #486071;
     }
 
+    .scanner-banner[hidden] {
+      display: none !important;
+    }
+
+    .scanner-banner {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border-radius: 14px;
+      border: 1px solid #f2d3a6;
+      background: #fff7ed;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #9a3412;
+    }
+
+    .scanner-banner.error {
+      border-color: #efc2c4;
+      background: #fff4f4;
+      color: #97272c;
+    }
+
     .actions {
       margin-top: 10px;
       display: grid;
@@ -840,6 +861,79 @@
       color: #5f7283;
     }
 
+    .scanner-status-card {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border-radius: 14px;
+      border: 1px solid #d7e5ef;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+    }
+
+    .scanner-status-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .scanner-status-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+      color: #0f4c5c;
+    }
+
+    .scanner-status-title {
+      margin-top: 4px;
+      font-size: 14px;
+      font-weight: 800;
+      color: #12364a;
+    }
+
+    .scanner-status-detail {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #5a7082;
+    }
+
+    .scanner-status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eef6fb;
+      color: #345067;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .scanner-status-pill.success {
+      background: #e9f9ef;
+      color: #10683e;
+    }
+
+    .scanner-status-pill.warning {
+      background: #fff7ed;
+      color: #9a3412;
+    }
+
+    .scanner-status-pill.error {
+      background: #fff4f4;
+      color: #97272c;
+    }
+
+    #scannerReconnectBtn {
+      background: #d9f0ef;
+      border: 1px solid #b6dcda;
+      color: #114b53;
+    }
+
     #saveAnalyticsLabelBtn {
       background: #d9f0ef;
       border: 1px solid #b6dcda;
@@ -897,6 +991,19 @@
             <div class="actions">
               <button id="scannerSetupBtn" type="button">Open Scanner Setup</button>
             </div>
+            <div id="scannerStatusCard" class="scanner-status-card">
+              <div class="scanner-status-top">
+                <div>
+                  <div class="scanner-status-label">Station Scanner</div>
+                  <div id="scannerStatusTitle" class="scanner-status-title">Needs Setup</div>
+                </div>
+                <div id="scannerStatusPill" class="scanner-status-pill">Offline</div>
+              </div>
+              <div id="scannerStatusDetail" class="scanner-status-detail">Open Scanner Setup once to pair a Web Serial scanner for this workstation.</div>
+              <div class="actions">
+                <button id="scannerReconnectBtn" type="button" hidden>Reconnect</button>
+              </div>
+            </div>
             <div id="nvcStatus"></div>
           </div>
           <div class="analytics">
@@ -940,6 +1047,7 @@
         </div>
 
         <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.</p>
+        <div id="scannerWorkflowBanner" class="scanner-banner" hidden></div>
 
         <div id="singleModeSection" class="mode-panel">
           <div class="workflow-note">Web Serial scanner capture fills the open chart in Single Inject and saves scans automatically in Multiple Inject or Inventory.</div>

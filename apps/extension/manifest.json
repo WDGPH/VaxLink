@@ -8,8 +8,10 @@
     "activeTab",
     "scripting",
     "storage",
-    "alarms"
+    "alarms",
+    "offscreen"
   ],
+  "minimum_chrome_version": "109",
   "host_permissions": [
     "https://nvc-cnv.canada.ca/*"
   ],

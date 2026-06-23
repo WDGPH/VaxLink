@@ -59,18 +59,54 @@ const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
 const PENDING_SCAN_INBOX_LIMIT = 25;
 const BADGE_COLOR = '#0891b2';
+const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
+const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
+const SCANNER_DAEMON_ENABLED_KEY = 'vaxlink_scanner_daemon_enabled_v1';
+const SCANNER_STATUS_SNAPSHOT_KEY = 'vaxlink_scanner_status_snapshot_v1';
+const SCANNER_DAEMON_OFFSCREEN_PATH = 'scanner-daemon.html';
+const SCANNER_DAEMON_TARGET = 'scannerDaemon';
+const SCANNER_DAEMON_BACKGROUND_TARGET = 'scannerDaemonBackground';
+const SCANNER_DAEMON_ACTIONS = Object.freeze({
+  ENSURE: 'scannerDaemon.ensure',
+  GET_STATUS: 'scannerDaemon.getStatus',
+  CONNECT_GRANTED: 'scannerDaemon.connectGranted',
+  DISCONNECT: 'scannerDaemon.disconnect',
+  ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
+  STATUS_CHANGED: 'scannerDaemon.statusChanged',
+  STATUS_UPDATE: 'scannerDaemon.statusUpdate'
+});
+const SCANNER_STATUS_STATES = Object.freeze({
+  NEVER_CONFIGURED: 'never_configured',
+  STARTING: 'starting',
+  CONNECTED: 'connected',
+  RECOVERING: 'recovering',
+  WAITING_FOR_DEVICE: 'waiting_for_device',
+  PERMISSION_LOST: 'permission_lost',
+  BUSY: 'busy',
+  ERROR: 'error',
+  DISABLED: 'disabled'
+});
+const VALID_SCANNER_STATES = new Set(Object.values(SCANNER_STATUS_STATES));
+let scannerDaemonCreatePromise = null;
+let scannerDaemonStatusCache = createScannerStatusSnapshot();
 
 // Load NVC bundle on installation/startup
 chrome.runtime.onInstalled.addListener(() => {
   bgLog('Vaccine Scanner extension installed');
   ensureActionIcon();
   initializeNVCSync();
+  void maybeStartScannerDaemon('install').catch((error) => {
+    console.warn('Scanner daemon startup failed on install:', error);
+  });
 });
 
 // Also load on startup
 chrome.runtime.onStartup.addListener(() => {
   ensureActionIcon();
   initializeNVCSync();
+  void maybeStartScannerDaemon('startup').catch((error) => {
+    console.warn('Scanner daemon startup failed on browser start:', error);
+  });
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -148,6 +184,185 @@ function getStorage(keys) {
 
 function setStorage(values) {
   return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+}
+
+function normalizeScannerIsoTimestamp(value) {
+  if (!value) return '';
+  const parsed = new Date(String(value).trim());
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
+}
+
+function normalizeScannerPortInfo(info) {
+  if (!info || typeof info !== 'object') return null;
+  const normalized = {};
+  if (info.usbVendorId !== undefined && info.usbVendorId !== null && info.usbVendorId !== '') {
+    const vendorId = Number(info.usbVendorId);
+    if (Number.isFinite(vendorId)) normalized.usbVendorId = vendorId;
+  }
+  if (info.usbProductId !== undefined && info.usbProductId !== null && info.usbProductId !== '') {
+    const productId = Number(info.usbProductId);
+    if (Number.isFinite(productId)) normalized.usbProductId = productId;
+  }
+  if (info.bluetoothServiceClassId) {
+    normalized.bluetoothServiceClassId = String(info.bluetoothServiceClassId);
+  }
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function createScannerStatusSnapshot(overrides = {}) {
+  return normalizeScannerStatusSnapshot({
+    state: SCANNER_STATUS_STATES.NEVER_CONFIGURED,
+    profileId: '',
+    portInfo: null,
+    lastConnectedAt: '',
+    lastDisconnectedAt: '',
+    lastError: '',
+    recoverAttemptCount: 0,
+    ...overrides
+  });
+}
+
+function normalizeScannerStatusSnapshot(snapshot) {
+  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  return {
+    state: VALID_SCANNER_STATES.has(source.state)
+      ? source.state
+      : SCANNER_STATUS_STATES.NEVER_CONFIGURED,
+    profileId: String(source.profileId || '').trim(),
+    portInfo: normalizeScannerPortInfo(source.portInfo),
+    lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
+    lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
+    lastError: String(source.lastError || '').trim(),
+    recoverAttemptCount: Math.max(0, Number.parseInt(source.recoverAttemptCount, 10) || 0)
+  };
+}
+
+function buildDefaultScannerStatus({ enabled = false, profileId = '', portInfo = null } = {}) {
+  const normalizedProfileId = String(profileId || '').trim();
+  if (!normalizedProfileId) {
+    return createScannerStatusSnapshot();
+  }
+  return createScannerStatusSnapshot({
+    state: enabled ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE : SCANNER_STATUS_STATES.DISABLED,
+    profileId: normalizedProfileId,
+    portInfo: normalizeScannerPortInfo(portInfo)
+  });
+}
+
+async function getScannerBootstrapState() {
+  const stored = await getStorage([
+    SCANNER_DAEMON_ENABLED_KEY,
+    SCANNER_PROFILE_STORAGE_KEY,
+    SCANNER_PORT_INFO_STORAGE_KEY,
+    SCANNER_STATUS_SNAPSHOT_KEY
+  ]);
+  const enabled = stored[SCANNER_DAEMON_ENABLED_KEY] === true;
+  const profileId = String(stored[SCANNER_PROFILE_STORAGE_KEY] || '').trim();
+  const portInfo = normalizeScannerPortInfo(stored[SCANNER_PORT_INFO_STORAGE_KEY]);
+  const status = stored[SCANNER_STATUS_SNAPSHOT_KEY]
+    ? normalizeScannerStatusSnapshot(stored[SCANNER_STATUS_SNAPSHOT_KEY])
+    : buildDefaultScannerStatus({ enabled, profileId, portInfo });
+  scannerDaemonStatusCache = status;
+  return { enabled, profileId, portInfo, status };
+}
+
+async function persistScannerStatusSnapshot(snapshot) {
+  const normalized = normalizeScannerStatusSnapshot(snapshot);
+  scannerDaemonStatusCache = normalized;
+  const values = {
+    [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
+  };
+  if (normalized.profileId) {
+    values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
+  }
+  if (normalized.portInfo) {
+    values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
+  }
+  await setStorage(values);
+  return normalized;
+}
+
+async function broadcastScannerStatus(snapshot) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({
+      action: SCANNER_DAEMON_ACTIONS.STATUS_CHANGED,
+      status: snapshot
+    }, () => {
+      void chrome.runtime.lastError;
+      resolve();
+    });
+  });
+}
+
+async function hasScannerDaemonDocument() {
+  const offscreenUrl = chrome.runtime.getURL(SCANNER_DAEMON_OFFSCREEN_PATH);
+  if (typeof chrome.runtime.getContexts === 'function') {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [offscreenUrl]
+    });
+    return contexts.length > 0;
+  }
+
+  if (typeof clients === 'undefined' || typeof clients.matchAll !== 'function') {
+    return false;
+  }
+  const matchedClients = await clients.matchAll();
+  return matchedClients.some((client) => client.url === offscreenUrl);
+}
+
+async function ensureScannerDaemon() {
+  if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
+    throw new Error('The Offscreen API is not available in this browser context.');
+  }
+
+  if (await hasScannerDaemonDocument()) {
+    return { created: false };
+  }
+
+  if (!scannerDaemonCreatePromise) {
+    scannerDaemonCreatePromise = chrome.offscreen.createDocument({
+      url: SCANNER_DAEMON_OFFSCREEN_PATH,
+      reasons: ['WORKERS'],
+      justification: 'Keep a previously granted scanner connection active without a visible tab.'
+    }).finally(() => {
+      scannerDaemonCreatePromise = null;
+    });
+  }
+
+  await scannerDaemonCreatePromise;
+  return { created: true };
+}
+
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
+async function sendScannerDaemonMessage(message) {
+  await ensureScannerDaemon();
+  return sendRuntimeMessage({ ...message, target: SCANNER_DAEMON_TARGET });
+}
+
+async function maybeStartScannerDaemon(trigger = 'startup') {
+  const bootstrap = await getScannerBootstrapState();
+  if (!bootstrap.enabled || !bootstrap.profileId) {
+    return { started: false, status: bootstrap.status };
+  }
+  await sendScannerDaemonMessage({
+    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+    profileId: bootstrap.profileId,
+    preferredPortInfo: bootstrap.portInfo,
+    trigger
+  });
+  return { started: true, status: bootstrap.status };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -1974,6 +2189,100 @@ function lookupTradenameByDIN(din) {
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   bgLog('Background received message:', request);
+  if (request?.target === SCANNER_DAEMON_TARGET) {
+    return false;
+  }
+  if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED || request?.action === 'scannerDaemon.scanEcho') {
+    return false;
+  }
+
+  if (request?.target === SCANNER_DAEMON_BACKGROUND_TARGET && request.action === SCANNER_DAEMON_ACTIONS.STATUS_UPDATE) {
+    persistScannerStatusSnapshot(request.status || null)
+      .then((status) => broadcastScannerStatus(status).then(() => status))
+      .then((status) => sendResponse({ success: true, status }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner status update failed' }));
+    return true;
+  }
+
+  if (request.action === SCANNER_DAEMON_ACTIONS.ENSURE) {
+    ensureScannerDaemon()
+      .then(() => getScannerBootstrapState())
+      .then((bootstrap) => sendResponse({ success: true, status: bootstrap.status }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner daemon ensure failed' }));
+    return true;
+  }
+
+  if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
+    (async () => {
+      const bootstrap = await getScannerBootstrapState();
+      let status = bootstrap.status;
+      if (bootstrap.enabled && bootstrap.profileId) {
+        await maybeStartScannerDaemon('status_request');
+        const daemonResponse = await sendScannerDaemonMessage({ action: SCANNER_DAEMON_ACTIONS.GET_STATUS }).catch(() => null);
+        if (daemonResponse && daemonResponse.success && daemonResponse.status) {
+          status = normalizeScannerStatusSnapshot(daemonResponse.status);
+          await persistScannerStatusSnapshot(status);
+        }
+      }
+      sendResponse({ success: true, status });
+    })().catch((error) => {
+      sendResponse({ success: false, error: error?.message || 'Could not load scanner status' });
+    });
+    return true;
+  }
+
+  if (request.action === SCANNER_DAEMON_ACTIONS.ENABLE_AUTOSTART) {
+    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true })
+      .then(() => getScannerBootstrapState())
+      .then((bootstrap) => sendResponse({ success: true, status: bootstrap.status }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Could not enable scanner autostart' }));
+    return true;
+  }
+
+  if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
+    (async () => {
+      const values = {};
+      const requestedProfileId = String(request.profileId || '').trim();
+      const requestedPortInfo = normalizeScannerPortInfo(request.preferredPortInfo);
+      if (requestedProfileId) {
+        values[SCANNER_PROFILE_STORAGE_KEY] = requestedProfileId;
+      }
+      if (requestedPortInfo) {
+        values[SCANNER_PORT_INFO_STORAGE_KEY] = requestedPortInfo;
+      }
+      if (request.enableAutostart === true) {
+        values[SCANNER_DAEMON_ENABLED_KEY] = true;
+      }
+      if (Object.keys(values).length) {
+        await setStorage(values);
+      }
+      const bootstrap = await getScannerBootstrapState();
+      if (!bootstrap.profileId) {
+        throw new Error('No scanner profile is configured yet.');
+      }
+      await sendScannerDaemonMessage({
+        action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+        profileId: bootstrap.profileId,
+        preferredPortInfo: bootstrap.portInfo,
+        trigger: request.trigger || 'manual'
+      });
+      sendResponse({ success: true, accepted: true, status: bootstrap.status });
+    })().catch((error) => {
+      sendResponse({ success: false, error: error?.message || 'Scanner reconnect failed' });
+    });
+    return true;
+  }
+
+  if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
+    sendScannerDaemonMessage({
+      action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
+      trigger: request.trigger || 'manual'
+    })
+      .then((response) => sendResponse({ success: true, accepted: true, response }))
+      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner disconnect failed' }));
+    return true;
+  }
+
   if (request.action === 'refreshNVCBundle') {
     const requestedSource = (request.sourceUrl || '').trim();
     const sourceUrl = normalizeSourceUrl(requestedSource || DEFAULT_NVC_SOURCE_URL);

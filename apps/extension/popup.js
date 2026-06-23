@@ -13,6 +13,11 @@ import {
   setButtonBusy,
   showOutput
 } from './popup-ui.js';
+import {
+  SCANNER_DAEMON_ACTIONS,
+  buildScannerStatusDescriptor,
+  normalizeScannerStatusSnapshot
+} from './scanner/scanner-daemon-shared.js';
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -47,6 +52,11 @@ let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
 let scannerSetupBtn;
+let scannerReconnectBtn;
+let scannerStatusTitle;
+let scannerStatusDetail;
+let scannerStatusPill;
+let scannerWorkflowBanner;
 let testModeAddBtn;
 let testModeBarcode;
 let parsedData = null;
@@ -56,6 +66,7 @@ let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 
 const lotLookupCache = new Map();
 const LOT_LOOKUP_CACHE_MAX = 64;
@@ -134,6 +145,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
   scannerSetupBtn = document.getElementById('scannerSetupBtn');
+  scannerReconnectBtn = document.getElementById('scannerReconnectBtn');
+  scannerStatusTitle = document.getElementById('scannerStatusTitle');
+  scannerStatusDetail = document.getElementById('scannerStatusDetail');
+  scannerStatusPill = document.getElementById('scannerStatusPill');
+  scannerWorkflowBanner = document.getElementById('scannerWorkflowBanner');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
   // Only show test mode panel when running as an unpacked (developer) extension.
@@ -173,7 +189,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
   await loadAnalyticsSummary();
+  await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
+  chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -209,7 +227,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (settingsToggleBtn) {
     settingsToggleBtn.addEventListener('click', () => {
-      void setSettingsPanelOpen(settingsPanel?.hidden ?? true);
+      const nextState = settingsPanel?.hidden ?? true;
+      void setSettingsPanelOpen(nextState);
+      if (nextState) {
+        void loadScannerStatus();
+      }
     });
   }
   if (adminDateTimeAutofillToggle) {
@@ -220,6 +242,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (scannerSetupBtn) {
     scannerSetupBtn.addEventListener('click', () => {
       chrome.tabs.create({ url: chrome.runtime.getURL('scanner-setup.html') });
+    });
+  }
+  if (scannerReconnectBtn) {
+    scannerReconnectBtn.addEventListener('click', () => {
+      void reconnectScannerDaemon();
     });
   }
 
@@ -401,8 +428,83 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadNVCStatus();
 });
 
+function handleRuntimeMessage(request) {
+  if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
+    applyScannerStatus(request.status);
+    return false;
+  }
+  return false;
+}
+
 function writeOutput(message, type = 'info') {
   showOutput(outputDiv, message, type);
+}
+
+async function loadScannerStatus() {
+  try {
+    const response = await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS);
+    if (response && response.success && response.status) {
+      applyScannerStatus(response.status);
+      return;
+    }
+  } catch (_) {
+    // Leave the last known UI in place if the daemon status is temporarily unavailable.
+  }
+  renderScannerStatusUi();
+}
+
+async function reconnectScannerDaemon() {
+  try {
+    if (scannerReconnectBtn) {
+      scannerReconnectBtn.disabled = true;
+    }
+    writeOutput('Reconnecting the station scanner...', 'info');
+    const response = await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
+      trigger: 'popup_reconnect'
+    });
+    if (response && response.success && response.status) {
+      applyScannerStatus(response.status);
+    }
+  } catch (error) {
+    writeOutput(error.message || 'Could not reconnect the station scanner.', 'error');
+  } finally {
+    renderScannerStatusUi();
+  }
+}
+
+function applyScannerStatus(status) {
+  scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
+  renderScannerStatusUi();
+}
+
+function renderScannerStatusUi() {
+  const descriptor = buildScannerStatusDescriptor(scannerStatusSnapshot, activeMode);
+
+  if (scannerStatusTitle) {
+    scannerStatusTitle.textContent = descriptor.label;
+  }
+  if (scannerStatusDetail) {
+    scannerStatusDetail.textContent = descriptor.detail;
+  }
+  if (scannerStatusPill) {
+    scannerStatusPill.textContent = descriptor.label;
+    scannerStatusPill.className = `scanner-status-pill ${descriptor.tone}`;
+  }
+  if (scannerReconnectBtn) {
+    scannerReconnectBtn.hidden = !descriptor.showReconnect;
+    scannerReconnectBtn.disabled = false;
+  }
+  if (scannerWorkflowBanner) {
+    if (descriptor.bannerText) {
+      scannerWorkflowBanner.hidden = false;
+      scannerWorkflowBanner.textContent = descriptor.bannerText;
+      scannerWorkflowBanner.className = `scanner-banner${descriptor.bannerTone === 'error' ? ' error' : ''}`;
+    } else {
+      scannerWorkflowBanner.hidden = true;
+      scannerWorkflowBanner.textContent = '';
+      scannerWorkflowBanner.className = 'scanner-banner';
+    }
+  }
 }
 
 async function loadSettingsPanelState() {
@@ -1175,6 +1277,7 @@ async function setActiveMode(mode, options = {}) {
   if (scanStateSubtitle) {
     scanStateSubtitle.textContent = config.subtitle;
   }
+  renderScannerStatusUi();
 
   if (options.persist !== false) {
     await setLocalStorage({ [WORKFLOW_MODE_KEY]: activeMode });
@@ -1309,6 +1412,10 @@ function sendRuntimeMessage(message) {
       resolve(response);
     });
   });
+}
+
+function sendScannerDaemonCommand(action, payload = {}) {
+  return sendRuntimeMessage({ action, ...payload });
 }
 
 function buildLotLookupCacheKey(lot, gtin) {

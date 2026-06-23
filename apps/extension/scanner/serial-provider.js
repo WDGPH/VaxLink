@@ -95,6 +95,9 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
         activeReader = null;
       }
     }
+    if (keepReading) {
+      onStatus({ state: 'disconnected', profile, portInfo: port.getInfo() });
+    }
   })();
 
   return {
