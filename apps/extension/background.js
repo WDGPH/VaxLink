@@ -32,7 +32,10 @@ const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
 const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
   // RECOMBIVAX HB adult — NVC incorrectly links to pediatric tradename
   'Y016312': '6951000087100',
-  'Y020519': '6951000087100'
+  'Y020519': '6951000087100',
+  // VAQTA (HA) adult — NVC lists this lot's pediatric tradename link before
+  // the adult one, so the default first-match resolution picks pediatric.
+  'Y018089': '6901000087101'
 });
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',

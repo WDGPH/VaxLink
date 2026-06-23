@@ -182,9 +182,14 @@ function setupMessageListener() {
         return false;
       }
       try {
-        const success = autoFillTelus(request.data);
-        vlog('autoFillTelus', success);
-        sendResponse({ success: success });
+        const result = autoFillTelus(request.data);
+        vlog('autoFillTelus', result?.status, result);
+        sendResponse({
+          success: isAutofillSuccess(result),
+          pending: isAutofillPending(result),
+          status: result?.status || 'failed',
+          error: result?.error || ''
+        });
       } catch (e) {
         console.error('Error in autoFillTelus:', e);
         sendResponse({ success: false, error: e.message });
@@ -378,6 +383,20 @@ function getQueueRemainingDoses(row, fallback = 1) {
   return total !== null ? total : fallback;
 }
 
+function buildQueueRowsAfterRecordUse(rows, record, recordIndex) {
+  const nextRows = Array.isArray(rows) ? rows.slice() : [];
+  nextRows.splice(recordIndex, 1);
+
+  const remaining = getQueueRemainingDoses(record, null);
+  if (remaining === null) {
+    nextRows.splice(recordIndex, 0, record);
+  } else if (remaining > 1) {
+    nextRows.splice(recordIndex, 0, { ...record, remaining_doses: remaining - 1 });
+  }
+
+  return nextRows;
+}
+
 async function saveScanToQueue(data, rawBarcode, storageKey) {
   if (!storageKey) {
     throw new Error('No storage key configured for queued scan mode');
@@ -567,11 +586,14 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   } else {
     delete parsed.administered_at;
   }
-  const success = autoFillTelus(parsed);
+  const autofillResult = autoFillTelus(parsed);
+  const success = isAutofillSuccess(autofillResult);
+  const pending = isAutofillPending(autofillResult);
   logAnalyticsEvent('autofill_result', {
     workflow: activeWorkflowMode,
     source,
     success,
+    pending,
     vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
@@ -579,7 +601,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (success) {
     showVaxlinkToast(parsed);
   }
-  vlog('hands-free autofill', success, { source, parsed });
+  vlog('hands-free autofill', autofillResult?.status, { source, parsed });
 }
 
 function isHandsFreeSupportedPage() {
@@ -1129,10 +1151,10 @@ function isShortAgentCandidate(value) {
   return compact.length > 0 && compact.length <= 3;
 }
 
-function fieldFilledTextMatchesCandidate(field, candidate) {
+function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
-  const filledRaw = getFieldFilledText(field);
+  const filledRaw = String(filledRawValue || '').trim();
   const filledNorm = normalizeForMatch(filledRaw);
   if (!filledNorm) return false;
   if (filledNorm === candidateNorm) return true;
@@ -1147,10 +1169,11 @@ function fieldFilledTextMatchesCandidate(field, candidate) {
   return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
 }
 
-function isAgentCandidateAccepted(candidate, field) {
+function isAgentTextAccepted(candidate, filledRawValue) {
   const candidateNorm = normalizeForMatch(candidate);
-  const filledNorm = normalizeForMatch(getFieldFilledText(field));
-  if (fieldFilledTextMatchesCandidate(field, candidate)) return true;
+  const filledRaw = String(filledRawValue || '').trim();
+  const filledNorm = normalizeForMatch(filledRaw);
+  if (filledAgentTextMatchesCandidate(filledRaw, candidate)) return true;
 
   if (isShortAgentCandidate(candidate)) {
     const token = candidateNorm.replace(/[^a-z0-9]/g, '');
@@ -1166,6 +1189,14 @@ function isAgentCandidateAccepted(candidate, field) {
 
   const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
   return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+}
+
+function fieldFilledTextMatchesCandidate(field, candidate) {
+  return filledAgentTextMatchesCandidate(getFieldFilledText(field), candidate);
+}
+
+function isAgentCandidateAccepted(candidate, field) {
+  return isAgentTextAccepted(candidate, getFieldFilledText(field));
 }
 
 function fillPanoramaAgentField(selectors, candidate) {
@@ -1296,6 +1327,18 @@ function getPanoramaAgentSelectors() {
   ];
 }
 
+function getPanoramaCurrentAgentSelectionText() {
+  const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
+  for (const field of fields) {
+    const raw = String(getFieldFilledText(field) || '').trim();
+    const norm = normalizeForMatch(raw);
+    if (norm && norm !== 'select' && norm !== '--') {
+      return raw;
+    }
+  }
+  return '';
+}
+
 function hasPanoramaAgentSelection(data) {
   const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
   if (!fields.length) return false;
@@ -1306,6 +1349,19 @@ function hasPanoramaAgentSelection(data) {
   }
 
   return fields.some((field) => candidates.some((candidate) => isAgentCandidateAccepted(candidate, field)));
+}
+
+function queueRecordMatchesPanoramaAgentText(record, agentText) {
+  const payload = buildAutofillPayloadFromQueueRecord(record);
+  if (!payload) return false;
+  const candidates = getPanoramaAgentCandidates(payload);
+  return candidates.some((candidate) => isAgentTextAccepted(candidate, agentText));
+}
+
+function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
+  const raw = String(agentText || '').trim();
+  if (!raw || !Array.isArray(rows) || !rows.length) return -1;
+  return rows.findIndex((row) => queueRecordMatchesPanoramaAgentText(row, raw));
 }
 
 function tryFillPanoramaAgent(data) {
@@ -1411,6 +1467,63 @@ function normalizePanoramaLotToken(value) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+// Inventory confirmed these product families can legitimately carry the same
+// lot in both Panorama funding buckets. For them, falling back to SHOW_ALL can
+// silently select the wrong funding row, so VaxLink must keep funding explicit.
+const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
+  { label: 'Arexvy', terms: ['arexvy'] },
+  { label: 'Bexsero', terms: ['bexsero'] },
+  { label: 'Engerix B', terms: ['engerix b'] },
+  { label: 'Gardasil 9', terms: ['gardasil 9'] },
+  { label: 'Havrix', terms: ['havrix 1440', 'havrix 720', 'havrix'] },
+  { label: 'Avaxim', terms: ['avaxim'] },
+  { label: 'Nimenrix', terms: ['nimenrix'] },
+  { label: 'RabAvert', terms: ['rabavert'] },
+  { label: 'Imovax Rabies', terms: ['imovax rabies'] },
+  { label: 'Shingrix', terms: ['shingrix'] },
+  { label: 'Tubersol', terms: ['tubersol'] }
+]);
+
+function buildPanoramaFundingSourceText(data) {
+  return normalizeForMatch([
+    data?.name,
+    data?.tradename,
+    data?.generic_name
+  ].filter(Boolean).join(' '));
+}
+
+function getPanoramaSharedFundingLotProductLabel(data) {
+  const source = buildPanoramaFundingSourceText(data);
+  if (!source) return '';
+  for (const product of PANORAMA_SHARED_FUNDING_LOT_PRODUCTS) {
+    if ((product.terms || []).some((term) => source.includes(normalizeForMatch(term)))) {
+      return product.label;
+    }
+  }
+  return '';
+}
+
+function hasPanoramaFundedRadio() {
+  return !!document.querySelector('input[id*="fundedRadio:selectOneRadio"]');
+}
+
+function getPanoramaFundedRadioValue() {
+  const checked = Array.from(document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]'))
+    .find((radio) => radio && radio.checked);
+  return String(checked?.value || '').trim();
+}
+
+function isExplicitPanoramaFundingValue(value) {
+  return value === 'PUBLICLY_FUNDED' || value === 'NON_PUBLICLY_FUNDED';
+}
+
+function getPanoramaFundingLabel(value) {
+  if (value === 'PUBLICLY_FUNDED') return 'Publicly Funded';
+  if (value === 'NON_PUBLICLY_FUNDED') return 'Non-Publicly Funded';
+  if (value === 'SHOW_ALL') return 'Show All';
+  return 'funding filter';
+}
+
 function optionTextMatchesLotExactly(optionText, lotValue) {
   const lotToken = normalizePanoramaLotToken(lotValue);
   if (!lotToken) return false;
@@ -1471,16 +1584,21 @@ function fillPanoramaLotFromSelect(lotValue) {
   return false;
 }
 
-function resetPanoramaFundedRadioToShowAll() {
-  const radio = document.querySelector('input[id*="fundedRadio:selectOneRadio"][value="SHOW_ALL"]');
+function setPanoramaFundedRadioValue(value) {
+  const desired = String(value || '').trim();
+  const radio = document.querySelector(`input[id*="fundedRadio:selectOneRadio"][value="${desired}"]`);
   if (!radio) return 'not_found';
   if (radio.checked) return 'already';
   const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
   if (box) box.click();
   radio.checked = true;
   radio.dispatchEvent(new Event('change', { bubbles: true }));
-  vlog('VaxLink: funded radio reset to Show All');
+  vlog('VaxLink: funded radio set to', desired);
   return 'clicked';
+}
+
+function resetPanoramaFundedRadioToShowAll() {
+  return setPanoramaFundedRadioValue('SHOW_ALL');
 }
 
 function openPanoramaLotDropdown() {
@@ -1628,7 +1746,7 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
   vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
 }
 
-function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
+function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options = {}) {
   if (!data) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
     stopPanoramaLotTradeWatcher();
@@ -1652,7 +1770,10 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
   let stopped = false;
   let lastAttemptAt = 0;
   let stablePasses = 0;
-  let fundedRadioEnsured = false;
+  let fundedRadioEnsured = !!options.fundedRadioEnsured;
+  const preserveFundingFilter = options.preserveFundingFilter === true;
+  let sharedFundingMisses = 0;
+  let finalizeOnResolved = options.finalizeOnResolved === true;
 
   const stop = () => {
     if (stopped) return;
@@ -1688,12 +1809,45 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
       resolved = hasPanoramaLotOrTradeSelection(data);
     }
     if (!resolved && hasResolvedAgent && !busy) {
-      if (!fundedRadioEnsured) {
-        const radioResult = resetPanoramaFundedRadioToShowAll();
-        fundedRadioEnsured = true;
-        if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
+      if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
+        const fundedValue = getPanoramaFundedRadioValue();
+        if (!isExplicitPanoramaFundingValue(fundedValue)) {
+          showVaxlinkToast({
+            ...data,
+            _sharedFundingLotFilterRequired: true,
+            _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
+            _fundedRadioValue: fundedValue
+          }, 12000);
+          stop();
+          return;
+        }
       }
+
+      // Try lot fill with the current radio state first — avoids triggering a
+      // funded-radio AJAX that can reset the agent and create a re-fill cascade.
       resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
+      if (!resolved && preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
+        sharedFundingMisses += 1;
+        if (sharedFundingMisses >= 3) {
+          showVaxlinkToast({
+            ...data,
+            _sharedFundingLotSwitchFilter: true,
+            _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
+            _fundedRadioValue: getPanoramaFundedRadioValue()
+          }, 12000);
+          stop();
+          return;
+        }
+      } else if (resolved) {
+        sharedFundingMisses = 0;
+      }
+      if (!resolved && !fundedRadioEnsured && !preserveFundingFilter) {
+        fundedRadioEnsured = true;
+        const radioResult = resetPanoramaFundedRadioToShowAll();
+        if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
+        // Radio was already at SHOW_ALL or not found — retry immediately
+        resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
+      }
     }
 
     if (!resolved && hasLot && hasResolvedAgent && !busy) {
@@ -1718,6 +1872,10 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0) {
     }
 
     if (stablePasses >= 2) {
+      if (finalizeOnResolved) {
+        finalizeOnResolved = false;
+        void finalizeDeferredPanoramaAutofill(data);
+      }
       stop();
     }
   };
@@ -1783,6 +1941,25 @@ function isPanoramaImmunizationPage() {
 }
 
 function fillPanoramaImmunizationFields(data) {
+  const sharedFundingProductLabel = getPanoramaSharedFundingLotProductLabel(data);
+  const preserveFundingFilter = !!(sharedFundingProductLabel && String(data?.lot || '').trim());
+  const fundedValue = getPanoramaFundedRadioValue();
+  if (preserveFundingFilter && hasPanoramaFundedRadio() && !isExplicitPanoramaFundingValue(fundedValue)) {
+    showVaxlinkToast({
+      ...data,
+      _sharedFundingLotFilterRequired: true,
+      _sharedFundingLotLabel: sharedFundingProductLabel,
+      _fundedRadioValue: fundedValue
+    }, 12000);
+    return createAutofillResult('pending', { reason: 'funding_choice_required' });
+  }
+
+  // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
+  // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
+  // expiry not selected after selecting the agent). The scheduler below only
+  // falls back to resetting it again if this attempt found no radio at all.
+  const radioResult = preserveFundingFilter ? 'preserved' : resetPanoramaFundedRadioToShowAll();
+
   let agentCount = 0;
   if (hasPanoramaAgentSelection(data) || tryFillPanoramaAgent(data)) {
     agentCount = 1;
@@ -1794,12 +1971,27 @@ function fillPanoramaImmunizationFields(data) {
   fillCount += fillPanoramaDeferredDetailFields(data);
 
   // Panorama refreshes lot options and dependent controls asynchronously after selection.
+  const finalizeOnResolved = preserveFundingFilter && !!data?.lot && !hasPanoramaLotSelection(data.lot);
   if (agentCount > 0 || data.lot || hasPanoramaDeferredDetailData(data) || getPanoramaTradeCandidates(data).length > 0) {
-    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350);
+    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350, {
+      fundedRadioEnsured: !preserveFundingFilter && radioResult !== 'not_found',
+      preserveFundingFilter,
+      finalizeOnResolved
+    });
+  }
+
+  if (preserveFundingFilter && data?.lot) {
+    if (hasPanoramaLotSelection(data.lot)) {
+      return createAutofillResult('success', { fillCount });
+    }
+    return createAutofillResult('pending', {
+      reason: 'waiting_for_lot_resolution',
+      fillCount
+    });
   }
 
   if (fillCount > 0) {
-    return fillCount;
+    return createAutofillResult('success', { fillCount });
   }
 
   // If agent did not fill, still attempt lot/trade directly.
@@ -1807,7 +1999,7 @@ function fillPanoramaImmunizationFields(data) {
     fillCount += 1;
   }
   if (fillCount > 0) {
-    return fillCount;
+    return createAutofillResult('success', { fillCount });
   }
 
   const fallbackMapping = [
@@ -1835,7 +2027,7 @@ function fillPanoramaImmunizationFields(data) {
       fallbackCount += 1;
     }
   }
-  return fallbackCount;
+  return createAutofillResult(fallbackCount > 0 ? 'success' : 'failed', { fillCount: fallbackCount });
 }
 
 const PANORAMA_AGENT_RULES = Array.isArray(globalThis.VAXLINK_PANORAMA_AGENT_RULES)
@@ -2026,13 +2218,84 @@ function buildAutofillPayloadFromQueueRecord(record) {
   return payload;
 }
 
+function createAutofillResult(status, extra = {}) {
+  return { status, ...extra };
+}
+
+function isAutofillSuccess(result) {
+  return !!result && result.status === 'success';
+}
+
+function isAutofillPending(result) {
+  return !!result && result.status === 'pending';
+}
+
+async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
+  const storageKey = String(queueContext?.storageKey || '').trim();
+  const recordId = String(queueContext?.recordId || '').trim();
+  if (!storageKey || !recordId) {
+    return null;
+  }
+
+  const stored = await getLocalStorage([storageKey]);
+  const rows = (stored && Array.isArray(stored[storageKey])) ? stored[storageKey] : [];
+  const recordIndex = rows.findIndex((row) => row && String(row.id || '') === recordId);
+  if (recordIndex < 0) {
+    return null;
+  }
+
+  const record = rows[recordIndex];
+  const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
+  await setLocalStorage({ [storageKey]: nextRows });
+
+  const workflow = queueContext.workflow || 'multiple';
+  const source = queueContext.source || 'queue';
+  const expiryFlag = record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag;
+  logAnalyticsEvent('queue_used', {
+    workflow,
+    queue: queueContext.queue || workflow,
+    source,
+    count: 1,
+    queueSizeAfter: nextRows.length,
+    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  });
+  logAnalyticsEvent('autofill_result', {
+    workflow,
+    source,
+    success: true,
+    deferred: true,
+    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  });
+
+  return { record, queueSizeAfter: nextRows.length };
+}
+
+async function finalizeDeferredPanoramaAutofill(data) {
+  if (!data || data._vaxlinkDeferredFinalized) {
+    return;
+  }
+  data._vaxlinkDeferredFinalized = true;
+
+  try {
+    await consumeQueueRecordAfterDeferredAutofill(data._vaxlinkQueueContext);
+  } catch (error) {
+    console.warn('VaxLink deferred queue finalize failed:', error);
+  }
+
+  showVaxlinkToast(data);
+}
+
 function autoFillTelus(data) {
   try {
     if (isPanoramaImmunizationPage()) {
-      const panoramaFillCount = fillPanoramaImmunizationFields(data);
-      vlog('Panorama fields filled', panoramaFillCount);
+      const panoramaResult = fillPanoramaImmunizationFields(data);
+      vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
       lastVaxlinkFillAt = Date.now();
-      return panoramaFillCount > 0;
+      return panoramaResult;
     }
 
     const mapping = [
@@ -2226,10 +2489,10 @@ function autoFillTelus(data) {
     }
 
     vlog('generic auto-fill fields', fillCount);
-    return fillCount > 0;
+    return createAutofillResult(fillCount > 0 ? 'success' : 'failed', { fillCount });
   } catch (e) {
     console.error('Auto-fill error:', e);
-    return false;
+    return createAutofillResult('failed', { error: e.message || 'Auto-fill failed' });
   }
 }
 
@@ -2326,15 +2589,27 @@ function ensureToastHost() {
     .vl-toast-dismiss:hover { background: rgba(0,0,0,.4); }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
-    .vl-toast-override {
-      margin-top: 7px;
-      padding: 5px 8px;
-      border-radius: 5px;
-      background: rgba(0,0,0,.25);
-      font-size: 11.5px;
+    .vl-toast-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .vl-toast-action {
+      padding: 5px 10px;
+      border: 1px solid rgba(255,255,255,.65);
+      border-radius: 6px;
+      background: rgba(255,255,255,.14);
+      color: #fff;
+      font: inherit;
+      font-size: 12px;
       font-weight: 600;
-      letter-spacing: 0.1px;
-      color: #fef08a;
+      cursor: pointer;
+    }
+    .vl-toast-action:hover { background: rgba(255,255,255,.22); }
+    .vl-toast-action.secondary {
+      background: rgba(0,0,0,.22);
+      border-color: rgba(255,255,255,.35);
     }
   `;
   shadow.appendChild(style);
@@ -2355,13 +2630,15 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   // Routine toasts share one slot and one auto-dismiss timer; the persistent
   // expired warning lives in its own slot above and is never replaced by them.
-  const showRoutineToast = (html, ms) => {
+  const showRoutineToast = (html, ms, options = {}) => {
     if (toastDismissTimer) {
       clearTimeout(toastDismissTimer);
       toastDismissTimer = null;
     }
     toastRoutineSlot.innerHTML = html;
-    toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
+    if (!options.persistent) {
+      toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
+    }
   };
 
   if (data._commandMode) {
@@ -2384,11 +2661,62 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  if (data._manualSelectionKept) {
+  if (data._stepMatchMissing) {
     showRoutineToast(`<div class="vl-toast info show">
-      <div class="vl-toast-title">Kept your selection</div>
-      <div class="vl-toast-detail">The agent on screen differs from the next queued scan — VaxLink did not change it. Remove the queued item if it is no longer needed.</div>
+      <div class="vl-toast-title">No queued match for this agent</div>
+      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the queue. VaxLink left the queue unchanged.</div>
     </div>`, durationMs + 2000);
+    return;
+  }
+
+  if (data._sharedFundingLotFilterRequired || data._sharedFundingLotSwitchFilter) {
+    const productLabel = data._sharedFundingLotLabel || data.tradename || data.generic_name || data.name || 'This product';
+    const needsInitialChoice = !!data._sharedFundingLotFilterRequired;
+    const title = needsInitialChoice ? 'Choose PF or NPF' : 'Try the other funding bucket';
+    const detail = needsInitialChoice
+      ? `${productLabel} can use the same lot in both Panorama funding buckets.`
+      : `${productLabel}${data.lot ? ` lot ${data.lot}` : ''} was not found under ${getPanoramaFundingLabel(data._fundedRadioValue)}.`;
+    const followUp = needsInitialChoice
+      ? `Pick Publicly Funded or Non-Publicly Funded and VaxLink will continue automatically.`
+      : 'Pick the funding bucket to try and VaxLink will continue automatically.';
+
+    showRoutineToast(`<div class="vl-toast info persistent show">
+      <div class="vl-toast-title">${escapeToastHtml(title)}</div>
+      <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
+      <div class="vl-toast-detail">${escapeToastHtml(followUp)}</div>
+      <div class="vl-toast-actions">
+        <button class="vl-toast-action" type="button" data-vl-funded-choice="PUBLICLY_FUNDED">Publicly Funded</button>
+        <button class="vl-toast-action" type="button" data-vl-funded-choice="NON_PUBLICLY_FUNDED">Non-Publicly Funded</button>
+        <button class="vl-toast-action secondary" type="button" data-vl-funded-choice-dismiss="true">Not now</button>
+      </div>
+    </div>`, durationMs, { persistent: true });
+
+    toastRoutineSlot.querySelectorAll('[data-vl-funded-choice]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const fundedChoice = button.getAttribute('data-vl-funded-choice');
+        if (toastDismissTimer) {
+          clearTimeout(toastDismissTimer);
+          toastDismissTimer = null;
+        }
+        toastRoutineSlot.innerHTML = '';
+        const radioResult = setPanoramaFundedRadioValue(fundedChoice);
+        if (radioResult === 'not_found') {
+          showRoutineToast(`<div class="vl-toast info show">
+            <div class="vl-toast-title">Funding selector not found</div>
+            <div class="vl-toast-detail">Panorama did not expose the PF/NPF selector yet. Try again once the lot section finishes loading.</div>
+          </div>`, 7000);
+          return;
+        }
+        const autofillResult = autoFillTelus(data);
+        if (isAutofillSuccess(autofillResult)) {
+          await finalizeDeferredPanoramaAutofill(data);
+        }
+      });
+    });
+    const dismissBtn = toastRoutineSlot.querySelector('[data-vl-funded-choice-dismiss]');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', () => dismissToast(toastRoutineSlot));
+    }
     return;
   }
 
@@ -2416,9 +2744,6 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
   const isExpired = flag === 'expired';
-  const overrideNote = data.nvc_override
-    ? `<div class="vl-toast-override">\u26a0 VaxLink override applied \u2014 please verify agent</div>`
-    : '';
   const queuedNote = data._queuedCount
     ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
     : '';
@@ -2428,7 +2753,6 @@ function showVaxlinkToast(data, durationMs = 4000) {
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${queuedNote}
-    ${overrideNote}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
 
@@ -2441,7 +2765,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
     return;
   }
-  showRoutineToast(toastHtml, data.nvc_override ? durationMs + 4000 : durationMs);
+  showRoutineToast(toastHtml, durationMs);
 }
 
 function dismissToast(slot) {
@@ -3084,60 +3408,56 @@ async function clearHudQueue() {
   updateHudState();
 }
 
-// Guards the read-shift-write sequence below: tryAutoDrain, the multi-step
+// Guards the read-match-write sequence below: tryAutoDrain, the multi-step
 // observer, and the HUD apply button can all fire close together, and without
-// this flag two callers would shift the same queue head (double-fill) or
+// this flag two callers could consume the same queued record (double-fill) or
 // clobber each other's setLocalStorage (dropped record).
 let applyQueueInFlight = false;
 
-async function applyNextQueueItem() {
+async function applyNextQueueItem(options = {}) {
   if (applyQueueInFlight) return;
   applyQueueInFlight = true;
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
+    const matchCurrentAgent = options.matchCurrentAgent === true;
+    const suppressQueueEmptyToast = options.suppressQueueEmptyToast === true;
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
     const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
       ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
     if (!rows.length) {
-      showVaxlinkToast({ _queueEmpty: true });
+      if (!suppressQueueEmptyToast) {
+        showVaxlinkToast({ _queueEmpty: true });
+      }
       updateHudState();
-      return;
+      return 'queue_empty';
     }
 
-    // Issue #26: if an agent is already selected on this form (carried over
-    // from the multi-grid or chosen manually) and it does not match the queue
-    // head, the nurse picked a different vaccine for this entry. Filling now
-    // would silently revert her change — keep the form and the queue intact.
-    // isImmunizationFormEmpty (not hasPanoramaAgentSelection(null)) because the
-    // latter counts the "Select"/"--" placeholder option as a selection, which
-    // would block draining into a genuinely empty form.
-    const headPayload = buildAutofillPayloadFromQueueRecord(rows[0]);
-    if (
-      headPayload &&
-      !isImmunizationFormEmpty() &&
-      !hasPanoramaAgentSelection(headPayload)
-    ) {
-      vlog('auto-fill skipped: existing agent selection differs from queue head');
-      showVaxlinkToast({ _manualSelectionKept: true });
-      updateHudState();
-      return;
+    const currentAgentText = getPanoramaCurrentAgentSelectionText();
+    const shouldRespectPanoramaAgent = !!currentAgentText && isPanoramaImmunizationPage();
+
+    let recordIndex = 0;
+    if (matchCurrentAgent || shouldRespectPanoramaAgent) {
+      recordIndex = findMatchingQueueRecordIndexForPanoramaAgent(rows, currentAgentText);
+      if (recordIndex < 0) {
+        vlog('auto-fill skipped: no queued vaccine matches current Panorama agent', currentAgentText);
+        showVaxlinkToast({ _stepMatchMissing: true });
+        updateHudState();
+        return 'no_match';
+      }
     }
 
-    const record = rows.shift();
-    // Re-queue the record if it still has doses remaining.
-    // null remaining_doses means unknown/unlimited (multi-dose vial with no count
-    // tracked) — put it back at the head so it can be used again.
-    const remaining = getQueueRemainingDoses(record, null);
-    if (remaining === null) {
-      rows.unshift(record);
-    } else if (remaining > 1) {
-      rows.unshift({ ...record, remaining_doses: remaining - 1 });
-    }
-    // else remaining <= 1: record is consumed, don't re-queue
-    await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
-
+    const record = rows[recordIndex];
     const data = buildAutofillPayloadFromQueueRecord(record);
-    if (!data) return;
+    if (!data) return 'no_data';
+    data._vaxlinkQueueContext = {
+      storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+      recordId: record.id,
+      workflow: 'multiple',
+      queue: 'multiple',
+      source: 'hud'
+    };
+
+    const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
 
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
@@ -3147,30 +3467,46 @@ async function applyNextQueueItem() {
       expiryFlag: record.expiry_flag || ''
     });
 
-    const success = autoFillTelus(data);
+    const autofillResult = autoFillTelus(data);
+    const success = isAutofillSuccess(autofillResult);
+    const pending = isAutofillPending(autofillResult);
+    if (success) {
+      await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: nextRows });
+    }
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'hud',
       success,
+      pending,
       vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
-    logAnalyticsEvent('queue_used', {
-      workflow: 'multiple',
-      queue: 'multiple',
-      source: 'hud',
-      count: 1,
-      queueSizeAfter: rows.length
-    });
+    if (success) {
+      logAnalyticsEvent('queue_used', {
+        workflow: 'multiple',
+        queue: 'multiple',
+        source: 'hud',
+        count: 1,
+        queueSizeAfter: nextRows.length
+      });
+    }
 
     if (success) {
       showVaxlinkToast(data);
+      updateHudState();
+      return 'success';
+    }
+    if (pending) {
+      updateHudState();
+      return 'pending';
     }
     updateHudState();
+    return 'fill_failed';
   } catch (error) {
     console.warn('VaxLink HUD apply error:', error);
     if (hudApplyBtn) hudApplyBtn.disabled = false;
+    return 'error';
   } finally {
     applyQueueInFlight = false;
   }
@@ -3225,6 +3561,7 @@ let multiGridFillPending = false;
 let multiStepObserver = null;
 let lastObservedPanoramaStepKey = '';
 let lastAutoFilledPanoramaStepKey = '';
+let lastSkippedPanoramaAgentKey = '';
 let multiStepAutoFillPending = false;
 
 function isPanoramaMultipleImmunizationGridPage() {
@@ -3438,7 +3775,9 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
   if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
   const stepKey = getPanoramaMultiStepIndicatorKey();
-  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey) return;
+  const currentAgentKey = normalizeForMatch(getPanoramaCurrentAgentSelectionText());
+  const attemptKey = currentAgentKey ? `${stepKey}|${currentAgentKey}` : stepKey;
+  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey || attemptKey === lastSkippedPanoramaAgentKey) return;
   if ((Date.now() - lastVaxlinkFillAt) < 1200) return;
 
   multiStepAutoFillPending = true;
@@ -3449,8 +3788,16 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
     if (!rows.length) return;
     if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
-    await applyNextQueueItem();
-    lastAutoFilledPanoramaStepKey = stepKey;
+    const result = await applyNextQueueItem({
+      matchCurrentAgent: true,
+      suppressQueueEmptyToast: true
+    });
+    if (result === 'success') {
+      lastAutoFilledPanoramaStepKey = stepKey;
+      lastSkippedPanoramaAgentKey = '';
+    } else if (result === 'no_match') {
+      lastSkippedPanoramaAgentKey = attemptKey;
+    }
   } catch (error) {
     console.warn('VaxLink multi-step autofill error:', error);
   } finally {

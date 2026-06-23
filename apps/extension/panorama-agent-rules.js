@@ -119,13 +119,18 @@
     { outputs: ['Hib-HB'], clauses: [{ any: ['hib hb', 'haemophilus influenzae type b hepatitis b'] }] },
     { outputs: ['Hib'], clauses: [{ any: ['act hib', 'hiberix', 'haemophilus influenzae type b'], notAny: ['hepatitis b', 'meningococcal'] }] },
     { outputs: ['LAIV'], clauses: [{ any: ['flumist', 'live attenuated influenza', 'laiv'] }] },
-    { outputs: ['H1N1'], clauses: [{ any: ['h1n1'] }] },
-    { outputs: ['H5N1'], clauses: [{ any: ['h5n1'] }] },
+    // Seasonal influenza tradenames often include subtype antigens (for example H1N1)
+    // in NVC metadata. Keep subtype-specific Panorama agents limited to explicit
+    // monovalent / pandemic vaccine names so routine Fluzone / Flulaval / etc.
+    // lots continue to resolve to Panorama's Inf agents, which are the lot-backed
+    // options used in clinic.
+    { outputs: ['H1N1'], clauses: [{ any: ['influenza a subtype h1n1 vaccine', 'influenza a monovalent h1n1', 'monovalent h1n1', 'h1n1 vaccine', 'pandemic h1n1'], notAny: ['quadrivalent', 'trivalent', 'high dose', 'laiv'] }] },
+    { outputs: ['H5N1'], clauses: [{ any: ['influenza a subtype h5n1 vaccine', 'monovalent h5n1', 'h5n1 vaccine', 'arepanrix h5n1', 'foclivia'], notAny: ['quadrivalent', 'trivalent', 'high dose', 'laiv'] }] },
     { outputs: ['Inf High Dose (QIV)'], clauses: [{ any: ['high dose quadrivalent influenza', 'high dose qiv', 'fluzone high dose quadrivalent', 'influenza high dose qiv'] }] },
     { outputs: ['Inf High Dose (TIV)'], clauses: [{ any: ['high dose trivalent influenza', 'high dose tiv', 'influenza high dose tiv'] }] },
-    { outputs: ['Inf (QIV)'], clauses: [{ any: ['quadrivalent influenza', 'qiv', 'tetra', 'quadrivalent inactivated influenza'], notAny: ['high dose', 'laiv', 'h1n1', 'h5n1'] }] },
-    { outputs: ['Inf (TIV)'], clauses: [{ any: ['trivalent influenza', 'tiv', 'trivalent inactivated influenza'], notAny: ['high dose', 'laiv', 'h1n1', 'h5n1', 'quadrivalent', 'qiv', 'tetra'] }] },
-    { outputs: ['inf-unspecified'], clauses: [{ any: ['influenza', 'flu'], notAny: ['laiv', 'h1n1', 'h5n1', 'high dose', 'qiv', 'tiv', 'quadrivalent', 'trivalent', 'tetra'] }] },
+    { outputs: ['Inf (QIV)'], clauses: [{ any: ['quadrivalent influenza', 'qiv', 'tetra', 'quadrivalent inactivated influenza'], notAny: ['high dose', 'laiv'] }] },
+    { outputs: ['Inf (TIV)'], clauses: [{ any: ['trivalent influenza', 'tiv', 'trivalent inactivated influenza'], notAny: ['high dose', 'laiv', 'quadrivalent', 'qiv', 'tetra'] }] },
+    { outputs: ['inf-unspecified'], clauses: [{ any: ['influenza', 'flu'], notAny: ['laiv', 'high dose', 'qiv', 'tiv', 'quadrivalent', 'trivalent', 'tetra', 'influenza a subtype h1n1 vaccine', 'monovalent h1n1', 'h1n1 vaccine', 'pandemic h1n1', 'influenza a subtype h5n1 vaccine', 'monovalent h5n1', 'h5n1 vaccine', 'arepanrix h5n1', 'foclivia'] }] },
     { outputs: ['Zos'], clauses: [{ any: ['shingrix', 'recombinant zoster', 'zoster recombinant'] }] },
     { outputs: ['Zos-Live'], clauses: [{ any: ['zostavax', 'live zoster', 'zoster live'] }] },
     { outputs: ['Zos-unspecified'], clauses: [{ any: ['zoster', 'shingles'], notAny: ['shingrix', 'zostavax', 'recombinant', 'live'] }] },
