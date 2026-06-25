@@ -1,3 +1,12 @@
+// Bundle-anchored segmentation search for separator-less HID scans. Loaded as a
+// classic script (attaches globalThis.VaxLinkGS1Segmentation) so it works under
+// the MV3 service worker importScripts loader.
+try {
+  importScripts('shared/gs1-segmentation.js');
+} catch (e) {
+  console.warn('[VaxLink] GS1 segmentation search unavailable:', e?.message || e);
+}
+
 const VAXLINK_BG_DEBUG = false;
 function bgLog(...args) {
   if (VAXLINK_BG_DEBUG) console.log('[VaxLink]', ...args);
@@ -1457,6 +1466,30 @@ function looksLikeGtinOrNumericId(key) {
   return /^\d{8,14}$/.test(k);
 }
 
+// Recover a bundle-known lot from a raw scan when the directly-parsed lot
+// missed. Separator-less HID scans can truncate a lot whose value contains
+// digits that look like another AI (e.g. the "21" inside "AHAVC219AC"). The
+// segmentation search enumerates every valid parse and we accept the recovered
+// lot only when the NVC bundle actually knows it, so this never overrides a good
+// lookup and degrades to a no-op when offline / the lot is genuinely new.
+function recoverLotFromRawScan(rawScan) {
+  const seg = self.VaxLinkGS1Segmentation;
+  if (!seg || !rawScan) return null;
+  const lotIndex = nvcIndexes.lotByLotNumber;
+  if (!lotIndex) return null;
+  const knownLot = (lot) => {
+    const key = String(lot || '').trim().toLowerCase();
+    return !!key && Object.prototype.hasOwnProperty.call(lotIndex, key);
+  };
+  try {
+    const best = seg.resolveBestSegmentation(rawScan, knownLot);
+    return best && best.lotKnown && best.lot ? best.lot : null;
+  } catch (e) {
+    console.warn('[VaxLink] lot recovery failed:', e?.message || e);
+    return null;
+  }
+}
+
 function lookupVaccineLot(lotNumber, options = {}) {
   if (!lotNumber) {
     bgLog('lookupVaccineLot: no lot number provided');
@@ -1655,8 +1688,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return { error: 'Failed to load NVC database' };
         }
 
-        const vaccineInfo = lookupVaccineLot(request.lot, { gtin: request.gtin });
+        let vaccineInfo = lookupVaccineLot(request.lot, { gtin: request.gtin });
         bgLog('Lookup result:', vaccineInfo);
+
+        // Direct lookup missed: try to recover a bundle-known lot the greedy
+        // parser may have truncated out of a separator-less HID scan.
+        if (!vaccineInfo && request.rawScan) {
+          const recoveredLot = recoverLotFromRawScan(request.rawScan);
+          if (recoveredLot && recoveredLot !== request.lot) {
+            const recoveredInfo = lookupVaccineLot(recoveredLot, { gtin: request.gtin });
+            if (recoveredInfo) {
+              bgLog('Recovered lot from raw scan:', request.lot, '->', recoveredLot);
+              recoveredInfo.resolved_lot = recoveredLot;
+              recoveredInfo.resolved_from = 'segmentation_search';
+              vaccineInfo = recoveredInfo;
+            }
+          }
+        }
 
         if (vaccineInfo) {
           return vaccineInfo;

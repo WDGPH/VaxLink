@@ -389,7 +389,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
   return data;
 }
 
-function lookupVaccineInfoByLot(lot, gtin) {
+function lookupVaccineInfoByLot(lot, gtin, rawScan) {
   return new Promise((resolve) => {
     if (!lot) {
       resolve(null);
@@ -398,6 +398,9 @@ function lookupVaccineInfoByLot(lot, gtin) {
     const request = { action: 'lookupVaccineInfo', lot };
     if (gtin) {
       request.gtin = gtin;
+    }
+    if (rawScan) {
+      request.rawScan = rawScan;
     }
     chrome.runtime.sendMessage(request, (response) => {
       if (chrome.runtime.lastError) {
@@ -583,6 +586,12 @@ async function saveScanToQueue(data, rawBarcode, storageKey) {
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   if (!parsed || !vaccineInfo) return;
+  // background recovered the real lot from a truncated separator-less scan;
+  // correct parsed.lot so the HUD, queue record, and Panorama lot match all use
+  // the full value rather than the greedy parser's truncated token.
+  if (vaccineInfo.resolved_lot) {
+    parsed.lot = vaccineInfo.resolved_lot;
+  }
   parsed.tradename = vaccineInfo.tradename;
   parsed.generic_name = vaccineInfo.generic_name;
   parsed.disease = vaccineInfo.disease;
@@ -707,10 +716,15 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
 
+  // Raw scan that produced parsed.lot, forwarded so background can recover a
+  // bundle-known lot the greedy parser may have truncated from an HID scan.
+  let lotRawScan = trimmed;
+
   if (!parsed.lot && !parsed.expiry && !parsed.serial) {
     const recovered = getRecentRichScanCandidate(parsed.gtin);
     if (recovered) {
       parsed = mergeParsedScanFields(parsed, recovered.parsed);
+      lotRawScan = recovered.raw;
       vlog('hands-free recovered from input candidate', {
         source,
         candidatePreview: recovered.raw.slice(0, 80),
@@ -724,7 +738,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     let lookupAttempted = false;
     if (parsed.lot) {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
+      vaccineInfo = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin, lotRawScan);
     }
 
     // Do not treat GTIN as a lot lookup key (pilot: wrong agent / e.g. TI vs HB).
