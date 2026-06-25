@@ -5,7 +5,7 @@ export function parseInputData(rawInput) {
   }
 
   if (input.startsWith('01') || input.startsWith('(01)')) {
-    return parseGS1Barcode(input);
+    return withRawScan(parseGS1Barcode(input), input);
   }
 
   const manual = parseManualTestInput(input);
@@ -13,7 +13,17 @@ export function parseInputData(rawInput) {
     return manual;
   }
 
-  return parseGS1Barcode(input);
+  return withRawScan(parseGS1Barcode(input), input);
+}
+
+// Preserve the original scan alongside the parsed fields so the lot lookup can
+// fall back to a bundle-anchored segmentation search when the greedy parse
+// truncated a separator-less lot. Whitelisted record builders ignore this key.
+function withRawScan(data, rawInput) {
+  if (data && typeof data === 'object' && !data.rawScan) {
+    data.rawScan = rawInput;
+  }
+  return data;
 }
 
 export function parseManualTestInput(input) {

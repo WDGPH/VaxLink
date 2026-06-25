@@ -1310,7 +1310,7 @@ function buildLotLookupCacheKey(lot, gtin) {
   return `${lotKey}|${gtinKey}`;
 }
 
-async function lookupVaccineInfo(lot, gtin) {
+async function lookupVaccineInfo(lot, gtin, rawScan) {
   const lotKey = String(lot || '').trim().toLowerCase();
   if (!lotKey) {
     return { error: 'No lot number provided' };
@@ -1322,6 +1322,9 @@ async function lookupVaccineInfo(lot, gtin) {
   const message = { action: 'lookupVaccineInfo', lot };
   if (gtin) {
     message.gtin = gtin;
+  }
+  if (rawScan) {
+    message.rawScan = rawScan;
   }
   const response = await sendRuntimeMessage(message);
   // Cache successes only: a transient error (cold service worker, bundle not
@@ -1593,6 +1596,11 @@ async function handleUseMultipleInjectRecord(record) {
 function mergeVaccineInfoIntoParsedData(baseData, vaccineInfo, expiryStatus, expirySource) {
   const merged = { ...baseData };
   if (vaccineInfo && !vaccineInfo.error) {
+    // A separator-less scan can truncate the lot; when background recovered the
+    // real lot via the segmentation search, show/store the corrected value.
+    if (vaccineInfo.resolved_lot) {
+      merged.lot = vaccineInfo.resolved_lot;
+    }
     merged.tradename = vaccineInfo.tradename || merged.tradename || null;
     merged.generic_name = vaccineInfo.generic_name || merged.generic_name || null;
     merged.disease = vaccineInfo.disease || merged.disease || null;
@@ -1622,7 +1630,7 @@ async function enrichParsedData(baseData) {
   if (baseData.lot) {
     try {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfo(baseData.lot, baseData.gtin);
+      vaccineInfo = await lookupVaccineInfo(baseData.lot, baseData.gtin, baseData.rawScan);
     } catch (error) {
       vaccineInfo = { error: error.message || 'Lookup failed' };
     }
