@@ -352,17 +352,14 @@ async function sendScannerDaemonMessage(message) {
 }
 
 async function maybeStartScannerDaemon(trigger = 'startup') {
+  // Web Serial (navigator.serial) is not available inside an offscreen
+  // document, so the offscreen scanner daemon can never open the port. Serial
+  // capture now happens in-page in scanner-setup.js, which routes scans via the
+  // `scannerScanCaptured` message. We intentionally do NOT auto-start the
+  // offscreen daemon: starting it only produces error-state noise and risks
+  // contending for the COM port. Capture works through the visible setup page.
   const bootstrap = await getScannerBootstrapState();
-  if (!bootstrap.enabled || !bootstrap.profileId) {
-    return { started: false, status: bootstrap.status };
-  }
-  await sendScannerDaemonMessage({
-    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-    profileId: bootstrap.profileId,
-    preferredPortInfo: bootstrap.portInfo,
-    trigger
-  });
-  return { started: true, status: bootstrap.status };
+  return { started: false, status: bootstrap.status };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -446,10 +443,11 @@ function isSupportedChartUrl(urlValue) {
   try {
     const url = new URL(String(urlValue || ''));
     const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
        host === 'panorama.prod.ehealthontario.ca') &&
-      url.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+      path.includes('/recordimms/');
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
     return isPanorama || isInputHealth;
   } catch (_) {
