@@ -121,6 +121,24 @@ ensureActionIcon();
 initializeNVCSync();
 initQueueBadge();
 
+// One-time cleanup: tear down any offscreen scanner daemon left over from the
+// disabled daemon architecture. If it is still alive it can hold the serial
+// COM port open and make in-page capture fail with "Failed to open serial port".
+(async () => {
+  try {
+    if (
+      chrome.offscreen &&
+      typeof chrome.offscreen.closeDocument === 'function' &&
+      await hasScannerDaemonDocument()
+    ) {
+      await chrome.offscreen.closeDocument();
+      bgLog('Closed leftover offscreen scanner daemon document');
+    }
+  } catch (_) {
+    // Best effort; nothing to clean up.
+  }
+})();
+
 function ensureActionIcon() {
   if (iconInitPromise) {
     return iconInitPromise;
@@ -312,6 +330,14 @@ async function hasScannerDaemonDocument() {
 }
 
 async function ensureScannerDaemon() {
+  // The offscreen scanner daemon is permanently disabled: navigator.serial is
+  // not available in offscreen documents, so it can never capture, and creating
+  // it only risks grabbing/locking the COM port out from under the in-page
+  // Web Serial capture (scanner-setup.js), which surfaces as
+  // "Failed to open serial port". Never create the offscreen document.
+  throw new Error('Offscreen scanner daemon is disabled; Web Serial is captured in-page.');
+
+  // eslint-disable-next-line no-unreachable
   if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
     throw new Error('The Offscreen API is not available in this browser context.');
   }
