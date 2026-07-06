@@ -2076,6 +2076,20 @@ function resetPanoramaFundedRadioToShowAll() {
   return setPanoramaFundedRadioValue('SHOW_ALL');
 }
 
+// After the nurse answers the PF/NPF prompt we thread their pick through the
+// fill data as _fundedRadioChoice. Panorama's post-selection AJAX can re-render
+// the funded-radio group and momentarily drop the checked state; if a later fill
+// pass re-detects a non-explicit value we must re-apply the nurse's answer rather
+// than re-summon the persistent chooser (which would otherwise linger on screen
+// until "Not now" is clicked). Returns the setPanoramaFundedRadioValue result, or
+// null when no answer has been recorded yet.
+function reapplyAnsweredPanoramaFundingChoice(data) {
+  const choice = data && data._fundedRadioChoice;
+  if (!isExplicitPanoramaFundingValue(choice)) return null;
+  if (getPanoramaFundedRadioValue() === choice) return 'already';
+  return setPanoramaFundedRadioValue(choice);
+}
+
 function openPanoramaLotDropdown() {
   const selectors = [
     '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
@@ -2287,14 +2301,18 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         const fundedValue = getPanoramaFundedRadioValue();
         if (!isExplicitPanoramaFundingValue(fundedValue)) {
-          showVaxlinkToast({
-            ...data,
-            _sharedFundingLotFilterRequired: true,
-            _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
-            _fundedRadioValue: fundedValue
-          }, 12000);
-          stop();
-          return;
+          const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
+          if (!reapplied) {
+            showVaxlinkToast({
+              ...data,
+              _sharedFundingLotFilterRequired: true,
+              _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
+              _fundedRadioValue: fundedValue
+            }, 12000);
+            stop();
+            return;
+          }
+          if (reapplied === 'clicked') return; // wait for the radio AJAX to settle
         }
       }
 
@@ -2420,13 +2438,17 @@ function fillPanoramaImmunizationFields(data) {
   const preserveFundingFilter = !!(sharedFundingProductLabel && String(data?.lot || '').trim());
   const fundedValue = getPanoramaFundedRadioValue();
   if (preserveFundingFilter && hasPanoramaFundedRadio() && !isExplicitPanoramaFundingValue(fundedValue)) {
-    showVaxlinkToast({
-      ...data,
-      _sharedFundingLotFilterRequired: true,
-      _sharedFundingLotLabel: sharedFundingProductLabel,
-      _fundedRadioValue: fundedValue
-    }, 12000);
-    return createAutofillResult('pending', { reason: 'funding_choice_required' });
+    // If the nurse already answered the chooser, re-apply their pick rather than
+    // re-prompting; only summon the chooser when there is no recorded answer yet.
+    if (!reapplyAnsweredPanoramaFundingChoice(data)) {
+      showVaxlinkToast({
+        ...data,
+        _sharedFundingLotFilterRequired: true,
+        _sharedFundingLotLabel: sharedFundingProductLabel,
+        _fundedRadioValue: fundedValue
+      }, 12000);
+      return createAutofillResult('pending', { reason: 'funding_choice_required' });
+    }
   }
 
   // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
@@ -3182,9 +3204,24 @@ function showVaxlinkToast(data, durationMs = 4000) {
           </div>`, 7000);
           return;
         }
-        const autofillResult = autoFillTelus(data);
+        // Drop the chooser flags now that the nurse has answered. Otherwise the
+        // deferred finalize (and any success toast) re-runs showVaxlinkToast with
+        // _sharedFundingLotFilterRequired still set and re-summons this same
+        // persistent prompt, which then only "Not now" can clear.
+        const {
+          _sharedFundingLotFilterRequired,
+          _sharedFundingLotSwitchFilter,
+          _sharedFundingLotLabel,
+          _fundedRadioValue,
+          ...rest
+        } = data;
+        // Record the nurse's answer so any later fill pass re-applies it instead
+        // of re-summoning this persistent chooser (which then only "Not now"
+        // could clear).
+        const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
+        const autofillResult = autoFillTelus(fillData);
         if (isAutofillSuccess(autofillResult)) {
-          await finalizeDeferredPanoramaAutofill(data);
+          await finalizeDeferredPanoramaAutofill(fillData);
         }
       });
     });
