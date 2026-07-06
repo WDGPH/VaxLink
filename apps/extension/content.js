@@ -1028,10 +1028,14 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
+    const recordImmsPath = '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+    const pathname = window.location.pathname;
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
        host === 'panorama.prod.ehealthontario.ca') &&
-      window.location.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+      // Keep the canonical recordImms.xhtml page, and also allow Panorama's
+      // suffixed variant of the same view (e.g. recordImms.xhtml.xwar).
+      (pathname === recordImmsPath || pathname.startsWith(recordImmsPath + '.'));
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
