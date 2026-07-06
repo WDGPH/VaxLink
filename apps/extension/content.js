@@ -1952,6 +1952,7 @@ const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
   { label: 'Havrix', terms: ['havrix 1440', 'havrix 720', 'havrix'] },
   { label: 'Avaxim', terms: ['avaxim'] },
   { label: 'Nimenrix', terms: ['nimenrix'] },
+  { label: 'Prevnar', terms: ['prevnar', 'prevenar'] },
   { label: 'RabAvert', terms: ['rabavert'] },
   { label: 'Imovax Rabies', terms: ['imovax rabies'] },
   { label: 'Shingrix', terms: ['shingrix'] },
