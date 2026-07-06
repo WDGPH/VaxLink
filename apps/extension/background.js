@@ -487,6 +487,18 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
+function tabAcceptedScannerScan(response) {
+  return !!(
+    response &&
+    (response.accepted === true ||
+      response.success === true ||
+      response.pending === true ||
+      response.queued === true ||
+      response.duplicate_ignored === true ||
+      response.command_handled === true)
+  );
+}
+
 function sendScanToTab(tabId, scan) {
   return new Promise((resolve, reject) => {
     if (!tabId && tabId !== 0) {
@@ -498,7 +510,7 @@ function sendScanToTab(tabId, scan) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      if (!response || response.success !== true) {
+      if (!tabAcceptedScannerScan(response)) {
         reject(new Error(response?.error || 'Tab did not accept scan'));
         return;
       }

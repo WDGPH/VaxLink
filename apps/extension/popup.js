@@ -240,14 +240,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   if (scannerSetupBtn) {
-    scannerSetupBtn.addEventListener('click', () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL('scanner-setup.html') });
-    });
+    scannerSetupBtn.addEventListener('click', openScannerSetupPage);
   }
   if (scannerReconnectBtn) {
-    scannerReconnectBtn.addEventListener('click', () => {
-      void reconnectScannerDaemon();
-    });
+    scannerReconnectBtn.addEventListener('click', openScannerSetupPage);
   }
 
   if (autoFillBtn) {
@@ -453,23 +449,14 @@ async function loadScannerStatus() {
   renderScannerStatusUi();
 }
 
-async function reconnectScannerDaemon() {
-  try {
-    if (scannerReconnectBtn) {
-      scannerReconnectBtn.disabled = true;
+function openScannerSetupPage() {
+  chrome.tabs.create({ url: chrome.runtime.getURL('scanner-setup.html') }, () => {
+    if (chrome.runtime.lastError) {
+      writeOutput(chrome.runtime.lastError.message || 'Could not open scanner setup.', 'error');
+      return;
     }
-    writeOutput('Reconnecting the station scanner...', 'info');
-    const response = await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
-      trigger: 'popup_reconnect'
-    });
-    if (response && response.success && response.status) {
-      applyScannerStatus(response.status);
-    }
-  } catch (error) {
-    writeOutput(error.message || 'Could not reconnect the station scanner.', 'error');
-  } finally {
-    renderScannerStatusUi();
-  }
+    writeOutput('Scanner Setup opened. Keep that tab open while using Web Serial capture.', 'info');
+  });
 }
 
 function applyScannerStatus(status) {
@@ -493,6 +480,7 @@ function renderScannerStatusUi() {
   if (scannerReconnectBtn) {
     scannerReconnectBtn.hidden = !descriptor.showReconnect;
     scannerReconnectBtn.disabled = false;
+    scannerReconnectBtn.textContent = 'Open Setup';
   }
   if (scannerWorkflowBanner) {
     if (descriptor.bannerText) {

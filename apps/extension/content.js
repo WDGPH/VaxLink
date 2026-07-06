@@ -166,7 +166,20 @@ function setupMessageListener() {
         return true;
       }
       Promise.resolve(handleHandsFreeScan(request.scan?.rawText || '', request.scan?.source || 'scanner-channel'))
-        .then(() => sendResponse({ success: true }))
+        .then((result) => {
+          const accepted = result?.accepted !== false;
+          sendResponse({
+            accepted,
+            success: !!result?.success,
+            pending: !!result?.pending,
+            status: result?.status || (result?.success ? 'success' : 'failed'),
+            error: result?.error || '',
+            queued: !!result?.queued,
+            duplicate_ignored: !!result?.duplicate_ignored,
+            command_handled: !!result?.command_handled,
+            queueSizeAfter: result?.queueSizeAfter || 0
+          });
+        })
         .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan handling failed' }));
       return true;
     }
@@ -433,20 +446,24 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
 
 async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (!isHandsFreeSupportedPage()) {
-    return;
+    return { accepted: false, success: false, status: 'unsupported_page', error: 'Unsupported chart page' };
   }
 
   const trimmed = String(scanValue || '').trim();
-  if (!trimmed) return;
+  if (!trimmed) {
+    return { accepted: true, success: false, status: 'empty_scan', error: 'Scan event missing raw text' };
+  }
 
-  if (handleVaxlinkCommand(trimmed)) return;
+  if (handleVaxlinkCommand(trimmed)) {
+    return { accepted: true, success: true, status: 'command_handled', command_handled: true };
+  }
 
   const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
 
   const now = Date.now();
   if (trimmed === lastHandledScanValue && (now - lastHandledScanAt) < 1500) {
-    return;
+    return { accepted: true, success: true, status: 'duplicate_ignored', duplicate_ignored: true };
   }
   lastHandledScanValue = trimmed;
   lastHandledScanAt = now;
@@ -468,7 +485,12 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       source,
       note: error.message
     });
-    return;
+    return {
+      accepted: true,
+      success: false,
+      status: 'parse_error',
+      error: error.message || 'Scan was not valid GS1'
+    };
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
 
@@ -544,7 +566,14 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
           manufacturer: record.manufacturer || '',
           expiryFlag: record.expiry_flag || finalExpiryFlag
         });
-        return;
+        return {
+          accepted: true,
+          success: true,
+          queued: true,
+          duplicate_ignored: true,
+          status: 'duplicate_ignored',
+          queueSizeAfter: record.queueSizeAfter || 0
+        };
       }
       // Expired records get the expiry_warning cue from the persistent toast.
       if (record.expiry_flag !== 'expired') {
@@ -568,10 +597,23 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         manufacturer: record.manufacturer || '',
         expiryFlag: record.expiry_flag || finalExpiryFlag
       });
+      return {
+        accepted: true,
+        success: true,
+        queued: true,
+        status: 'queued',
+        queueSizeAfter: record.queueSizeAfter || 0
+      };
     } catch (error) {
       console.warn('Workflow queue save failed:', error);
+      playAudioCue('error');
+      return {
+        accepted: true,
+        success: false,
+        status: 'queue_failed',
+        error: error?.message || 'Workflow queue save failed'
+      };
     }
-    return;
   }
 
   logAnalyticsEvent('autofill_attempt', {
@@ -600,8 +642,17 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   });
   if (success) {
     showVaxlinkToast(parsed);
+  } else if (!pending) {
+    playAudioCue('error');
   }
   vlog('hands-free autofill', autofillResult?.status, { source, parsed });
+  return {
+    accepted: true,
+    success,
+    pending,
+    status: autofillResult?.status || 'failed',
+    error: autofillResult?.error || (!success && !pending ? 'Could not auto-fill fields' : '')
+  };
 }
 
 function isHandsFreeSupportedPage() {
