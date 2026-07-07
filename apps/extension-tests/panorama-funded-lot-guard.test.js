@@ -9,6 +9,7 @@ const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
   { label: 'Havrix', terms: ['havrix 1440', 'havrix 720', 'havrix'] },
   { label: 'Avaxim', terms: ['avaxim'] },
   { label: 'Nimenrix', terms: ['nimenrix'] },
+  { label: 'Prevnar', terms: ['prevnar', 'prevenar'] },
   { label: 'RabAvert', terms: ['rabavert'] },
   { label: 'Imovax Rabies', terms: ['imovax rabies'] },
   { label: 'Shingrix', terms: ['shingrix'] },
@@ -59,6 +60,9 @@ test('shared PF/NPF lot products are recognized from scan metadata', () => {
     [{ name: 'HAVRIX 720' }, 'Havrix'],
     [{ tradename: 'Avaxim' }, 'Avaxim'],
     [{ tradename: 'Nimenrix' }, 'Nimenrix'],
+    [{ tradename: 'Prevnar 20' }, 'Prevnar'],
+    [{ tradename: 'Prevnar 13' }, 'Prevnar'],
+    [{ name: 'Prevenar 13' }, 'Prevnar'],
     [{ tradename: 'RabAvert' }, 'RabAvert'],
     [{ tradename: 'IMOVAX Rabies' }, 'Imovax Rabies'],
     [{ tradename: 'Shingrix' }, 'Shingrix'],
@@ -73,7 +77,6 @@ test('shared PF/NPF lot products are recognized from scan metadata', () => {
 test('products outside the shared-lot list do not require the PF/NPF chooser', () => {
   for (const input of [
     { tradename: 'Comirnaty' },
-    { tradename: 'Prevnar 20' },
     { tradename: 'Priorix' },
     { tradename: 'Twinrix' }
   ]) {
