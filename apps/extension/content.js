@@ -1856,7 +1856,12 @@ function tryFillPanoramaAgent(data) {
 
 function hasPanoramaDeferredDetailData(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  return !!(administered.date || administered.time);
+  if (administered.date || administered.time) return true;
+  // Reason for immunization (default "Routine") and consent are filled whenever
+  // those controls exist on the immunization form, regardless of scan payload.
+  if (getFields(getPanoramaReasonForImmunizationSelectors()).length) return true;
+  if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
+  return false;
 }
 
 function getPanoramaAdministeredDateTimeFields() {
@@ -1874,12 +1879,18 @@ function getPanoramaAdministeredDateTimeFields() {
 
 function hasPanoramaDeferredDetailFieldsFilled(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  if (!administered.date && !administered.time) return true;
-
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
   const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
   const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
-  return dateMatches && timeMatches;
+  const reasonSatisfied = panoramaSelectAutofillSatisfied(
+    getPanoramaReasonForImmunizationSelectors(),
+    getPanoramaReasonForImmunizationValue(data)
+  );
+  const consentSatisfied = panoramaSelectAutofillSatisfied(
+    getPanoramaConsentReasonSelectors(),
+    getPanoramaConsentReasonValue(data)
+  );
+  return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
 }
 
 function fillPanoramaMaskedTextInput(field, nextValue) {
@@ -1913,6 +1924,67 @@ function fillPanoramaAdministeredDateTimeFields(data) {
   return fillCount;
 }
 
+// Reason for Immunization and consent are PrimeFaces selectonemenu widgets whose
+// hidden native <select> carries the real options. Reason defaults to "Routine";
+// the consent reason ("Consent obtained") only becomes enabled after the lot is
+// selected, so both are handled as deferred fields and retried by the scheduler.
+function getPanoramaReasonForImmunizationSelectors() {
+  return [
+    'select[id*="reasonForImmunizationSelect:iTermSelectOneMenu_input"]'
+  ];
+}
+
+function getPanoramaConsentReasonSelectors() {
+  return [
+    'select[id*="consentReadinessReasonSelect:iTermSelectOneMenu_input"]'
+  ];
+}
+
+function getPanoramaReasonForImmunizationValue(data) {
+  const explicit = String(data?.reason_for_immunization || '').trim();
+  return explicit || 'Routine';
+}
+
+function getPanoramaConsentReasonValue(data) {
+  const explicit = String(data?.consent_reason || '').trim();
+  return explicit || 'Consent obtained';
+}
+
+function panoramaSelectHasDesiredSelection(selectors, desiredText) {
+  const desiredNorm = normalizeForMatch(desiredText);
+  if (!desiredNorm) return true;
+  return getFields(selectors).some((field) => {
+    if (field.tagName !== 'SELECT') return false;
+    const opt = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    return !!opt && normalizeForMatch(opt.text) === desiredNorm;
+  });
+}
+
+// A reason/consent control counts as "satisfied" (nothing left to do) when it is
+// absent, still disabled (Panorama has not enabled it yet), or already showing the
+// desired option. This keeps the scheduler retrying only while a fillable control
+// is present but not yet set.
+function panoramaSelectAutofillSatisfied(selectors, desiredText) {
+  const fields = getFields(selectors);
+  if (!fields.length) return true;
+  if (!fields.some(canFillPanoramaControl)) return true;
+  return panoramaSelectHasDesiredSelection(selectors, desiredText);
+}
+
+function fillPanoramaReasonForImmunization(data) {
+  const selectors = getPanoramaReasonForImmunizationSelectors();
+  const value = getPanoramaReasonForImmunizationValue(data);
+  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
+  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+}
+
+function fillPanoramaConsentReason(data) {
+  const selectors = getPanoramaConsentReasonSelectors();
+  const value = getPanoramaConsentReasonValue(data);
+  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
+  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+}
+
 function isPrimeFacesAjaxBusy() {
   try {
     const queue = globalThis.PrimeFaces && globalThis.PrimeFaces.ajax && globalThis.PrimeFaces.ajax.Queue;
@@ -1936,7 +2008,10 @@ function buildPanoramaDeferredDetailMappings(data) {
 
 function fillPanoramaDeferredDetailFields(data) {
   if (!data) return 0;
-  return fillPanoramaAdministeredDateTimeFields(data);
+  let count = fillPanoramaAdministeredDateTimeFields(data);
+  count += fillPanoramaReasonForImmunization(data);
+  count += fillPanoramaConsentReason(data);
+  return count;
 }
 
 function normalizePanoramaLotToken(value) {
