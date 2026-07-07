@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "VaxLink Alpha",
-  "version": "1.0.9",
-  "version_name": "1.0.9",
+  "version": "1.1.0",
+  "version_name": "1.1.0",
   "description": "Parse GS1 vaccine barcodes and auto-fill Panorama and web-based EMR platforms",
   "permissions": [
     "activeTab",
@@ -36,7 +36,10 @@
         "https://inputhealth.com/*",
         "https://*.inputhealth.com/*"
       ],
-      "js": ["panorama-agent-rules.js", "content.js"],
+      "js": [
+        "panorama-agent-rules.js",
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ],
