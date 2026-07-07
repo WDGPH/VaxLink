@@ -1028,10 +1028,14 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
+    const recordImmsPath = '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+    const pathname = window.location.pathname;
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
        host === 'panorama.prod.ehealthontario.ca') &&
-      window.location.pathname === '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
+      // Keep the canonical recordImms.xhtml page, and also allow Panorama's
+      // suffixed variant of the same view (e.g. recordImms.xhtml.xwar).
+      (pathname === recordImmsPath || pathname.startsWith(recordImmsPath + '.'));
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
@@ -1852,7 +1856,12 @@ function tryFillPanoramaAgent(data) {
 
 function hasPanoramaDeferredDetailData(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  return !!(administered.date || administered.time);
+  if (administered.date || administered.time) return true;
+  // Reason for immunization (default "Routine") and consent are filled whenever
+  // those controls exist on the immunization form, regardless of scan payload.
+  if (getFields(getPanoramaReasonForImmunizationSelectors()).length) return true;
+  if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
+  return false;
 }
 
 function getPanoramaAdministeredDateTimeFields() {
@@ -1870,12 +1879,18 @@ function getPanoramaAdministeredDateTimeFields() {
 
 function hasPanoramaDeferredDetailFieldsFilled(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  if (!administered.date && !administered.time) return true;
-
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
   const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
   const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
-  return dateMatches && timeMatches;
+  const reasonSatisfied = panoramaSelectAutofillSatisfied(
+    getPanoramaReasonForImmunizationSelectors(),
+    getPanoramaReasonForImmunizationValue(data)
+  );
+  const consentSatisfied = panoramaSelectAutofillSatisfied(
+    getPanoramaConsentReasonSelectors(),
+    getPanoramaConsentReasonValue(data)
+  );
+  return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
 }
 
 function fillPanoramaMaskedTextInput(field, nextValue) {
@@ -1909,6 +1924,67 @@ function fillPanoramaAdministeredDateTimeFields(data) {
   return fillCount;
 }
 
+// Reason for Immunization and consent are PrimeFaces selectonemenu widgets whose
+// hidden native <select> carries the real options. Reason defaults to "Routine";
+// the consent reason ("Consent obtained") only becomes enabled after the lot is
+// selected, so both are handled as deferred fields and retried by the scheduler.
+function getPanoramaReasonForImmunizationSelectors() {
+  return [
+    'select[id*="reasonForImmunizationSelect:iTermSelectOneMenu_input"]'
+  ];
+}
+
+function getPanoramaConsentReasonSelectors() {
+  return [
+    'select[id*="consentReadinessReasonSelect:iTermSelectOneMenu_input"]'
+  ];
+}
+
+function getPanoramaReasonForImmunizationValue(data) {
+  const explicit = String(data?.reason_for_immunization || '').trim();
+  return explicit || 'Routine';
+}
+
+function getPanoramaConsentReasonValue(data) {
+  const explicit = String(data?.consent_reason || '').trim();
+  return explicit || 'Consent obtained';
+}
+
+function panoramaSelectHasDesiredSelection(selectors, desiredText) {
+  const desiredNorm = normalizeForMatch(desiredText);
+  if (!desiredNorm) return true;
+  return getFields(selectors).some((field) => {
+    if (field.tagName !== 'SELECT') return false;
+    const opt = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    return !!opt && normalizeForMatch(opt.text) === desiredNorm;
+  });
+}
+
+// A reason/consent control counts as "satisfied" (nothing left to do) when it is
+// absent, still disabled (Panorama has not enabled it yet), or already showing the
+// desired option. This keeps the scheduler retrying only while a fillable control
+// is present but not yet set.
+function panoramaSelectAutofillSatisfied(selectors, desiredText) {
+  const fields = getFields(selectors);
+  if (!fields.length) return true;
+  if (!fields.some(canFillPanoramaControl)) return true;
+  return panoramaSelectHasDesiredSelection(selectors, desiredText);
+}
+
+function fillPanoramaReasonForImmunization(data) {
+  const selectors = getPanoramaReasonForImmunizationSelectors();
+  const value = getPanoramaReasonForImmunizationValue(data);
+  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
+  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+}
+
+function fillPanoramaConsentReason(data) {
+  const selectors = getPanoramaConsentReasonSelectors();
+  const value = getPanoramaConsentReasonValue(data);
+  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
+  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+}
+
 function isPrimeFacesAjaxBusy() {
   try {
     const queue = globalThis.PrimeFaces && globalThis.PrimeFaces.ajax && globalThis.PrimeFaces.ajax.Queue;
@@ -1932,7 +2008,10 @@ function buildPanoramaDeferredDetailMappings(data) {
 
 function fillPanoramaDeferredDetailFields(data) {
   if (!data) return 0;
-  return fillPanoramaAdministeredDateTimeFields(data);
+  let count = fillPanoramaAdministeredDateTimeFields(data);
+  count += fillPanoramaReasonForImmunization(data);
+  count += fillPanoramaConsentReason(data);
+  return count;
 }
 
 function normalizePanoramaLotToken(value) {
@@ -1952,6 +2031,7 @@ const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
   { label: 'Havrix', terms: ['havrix 1440', 'havrix 720', 'havrix'] },
   { label: 'Avaxim', terms: ['avaxim'] },
   { label: 'Nimenrix', terms: ['nimenrix'] },
+  { label: 'Prevnar', terms: ['prevnar', 'prevenar'] },
   { label: 'RabAvert', terms: ['rabavert'] },
   { label: 'Imovax Rabies', terms: ['imovax rabies'] },
   { label: 'Shingrix', terms: ['shingrix'] },
@@ -2073,6 +2153,20 @@ function setPanoramaFundedRadioValue(value) {
 
 function resetPanoramaFundedRadioToShowAll() {
   return setPanoramaFundedRadioValue('SHOW_ALL');
+}
+
+// After the nurse answers the PF/NPF prompt we thread their pick through the
+// fill data as _fundedRadioChoice. Panorama's post-selection AJAX can re-render
+// the funded-radio group and momentarily drop the checked state; if a later fill
+// pass re-detects a non-explicit value we must re-apply the nurse's answer rather
+// than re-summon the persistent chooser (which would otherwise linger on screen
+// until "Not now" is clicked). Returns the setPanoramaFundedRadioValue result, or
+// null when no answer has been recorded yet.
+function reapplyAnsweredPanoramaFundingChoice(data) {
+  const choice = data && data._fundedRadioChoice;
+  if (!isExplicitPanoramaFundingValue(choice)) return null;
+  if (getPanoramaFundedRadioValue() === choice) return 'already';
+  return setPanoramaFundedRadioValue(choice);
 }
 
 function openPanoramaLotDropdown() {
@@ -2286,14 +2380,18 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         const fundedValue = getPanoramaFundedRadioValue();
         if (!isExplicitPanoramaFundingValue(fundedValue)) {
-          showVaxlinkToast({
-            ...data,
-            _sharedFundingLotFilterRequired: true,
-            _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
-            _fundedRadioValue: fundedValue
-          }, 12000);
-          stop();
-          return;
+          const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
+          if (!reapplied) {
+            showVaxlinkToast({
+              ...data,
+              _sharedFundingLotFilterRequired: true,
+              _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
+              _fundedRadioValue: fundedValue
+            }, 12000);
+            stop();
+            return;
+          }
+          if (reapplied === 'clicked') return; // wait for the radio AJAX to settle
         }
       }
 
@@ -2419,13 +2517,17 @@ function fillPanoramaImmunizationFields(data) {
   const preserveFundingFilter = !!(sharedFundingProductLabel && String(data?.lot || '').trim());
   const fundedValue = getPanoramaFundedRadioValue();
   if (preserveFundingFilter && hasPanoramaFundedRadio() && !isExplicitPanoramaFundingValue(fundedValue)) {
-    showVaxlinkToast({
-      ...data,
-      _sharedFundingLotFilterRequired: true,
-      _sharedFundingLotLabel: sharedFundingProductLabel,
-      _fundedRadioValue: fundedValue
-    }, 12000);
-    return createAutofillResult('pending', { reason: 'funding_choice_required' });
+    // If the nurse already answered the chooser, re-apply their pick rather than
+    // re-prompting; only summon the chooser when there is no recorded answer yet.
+    if (!reapplyAnsweredPanoramaFundingChoice(data)) {
+      showVaxlinkToast({
+        ...data,
+        _sharedFundingLotFilterRequired: true,
+        _sharedFundingLotLabel: sharedFundingProductLabel,
+        _fundedRadioValue: fundedValue
+      }, 12000);
+      return createAutofillResult('pending', { reason: 'funding_choice_required' });
+    }
   }
 
   // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
@@ -3181,9 +3283,24 @@ function showVaxlinkToast(data, durationMs = 4000) {
           </div>`, 7000);
           return;
         }
-        const autofillResult = autoFillTelus(data);
+        // Drop the chooser flags now that the nurse has answered. Otherwise the
+        // deferred finalize (and any success toast) re-runs showVaxlinkToast with
+        // _sharedFundingLotFilterRequired still set and re-summons this same
+        // persistent prompt, which then only "Not now" can clear.
+        const {
+          _sharedFundingLotFilterRequired,
+          _sharedFundingLotSwitchFilter,
+          _sharedFundingLotLabel,
+          _fundedRadioValue,
+          ...rest
+        } = data;
+        // Record the nurse's answer so any later fill pass re-applies it instead
+        // of re-summoning this persistent chooser (which then only "Not now"
+        // could clear).
+        const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
+        const autofillResult = autoFillTelus(fillData);
         if (isAutofillSuccess(autofillResult)) {
-          await finalizeDeferredPanoramaAutofill(data);
+          await finalizeDeferredPanoramaAutofill(fillData);
         }
       });
     });
