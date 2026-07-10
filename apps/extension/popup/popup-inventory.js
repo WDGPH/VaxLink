@@ -1,4 +1,4 @@
-import { buildLegacyQueueRecord } from './queue-record.js';
+import { buildLegacyQueueRecord } from '../shared/queue-record.js';
 import { escapeHtml } from './popup-ui.js';
 
 export const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';

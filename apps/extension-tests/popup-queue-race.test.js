@@ -40,7 +40,7 @@ function installBrowserGlobals() {
 }
 
 const store = installBrowserGlobals();
-const { ScanQueueManager } = await import('../extension/popup-inventory.js');
+const { ScanQueueManager } = await import('../extension/popup/popup-inventory.js');
 
 function makeManager() {
   return new ScanQueueManager({

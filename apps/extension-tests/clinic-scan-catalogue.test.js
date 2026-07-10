@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseInputData } from '../extension/popup-parser.js';
+import { parseInputData } from '../extension/shared/popup-parser.js';
 import {
   buildVialBarcode,
   createBackgroundHarness,

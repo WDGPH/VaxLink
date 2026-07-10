@@ -5,7 +5,7 @@ import {
   buildInventorySummary,
   buildMultipleInjectSummary,
   buildQueueRecord
-} from '../extension/popup-inventory.js';
+} from '../extension/popup/popup-inventory.js';
 
 test('buildQueueRecord preserves popup inventory export fields', () => {
   const row = buildQueueRecord({

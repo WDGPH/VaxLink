@@ -118,7 +118,7 @@ export function buildVialBarcode({ gtin, expiryIso, lot, serial = null }) {
 
 const BACKGROUND_PATH = path.resolve(
   fileURLToPath(import.meta.url),
-  '../../../extension/background.js'
+  '../../../extension/background/background.js'
 );
 
 export function createBackgroundHarness(bundle) {
@@ -248,7 +248,7 @@ export function createBackgroundHarness(bundle) {
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url);
-require(path.resolve(fileURLToPath(import.meta.url), '../../../extension/panorama-agent-rules.js'));
+require(path.resolve(fileURLToPath(import.meta.url), '../../../extension/content/platforms/panorama/agent-rules.js'));
 const PANORAMA_AGENT_RULES = globalThis.VAXLINK_PANORAMA_AGENT_RULES;
 
 function normalizeForMatch(value) {

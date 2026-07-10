@@ -20,8 +20,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseInputData, getExpiryStatus } from '../extension/popup-parser.js';
-import { buildLegacyQueueRecord } from '../extension/queue-record.js';
+import { parseInputData, getExpiryStatus } from '../extension/shared/popup-parser.js';
+import { buildLegacyQueueRecord } from '../extension/shared/queue-record.js';
 import {
   buildVialBarcode,
   createBackgroundHarness,
@@ -64,7 +64,7 @@ function installBrowserGlobals() {
 }
 
 const browser = installBrowserGlobals();
-const { ScanQueueManager, buildQueueRecord } = await import('../extension/popup-inventory.js');
+const { ScanQueueManager, buildQueueRecord } = await import('../extension/popup/popup-inventory.js');
 
 const bundle = loadNvcBundle();
 

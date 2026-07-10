@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseGS1Barcode, parseInputData, formatDate } from '../extension/popup-parser.js';
+import { parseGS1Barcode, parseInputData, formatDate } from '../extension/shared/popup-parser.js';
 
 const GS = String.fromCharCode(0x1d);
 // 01 + GTIN, 17 + expiry, 10 + lot (lot last, no GS needed; lot text avoids

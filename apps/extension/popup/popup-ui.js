@@ -1,4 +1,4 @@
-import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
+import { buildExpiryBanner, getExpiryStatus } from '../shared/popup-parser.js';
 
 export const HANDS_FREE_SCAN_KEY = 'hands_free_scan_autofill_enabled';
 export const HANDS_FREE_SCAN_MODE_KEY = 'hands_free_scan_mode_v1';

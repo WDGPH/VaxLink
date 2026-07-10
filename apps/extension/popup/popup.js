@@ -6,7 +6,7 @@ import {
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
-import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-parser.js';
+import { getExpiryStatus, outputTypeForExpiry, parseInputData } from '../shared/popup-parser.js';
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,

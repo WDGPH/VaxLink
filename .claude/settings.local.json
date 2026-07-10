@@ -11,7 +11,20 @@
       "Bash(rtk read *)",
       "Bash(bash scripts/fetch-nvc.sh)",
       "Bash(node *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(rtk find *)",
+      "Bash(awk 'NF && $0 !~ /^[[:space:]]/ && $0 !~ /^\\(async \\)?function / {print NR\": \"$0}' content.js)",
+      "Bash(git rm *)",
+      "Bash(git mv *)",
+      "Bash(sed -i \"s|'../../../extension/background.js'|'../../../extension/background/background.js'|g\" helpers/clinic-sim.js)",
+      "Bash(sed -i 's|extension/panorama-agent-rules\\\\.js|extension/content/platforms/panorama/agent-rules.js|g' hb-classification.test.js multiple-workflow-ordering.test.js hb-nvc-lots.test.js helpers/clinic-sim.js)",
+      "Bash(sed -i 's|\\\\.\\\\./extension/popup-parser\\\\.js|../extension/shared/popup-parser.js|g' clinic-workflow-day.test.js gs1-scanner-formats.test.js clinic-scan-catalogue.test.js)",
+      "Bash(sed -i 's|\\\\.\\\\./extension/queue-record\\\\.js|../extension/shared/queue-record.js|g' clinic-workflow-day.test.js)",
+      "Bash(sed -i 's|\\\\.\\\\./extension/popup-inventory\\\\.js|../extension/popup/popup-inventory.js|g' clinic-workflow-day.test.js csv-export-injection.test.js popup-inventory.test.js popup-queue-race.test.js)",
+      "Bash(./scripts/package-extension.sh alpha *)",
+      "Bash(unzip -l dist/vaxlink-alpha-*.zip)",
+      "Bash(awk '{print $4}')",
+      "Bash(grep -vE '^$')"
     ]
   }
 }

@@ -46,7 +46,7 @@ function installBrowserGlobals() {
 }
 
 const { store, csvCaptures } = installBrowserGlobals();
-const { ScanQueueManager } = await import('../extension/popup-inventory.js');
+const { ScanQueueManager } = await import('../extension/popup/popup-inventory.js');
 
 test('CSV export neutralizes formula-prefixed cells but keeps numbers numeric', async () => {
   store.set(QUEUE_KEY, [{

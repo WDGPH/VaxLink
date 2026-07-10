@@ -27,7 +27,7 @@ const bundlePath = existsSync(BUNDLE_PATH) ? BUNDLE_PATH : null;
 
 // Load panorama-agent-rules.js side-effect so globalThis.VAXLINK_PANORAMA_AGENT_RULES is set.
 const require = createRequire(import.meta.url);
-const rulesPath = path.resolve(fileURLToPath(import.meta.url), '../../extension/panorama-agent-rules.js');
+const rulesPath = path.resolve(fileURLToPath(import.meta.url), '../../extension/content/platforms/panorama/agent-rules.js');
 require(rulesPath);
 const PANORAMA_AGENT_RULES = globalThis.VAXLINK_PANORAMA_AGENT_RULES;
 
