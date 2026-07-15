@@ -2185,6 +2185,30 @@ function setPanoramaFundedRadioValue(value) {
     }
   }
   radio.checked = true;
+  // The radio AJAX re-renders this panel with the right state, but during that
+  // round trip the group still DISPLAYS the previous choice (the widget did
+  // not take our click, so only the hidden input changed). Sync the widget
+  // visuals immediately so the nurse sees their pick, not a SHOW_ALL blip;
+  // the server response then replaces this with the authoritative markup.
+  const group = radio.closest('table.ui-selectoneradio');
+  if (group) {
+    group.querySelectorAll('.ui-radiobutton-box').forEach((otherBox) => {
+      otherBox.classList.remove('ui-state-active');
+      const icon = otherBox.querySelector('.ui-radiobutton-icon');
+      if (icon) {
+        icon.classList.remove('ui-icon-bullet');
+        icon.classList.add('ui-icon-blank');
+      }
+    });
+  }
+  if (box) {
+    box.classList.add('ui-state-active');
+    const icon = box.querySelector('.ui-radiobutton-icon');
+    if (icon) {
+      icon.classList.remove('ui-icon-blank');
+      icon.classList.add('ui-icon-bullet');
+    }
+  }
   radio.dispatchEvent(new Event('change', { bubbles: true }));
   vlog('VaxLink: funded radio set to', desired);
   return 'clicked';
@@ -2332,17 +2356,32 @@ function fillPanoramaLotFromPanelItems(lotValue) {
   return false;
 }
 
-function tryFillPanoramaLot(lotValue) {
+function hasFillablePanoramaLotSelect() {
+  return getFields([
+    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
+  ]).some(canFillPanoramaControl);
+}
+
+function tryFillPanoramaLot(lotValue, { panelRescue = false } = {}) {
   if (!lotValue) return false;
   if (fillPanoramaLotFromSelect(lotValue)) return true;
+  // When a fillable native select exists, a missing option just means the lot
+  // list is still refreshing — the select path lands it silently (and exactly
+  // once) on the pass right after the options arrive. Driving the visible
+  // dropdown (open, filter, click) here only shows the nurse failed retries,
+  // so it is reserved for layouts without a fillable select and, as a late
+  // rescue, for the case where the silent select change never registered.
+  if (hasFillablePanoramaLotSelect() && !panelRescue) return false;
   openPanoramaLotDropdown();
   if (fillPanoramaLotFromPanelItems(lotValue)) return true;
   return false;
 }
 
-function tryFillPanoramaLotOrTrade(data) {
+function tryFillPanoramaLotOrTrade(data, options) {
   if (!data) return false;
-  if (data.lot) return tryFillPanoramaLot(data.lot);
+  if (data.lot) return tryFillPanoramaLot(data.lot, options);
   return fillPanoramaTradeName(data);
 }
 
@@ -2444,6 +2483,11 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
   // longer road to the lot. Re-apply at most once per cooldown.
   const FUNDING_REAPPLY_COOLDOWN_MS = 2500;
   let lastFundingReapplyClickAt = 0;
+  // While a fillable lot select exists, lot filling is silent and lands in one
+  // action once the options refresh. Only if it stays unresolved this long do
+  // we start driving the visible dropdown as a rescue.
+  const PANEL_RESCUE_AFTER_MS = 5000;
+  const scheduleStartedAt = Date.now();
   // Attempts can fire ~110ms apart, so two back-to-back "stable" passes can
   // land inside a transient state: right after a funding-radio AJAX the
   // consent select is momentarily DISABLED (counts as satisfied) while the
@@ -2539,9 +2583,11 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
         }
       }
 
+      const panelRescue = (now - scheduleStartedAt) >= PANEL_RESCUE_AFTER_MS;
+
       // Try lot fill with the current radio state first — avoids triggering a
       // funded-radio AJAX that can reset the agent and create a re-fill cascade.
-      resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
+      resolved = tryFillPanoramaLotOrTrade(data, { panelRescue }) || hasPanoramaLotOrTradeSelection(data);
       if (!resolved && preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         if ((now - lastSharedFundingMissAt) >= SHARED_FUNDING_MISS_GAP_MS) {
           lastSharedFundingMissAt = now;
@@ -2565,11 +2611,14 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
         const radioResult = resetPanoramaFundedRadioToShowAll();
         if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
         // Radio was already at SHOW_ALL or not found — retry immediately
-        resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
+        resolved = tryFillPanoramaLotOrTrade(data, { panelRescue }) || hasPanoramaLotOrTradeSelection(data);
       }
     }
 
-    if (!resolved && hasLot && hasResolvedAgent && !busy) {
+    // Last-ditch visible-dropdown pass: only for layouts without a fillable
+    // native select, or once the silent select path has had its rescue window.
+    if (!resolved && hasLot && hasResolvedAgent && !busy
+        && (!hasFillablePanoramaLotSelect() || (now - scheduleStartedAt) >= PANEL_RESCUE_AFTER_MS)) {
       if (!hasPanoramaLotSelection(data?.lot)) {
         openPanoramaLotDropdown();
       }
@@ -2712,7 +2761,11 @@ function fillPanoramaImmunizationFields(data) {
   // Panorama refreshes lot options and dependent controls asynchronously after selection.
   const finalizeOnResolved = preserveFundingFilter && !!data?.lot && !hasPanoramaLotSelection(data.lot);
   if (agentCount > 0 || data.lot || hasPanoramaDeferredDetailData(data) || getPanoramaTradeCandidates(data).length > 0) {
-    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 1200 : 350, {
+    // Start the scheduler (and its MutationObserver) almost immediately: every
+    // pass is now a silent, idempotent no-op until there is real work, so the
+    // old 1200ms head start was pure dead time — the observer is what reacts
+    // the moment an agent/radio/checkbox AJAX lands the refreshed lot options.
+    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 200 : 100, {
       fundedRadioEnsured: !preserveFundingFilter && radioResult !== 'not_found',
       preserveFundingFilter,
       finalizeOnResolved

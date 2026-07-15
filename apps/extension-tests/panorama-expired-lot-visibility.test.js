@@ -63,6 +63,40 @@ test('the visibility checkbox is only clicked when present and unchecked', () =>
   assert.equal(ensureExpiredRecalledLotsVisible(checkbox), 'already');
 });
 
+// Mirrors the lot-fill policy in tryFillPanoramaLot: while a fillable native
+// select exists, filling is silent — a missing option means the list is still
+// refreshing, and the select path lands the lot in ONE action on the pass
+// right after the options arrive. The visible dropdown (open, filter, click)
+// is reserved for layouts without a fillable select and for a late rescue.
+function lotFillAction({ optionsContainLot, fillableSelectExists, panelRescue }) {
+  if (optionsContainLot) return 'select-silently';
+  if (fillableSelectExists && !panelRescue) return 'wait';
+  return 'drive-visible-dropdown';
+}
+
+test('lot filling waits silently while the select options refresh, then selects once', () => {
+  // options not refreshed yet: no visible interaction, just wait for the AJAX
+  assert.equal(
+    lotFillAction({ optionsContainLot: false, fillableSelectExists: true, panelRescue: false }),
+    'wait'
+  );
+  // options arrived: one silent select action
+  assert.equal(
+    lotFillAction({ optionsContainLot: true, fillableSelectExists: true, panelRescue: false }),
+    'select-silently'
+  );
+  // no native select (autocomplete layout): the dropdown is the only path
+  assert.equal(
+    lotFillAction({ optionsContainLot: false, fillableSelectExists: false, panelRescue: false }),
+    'drive-visible-dropdown'
+  );
+  // still unresolved after the rescue window: fall back to the dropdown
+  assert.equal(
+    lotFillAction({ optionsContainLot: false, fillableSelectExists: true, panelRescue: true }),
+    'drive-visible-dropdown'
+  );
+});
+
 // Mirrors the prompt ordering in fillPanoramaImmunizationFields /
 // schedulePanoramaLotOrTradeSelection: for an expired lot the visibility
 // checkbox is asserted BEFORE the PF/NPF chooser is shown, so its AJAX settles
