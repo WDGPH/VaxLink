@@ -90,3 +90,98 @@ test('only PF and NPF are explicit funded choices', () => {
   assert.equal(isExplicitPanoramaFundingValue('SHOW_ALL'), false);
   assert.equal(isExplicitPanoramaFundingValue(''), false);
 });
+
+// Mirrors setPanoramaFundedRadioValue: setting the funded radio must fire
+// exactly ONE radio AJAX, like a manual click. The old path clicked the
+// PrimeFaces widget box AND dispatched a synthetic change on top — the second
+// queued radio request re-rendered the lot section from a stale serialization
+// and wiped the "Display Expired and Recalled Lots" checkbox (which a manual
+// radio change preserves). The synthetic path is a fallback for when the
+// widget did not take the click.
+function setFundedRadio(radio, widgetBound) {
+  const ajaxFired = [];
+  if (radio.checked) return { result: 'already', ajaxFired };
+  if (radio.box && widgetBound) {
+    radio.checked = true;      // widget toggles the input...
+    ajaxFired.push('widget');  // ...and fires its own AJAX
+  }
+  if (radio.checked) return { result: 'clicked', ajaxFired };
+  radio.checked = true;
+  ajaxFired.push('synthetic-change');
+  return { result: 'clicked', ajaxFired };
+}
+
+test('setting the funded radio fires exactly one AJAX, like a manual click', () => {
+  // widget bound (normal Panorama page): widget click only, no synthetic change
+  assert.deepEqual(
+    setFundedRadio({ checked: false, box: {} }, true),
+    { result: 'clicked', ajaxFired: ['widget'] }
+  );
+  // widget not bound: the synthetic fallback still applies the choice, once
+  assert.deepEqual(
+    setFundedRadio({ checked: false, box: {} }, false),
+    { result: 'clicked', ajaxFired: ['synthetic-change'] }
+  );
+  // already selected: no AJAX at all
+  assert.deepEqual(
+    setFundedRadio({ checked: true, box: {} }, true),
+    { result: 'already', ajaxFired: [] }
+  );
+});
+
+// Mirrors the shared-funding miss pacing in schedulePanoramaLotOrTradeSelection.
+// Fill attempts fire in a sub-second burst (0/120/260/450ms + mutation observer)
+// and the content script cannot see PrimeFaces' AJAX queue, so counting every
+// failed lot lookup as a miss re-summoned the PF/NPF chooser before the
+// radio/checkbox AJAX had repopulated the lot options (nurses had to answer the
+// same prompt three times). Misses must be spaced out, and the window restarts
+// whenever VaxLink itself triggers a lot-options refresh.
+const SHARED_FUNDING_MISS_GAP_MS = 1200;
+
+function createSharedFundingMissWindow() {
+  let misses = 0;
+  let lastMissAt = 0;
+  return {
+    restart(now) {
+      misses = 0;
+      lastMissAt = now;
+    },
+    // returns true when the third counted miss is reached (chooser re-summoned)
+    recordMiss(now) {
+      if ((now - lastMissAt) < SHARED_FUNDING_MISS_GAP_MS) return false;
+      lastMissAt = now;
+      misses += 1;
+      return misses >= 3;
+    }
+  };
+}
+
+test('a sub-second burst of failed lot lookups does not re-summon the chooser', () => {
+  const window_ = createSharedFundingMissWindow();
+  window_.restart(1000); // NPF answered -> radio AJAX in flight
+  // burst attempts while the refresh is still pending
+  for (const at of [1000, 1120, 1260, 1450, 1500, 1610, 1720, 1830]) {
+    assert.equal(window_.recordMiss(at), false);
+  }
+});
+
+test('sustained genuine failure still re-summons the chooser after ~3 spaced misses', () => {
+  const window_ = createSharedFundingMissWindow();
+  window_.restart(1000);
+  assert.equal(window_.recordMiss(2250), false);  // miss 1
+  assert.equal(window_.recordMiss(2900), false);  // within gap -> not counted
+  assert.equal(window_.recordMiss(3500), false);  // miss 2
+  assert.equal(window_.recordMiss(4800), true);   // miss 3 -> chooser
+});
+
+test('a refresh triggered by VaxLink restarts the miss window', () => {
+  const window_ = createSharedFundingMissWindow();
+  window_.restart(0);
+  assert.equal(window_.recordMiss(1200), false);  // miss 1
+  assert.equal(window_.recordMiss(2400), false);  // miss 2
+  // expired-lots checkbox clicked -> options are about to change
+  window_.restart(2600);
+  assert.equal(window_.recordMiss(3800), false);  // miss 1 again, not 3
+  assert.equal(window_.recordMiss(5000), false);  // miss 2
+  assert.equal(window_.recordMiss(6200), true);   // miss 3 -> chooser
+});

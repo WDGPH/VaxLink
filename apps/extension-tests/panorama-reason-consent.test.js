@@ -63,6 +63,44 @@ test('a control is "satisfied" when absent, still disabled, or already set', () 
   assert.equal(autofillSatisfied([{ options: empty, selectedIndex: 1, disabled: false }], 'Routine'), true);
 });
 
+// Mirrors the spaced stable-pass gate in schedulePanoramaLotOrTradeSelection.
+// Right after a funding-radio AJAX the consent select is momentarily DISABLED
+// (which counts as "satisfied") while the lot is already re-filled. Attempts
+// fire ~110ms apart, so two un-spaced stable passes could land inside that
+// transient window and stop the scheduler — then consent re-enables empty with
+// nothing left running to fill it.
+function createStablePassGate(gapMs = 700) {
+  let passes = 0;
+  let lastAt = 0;
+  return {
+    // returns true when the scheduler would stop
+    observe(now, stable) {
+      if (!stable) {
+        passes = 0;
+        return false;
+      }
+      if ((now - lastAt) >= gapMs) {
+        lastAt = now;
+        passes += 1;
+      }
+      return passes >= 2;
+    }
+  };
+}
+
+test('a transient disabled-consent window cannot stop the fill scheduler', () => {
+  const gate = createStablePassGate();
+  // radio AJAX cleared the lot section: consent disabled -> looks "satisfied"
+  assert.equal(gate.observe(1000, true), false);
+  assert.equal(gate.observe(1110, true), false); // burst pass: not counted
+  assert.equal(gate.observe(1300, true), false);
+  // consent re-enables empty -> not satisfied -> counter resets, consent refilled
+  assert.equal(gate.observe(1500, false), false);
+  // genuine stability across spaced passes still stops the scheduler
+  assert.equal(gate.observe(2000, true), false);
+  assert.equal(gate.observe(2800, true), true);
+});
+
 // Mirrors fillPanoramaAdministeredDateTimeFields: a field whose value already
 // matches the target must NOT be rewritten. Rewriting is not a no-op in
 // Panorama — the change event fires an AJAX refresh that clears the consent
