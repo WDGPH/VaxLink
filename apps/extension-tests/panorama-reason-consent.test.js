@@ -63,23 +63,69 @@ test('a control is "satisfied" when absent, still disabled, or already set', () 
   assert.equal(autofillSatisfied([{ options: empty, selectedIndex: 1, disabled: false }], 'Routine'), true);
 });
 
-test('default targets resolve to exactly one option in the pano3 fixture', () => {
-  const fixture = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '..', '..', 'pano3.html'
+// Mirrors fillPanoramaAdministeredDateTimeFields: a field whose value already
+// matches the target must NOT be rewritten. Rewriting is not a no-op in
+// Panorama — the change event fires an AJAX refresh that clears the consent
+// select (enabled only once a date is present) and it never re-populates. The
+// PF/NPF chooser answer re-runs the whole fill, which is where this bites.
+function administeredDateTimeWrites(administered, dateField, timeField) {
+  const writes = [];
+  if (administered.date
+      && String(dateField?.value || '').trim() !== administered.date) {
+    writes.push('date');
+  }
+  if (administered.time
+      && String(timeField?.value || '').trim() !== administered.time) {
+    writes.push('time');
+  }
+  return writes;
+}
+
+test('a re-fill pass leaves an already-correct Date Administered untouched', () => {
+  const administered = { date: '2026/07/15', time: '10:30' };
+
+  // First pass: both fields empty -> both written.
+  assert.deepEqual(
+    administeredDateTimeWrites(administered, { value: '' }, { value: '' }),
+    ['date', 'time']
   );
-  const html = fs.readFileSync(fixture, 'utf8');
 
-  const optionsFor = (idFrag) => {
-    const m = html.match(new RegExp('id="[^"]*' + idFrag + ':iTermSelectOneMenu_input"[^>]*>(.*?)</select>'));
-    if (!m) return [];
-    return [...m[1].matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)]
-      .map((o) => ({ value: o[1], text: o[2] }))
-      .filter((o) => o.value !== '');
-  };
+  // PF/NPF answer re-fill: values already correct -> zero writes, so the
+  // date change AJAX never fires and consent stays selected.
+  assert.deepEqual(
+    administeredDateTimeWrites(administered, { value: '2026/07/15' }, { value: '10:30' }),
+    []
+  );
 
-  const matches = (options, desired) => options.filter((o) => o.text.trim() === desired);
-
-  assert.deepEqual(matches(optionsFor('reasonForImmunizationSelect'), 'Routine').map((o) => o.value), ['1327349']);
-  assert.deepEqual(matches(optionsFor('consentReadinessReasonSelect'), 'Consent obtained').map((o) => o.value), ['1328318']);
+  // A genuinely different value is still corrected.
+  assert.deepEqual(
+    administeredDateTimeWrites(administered, { value: '2026/07/14' }, { value: '10:30' }),
+    ['date']
+  );
 });
+
+// pano3 captures the pre-lot state (consent select rendered but disabled),
+// pano4 the post-lot state (consent select enabled). The defaults must resolve
+// to exactly one option in both.
+for (const fixtureName of ['pano3.html', 'pano4.html']) {
+  test(`default targets resolve to exactly one option in the ${fixtureName} fixture`, () => {
+    const fixture = path.join(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..', '..', fixtureName
+    );
+    const html = fs.readFileSync(fixture, 'utf8');
+
+    const optionsFor = (idFrag) => {
+      const m = html.match(new RegExp('id="[^"]*' + idFrag + ':iTermSelectOneMenu_input"[^>]*>(.*?)</select>'));
+      if (!m) return [];
+      return [...m[1].matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)]
+        .map((o) => ({ value: o[1], text: o[2] }))
+        .filter((o) => o.value !== '');
+    };
+
+    const matches = (options, desired) => options.filter((o) => o.text.trim() === desired);
+
+    assert.deepEqual(matches(optionsFor('reasonForImmunizationSelect'), 'Routine').map((o) => o.value), ['1327349']);
+    assert.deepEqual(matches(optionsFor('consentReadinessReasonSelect'), 'Consent obtained').map((o) => o.value), ['1328318']);
+  });
+}

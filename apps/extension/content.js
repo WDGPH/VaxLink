@@ -14,11 +14,13 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let reasonConsentAutofillEnabled = true;
 let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
@@ -45,6 +47,10 @@ const INPUT_CANDIDATE_TTL_MS = 5000;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+}
+
+function normalizeReasonConsentAutofillSetting(stored) {
+  return !(stored && stored[REASON_CONSENT_AUTOFILL_KEY] === false);
 }
 
 function normalizeAudioFeedbackSetting(stored) {
@@ -1120,10 +1126,12 @@ function initHandsFreeScanner() {
     LEGACY_REMOTE_MODE_KEY,
     LEGACY_HANDS_FREE_KEY,
     ADMIN_DATETIME_AUTOFILL_KEY,
+    REASON_CONSENT_AUTOFILL_KEY,
     AUDIO_FEEDBACK_KEY
   ], (stored) => {
     activeWorkflowMode = normalizeWorkflowMode(stored);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
+    reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(stored);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
     vlog('active workflow mode', activeWorkflowMode);
 
@@ -1155,6 +1163,7 @@ function initHandsFreeScanner() {
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
       !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
+      !(REASON_CONSENT_AUTOFILL_KEY in changes) &&
       !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
@@ -1167,12 +1176,16 @@ function initHandsFreeScanner() {
       [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
         ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
         : adminDateTimeAutofillEnabled,
+      [REASON_CONSENT_AUTOFILL_KEY]: REASON_CONSENT_AUTOFILL_KEY in changes
+        ? changes[REASON_CONSENT_AUTOFILL_KEY].newValue
+        : reasonConsentAutofillEnabled,
       [AUDIO_FEEDBACK_KEY]: AUDIO_FEEDBACK_KEY in changes
         ? changes[AUDIO_FEEDBACK_KEY].newValue
         : audioFeedbackEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
+    reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
@@ -1858,9 +1871,12 @@ function hasPanoramaDeferredDetailData(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (administered.date || administered.time) return true;
   // Reason for immunization (default "Routine") and consent are filled whenever
-  // those controls exist on the immunization form, regardless of scan payload.
-  if (getFields(getPanoramaReasonForImmunizationSelectors()).length) return true;
-  if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
+  // those controls exist on the immunization form, regardless of scan payload —
+  // unless the nurse turned that off in Data Tools.
+  if (reasonConsentAutofillEnabled) {
+    if (getFields(getPanoramaReasonForImmunizationSelectors()).length) return true;
+    if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
+  }
   return false;
 }
 
@@ -1882,11 +1898,11 @@ function hasPanoramaDeferredDetailFieldsFilled(data) {
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
   const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
   const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
-  const reasonSatisfied = panoramaSelectAutofillSatisfied(
+  const reasonSatisfied = !reasonConsentAutofillEnabled || panoramaSelectAutofillSatisfied(
     getPanoramaReasonForImmunizationSelectors(),
     getPanoramaReasonForImmunizationValue(data)
   );
-  const consentSatisfied = panoramaSelectAutofillSatisfied(
+  const consentSatisfied = !reasonConsentAutofillEnabled || panoramaSelectAutofillSatisfied(
     getPanoramaConsentReasonSelectors(),
     getPanoramaConsentReasonValue(data)
   );
@@ -1914,11 +1930,20 @@ function fillPanoramaAdministeredDateTimeFields(data) {
 
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
 
+  // Rewriting an already-correct value is not a no-op in Panorama: the change
+  // event triggers an AJAX refresh that clears the consent select (which only
+  // enables once a date is present) and it is not re-populated afterwards. So
+  // a re-fill pass (e.g. after the PF/NPF chooser is answered) must leave a
+  // matching date/time untouched.
   let fillCount = 0;
-  if (administered.date && fillPanoramaMaskedTextInput(dateField, administered.date)) {
+  if (administered.date
+      && String(dateField?.value || '').trim() !== administered.date
+      && fillPanoramaMaskedTextInput(dateField, administered.date)) {
     fillCount += 1;
   }
-  if (administered.time && fillPanoramaMaskedTextInput(timeField, administered.time)) {
+  if (administered.time
+      && String(timeField?.value || '').trim() !== administered.time
+      && fillPanoramaMaskedTextInput(timeField, administered.time)) {
     fillCount += 1;
   }
   return fillCount;
@@ -1972,6 +1997,7 @@ function panoramaSelectAutofillSatisfied(selectors, desiredText) {
 }
 
 function fillPanoramaReasonForImmunization(data) {
+  if (!reasonConsentAutofillEnabled) return 0;
   const selectors = getPanoramaReasonForImmunizationSelectors();
   const value = getPanoramaReasonForImmunizationValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
@@ -1979,6 +2005,7 @@ function fillPanoramaReasonForImmunization(data) {
 }
 
 function fillPanoramaConsentReason(data) {
+  if (!reasonConsentAutofillEnabled) return 0;
   const selectors = getPanoramaConsentReasonSelectors();
   const value = getPanoramaConsentReasonValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
@@ -2153,6 +2180,31 @@ function setPanoramaFundedRadioValue(value) {
 
 function resetPanoramaFundedRadioToShowAll() {
   return setPanoramaFundedRadioValue('SHOW_ALL');
+}
+
+function isExpiredPanoramaScan(data) {
+  const flag = data?.expiry_flag
+    || getExpiryStatus(data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry).flag;
+  return flag === 'expired';
+}
+
+// Panorama hides expired/recalled lots from the lot dropdown unless the
+// "Display Expired and Recalled Lots" checkbox is on. Every funding-radio
+// change (e.g. answering the PF/NPF chooser) re-renders the LotInfo section
+// and resets that checkbox, so an expired scan must re-assert it before each
+// lot fill attempt or the lot silently disappears from the options.
+function ensurePanoramaExpiredRecalledLotsVisible() {
+  const input = document.querySelector('input[id*="displayExpiredRecalledCheckbox:selectBooleanCheckboxId_input"]');
+  if (!input) return 'not_found';
+  if (input.checked) return 'already';
+  const box = input.closest('.ui-chkbox')?.querySelector('.ui-chkbox-box');
+  if (box) box.click();
+  if (!input.checked) {
+    input.checked = true;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  vlog('VaxLink: enabled Display Expired and Recalled Lots');
+  return 'clicked';
 }
 
 // After the nurse answers the PF/NPF prompt we thread their pick through the
@@ -2393,6 +2445,13 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
           }
           if (reapplied === 'clicked') return; // wait for the radio AJAX to settle
         }
+      }
+
+      // An expired lot only appears in the dropdown while "Display Expired and
+      // Recalled Lots" is checked, and every funding-radio AJAX resets it.
+      if (hasLot && isExpiredPanoramaScan(data)) {
+        const expiredVisibility = ensurePanoramaExpiredRecalledLotsVisible();
+        if (expiredVisibility === 'clicked') return; // wait for lot options to refresh
       }
 
       // Try lot fill with the current radio state first — avoids triggering a

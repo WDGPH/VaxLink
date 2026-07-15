@@ -46,6 +46,7 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
+let reasonConsentAutofillToggle;
 let testModeAddBtn;
 let testModeBarcode;
 let parsedData = null;
@@ -55,6 +56,7 @@ let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let reasonConsentAutofillEnabled = true;
 
 const lotLookupCache = new Map();
 const LOT_LOOKUP_CACHE_MAX = 64;
@@ -65,6 +67,7 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -132,6 +135,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
+  reasonConsentAutofillToggle = document.getElementById('reasonConsentAutofillToggle');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
   // Only show test mode panel when running as an unpacked (developer) extension.
@@ -170,6 +174,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
+  await loadReasonConsentAutofillSetting();
   await loadAnalyticsSummary();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
 
@@ -213,6 +218,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
+    });
+  }
+  if (reasonConsentAutofillToggle) {
+    reasonConsentAutofillToggle.addEventListener('change', () => {
+      void setReasonConsentAutofillSetting(!!reasonConsentAutofillToggle.checked);
     });
   }
 
@@ -460,6 +470,41 @@ async function setAdminDateTimeAutofillSetting(enabled) {
     );
   } catch (error) {
     writeOutput(error.message || 'Could not update Date Administered auto-fill setting.', 'error');
+  }
+}
+
+function normalizeReasonConsentAutofillSetting(stored) {
+  return !(stored && stored[REASON_CONSENT_AUTOFILL_KEY] === false);
+}
+
+function applyReasonConsentAutofillSetting(enabled) {
+  reasonConsentAutofillEnabled = !!enabled;
+  if (reasonConsentAutofillToggle) {
+    reasonConsentAutofillToggle.checked = reasonConsentAutofillEnabled;
+  }
+}
+
+async function loadReasonConsentAutofillSetting() {
+  try {
+    const stored = await getLocalStorage([REASON_CONSENT_AUTOFILL_KEY]);
+    applyReasonConsentAutofillSetting(normalizeReasonConsentAutofillSetting(stored));
+  } catch (_) {
+    applyReasonConsentAutofillSetting(true);
+  }
+}
+
+async function setReasonConsentAutofillSetting(enabled) {
+  applyReasonConsentAutofillSetting(enabled);
+  try {
+    await setLocalStorage({ [REASON_CONSENT_AUTOFILL_KEY]: reasonConsentAutofillEnabled });
+    writeOutput(
+      reasonConsentAutofillEnabled
+        ? 'Reason for Immunization and Consent auto-fill is enabled.'
+        : 'Reason for Immunization and Consent auto-fill is disabled.',
+      'info'
+    );
+  } catch (error) {
+    writeOutput(error.message || 'Could not update Reason/Consent auto-fill setting.', 'error');
   }
 }
 
