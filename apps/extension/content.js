@@ -2171,7 +2171,19 @@ function setPanoramaFundedRadioValue(value) {
   if (!radio) return 'not_found';
   if (radio.checked) return 'already';
   const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
-  if (box) box.click();
+  if (box) {
+    // A single widget click mirrors a manual selection exactly. Dispatching a
+    // synthetic change on top of it queues a SECOND radio AJAX whose
+    // serialization/re-render races the first — that double round-trip is
+    // what wiped the "Display Expired and Recalled Lots" checkbox, which a
+    // manual radio change leaves alone. Only fall back to the synthetic path
+    // when the widget did not take the click.
+    box.click();
+    if (radio.checked) {
+      vlog('VaxLink: funded radio set to', desired);
+      return 'clicked';
+    }
+  }
   radio.checked = true;
   radio.dispatchEvent(new Event('change', { bubbles: true }));
   vlog('VaxLink: funded radio set to', desired);
@@ -2221,7 +2233,23 @@ function reapplyAnsweredPanoramaFundingChoice(data) {
   return setPanoramaFundedRadioValue(choice);
 }
 
+const LOT_DROPDOWN_OPEN_COOLDOWN_MS = 2000;
+let lastLotDropdownOpenClickAt = 0;
+
 function openPanoramaLotDropdown() {
+  // A PrimeFaces trigger click TOGGLES the panel: clicking again while it is
+  // open closes it. Retry passes reach this several times a second, so an
+  // unconditional click flickers the dropdown open/closed and the lot can
+  // never be picked from the panel. Only click while the panel is closed,
+  // and at most once per cooldown — Panorama re-renders close the panel, and
+  // reopening it on every pass flickers the form just the same.
+  const openPanel = Array.from(
+    document.querySelectorAll('.ui-selectonemenu-panel[id*="LotInfo:lotNumberSelect"]')
+  ).some(isVisible);
+  if (openPanel) return true;
+  const now = Date.now();
+  if ((now - lastLotDropdownOpenClickAt) < LOT_DROPDOWN_OPEN_COOLDOWN_MS) return false;
+
   const selectors = [
     '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
     '[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
@@ -2229,6 +2257,7 @@ function openPanoramaLotDropdown() {
   ];
   const triggers = getFields(selectors).filter(isVisible);
   for (const trigger of triggers) {
+    lastLotDropdownOpenClickAt = now;
     trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     trigger.click();
     return true;
@@ -2246,6 +2275,9 @@ function fillPanoramaLotFromPanelItems(lotValue) {
   const lotToken = normalizePanoramaLotToken(lotText);
   const filters = getFields(filterSelectors).filter(canFillPanoramaControl);
   for (const filterInput of filters) {
+    // Retyping the same filter on every retry pass re-filters the panel and
+    // steals focus several times a second — visible churn with no progress.
+    if (String(filterInput.value || '') === lotText) continue;
     filterInput.focus();
     filterInput.value = lotText;
     filterInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -2393,6 +2425,39 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
   let fundedRadioEnsured = !!options.fundedRadioEnsured;
   const preserveFundingFilter = options.preserveFundingFilter === true;
   let sharedFundingMisses = 0;
+  // isPrimeFacesAjaxBusy() cannot see the page's PrimeFaces queue from the
+  // isolated content-script world, so attempts are NOT actually gated while a
+  // radio/checkbox AJAX is refreshing the lot options. Attempts fire in a
+  // sub-second burst (0/120/260/450ms + mutation observer), so counting every
+  // failed lookup would hit the 3-miss limit and re-summon the PF/NPF chooser
+  // before the refresh lands. Space counted misses out so 3 misses represent
+  // seconds of genuine failure, and restart the window whenever we trigger a
+  // refresh ourselves.
+  // The full cascade after a PF/NPF answer (radio AJAX -> checkbox reset ->
+  // re-assert -> lot options refresh) takes a few seconds; three counted
+  // misses must outlast it or the chooser re-appears mid-refresh.
+  const SHARED_FUNDING_MISS_GAP_MS = 1200;
+  const EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS = 2500;
+  // Panorama re-renders can momentarily drop the funded radio's checked state.
+  // Re-clicking it on every such pass stacks radio AJAX requests, each of
+  // which resets the expired-lots checkbox again — visible flicker and a
+  // longer road to the lot. Re-apply at most once per cooldown.
+  const FUNDING_REAPPLY_COOLDOWN_MS = 2500;
+  let lastFundingReapplyClickAt = 0;
+  // Attempts can fire ~110ms apart, so two back-to-back "stable" passes can
+  // land inside a transient state: right after a funding-radio AJAX the
+  // consent select is momentarily DISABLED (counts as satisfied) while the
+  // lot is already re-filled — the scheduler would stop, and when Panorama
+  // re-enables consent moments later, nothing is left running to fill it.
+  // Spacing the counted passes keeps the scheduler alive across that window.
+  const STABLE_PASS_GAP_MS = 700;
+  let lastSharedFundingMissAt = 0;
+  let lastExpiredVisibilityClickAt = 0;
+  let lastStablePassAt = 0;
+  const restartSharedFundingMissWindow = () => {
+    sharedFundingMisses = 0;
+    lastSharedFundingMissAt = Date.now();
+  };
   let finalizeOnResolved = options.finalizeOnResolved === true;
 
   const stop = () => {
@@ -2432,8 +2497,18 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         const fundedValue = getPanoramaFundedRadioValue();
         if (!isExplicitPanoramaFundingValue(fundedValue)) {
+          if ((now - lastFundingReapplyClickAt) < FUNDING_REAPPLY_COOLDOWN_MS) {
+            return; // a reapply click is still settling — don't stack another radio AJAX
+          }
           const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
           if (!reapplied) {
+            // For an expired lot, assert "Display Expired and Recalled Lots"
+            // BEFORE prompting for PF/NPF: its AJAX settles while the nurse
+            // reads the prompt, so their answer only has the radio refresh
+            // left and the lot resolves without visible churn.
+            if (isExpiredPanoramaScan(data)) {
+              ensurePanoramaExpiredRecalledLotsVisible();
+            }
             showVaxlinkToast({
               ...data,
               _sharedFundingLotFilterRequired: true,
@@ -2443,31 +2518,44 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
             stop();
             return;
           }
-          if (reapplied === 'clicked') return; // wait for the radio AJAX to settle
+          if (reapplied === 'clicked') {
+            lastFundingReapplyClickAt = now;
+            restartSharedFundingMissWindow();
+            return; // wait for the radio AJAX to settle
+          }
         }
       }
 
       // An expired lot only appears in the dropdown while "Display Expired and
       // Recalled Lots" is checked, and every funding-radio AJAX resets it.
-      if (hasLot && isExpiredPanoramaScan(data)) {
-        const expiredVisibility = ensurePanoramaExpiredRecalledLotsVisible();
-        if (expiredVisibility === 'clicked') return; // wait for lot options to refresh
+      // Click it at most once per cooldown and keep going — returning here
+      // would starve the deferred date/reason/consent fills and the 3-miss
+      // prompt whenever Panorama keeps resetting the checkbox.
+      if (hasLot && isExpiredPanoramaScan(data)
+          && (now - lastExpiredVisibilityClickAt) >= EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS) {
+        if (ensurePanoramaExpiredRecalledLotsVisible() === 'clicked') {
+          lastExpiredVisibilityClickAt = now;
+          restartSharedFundingMissWindow();
+        }
       }
 
       // Try lot fill with the current radio state first — avoids triggering a
       // funded-radio AJAX that can reset the agent and create a re-fill cascade.
       resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
       if (!resolved && preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
-        sharedFundingMisses += 1;
-        if (sharedFundingMisses >= 3) {
-          showVaxlinkToast({
-            ...data,
-            _sharedFundingLotSwitchFilter: true,
-            _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
-            _fundedRadioValue: getPanoramaFundedRadioValue()
-          }, 12000);
-          stop();
-          return;
+        if ((now - lastSharedFundingMissAt) >= SHARED_FUNDING_MISS_GAP_MS) {
+          lastSharedFundingMissAt = now;
+          sharedFundingMisses += 1;
+          if (sharedFundingMisses >= 3) {
+            showVaxlinkToast({
+              ...data,
+              _sharedFundingLotSwitchFilter: true,
+              _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
+              _fundedRadioValue: getPanoramaFundedRadioValue()
+            }, 12000);
+            stop();
+            return;
+          }
         }
       } else if (resolved) {
         sharedFundingMisses = 0;
@@ -2494,10 +2582,13 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
-    // Require a stable follow-up pass before stopping so we do not exit while
-    // PrimeFaces is still applying dependent field refreshes.
+    // Require spaced stable follow-up passes before stopping so we do not exit
+    // while PrimeFaces is still applying dependent field refreshes.
     if (!busy && resolved && deferredResolved) {
-      stablePasses += 1;
+      if ((now - lastStablePassAt) >= STABLE_PASS_GAP_MS) {
+        lastStablePassAt = now;
+        stablePasses += 1;
+      }
     } else {
       stablePasses = 0;
     }
@@ -2507,6 +2598,12 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
         finalizeOnResolved = false;
         void finalizeDeferredPanoramaAutofill(data);
       }
+      // Panorama's dependent refreshes (trade/dose/route after lot selection,
+      // consent re-enabling) can still land after we stop and clear a value we
+      // already set. These late passes re-assert only what changed — every fill
+      // in them is a no-op while the fields still hold the desired values.
+      setTimeout(() => fillPanoramaDeferredDetailFields(data), 1500);
+      setTimeout(() => fillPanoramaDeferredDetailFields(data), 3500);
       stop();
     }
   };
@@ -2579,6 +2676,13 @@ function fillPanoramaImmunizationFields(data) {
     // If the nurse already answered the chooser, re-apply their pick rather than
     // re-prompting; only summon the chooser when there is no recorded answer yet.
     if (!reapplyAnsweredPanoramaFundingChoice(data)) {
+      // For an expired lot, assert "Display Expired and Recalled Lots" BEFORE
+      // prompting for PF/NPF: its AJAX settles while the nurse reads the
+      // prompt, so their answer only has the radio refresh left and the lot
+      // resolves without visible churn.
+      if (isExpiredPanoramaScan(data)) {
+        ensurePanoramaExpiredRecalledLotsVisible();
+      }
       showVaxlinkToast({
         ...data,
         _sharedFundingLotFilterRequired: true,

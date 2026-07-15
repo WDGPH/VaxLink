@@ -63,6 +63,56 @@ test('the visibility checkbox is only clicked when present and unchecked', () =>
   assert.equal(ensureExpiredRecalledLotsVisible(checkbox), 'already');
 });
 
+// Mirrors the prompt ordering in fillPanoramaImmunizationFields /
+// schedulePanoramaLotOrTradeSelection: for an expired lot the visibility
+// checkbox is asserted BEFORE the PF/NPF chooser is shown, so its AJAX settles
+// while the nurse reads the prompt and their answer only has the radio
+// refresh left.
+test('the visibility checkbox is asserted before the PF/NPF chooser appears', () => {
+  const calls = [];
+  const promptForFunding = (data) => {
+    if (isExpiredPanoramaScan(data)) calls.push('display-expired-checkbox');
+    calls.push('pf-npf-prompt');
+  };
+
+  promptForFunding({ expiry_flag: 'expired' });
+  assert.deepEqual(calls, ['display-expired-checkbox', 'pf-npf-prompt']);
+
+  calls.length = 0;
+  promptForFunding({ expiry: '2099-01-01' });
+  assert.deepEqual(calls, ['pf-npf-prompt']);
+});
+
+// Mirrors the click cooldown in schedulePanoramaLotOrTradeSelection. The ensure
+// must never make the attempt bail out early (that starved the deferred
+// date/reason/consent fills and the 3-miss prompt when Panorama kept resetting
+// the checkbox); instead clicks are rate-limited and the pass continues.
+const EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS = 2500;
+
+function createVisibilityClickGate() {
+  let lastClickAt = 0;
+  return {
+    shouldAttempt(now) {
+      return (now - lastClickAt) >= EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS;
+    },
+    recordClick(now) {
+      lastClickAt = now;
+    }
+  };
+}
+
+test('checkbox re-clicks are rate-limited so a reset loop cannot starve the fill pass', () => {
+  const gate = createVisibilityClickGate();
+  assert.equal(gate.shouldAttempt(10000), true);
+  gate.recordClick(10000);
+  // Panorama resets the box 1s later — within the cooldown the pass skips the
+  // click and still runs the lot lookup and deferred fills.
+  assert.equal(gate.shouldAttempt(11000), false);
+  assert.equal(gate.shouldAttempt(12400), false);
+  // after the cooldown the box is re-asserted
+  assert.equal(gate.shouldAttempt(12600), true);
+});
+
 test('a funding-radio reset that unchecks the box is re-asserted on the next pass', () => {
   const checkbox = { checked: false };
   // initial expired scan: assert visibility, then the lot fill succeeds
