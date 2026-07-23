@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // Mirrors the reason-for-immunization / consent defaulting and "already satisfied"
 // logic added to apps/extension/content.js. Kept as a self-contained reimplementation
@@ -142,17 +139,31 @@ test('a re-fill pass leaves an already-correct Date Administered untouched', () 
   );
 });
 
-// pano3 captures the pre-lot state (consent select rendered but disabled),
-// pano4 the post-lot state (consent select enabled). The defaults must resolve
-// to exactly one option in both.
-for (const fixtureName of ['pano3.html', 'pano4.html']) {
-  test(`default targets resolve to exactly one option in the ${fixtureName} fixture`, () => {
-    const fixture = path.join(
-      path.dirname(fileURLToPath(import.meta.url)),
-      '..', '..', fixtureName
-    );
-    const html = fs.readFileSync(fixture, 'utf8');
+// Inline reproductions of the two PrimeFaces select elements Panorama renders for
+// this form (field IDs, reason/consent option codes only — no patient data). Pre-lot:
+// consent select is rendered but disabled. Post-lot: it's enabled with a value selected.
+const REASON_SELECT =
+  '<select id="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_reasonForImmunizationSelect:iTermSelectOneMenu_input" name="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_reasonForImmunizationSelect:iTermSelectOneMenu_input" tabindex="-1" onchange="">' +
+  '<option value=""></option><option value="1327906">Contact Management</option><option value="1327348">High Risk</option>' +
+  '<option value="1328451">Occupational Risk</option><option value="1329225">Post-exposure Prophylaxis</option>' +
+  '<option value="1329224">Pre-exposure Prophylaxis</option><option value="1327349">Routine</option>' +
+  '<option value="1328452">Travel</option></select>';
 
+const CONSENT_SELECT_PRE_LOT =
+  '<select id="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_consentReadinessReasonSelect:iTermSelectOneMenu_input" name="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_consentReadinessReasonSelect:iTermSelectOneMenu_input" tabindex="-1" disabled="disabled" onchange="">' +
+  '<option value=""></option><option value="1328318">Consent obtained</option></select>';
+
+const CONSENT_SELECT_POST_LOT =
+  '<select id="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_consentReadinessReasonSelect:iTermSelectOneMenu_input" name="recordImmsForm:immsDetails_dataTable:immsDetails_Factory:immsDetailssection_consentReadinessReasonSelect:iTermSelectOneMenu_input" tabindex="-1" onchange="">' +
+  '<option value=""></option><option value="1328318" selected="selected">Consent obtained</option></select>';
+
+const FIXTURES = {
+  'pre-lot (consent select disabled)': REASON_SELECT + CONSENT_SELECT_PRE_LOT,
+  'post-lot (consent select enabled)': REASON_SELECT + CONSENT_SELECT_POST_LOT,
+};
+
+for (const [stateName, html] of Object.entries(FIXTURES)) {
+  test(`default targets resolve to exactly one option in the ${stateName} state`, () => {
     const optionsFor = (idFrag) => {
       const m = html.match(new RegExp('id="[^"]*' + idFrag + ':iTermSelectOneMenu_input"[^>]*>(.*?)</select>'));
       if (!m) return [];

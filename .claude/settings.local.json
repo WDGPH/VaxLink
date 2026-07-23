@@ -11,7 +11,11 @@
       "Bash(rtk read *)",
       "Bash(bash scripts/fetch-nvc.sh)",
       "Bash(node *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(git stash *)",
+      "Bash(git rev-list *)",
+      "Bash(git cat-file *)",
+      "Bash(git remote *)"
     ]
   }
 }
