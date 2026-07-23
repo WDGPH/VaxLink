@@ -12,7 +12,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `apps/web-next/` | Next.js 14 marketing site, deployed to GitHub Pages |
 | `scripts/` | Shell utilities (e.g. `fetch-nvc.sh` to download NVC bundle locally) |
 | `skills/` | Claude Code skill definitions for common extension workflows |
-| `pano1.html`, `pano2.html` | Panorama DOM fixtures used as selector test references |
 
 ## Commands
 
@@ -132,7 +131,7 @@ GitHub Actions:
 ## Important Constraints
 
 - `apps/web/nvc-bundle.json` is in `.gitignore` — never commit raw NVC bundle files.
-- If Panorama DOM changes, update selectors in `apps/extension/content.js`. Use `pano1.html` / `pano2.html` as fixtures.
+- If Panorama DOM changes, update selectors in `apps/extension/content.js`. Capture a fresh DOM snapshot locally to diff against (do not commit live-session captures — they can contain real patient data; sanitize to structural fragments only, as done in `apps/extension-tests/panorama-reason-consent.test.js`).
 - The extension has no build step — files are loaded directly by Chrome. No bundler, no transpilation.
 - `apps/extension-tests/` uses Node.js built-in `node:test` runner (no Jest/Vitest). Tests must stay outside `apps/extension/` so they are never packaged into the Chrome Web Store upload.
 - The repo-root `package.json` exists to mark the tree `"type": "module"` so Node parses the extension's ESM sources correctly in tests — don't delete it.
