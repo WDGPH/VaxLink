@@ -2,12 +2,12 @@
 
 VaxLink contains:
 - A Chrome extension for GS1 vaccine barcode parsing + CHR autofill
-- A web app for NVC FHIR bundle exploration and barcode/lot lookup
+- A Next.js marketing site (`apps/web-next`)
 
 ## Repository Layout
 
 - `apps/extension` - Chrome extension (Manifest V3)
-- `apps/web` - Landing page + NVC explorer UI
+- `apps/web-next` - Next.js marketing site, deployed to GitHub Pages
 
 ## Extension (`apps/extension`)
 
@@ -49,29 +49,8 @@ npm test
 
 This covers FEFO ordering, dose consumption, reconciliation math, and inventory export contracts.
 
-## Web App (`apps/web`)
-
-Fetch a local bundle snapshot (kept out of Git):
-
-```bash
-./scripts/fetch-nvc.sh
-```
-
-Run locally:
-
-```bash
-cd apps/web
-python3 -m http.server 8080
-```
-
-Pages:
-- `http://localhost:8080/` -> landing page
-- `http://localhost:8080/explorer.html` -> explorer + barcode parser
-- `http://localhost:8080/extension.html` -> extension learn-more page
-
 ## Notes
 
-- `apps/web/nvc-bundle.json` is a local snapshot for exploration and is ignored by Git.
 - Public access to NVC API does not automatically grant blanket redistribution rights for bundled terminology data. Keep raw bundle files out of public commits unless you have explicit permission.
 - If CHR DOM changes, update selectors in `apps/extension/content.js`.
 - Inventory manager operational data now lives in IndexedDB; popup trays and lightweight settings still live in `chrome.storage.local`.
