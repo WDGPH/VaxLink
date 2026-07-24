@@ -3,7 +3,7 @@
  * the live NVC FHIR bundle and verify each lot is classified correctly as
  * HB, HB-pediatric, or HB-dialysis.
  *
- * Requires apps/web/nvc-bundle.json (gitignored). Download with:
+ * Requires apps/extension/nvc_bundle.json (gitignored). Download with:
  *   bash scripts/fetch-nvc.sh
  *
  * The test is automatically skipped when the bundle file is absent so it does
@@ -17,10 +17,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-// Resolve relative to the test file itself: tests/ → extension/ → apps/ → VaxLink/
+// Resolve relative to the test file itself: extension-tests/ → apps/ → extension/
 const BUNDLE_PATH = path.resolve(
   fileURLToPath(import.meta.url),
-  '../../web/nvc-bundle.json'
+  '../../extension/nvc_bundle.json'
 );
 
 const bundlePath = existsSync(BUNDLE_PATH) ? BUNDLE_PATH : null;

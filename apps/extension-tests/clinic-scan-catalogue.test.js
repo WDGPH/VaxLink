@@ -8,7 +8,7 @@
  * pipeline (evaluated under a mocked chrome API with the bundle cached in
  * storage, exactly like a synced production install).
  *
- * Requires apps/web/nvc-bundle.json (gitignored). Download with:
+ * Requires apps/extension/nvc_bundle.json (gitignored). Download with:
  *   bash scripts/fetch-nvc.sh
  * The whole file is skipped when the bundle is absent so CI stays green.
  */

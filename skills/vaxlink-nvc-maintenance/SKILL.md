@@ -24,9 +24,7 @@ The goal is a fast, predictable mapping from barcode to structured vaccine metad
 - `apps/extension/popup.js`
 - `apps/extension/background.js`
 - `apps/extension/popup-inventory.js`
-- `apps/extension/inventory/model.js`
-- `apps/extension/inventory/receive.js`
-- `apps/extension/inventory/exports.js`
+- `apps/extension/queue-record.js`
 - `scripts/fetch-nvc.sh`
 
 ## What To Preserve

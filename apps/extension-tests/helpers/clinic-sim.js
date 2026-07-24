@@ -7,7 +7,7 @@
  * way the deployed extension caches it (`nvc_bundle_override`), so lookups run
  * the same indexing and resolution code paths as production.
  *
- * Requires apps/web/nvc-bundle.json (gitignored). Download with:
+ * Requires apps/extension/nvc_bundle.json (gitignored). Download with:
  *   bash scripts/fetch-nvc.sh
  */
 
@@ -18,12 +18,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
-// NVC bundle loading (tests/helpers/ → tests/ → extension/ → apps/ → web/)
+// NVC bundle loading (extension-tests/helpers/ → extension-tests/ → apps/ → extension/)
 // ---------------------------------------------------------------------------
 
 export const BUNDLE_PATH = path.resolve(
   fileURLToPath(import.meta.url),
-  '../../../web/nvc-bundle.json'
+  '../../../extension/nvc_bundle.json'
 );
 
 export function loadNvcBundle() {

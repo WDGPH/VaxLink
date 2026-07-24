@@ -17,7 +17,7 @@ VaxLink contains:
 - Looks up vaccine metadata from the NVC bundle
 - Auto-fills CHR fields (trade name, manufacturer, route, dose, strength, DIN/drug code, lot, expiry)
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
-- Supports popup inventory trays plus a full inventory operations page for receiving, FEFO review, reconciliation, incident logging, wastage, and export handoff
+- Supports popup inventory trays with CSV export
 
 ### Install (Developer Mode)
 
@@ -33,28 +33,29 @@ VaxLink contains:
 - Manual refresh from popup
 - Keeps last-known-good bundle if refresh fails
 
-### Inventory Architecture
+### Inventory
 
-- Popup and hands-free inventory capture still write to the legacy `chrome.storage.local` queue key `inventory_scan_batch_v1`
-- The inventory manager page now uses a normalized IndexedDB-backed data layer for items, transactions, incidents, reconciliation sign-offs, and lot quarantine flags
-- The page mirrors the legacy queue key for compatibility with popup inventory mode and content-script inventory capture
+- Popup and hands-free inventory capture write to the `chrome.storage.local` queue key `inventory_scan_batch_v1`
 - Detailed extension notes live in `apps/extension/README.md`
 
 ### Extension Checks
 
 ```bash
-cd apps/extension
+cd apps/extension-tests
 npm test
 ```
 
-This covers FEFO ordering, dose consumption, reconciliation math, and inventory export contracts.
+This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
 
 ## Notes
 
 - Public access to NVC API does not automatically grant blanket redistribution rights for bundled terminology data. Keep raw bundle files out of public commits unless you have explicit permission.
 - If CHR DOM changes, update selectors in `apps/extension/content.js`.
-- Inventory manager operational data now lives in IndexedDB; popup trays and lightweight settings still live in `chrome.storage.local`.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Internal use / private project.
+[MIT](LICENSE)
