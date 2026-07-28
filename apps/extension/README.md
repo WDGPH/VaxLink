@@ -4,24 +4,53 @@ Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, and CHR autofi
 
 ## Main Pieces
 
-- `popup.js` drives popup workflow state, scan parsing, queue management, and workflow mode switching (single / multiple / inventory).
-- `popup-inventory.js` manages the popup-side multiple-inject queue and inventory tray, stored in `chrome.storage.local`, plus CSV export.
-- `popup-parser.js` parses GS1 AI barcode strings.
-- `popup-ui.js` renders the popup UI.
-- `queue-record.js` normalizes inventory rows so the exported CSV column shape stays stable for downstream tools.
-- `content.js` handles hands-free page scanning and autofill on supported chart pages (Panorama, InputHealth).
-- `panorama-agent-rules.js` — heuristics for matching a scanned lot/GTIN to a Panorama agent dropdown option. Loaded before `content.js`.
+- `popup.js` drives popup workflow state, scan parsing, queue management, and inventory page launch.
+- `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
+- `content.js` handles scan routing, autofill, and workflow automation on supported chart pages.
 - `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
+- `scanner-setup.html` + `scanner/` provide the Web Serial scanner channel and diagnostics.
+- `inventory-manager.html` + `inventory-manager.js` open the full inventory operations page in its own extension tab.
+
+## Inventory Architecture
+
+The inventory page was split out of the old monolithic `inventory-manager.js` into domain modules under `apps/extension/inventory/`.
+
+- `page-controller.js` wires the page, events, exports, and status updates.
+- `repository.js` is the inventory source of truth for the page and persists operational data in IndexedDB.
+- `model.js` defines normalized inventory items, transactions, reconciliation snapshots, FEFO ordering, and legacy row conversion.
+- `receive.js` parses receive input and enriches scans through `lookupVaccineInfo`.
+- `render.js` renders the summary table, FEFO board, reconciliation grid, lot quarantine banner, and ledger.
+- `exports.js` builds CSV/JSON handoff files and preserves stable inventory export columns.
+- `audio.js`, `runtime.js`, `constants.js`, and `utils.js` hold the shared support code.
 
 ## Storage Model
 
 Everything lives in `chrome.storage.local`:
 
-- `multiple_inject_queue_v1` — active multiple-inject queue (popup + content script)
-- `inventory_scan_batch_v1` — inventory tray queue (popup + content script)
-- `nvc_bundle_override` — cached NVC FHIR bundle (background)
-- `vaxlink_workflow_mode_v1` — current workflow mode (popup)
-- `vaxlink_analytics_v1` — fill event log (background)
+- `chrome.storage.local`
+  Used by the popup and scanner flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
+- IndexedDB
+  Used by the inventory manager page for normalized inventory items, transactions, incidents, reconciliation sign-offs, and lot quarantine flags.
+
+The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup inventory mode and content-script inventory capture continue to work without a coordinated rewrite.
+
+## Inventory Keys
+
+- Legacy queue key: `inventory_scan_batch_v1`
+- Scanner settings: `inventory_ultrafast_scanner_v1`, `inventory_scanner_beeps_v1`
+- Serial scanner profile: `vaxlink_serial_scanner_profile_v1`
+- Pending dedicated-channel scans: `vaxlink_pending_scan_inbox_v1`
+- IndexedDB database: `vaxlink_inventory_ops_v2`
+
+## Dedicated Scanner Channel
+
+Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to grant Web Serial permission once, test the raw framed scan, and confirm the scanner is not also typing into a focused input. The setup tab can then be closed.
+
+This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
+
+When Chrome reports that Windows is locked, the daemon keeps reading the paired scanner and saves every scan to the Multiple Inject queue. It does not inject into the chart while locked. The computer must remain awake; browser code cannot capture scans while Windows is sleeping or hibernating.
+
+The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 
 ## Testing
 

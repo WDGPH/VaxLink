@@ -73,7 +73,7 @@ export function extractCatalogueLots(bundle) {
 }
 
 // ---------------------------------------------------------------------------
-// GS1 barcode synthesis (what a vial's DataMatrix scanner wedge emits)
+// GS1 barcode synthesis (what a vial's DataMatrix scanner emits)
 // ---------------------------------------------------------------------------
 
 export const GS = String.fromCharCode(0x1d);
@@ -97,7 +97,7 @@ export function isoToYYMMDD(iso) {
 }
 
 /**
- * Build the keyboard-wedge text for a vial scan:
+ * Build the raw GS1 payload text for a vial scan:
  *   (01) GTIN-14, (17) expiry, (10) lot, optional GS + (21) serial.
  * AI(01) and AI(17) are fixed-length so no separator precedes (10); the lot is
  * the final variable-length field unless a serial follows after a GS.
@@ -120,19 +120,28 @@ const BACKGROUND_PATH = path.resolve(
   fileURLToPath(import.meta.url),
   '../../../extension/background.js'
 );
+const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
-export function createBackgroundHarness(bundle) {
+export function createBackgroundHarness(bundle, options = {}) {
   const storageData = new Map();
   // Seed storage the way a synced production install looks: cached bundle plus
   // a fresh last-check timestamp so the startup auto-refresh skips the network.
   storageData.set('nvc_bundle_override', bundle);
   storageData.set('nvc_bundle_source_url', 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC');
   storageData.set('nvc_bundle_last_check_at', new Date().toISOString());
+  for (const [key, value] of Object.entries(options.storage || {})) {
+    storageData.set(key, value);
+  }
 
   const changedListeners = [];
   const messageListeners = [];
   const alarms = [];
   const consoleLines = [];
+  const idleListeners = [];
+  const offscreenCreations = [];
+  const tabMessages = [];
+  let offscreenExists = false;
+  let idleState = options.idleState || 'active';
   let badgeText = '';
 
   function resolveKeys(keys) {
@@ -144,10 +153,42 @@ export function createBackgroundHarness(bundle) {
 
   const chrome = {
     runtime: {
+      lastError: null,
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
-      getURL: (p) => `chrome-extension://vaxlink-test/${p}`
+      getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
+      async getContexts() {
+        return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
+      }
+    },
+    offscreen: {
+      async createDocument(options) {
+        offscreenCreations.push(options);
+        offscreenExists = true;
+      },
+      async closeDocument() {
+        offscreenExists = false;
+      }
+    },
+    idle: {
+      queryState(_intervalSeconds, callback) {
+        queueMicrotask(() => callback(idleState));
+      },
+      onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
+    },
+    tabs: {
+      query(queryInfo, callback) {
+        let tabs = Array.isArray(options.tabs) ? options.tabs : [];
+        if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);
+        if (queryInfo?.currentWindow) tabs = tabs.filter((tab) => tab.currentWindow !== false);
+        queueMicrotask(() => callback(tabs));
+      },
+      sendMessage(tabId, message, sendOptions, callback) {
+        tabMessages.push({ tabId, message, options: sendOptions });
+        const response = options.tabResponse || { success: false, error: 'No content tab in clinic-sim harness' };
+        queueMicrotask(() => callback(response));
+      }
     },
     alarms: {
       create: (name, info) => alarms.push({ name, info }),
@@ -200,6 +241,7 @@ export function createBackgroundHarness(bundle) {
     fetch: () => Promise.reject(new Error('network disabled in clinic-sim tests')),
     crypto: globalThis.crypto,
     TextEncoder,
+    URL,
     setTimeout,
     clearTimeout,
     setInterval,
@@ -208,6 +250,12 @@ export function createBackgroundHarness(bundle) {
   };
 
   vm.createContext(sandbox);
+  sandbox.importScripts = (...scriptPaths) => {
+    for (const scriptPath of scriptPaths) {
+      const resolvedPath = path.resolve(BACKGROUND_DIR, String(scriptPath || ''));
+      vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, { filename: path.basename(resolvedPath) });
+    }
+  };
   vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, { filename: 'background.js' });
 
   function sendMessage(request) {
@@ -239,7 +287,13 @@ export function createBackgroundHarness(bundle) {
     storageData,
     alarms,
     consoleLines,
-    getBadgeText: () => badgeText
+    offscreenCreations,
+    tabMessages,
+    getBadgeText: () => badgeText,
+    setIdleState(nextState) {
+      idleState = nextState;
+      for (const listener of idleListeners) listener(nextState);
+    }
   };
 }
 

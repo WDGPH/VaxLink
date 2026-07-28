@@ -414,6 +414,7 @@ export function buildQueueRecord(data, rawBarcode) {
 
 export function buildMultipleInjectSummary(rows) {
   const count = rows.length;
+  const lockedCount = rows.filter((row) => row.captured_while_locked === true).length;
   const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
   const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
   const doseTotal = rows.reduce((total, row) => {
@@ -421,6 +422,9 @@ export function buildMultipleInjectSummary(rows) {
     return total + (Number.isFinite(remaining) ? remaining : 0);
   }, 0);
   let summary = `${count} vaccine(s) saved for later chart fill.`;
+  if (lockedCount > 0) {
+    summary += ` ${lockedCount} captured while the workstation was locked.`;
+  }
   if (doseTotal > 0) {
     summary += ` ${doseTotal} dose(s) remaining across all vials.`;
   }

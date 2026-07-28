@@ -49,3 +49,13 @@ test('build summary helpers report counts, doses, and expiry flags', () => {
     '2 scan(s) ready for inventory export. 3 dose(s) remaining across all vials. 1 expired, 1 expiring soon.'
   );
 });
+
+test('multiple summary identifies scans captured while the workstation was locked', () => {
+  const summary = buildMultipleInjectSummary([
+    { captured_while_locked: true },
+    { captured_while_locked: true },
+    {}
+  ]);
+  assert.match(summary, /3 vaccine\(s\) saved/);
+  assert.match(summary, /2 captured while the workstation was locked/);
+});
