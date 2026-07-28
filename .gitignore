@@ -1,5 +1,4 @@
 # Local NVC bundle snapshots (do not publish raw data)
-apps/web/nvc-bundle.json
 apps/extension/nvc_bundle.json
 tmp/
 apps/web-next/node_modules/

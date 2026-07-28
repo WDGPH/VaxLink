@@ -6,10 +6,10 @@ Two places in `content.js` are hardcoded per-platform:
 
 | Location | What it does | Line |
 |---|---|---|
-| `isHandsFreeSupportedPage()` | Whitelist of allowed hostnames | 522 |
-| `autoFillTelus()` | Routes to Panorama fill OR generic fill | 1299 |
-| `isPanoramaImmunizationPage()` | Detects Panorama-specific DOM | 1127 |
-| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic | 1150 |
+| `isHandsFreeSupportedPage()` | Whitelist of allowed hostnames | 1023 |
+| `autoFillTelus()` | Routes to Panorama fill OR generic fill | 3084 |
+| `isPanoramaImmunizationPage()` | Detects Panorama-specific DOM | 2697 |
+| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic | 2720 |
 
 Adding OSCAR/Wolf/PS Suite today = copy-pasting more `if (isOSCAR)` branches into those same functions. It will get messy fast.
 

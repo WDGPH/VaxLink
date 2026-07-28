@@ -234,7 +234,7 @@ Unclassified:    0   ← every lot produces exactly one HB classification
 Lot overrides applied: Y016312, Y020519
 ```
 
-The test skips gracefully when `apps/web/nvc-bundle.json` is absent (run
+The test skips gracefully when `apps/extension/nvc_bundle.json` is absent (run
 `bash scripts/fetch-nvc.sh` to download it locally before running).
 
 Unit tests in `tests/hb-classification.test.js` cover all HB formulation

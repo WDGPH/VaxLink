@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_FILE="${1:-$ROOT_DIR/apps/web/nvc-bundle.json}"
+OUT_FILE="${1:-$ROOT_DIR/apps/extension/nvc_bundle.json}"
 URL="https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC"
 
 mkdir -p "$(dirname "$OUT_FILE")"

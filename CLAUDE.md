@@ -8,11 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `apps/extension/` | Chrome extension (Manifest V3) — no build step, plain JS |
 | `apps/extension-tests/` | Extension test suite (kept outside `apps/extension/` so the Chrome Web Store zip stays clean) |
-| `apps/web/` | Static landing page + NVC bundle explorer (no build step) |
 | `apps/web-next/` | Next.js 14 marketing site, deployed to GitHub Pages |
 | `scripts/` | Shell utilities (e.g. `fetch-nvc.sh` to download NVC bundle locally) |
 | `skills/` | Claude Code skill definitions for common extension workflows |
-| `pano1.html`, `pano2.html` | Panorama DOM fixtures used as selector test references |
 
 ## Commands
 
@@ -58,13 +56,6 @@ For GitHub Pages static export (also done automatically in CI):
 
 ```bash
 BUILD_STATIC_EXPORT=true PAGES_BASE_PATH=/<repo> npm run build
-```
-
-### Static Web App (`apps/web`)
-
-```bash
-cd apps/web && python3 -m http.server 8080
-./scripts/fetch-nvc.sh     # download local NVC bundle snapshot (not committed)
 ```
 
 ## Extension Architecture
@@ -131,8 +122,8 @@ GitHub Actions:
 
 ## Important Constraints
 
-- `apps/web/nvc-bundle.json` is in `.gitignore` — never commit raw NVC bundle files.
-- If Panorama DOM changes, update selectors in `apps/extension/content.js`. Use `pano1.html` / `pano2.html` as fixtures.
+- `apps/extension/nvc_bundle.json` is in `.gitignore` — never commit raw NVC bundle files.
+- If Panorama DOM changes, update selectors in `apps/extension/content.js`. Capture a fresh DOM snapshot locally to diff against (do not commit live-session captures — they can contain real patient data; sanitize to structural fragments only, as done in `apps/extension-tests/panorama-reason-consent.test.js`).
 - The extension has no build step — files are loaded directly by Chrome. No bundler, no transpilation.
 - `apps/extension-tests/` uses Node.js built-in `node:test` runner (no Jest/Vitest). Tests must stay outside `apps/extension/` so they are never packaged into the Chrome Web Store upload.
 - The repo-root `package.json` exists to mark the tree `"type": "module"` so Node parses the extension's ESM sources correctly in tests — don't delete it.

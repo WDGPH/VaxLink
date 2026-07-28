@@ -13,7 +13,7 @@
  * flags warn correctly, and the exported CSV is well-formed for downstream
  * tools.
  *
- * Requires apps/web/nvc-bundle.json (gitignored). Download with:
+ * Requires apps/extension/nvc_bundle.json (gitignored). Download with:
  *   bash scripts/fetch-nvc.sh
  */
 

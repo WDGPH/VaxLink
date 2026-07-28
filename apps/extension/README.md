@@ -1,6 +1,6 @@
 # VaxLink Extension
 
-Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, CHR autofill, and local inventory operations.
+Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, and CHR autofill.
 
 ## Main Pieces
 
@@ -25,7 +25,7 @@ The inventory page was split out of the old monolithic `inventory-manager.js` in
 
 ## Storage Model
 
-There are now two storage layers by design:
+Everything lives in `chrome.storage.local`:
 
 - `chrome.storage.local`
   Used by the popup and scanner flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
@@ -54,28 +54,16 @@ Static checks:
 
 ```bash
 cd apps/extension
-node --check inventory-manager.js
+node --check content.js
+node --check popup.js
 node --check popup-inventory.js
-node --check inventory/page-controller.js
 ```
 
-Focused inventory tests (the suite lives in `apps/extension-tests/`, outside this
-directory, so it never ships in the Chrome Web Store zip):
+Full suite (lives in `apps/extension-tests/`, outside this directory, so it never ships in the Chrome Web Store zip):
 
 ```bash
 cd apps/extension-tests
 npm test
 ```
 
-Current automated coverage checks:
-
-- FEFO ordering
-- dose consumption by lot
-- reconciliation math
-- inventory export contracts
-
-## Compatibility Notes
-
-- Popup inventory rows still use the legacy queue row shape.
-- The shared builder in `inventory/model.js` keeps popup rows and inventory-page rows aligned.
-- If you change export columns or row field names, update both the popup queue consumers and the inventory tests.
+Current automated coverage checks: GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.

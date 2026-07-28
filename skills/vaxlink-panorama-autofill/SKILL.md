@@ -33,7 +33,6 @@ Preserve the core behavior: VaxLink sets Agent and Lot, Panorama derives depende
 - Main logic: `apps/extension/content.js`
 - Payload and settings: `apps/extension/popup.js`, `apps/extension/popup-inventory.js`, `apps/extension/popup.html`
 - Agent heuristics: `apps/extension/panorama-agent-rules.js`
-- DOM fixtures: `pano1.html`, `pano2.html`
 
 ## Validation Checklist
 

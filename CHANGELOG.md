@@ -8,6 +8,13 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.0](https://github.com/WDGPH/VaxLink/compare/v1.0.7...v1.1.0) (2026-07-07)
+
+
+### Added
+
+* reason for immunization and consent autofill in Panorama ([e1d0b11](https://github.com/WDGPH/VaxLink/commit/e1d0b11f36c8dab4885c741871d78ebd1d014469))
+
 ## [1.0.7] – 2026-06-12
 
 ### Fixed

@@ -49,7 +49,7 @@ The `addimmsdetails_vaccDetailssection1createImms_publiclyfunded` checkbox that
 shows the final funding status is rendered with `disabled="disabled"`. Panorama
 sets it after lot selection. VaxLink cannot and should not write to it directly.
 
-### Selector evidence from DOM (pano3.html)
+### Selector evidence from captured Panorama DOM
 
 ```
 input[id*="fundedRadio:selectOneRadio"][value="SHOW_ALL"]        ← index :0
