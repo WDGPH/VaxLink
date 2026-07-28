@@ -60,6 +60,8 @@ export function createScannerStatusSnapshot(overrides = {}) {
     portInfo: null,
     lastConnectedAt: '',
     lastDisconnectedAt: '',
+    lastCaptureAt: '',
+    captureCount: 0,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -76,6 +78,8 @@ export function normalizeScannerStatusSnapshot(snapshot) {
     portInfo: normalizeScannerPortInfo(source.portInfo),
     lastConnectedAt: normalizeIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeIsoTimestamp(source.lastDisconnectedAt),
+    lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
+    captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(0, Number.parseInt(source.recoverAttemptCount, 10) || 0)
   };
@@ -257,7 +261,9 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
   switch (snapshot.state) {
     case SCANNER_STATUS_STATES.CONNECTED:
       descriptor.label = 'Connected';
-      descriptor.detail = 'Scanner online. Hands-free capture is active.';
+      descriptor.detail = snapshot.captureCount > 0
+        ? `Scanner online. ${snapshot.captureCount} hardware scan(s) captured; latest ${snapshot.lastCaptureAt || 'time unavailable'}.`
+        : 'Scanner online. No hardware scan has reached Web Serial since this daemon started.';
       descriptor.tone = 'success';
       descriptor.showSetup = true;
       break;

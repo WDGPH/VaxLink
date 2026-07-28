@@ -9,9 +9,10 @@
     "scripting",
     "storage",
     "alarms",
-    "offscreen"
+    "offscreen",
+    "idle"
   ],
-  "minimum_chrome_version": "109",
+  "minimum_chrome_version": "114",
   "host_permissions": [
     "https://nvc-cnv.canada.ca/*"
   ],

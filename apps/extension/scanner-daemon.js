@@ -120,11 +120,7 @@ function requestConnect(message = {}) {
 }
 
 function requestDisconnect() {
-  desiredConnection = desiredConnection || {
-    profileId: String(currentStatus.profileId || '').trim(),
-    preferredPortInfo: normalizeScannerPortInfo(currentStatus.portInfo),
-    trigger: 'disconnect'
-  };
+  desiredConnection = null;
   ensureWorker().postMessage({ type: 'disconnect' });
 }
 

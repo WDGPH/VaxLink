@@ -145,6 +145,10 @@ async function connectGrantedPort(trigger = 'manual') {
     try {
       activeConnection = await openSerialScanner(port, profile, {
         onScan: (scan) => {
+          updateStatus({
+            lastCaptureAt: scan.capturedAt || new Date().toISOString(),
+            captureCount: currentStatus.captureCount + 1
+          });
           postToHost({ type: 'scan', scan });
         },
         onStatus: (status) => {

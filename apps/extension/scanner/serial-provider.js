@@ -33,6 +33,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
   let keepReading = true;
   let activeReader = null;
   let idleFlushTimer = null;
+  let terminalReadError = null;
 
   const clearIdleFlush = () => {
     if (idleFlushTimer) {
@@ -88,14 +89,21 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
         }
       } catch (error) {
         if (keepReading) {
-          onError(error);
+          terminalReadError = error;
+          keepReading = false;
         }
       } finally {
         activeReader.releaseLock();
         activeReader = null;
       }
     }
-    if (keepReading) {
+    clearIdleFlush();
+    if (terminalReadError) {
+      if (port.readable || port.writable) {
+        await port.close().catch(() => undefined);
+      }
+      onError(terminalReadError);
+    } else if (keepReading) {
       onStatus({ state: 'disconnected', profile, portInfo: port.getInfo() });
     }
   })();

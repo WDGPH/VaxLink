@@ -44,7 +44,11 @@ The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup in
 
 ## Dedicated Scanner Channel
 
-Scanner capture uses a browser-visible Web Serial channel instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to select a Web Serial device, test the raw framed scan, and confirm the scanner is not also typing into a focused input.
+Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to grant Web Serial permission once, test the raw framed scan, and confirm the scanner is not also typing into a focused input. The setup tab can then be closed.
+
+This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
+
+When Chrome reports that Windows is locked, the daemon keeps reading the paired scanner and saves every scan to the Multiple Inject queue. It does not inject into the chart while locked. The computer must remain awake; browser code cannot capture scans while Windows is sleeping or hibernating.
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 

@@ -1,5 +1,17 @@
 const VAXLINK_BG_DEBUG = false;
 importScripts('shared/gs1-parser.js');
+importScripts('scanner/scanner-lock-session.js');
+
+const {
+  SCANNER_LOCK_STATE_KEY,
+  SCANNER_LOCK_SESSION_KEY,
+  normalizeMachineIdleState,
+  shouldQueueScannerScan,
+  createLockedScannerSession,
+  closeLockedScannerSession,
+  isLockedScannerSession,
+  buildLockedScanQueueContext
+} = globalThis.VaxLinkScannerLockSession;
 
 function bgLog(...args) {
   if (VAXLINK_BG_DEBUG) console.log('[VaxLink]', ...args);
@@ -49,6 +61,8 @@ const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
+let scannerQueueWriteQueue = Promise.resolve();
+let scannerLockSessionPromise = null;
 let iconInitPromise = null;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -120,24 +134,10 @@ bgLog('Service worker started, loading NVC bundle');
 ensureActionIcon();
 initializeNVCSync();
 initQueueBadge();
-
-// One-time cleanup: tear down any offscreen scanner daemon left over from the
-// disabled daemon architecture. If it is still alive it can hold the serial
-// COM port open and make in-page capture fail with "Failed to open serial port".
-(async () => {
-  try {
-    if (
-      chrome.offscreen &&
-      typeof chrome.offscreen.closeDocument === 'function' &&
-      await hasScannerDaemonDocument()
-    ) {
-      await chrome.offscreen.closeDocument();
-      bgLog('Closed leftover offscreen scanner daemon document');
-    }
-  } catch (_) {
-    // Best effort; nothing to clean up.
-  }
-})();
+initializeScannerLockMonitoring();
+void maybeStartScannerDaemon('service_worker_start').catch((error) => {
+  console.warn('Scanner daemon startup failed on service worker start:', error);
+});
 
 function ensureActionIcon() {
   if (iconInitPromise) {
@@ -330,14 +330,6 @@ async function hasScannerDaemonDocument() {
 }
 
 async function ensureScannerDaemon() {
-  // The offscreen scanner daemon is permanently disabled: navigator.serial is
-  // not available in offscreen documents, so it can never capture, and creating
-  // it only risks grabbing/locking the COM port out from under the in-page
-  // Web Serial capture (scanner-setup.js), which surfaces as
-  // "Failed to open serial port". Never create the offscreen document.
-  throw new Error('Offscreen scanner daemon is disabled; Web Serial is captured in-page.');
-
-  // eslint-disable-next-line no-unreachable
   if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
     throw new Error('The Offscreen API is not available in this browser context.');
   }
@@ -378,14 +370,19 @@ async function sendScannerDaemonMessage(message) {
 }
 
 async function maybeStartScannerDaemon(trigger = 'startup') {
-  // Web Serial (navigator.serial) is not available inside an offscreen
-  // document, so the offscreen scanner daemon can never open the port. Serial
-  // capture now happens in-page in scanner-setup.js, which routes scans via the
-  // `scannerScanCaptured` message. We intentionally do NOT auto-start the
-  // offscreen daemon: starting it only produces error-state noise and risks
-  // contending for the COM port. Capture works through the visible setup page.
   const bootstrap = await getScannerBootstrapState();
-  return { started: false, status: bootstrap.status };
+  if (!bootstrap.enabled || !bootstrap.profileId) {
+    return { started: false, status: bootstrap.status };
+  }
+  await ensureScannerDaemon();
+  const response = await sendRuntimeMessage({
+    target: SCANNER_DAEMON_TARGET,
+    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+    profileId: bootstrap.profileId,
+    preferredPortInfo: bootstrap.portInfo,
+    trigger
+  });
+  return { started: true, status: response?.status || bootstrap.status };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -421,7 +418,7 @@ function findRecentDuplicateQueueRow(rows, record, nowMs) {
   return null;
 }
 
-async function appendQueueRecord(storageKey, record) {
+async function appendQueueRecordNow(storageKey, record, options = {}) {
   if (!storageKey) {
     throw new Error('Missing queue storage key');
   }
@@ -431,7 +428,7 @@ async function appendQueueRecord(storageKey, record) {
   const stored = await getStorage([storageKey]);
   const rows = stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
 
-  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
+  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY && options.preserveEveryScan !== true) {
     const recordScannedAt = Date.parse(record.scanned_at);
     const nowMs = Number.isFinite(recordScannedAt) ? recordScannedAt : Date.now();
     const duplicate = findRecentDuplicateQueueRow(rows, record, nowMs);
@@ -453,6 +450,13 @@ async function appendQueueRecord(storageKey, record) {
   };
 }
 
+function appendQueueRecord(storageKey, record, options = {}) {
+  scannerQueueWriteQueue = scannerQueueWriteQueue
+    .catch(() => undefined)
+    .then(() => appendQueueRecordNow(storageKey, record, options));
+  return scannerQueueWriteQueue;
+}
+
 function queryTabs(queryInfo) {
   return new Promise((resolve) => {
     chrome.tabs.query(queryInfo, (tabs) => {
@@ -463,6 +467,73 @@ function queryTabs(queryInfo) {
       resolve(Array.isArray(tabs) ? tabs : []);
     });
   });
+}
+
+function queryMachineIdleState() {
+  if (!chrome.idle || typeof chrome.idle.queryState !== "function") {
+    return Promise.resolve("active");
+  }
+  return new Promise((resolve) => {
+    chrome.idle.queryState(15, (state) => {
+      if (chrome.runtime.lastError) {
+        resolve("active");
+        return;
+      }
+      resolve(normalizeMachineIdleState(state));
+    });
+  });
+}
+
+async function getLockedScannerSession() {
+  const stored = await getStorage([SCANNER_LOCK_SESSION_KEY]);
+  return stored && stored[SCANNER_LOCK_SESSION_KEY];
+}
+
+async function beginLockedScannerSession() {
+  if (!scannerLockSessionPromise) {
+    scannerLockSessionPromise = (async () => {
+      const existing = await getLockedScannerSession();
+      if (isLockedScannerSession(existing)) return existing;
+      const activeTabs = await queryTabs({ active: true, currentWindow: true });
+      const activeChartTab = activeTabs.find(tabMayBeSupportedChart) || null;
+      const session = createLockedScannerSession({ activeTab: activeChartTab });
+      await setStorage({
+        [SCANNER_LOCK_STATE_KEY]: "locked",
+        [SCANNER_LOCK_SESSION_KEY]: session
+      });
+      return session;
+    })().finally(() => {
+      scannerLockSessionPromise = null;
+    });
+  }
+  return scannerLockSessionPromise;
+}
+
+async function updateScannerLockState(state) {
+  const normalized = normalizeMachineIdleState(state);
+  if (normalized === "locked") {
+    return beginLockedScannerSession();
+  }
+  const existing = await getLockedScannerSession();
+  const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
+  if (isLockedScannerSession(existing)) {
+    values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
+  }
+  await setStorage(values);
+  return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
+}
+
+function initializeScannerLockMonitoring() {
+  if (chrome.idle?.onStateChanged) {
+    chrome.idle.onStateChanged.addListener((state) => {
+      void updateScannerLockState(state).catch((error) => {
+        console.warn("Could not update scanner lock state:", error);
+      });
+    });
+  }
+  void queryMachineIdleState()
+    .then(updateScannerLockState)
+    .catch((error) => console.warn("Could not initialize scanner lock state:", error));
 }
 
 function isSupportedChartUrl(urlValue) {
@@ -619,7 +690,7 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   }
 }
 
-function buildQueueRecordFromParsed(data, rawBarcode) {
+function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
   const totalDoses = getPositiveInt(data.total_doses, null);
   const fallbackDose = getPositiveInt(totalDoses, null);
   const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
@@ -656,11 +727,12 @@ function buildQueueRecordFromParsed(data, rawBarcode) {
     dose_tracking: data.dose_tracking || 'manual',
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
-    lookup_error: data.lookup_error || ''
+    lookup_error: data.lookup_error || '',
+    ...context
   };
 }
 
-async function saveScannerScanToWorkflowQueue(scan, mode) {
+async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const storageKey = getQueueStorageKeyForWorkflow(mode);
   if (!storageKey) return null;
 
@@ -682,7 +754,11 @@ async function saveScannerScanToWorkflowQueue(scan, mode) {
     }
   }
 
-  const record = await appendQueueRecord(storageKey, buildQueueRecordFromParsed(parsed, scan.rawText));
+  const record = await appendQueueRecord(
+    storageKey,
+    buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
+    { preserveEveryScan: options.preserveEveryScan === true }
+  );
   const expiryFlag = record.expiry_flag || getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
   await logAnalyticsEvent('scan_captured', {
     workflow: mode,
@@ -747,6 +823,25 @@ async function drainPendingScansToTab(tabId) {
 
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = normalizeScanEvent(rawScan);
+  const idleState = await queryMachineIdleState();
+  if (shouldQueueScannerScan(idleState)) {
+    const lockSession = await beginLockedScannerSession();
+    const lockedQueueResult = await saveScannerScanToWorkflowQueue(scan, "multiple", {
+      context: buildLockedScanQueueContext(lockSession),
+      preserveEveryScan: true
+    });
+    return {
+      routed: false,
+      queued: true,
+      queuedToWorkflow: true,
+      locked: true,
+      lockSessionId: lockSession.id,
+      pinnedTabId: lockSession.tabId,
+      workflow: "multiple",
+      storageKey: lockedQueueResult.storageKey,
+      queueSizeAfter: lockedQueueResult.record?.queueSizeAfter || 0
+    };
+  }
   const storedWorkflow = await getStorage([
     WORKFLOW_MODE_KEY,
     LEGACY_POPUP_MODE_KEY,
@@ -754,6 +849,23 @@ async function routeScanToActiveSupportedTab(rawScan) {
     LEGACY_HANDS_FREE_KEY
   ]);
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
+
+  // Queue workflows are owned by the background daemon. Do not route these
+  // scans through a chart first: the chart content script may still have a
+  // stale mode during popup/storage synchronization, which previously made a
+  // Multiple scan behave like Single or disappear into a failed chart fill.
+  if (workflowMode === "multiple" || workflowMode === "inventory") {
+    const workflowQueueResult = await saveScannerScanToWorkflowQueue(scan, workflowMode);
+    return {
+      routed: false,
+      queued: true,
+      queuedToWorkflow: true,
+      workflow: workflowQueueResult.workflow,
+      storageKey: workflowQueueResult.storageKey,
+      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
+    };
+  }
+
   const tried = new Set();
   const activeTabs = await queryTabs({ active: true, currentWindow: true });
   const allTabs = await queryTabs({});
@@ -2310,10 +2422,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    sendScannerDaemonMessage({
-      action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
-      trigger: request.trigger || 'manual'
-    })
+    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
+      .then(() => sendScannerDaemonMessage({
+        action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
+        trigger: request.trigger || 'manual'
+      }))
       .then((response) => sendResponse({ success: true, accepted: true, response }))
       .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner disconnect failed' }));
     return true;

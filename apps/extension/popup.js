@@ -189,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
+  renderMultipleModeCount(multipleInjectManager.count);
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
@@ -197,6 +198,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+  chrome.storage.onChanged.addListener(handlePopupStorageChanged);
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -442,6 +444,20 @@ function handleRuntimeMessage(request) {
   return false;
 }
 
+function handlePopupStorageChanged(changes, area) {
+  if (area !== 'local' || !(MULTIPLE_INJECT_QUEUE_KEY in changes)) return;
+  const rows = Array.isArray(changes[MULTIPLE_INJECT_QUEUE_KEY]?.newValue)
+    ? changes[MULTIPLE_INJECT_QUEUE_KEY].newValue
+    : [];
+  renderMultipleModeCount(rows.length);
+}
+
+function renderMultipleModeCount(count) {
+  if (!multipleModeBtn) return;
+  const normalized = Math.max(0, Number.parseInt(count, 10) || 0);
+  multipleModeBtn.textContent = normalized > 0 ? `Multiple Inject (${normalized})` : 'Multiple Inject';
+}
+
 function writeOutput(message, type = 'info') {
   showOutput(outputDiv, message, type);
 }
@@ -465,7 +481,7 @@ function openScannerSetupPage() {
       writeOutput(chrome.runtime.lastError.message || 'Could not open scanner setup.', 'error');
       return;
     }
-    writeOutput('Scanner Setup opened. Keep that tab open while using Web Serial capture.', 'info');
+    writeOutput('Scanner Setup opened. After granting the scanner once, the background daemon continues when the setup tab is closed.', 'info');
   });
 }
 
