@@ -1,0 +1,82 @@
+site_name: VaxLink
+site_description: Documentation for the VaxLink Chrome extension and marketing site
+site_url: https://wdgph.github.io/VaxLink/
+repo_url: https://github.com/WDGPH/VaxLink
+repo_name: WDGPH/VaxLink
+copyright: "&copy; Wellington-Dufferin-Guelph Public Health"
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  logo: assets/vaxlink-logo.svg
+  favicon: assets/vaxlink-logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.tabs
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: vaxlink
+      accent: vaxlink
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: vaxlink
+      accent: vaxlink
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  generator: false
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/WDGPH/VaxLink
+
+markdown_extensions:
+  - attr_list
+  - admonition
+  - md_in_html
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.details
+  - pymdownx.snippets:
+      base_path:
+        - "."
+      check_paths: true
+  - pymdownx.superfences
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Adding a New EMR: adding-an-emr.md
+  - Release Process: RELEASING.md
+  - Roadmap: roadmap.md
+  - Contributing: contributing.md
+  - Security Policy: security.md
