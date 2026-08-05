@@ -13,6 +13,11 @@ import {
   setButtonBusy,
   showOutput
 } from './popup-ui.js';
+import {
+  SCANNER_DAEMON_ACTIONS,
+  buildScannerStatusDescriptor,
+  normalizeScannerStatusSnapshot
+} from './scanner/scanner-daemon-shared.js';
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -46,6 +51,12 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
+let scannerSetupBtn;
+let scannerReconnectBtn;
+let scannerStatusTitle;
+let scannerStatusDetail;
+let scannerStatusPill;
+let scannerWorkflowBanner;
 let reasonConsentAutofillToggle;
 let testModeAddBtn;
 let testModeBarcode;
@@ -56,6 +67,7 @@ let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
+let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let reasonConsentAutofillEnabled = true;
 
 const lotLookupCache = new Map();
@@ -73,23 +85,23 @@ const MODE_CONFIG = {
   single: {
     title: 'Single Inject',
     subtitle: 'One scan fills the current chart immediately.',
-    helper: 'Use this when one vaccine is being charted now. Scan into the field below to preview, or leave this mode active and scan directly on the live chart page for hands-free auto-fill.',
+    helper: 'Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.',
     inputLabel: 'Scanned Barcode',
-    inputPlaceholder: 'Paste barcode here or scan with device...',
+    inputPlaceholder: 'Paste barcode text here...',
     usesScannerInput: true
   },
   multiple: {
     title: 'Multiple Inject',
     subtitle: 'Scan several vaccines now, choose them for chart fill later.',
-    helper: 'Leave this mode active while walking to the fridge. Each scan on the live chart page is saved automatically. When you come back, open the queue and choose Use for Chart on each saved vaccine.',
+    helper: 'Leave this mode active with a Web Serial scanner connected. Each scan is saved automatically, then you can choose Use for Chart on each saved vaccine.',
     usesScannerInput: false
   },
   inventory: {
     title: 'Inventory',
     subtitle: 'Capture vaccines into an export tray.',
-    helper: 'Use this for stock or export work. Scan into the field below and add to the inventory tray, or leave this mode active to save each live scan into the inventory export list automatically.',
+    helper: 'Use this for stock or export work. Paste barcode text below and add to the inventory tray, or use a Web Serial scanner to save scans automatically.',
     inputLabel: 'Inventory Barcode Input',
-    inputPlaceholder: 'Scan one barcode per line or paste a batch...',
+    inputPlaceholder: 'Paste one barcode per line...',
     usesScannerInput: true
   }
 };
@@ -135,6 +147,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById('adminDateTimeAutofillToggle');
+  scannerSetupBtn = document.getElementById('scannerSetupBtn');
+  scannerReconnectBtn = document.getElementById('scannerReconnectBtn');
+  scannerStatusTitle = document.getElementById('scannerStatusTitle');
+  scannerStatusDetail = document.getElementById('scannerStatusDetail');
+  scannerStatusPill = document.getElementById('scannerStatusPill');
+  scannerWorkflowBanner = document.getElementById('scannerWorkflowBanner');
   reasonConsentAutofillToggle = document.getElementById('reasonConsentAutofillToggle');
   testModeAddBtn = document.getElementById('testModeAddBtn');
   testModeBarcode = document.getElementById('testModeBarcode');
@@ -171,12 +189,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
+  renderMultipleModeCount(multipleInjectManager.count);
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
   await loadReasonConsentAutofillSetting();
   await loadAnalyticsSummary();
+  await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
+  chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+  chrome.storage.onChanged.addListener(handlePopupStorageChanged);
 
   if (scannedInput) {
     scannedInput.addEventListener('input', () => {
@@ -212,13 +234,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (settingsToggleBtn) {
     settingsToggleBtn.addEventListener('click', () => {
-      void setSettingsPanelOpen(settingsPanel?.hidden ?? true);
+      const nextState = settingsPanel?.hidden ?? true;
+      void setSettingsPanelOpen(nextState);
+      if (nextState) {
+        void loadScannerStatus();
+      }
     });
   }
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(!!adminDateTimeAutofillToggle.checked);
     });
+  }
+  if (scannerSetupBtn) {
+    scannerSetupBtn.addEventListener('click', openScannerSetupPage);
+  }
+  if (scannerReconnectBtn) {
+    scannerReconnectBtn.addEventListener('click', openScannerSetupPage);
   }
   if (reasonConsentAutofillToggle) {
     reasonConsentAutofillToggle.addEventListener('change', () => {
@@ -404,8 +436,89 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadNVCStatus();
 });
 
+function handleRuntimeMessage(request) {
+  if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
+    applyScannerStatus(request.status);
+    return false;
+  }
+  return false;
+}
+
+function handlePopupStorageChanged(changes, area) {
+  if (area !== 'local' || !(MULTIPLE_INJECT_QUEUE_KEY in changes)) return;
+  const rows = Array.isArray(changes[MULTIPLE_INJECT_QUEUE_KEY]?.newValue)
+    ? changes[MULTIPLE_INJECT_QUEUE_KEY].newValue
+    : [];
+  renderMultipleModeCount(rows.length);
+}
+
+function renderMultipleModeCount(count) {
+  if (!multipleModeBtn) return;
+  const normalized = Math.max(0, Number.parseInt(count, 10) || 0);
+  multipleModeBtn.textContent = normalized > 0 ? `Multiple Inject (${normalized})` : 'Multiple Inject';
+}
+
 function writeOutput(message, type = 'info') {
   showOutput(outputDiv, message, type);
+}
+
+async function loadScannerStatus() {
+  try {
+    const response = await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS);
+    if (response && response.success && response.status) {
+      applyScannerStatus(response.status);
+      return;
+    }
+  } catch (_) {
+    // Leave the last known UI in place if the daemon status is temporarily unavailable.
+  }
+  renderScannerStatusUi();
+}
+
+function openScannerSetupPage() {
+  chrome.tabs.create({ url: chrome.runtime.getURL('scanner-setup.html') }, () => {
+    if (chrome.runtime.lastError) {
+      writeOutput(chrome.runtime.lastError.message || 'Could not open scanner setup.', 'error');
+      return;
+    }
+    writeOutput('Scanner Setup opened. After granting the scanner once, the background daemon continues when the setup tab is closed.', 'info');
+  });
+}
+
+function applyScannerStatus(status) {
+  scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
+  renderScannerStatusUi();
+}
+
+function renderScannerStatusUi() {
+  const descriptor = buildScannerStatusDescriptor(scannerStatusSnapshot, activeMode);
+
+  if (scannerStatusTitle) {
+    scannerStatusTitle.textContent = descriptor.label;
+  }
+  if (scannerStatusDetail) {
+    scannerStatusDetail.textContent = descriptor.detail;
+  }
+  if (scannerStatusPill) {
+    scannerStatusPill.textContent = descriptor.label;
+    scannerStatusPill.className = `scanner-status-pill ${descriptor.tone}`;
+  }
+  if (scannerReconnectBtn) {
+    scannerReconnectBtn.hidden = !descriptor.showReconnect;
+    scannerReconnectBtn.disabled = false;
+    scannerReconnectBtn.textContent = 'Open Setup';
+  }
+  if (scannerWorkflowBanner) {
+    if (descriptor.bannerText) {
+      scannerWorkflowBanner.hidden = false;
+      scannerWorkflowBanner.textContent = descriptor.bannerText;
+      scannerWorkflowBanner.className = `scanner-banner${descriptor.bannerTone === 'error' ? ' error' : ''}`;
+    } else {
+      scannerWorkflowBanner.hidden = true;
+      scannerWorkflowBanner.textContent = '';
+      scannerWorkflowBanner.className = 'scanner-banner';
+    }
+  }
 }
 
 async function loadSettingsPanelState() {
@@ -1213,6 +1326,7 @@ async function setActiveMode(mode, options = {}) {
   if (scanStateSubtitle) {
     scanStateSubtitle.textContent = config.subtitle;
   }
+  renderScannerStatusUi();
 
   if (options.persist !== false) {
     await setLocalStorage({ [WORKFLOW_MODE_KEY]: activeMode });
@@ -1347,6 +1461,10 @@ function sendRuntimeMessage(message) {
       resolve(response);
     });
   });
+}
+
+function sendScannerDaemonCommand(action, payload = {}) {
+  return sendRuntimeMessage({ action, ...payload });
 }
 
 function buildLotLookupCacheKey(lot, gtin) {

@@ -25,25 +25,12 @@ let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
 let lastVaxlinkFillAt = 0;
-let scannerBuffer = '';
-let scannerStartedAt = 0;
-let scannerLastAt = 0;
-let scannerIdleTimer = null;
-let scannerInputTimer = null;
 let lastHandledScanValue = '';
 let lastHandledScanAt = 0;
-let lastInputCandidate = '';
-let lastInputCandidateAt = 0;
 let audioContextRef = null;
 let expiryGuardHost = null;
 let expiryGuardRoot = null;
-
-const SCAN_MIN_LENGTH = 8;
-const SCAN_MAX_DURATION_MS = 6000;
-const SCAN_MAX_AVG_INTERVAL_MS = 220;
-const SCAN_CHAR_GAP_RESET_MS = 1500;
-const SCAN_IDLE_COMMIT_MS = 1500;
-const INPUT_CANDIDATE_TTL_MS = 5000;
+let pendingScannerDrainRequested = false;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
@@ -156,6 +143,18 @@ function logAnalyticsEvent(eventType, payload = {}) {
   }
 }
 
+function requestPendingScannerScans() {
+  if (pendingScannerDrainRequested || !isHandsFreeSupportedPage()) return;
+  pendingScannerDrainRequested = true;
+  try {
+    chrome.runtime.sendMessage({ action: 'drainPendingScannerScans' }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (_) {
+    // Pending scan drain is best effort.
+  }
+}
+
 function setupMessageListener() {
   if (window.__vaxlinkMessageListenerInitialized) {
     return;
@@ -164,6 +163,32 @@ function setupMessageListener() {
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
+    if (request.action === 'vaxlinkScanCaptured') {
+      if (window.top !== window.self) {
+        return false;
+      }
+      if (!isHandsFreeSupportedPage()) {
+        sendResponse({ success: false, error: 'Unsupported chart page' });
+        return true;
+      }
+      Promise.resolve(handleHandsFreeScan(request.scan?.rawText || '', request.scan?.source || 'scanner-channel'))
+        .then((result) => {
+          const accepted = result?.accepted !== false;
+          sendResponse({
+            accepted,
+            success: !!result?.success,
+            pending: !!result?.pending,
+            status: result?.status || (result?.success ? 'success' : 'failed'),
+            error: result?.error || '',
+            queued: !!result?.queued,
+            duplicate_ignored: !!result?.duplicate_ignored,
+            command_handled: !!result?.command_handled,
+            queueSizeAfter: result?.queueSizeAfter || 0
+          });
+        })
+        .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan handling failed' }));
+      return true;
+    }
     if (request.action === 'autoFill') {
       // Only the top frame should respond to autoFill messages from the popup.
       // With all_frames:true, iframes also receive the message; if an iframe
@@ -197,202 +222,15 @@ function setupMessageListener() {
   vlog('message listener registered');
 }
 
-function resetScannerBuffer() {
-  if (scannerIdleTimer) {
-    clearTimeout(scannerIdleTimer);
-    scannerIdleTimer = null;
+function getGS1Parser() {
+  if (!globalThis.VaxLinkGS1Parser) {
+    throw new Error('VaxLink GS1 parser is not loaded');
   }
-  if (scannerInputTimer) {
-    clearTimeout(scannerInputTimer);
-    scannerInputTimer = null;
-  }
-  scannerBuffer = '';
-  scannerStartedAt = 0;
-  scannerLastAt = 0;
-}
-
-function isTextEntryElement(el) {
-  if (!el) return false;
-  const tag = String(el.tagName || '').toLowerCase();
-  if (tag === 'textarea' || tag === 'select') return true;
-  if (tag === 'input') {
-    const type = String(el.type || '').toLowerCase();
-    return !['button', 'checkbox', 'radio', 'submit', 'reset', 'file'].includes(type);
-  }
-  return !!el.isContentEditable;
-}
-
-function isLikelyScannerSequence() {
-  const value = String(scannerBuffer || '');
-  if (value.length < SCAN_MIN_LENGTH) return false;
-  if (!scannerStartedAt || !scannerLastAt) return false;
-  const duration = scannerLastAt - scannerStartedAt;
-  if (duration < 0 || duration > SCAN_MAX_DURATION_MS) return false;
-  const avgInterval = duration / Math.max(value.length - 1, 1);
-  return avgInterval <= SCAN_MAX_AVG_INTERVAL_MS;
-}
-
-function parseScannerDate(yymmdd) {
-  if (!yymmdd || yymmdd.length !== 6) return null;
-  const yy = yymmdd.substring(0, 2);
-  const mm = yymmdd.substring(2, 4);
-  let dd = yymmdd.substring(4, 6);
-  // GS1 allows day "00" meaning "last day of the month" — resolve it here so
-  // downstream date math doesn't roll back into the previous month.
-  if (dd === '00') {
-    const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
-    dd = String(lastDay).padStart(2, '0');
-  }
-  return `${mm}/${dd}/20${yy}`;
-}
-
-function parseScannerIsLikelyAIStart(s, idx) {
-  if (idx < 0 || idx > s.length - 2) return false;
-  const ai = s.substring(idx, idx + 2);
-  if (ai === '17') {
-    if (idx + 8 > s.length) return false;
-    return /^\d{6}$/.test(s.substring(idx + 2, idx + 8));
-  }
-  return ai === '10' || ai === '21';
-}
-
-function parseScannerCanParseTailNoGS(s, idx, memo) {
-  if (idx >= s.length) return true;
-  if (memo.has(idx)) return memo.get(idx);
-
-  let ok = false;
-  const ai = s.substring(idx, idx + 2);
-  if (ai === '17') {
-    ok = idx + 8 <= s.length &&
-      /^\d{6}$/.test(s.substring(idx + 2, idx + 8)) &&
-      parseScannerCanParseTailNoGS(s, idx + 8, memo);
-  } else if (ai === '10' || ai === '21') {
-    const valueStart = idx + 2;
-    if (valueStart < s.length) {
-      const next = parseScannerFindNextAINoGS(s, valueStart, memo, ai);
-      ok = next === -1 ? true : (next > valueStart && parseScannerCanParseTailNoGS(s, next, memo));
-    }
-  } else {
-    ok = false;
-  }
-
-  memo.set(idx, ok);
-  return ok;
-}
-
-function parseScannerFindNextAINoGS(s, startIdx, memo, currentVariableAI = null) {
-  for (let i = startIdx + 1; i < s.length - 1; i++) {
-    if (!parseScannerIsLikelyAIStart(s, i)) continue;
-    const candidateAI = s.substring(i, i + 2);
-    if (currentVariableAI && candidateAI === currentVariableAI) continue;
-    if (parseScannerCanParseTailNoGS(s, i, memo)) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-function parseScannerFindNextAI(s, startIdx, GS, currentVariableAI = null) {
-  if (GS && s.includes(GS) && s.substring(startIdx).includes(GS)) {
-    const ais = ['17', '10', '21'];
-    for (let i = startIdx; i < s.length - 1; i++) {
-      const twoChar = s.substring(i, i + 2);
-      if (ais.includes(twoChar) && i > 0 && s.charAt(i - 1) === GS) {
-        return i;
-      }
-    }
-  }
-
-  const memo = new Map();
-  return parseScannerFindNextAINoGS(s, startIdx, memo, currentVariableAI);
+  return globalThis.VaxLinkGS1Parser;
 }
 
 function parseGS1BarcodeFromScanner(rawScan) {
-  const GS = String.fromCharCode(0x1d);
-  let s = String(rawScan || '')
-    .trim()
-    .replace(/[\t\r\n]/g, GS)
-    // AIM symbology identifier: "]" + letter + digit — ]C1 (GS1-128),
-    // ]d2 (GS1 DataMatrix), ]Q3 (GS1 QR), ]e0 (GS1 DataBar). Lot-only
-    // barcodes have no "01" to re-anchor on, so strip generically.
-    .replace(/^\][A-Za-z]\d/, '')
-    .replace(/\(/g, '')
-    .replace(/\)/g, '')
-    .replace(/[^\x20-\x7E\x1D]/g, '');
-
-  if (!s.startsWith('01')) {
-    // Re-anchor on an embedded AI(01) only when a full 14-digit GTIN follows.
-    // A bare indexOf would fire on "01" inside a lot value (e.g. lot-only scan
-    // "10Y016312") and truncate the payload to garbage.
-    const first01 = s.indexOf('01');
-    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
-      s = s.substring(first01);
-    }
-  }
-
-  if (!s) {
-    throw new Error('Empty scan payload');
-  }
-
-  const data = { gtin: null, expiry: null, lot: null, serial: null };
-  let idx = 0;
-  if (s.startsWith('01')) {
-    if (s.length < 16) {
-      throw new Error('AI(01) GTIN incomplete');
-    }
-    data.gtin = s.substring(2, 16);
-    idx = 16;
-  } else if (!parseScannerIsLikelyAIStart(s, 0)) {
-    throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
-  }
-
-  while (idx < s.length) {
-    // Skip explicit separators.
-    if (s.charAt(idx) === GS) {
-      idx += 1;
-      continue;
-    }
-
-    const currentAI = s.substring(idx, idx + 2);
-    if (currentAI === '17') {
-      if (s.length < idx + 8) {
-        throw new Error('AI(17) expiry date incomplete');
-      }
-      const yymmdd = s.substring(idx + 2, idx + 8);
-      data.expiry = parseScannerDate(yymmdd);
-      idx += 8;
-    } else if (currentAI === '10') {
-      idx += 2;
-      let lotEnd = parseScannerFindNextAI(s, idx, GS, '10');
-      if (lotEnd === -1) {
-        lotEnd = s.length;
-      }
-      data.lot = s.substring(idx, lotEnd).replace(/\x1d/g, '');
-      idx = lotEnd;
-    } else if (currentAI === '21') {
-      idx += 2;
-      let serialEnd = parseScannerFindNextAI(s, idx, GS, '21');
-      if (serialEnd === -1) {
-        serialEnd = s.length;
-      }
-      data.serial = s.substring(idx, serialEnd).replace(/\x1d/g, '');
-      idx = serialEnd;
-    } else {
-      // Recover from unknown/intermediate AIs by finding the next recognized AI.
-      const nextKnownAI = parseScannerFindNextAI(s, idx, GS, null);
-      if (nextKnownAI > idx) {
-        idx = nextKnownAI;
-        continue;
-      }
-      break;
-    }
-  }
-
-  if (!data.gtin && !data.expiry && !data.lot && !data.serial) {
-    throw new Error('No recognized GS1 fields found');
-  }
-
-  return data;
+  return getGS1Parser().parseGS1Barcode(rawScan);
 }
 
 function lookupVaccineInfoByLot(lot, gtin) {
@@ -612,82 +450,26 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   }
 }
 
-function mergeParsedScanFields(base, extra) {
-  if (!extra) return base;
-  return {
-    scanned_at: base.scanned_at || extra.scanned_at || null,
-    administered_at: base.administered_at || extra.administered_at || null,
-    gtin: base.gtin || extra.gtin || null,
-    expiry: base.expiry || extra.expiry || null,
-    lot: base.lot || extra.lot || null,
-    serial: base.serial || extra.serial || null,
-    tradename: base.tradename || extra.tradename,
-    generic_name: base.generic_name || extra.generic_name,
-    disease: base.disease || extra.disease,
-    antigen: base.antigen || extra.antigen,
-    manufacturer: base.manufacturer || extra.manufacturer,
-    nvc_lot_expiry: base.nvc_lot_expiry || extra.nvc_lot_expiry,
-    din: base.din || extra.din,
-    route: base.route || extra.route,
-    strength: base.strength || extra.strength,
-    dose_value: base.dose_value || extra.dose_value,
-    dose_unit: base.dose_unit || extra.dose_unit,
-    drug_code: base.drug_code || extra.drug_code,
-    name: base.name || extra.name
-  };
-}
-
-function rememberRecentInputCandidate(rawValue) {
-  const value = String(rawValue || '').trim();
-  if (!value || !isCandidateGS1Text(value)) return;
-  lastInputCandidate = value;
-  lastInputCandidateAt = Date.now();
-}
-
-function getRecentRichScanCandidate(expectedGtin) {
-  const now = Date.now();
-  const candidates = [];
-  if (lastInputCandidate && (now - lastInputCandidateAt) <= INPUT_CANDIDATE_TTL_MS) {
-    candidates.push(lastInputCandidate);
-  }
-
-  const activeValue = getActiveElementScanCandidate();
-  if (activeValue) {
-    candidates.push(activeValue);
-  }
-
-  for (const raw of candidates) {
-    try {
-      const parsed = parseGS1BarcodeFromScanner(raw);
-      if (expectedGtin && parsed.gtin && parsed.gtin !== expectedGtin) {
-        continue;
-      }
-      if (parsed.lot || parsed.expiry || parsed.serial) {
-        return { raw, parsed };
-      }
-    } catch (_) {
-      // Ignore non-GS1 candidates.
-    }
-  }
-  return null;
-}
-
 async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (!isHandsFreeSupportedPage()) {
-    return;
+    return { accepted: false, success: false, status: 'unsupported_page', error: 'Unsupported chart page' };
   }
 
   const trimmed = String(scanValue || '').trim();
-  if (!trimmed) return;
+  if (!trimmed) {
+    return { accepted: true, success: false, status: 'empty_scan', error: 'Scan event missing raw text' };
+  }
 
-  if (handleVaxlinkCommand(trimmed)) return;
+  if (handleVaxlinkCommand(trimmed)) {
+    return { accepted: true, success: true, status: 'command_handled', command_handled: true };
+  }
 
   const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
 
   const now = Date.now();
   if (trimmed === lastHandledScanValue && (now - lastHandledScanAt) < 1500) {
-    return;
+    return { accepted: true, success: true, status: 'duplicate_ignored', duplicate_ignored: true };
   }
   lastHandledScanValue = trimmed;
   lastHandledScanAt = now;
@@ -709,21 +491,14 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       source,
       note: error.message
     });
-    return;
+    return {
+      accepted: true,
+      success: false,
+      status: 'parse_error',
+      error: error.message || 'Scan was not valid GS1'
+    };
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
-
-  if (!parsed.lot && !parsed.expiry && !parsed.serial) {
-    const recovered = getRecentRichScanCandidate(parsed.gtin);
-    if (recovered) {
-      parsed = mergeParsedScanFields(parsed, recovered.parsed);
-      vlog('hands-free recovered from input candidate', {
-        source,
-        candidatePreview: recovered.raw.slice(0, 80),
-        parsed
-      });
-    }
-  }
 
   try {
     let vaccineInfo = null;
@@ -797,7 +572,14 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
           manufacturer: record.manufacturer || '',
           expiryFlag: record.expiry_flag || finalExpiryFlag
         });
-        return;
+        return {
+          accepted: true,
+          success: true,
+          queued: true,
+          duplicate_ignored: true,
+          status: 'duplicate_ignored',
+          queueSizeAfter: record.queueSizeAfter || 0
+        };
       }
       // Expired records get the expiry_warning cue from the persistent toast.
       if (record.expiry_flag !== 'expired') {
@@ -821,10 +603,23 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         manufacturer: record.manufacturer || '',
         expiryFlag: record.expiry_flag || finalExpiryFlag
       });
+      return {
+        accepted: true,
+        success: true,
+        queued: true,
+        status: 'queued',
+        queueSizeAfter: record.queueSizeAfter || 0
+      };
     } catch (error) {
       console.warn('Workflow queue save failed:', error);
+      playAudioCue('error');
+      return {
+        accepted: true,
+        success: false,
+        status: 'queue_failed',
+        error: error?.message || 'Workflow queue save failed'
+      };
     }
-    return;
   }
 
   logAnalyticsEvent('autofill_attempt', {
@@ -853,171 +648,17 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   });
   if (success) {
     showVaxlinkToast(parsed);
+  } else if (!pending) {
+    playAudioCue('error');
   }
   vlog('hands-free autofill', autofillResult?.status, { source, parsed });
-}
-
-function flushHandsFreeBuffer(event) {
-  if (!scannerBuffer) return;
-  const captured = scannerBuffer;
-  const likelyScanner = isLikelyScannerSequence() || isCandidateGS1Text(captured);
-  resetScannerBuffer();
-
-  if (!likelyScanner) return;
-
-  if (event) {
-    event.preventDefault();
-  }
-  handleHandsFreeScan(captured, 'keyboard-buffer');
-}
-
-function scheduleScannerFlush() {
-  if (scannerIdleTimer) {
-    clearTimeout(scannerIdleTimer);
-  }
-  scannerIdleTimer = setTimeout(() => {
-    flushHandsFreeBuffer();
-  }, SCAN_IDLE_COMMIT_MS);
-}
-
-function getActiveElementScanCandidate() {
-  const el = document.activeElement;
-  if (!isTextEntryElement(el)) return '';
-  if (!el || !('value' in el)) return '';
-  const raw = String(el.value || '').trim();
-  // Field values on app forms can be truncated by maxlength/masks.
-  // Accept short AI-only GS1 payloads too (e.g., 17+10 without AI01).
-  if (raw.length < 8) return '';
-  if (!isCandidateGS1Text(raw)) return '';
-
-  // isCandidateGS1Text is too loose for Tab/Enter interception — it matches any
-  // text containing "01" (dates, patient IDs, lot numbers). Require a full parse
-  // just like onHandsFreePaste does, so nurses can Tab through fields normally.
-  let parsed;
-  try {
-    parsed = parseGS1BarcodeFromScanner(raw);
-  } catch (_) {
-    return '';
-  }
-  if (!parsed) return '';
-  // Require a numeric 14-digit GTIN. IDs starting with "10" parse as AI(10)
-  // lot barcodes (gtin=null) — null also fails this check, so they pass through.
-  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return '';
-
-  return raw;
-}
-
-function clearActiveElementValue() {
-  const el = document.activeElement;
-  if (!el || !('value' in el)) return;
-  el.value = '';
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function onHandsFreePaste(event) {
-  if (!isHandsFreeSupportedPage()) return;
-
-  const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
-  if (!text || text.length < SCAN_MIN_LENGTH) return;
-  if (!isCandidateGS1Text(text)) return;
-
-  // isCandidateGS1Text is too loose for paste — it matches dates, patient IDs,
-  // and any text containing "01" or starting with "10"/"17"/"21". IDs starting
-  // with "10" parse as AI(10) lot barcodes (gtin=null) which must also be
-  // rejected. Require a full parse with a numeric 14-digit GTIN.
-  let parsed;
-  try {
-    parsed = parseGS1BarcodeFromScanner(text);
-  } catch (_) {
-    return;
-  }
-  if (!parsed) return;
-  if (!parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
-
-  event.preventDefault();
-  rememberRecentInputCandidate(text);
-  vlog('hands-free paste');
-  handleHandsFreeScan(text, 'paste');
-}
-
-function isCandidateGS1Text(value) {
-  const text = String(value || '').trim();
-  if (text.length < SCAN_MIN_LENGTH) return false;
-  const normalized = normalizeScannerCandidate(text);
-  if (!normalized) return false;
-  if (normalized.startsWith('01') || normalized.includes('01')) return true;
-  if (normalized.startsWith('17')) {
-    return normalized.length >= 8 && /^\d{6}$/.test(normalized.substring(2, 8));
-  }
-  if (normalized.startsWith('10') || normalized.startsWith('21')) {
-    return normalized.length > 2;
-  }
-  return parseScannerIsLikelyAIStart(normalized, 0);
-}
-
-function normalizeScannerCandidate(value) {
-  const GS = String.fromCharCode(0x1d);
-  let s = String(value || '')
-    .trim()
-    .replace(/[\t\r\n]/g, GS)
-    .replace(/^\][A-Za-z]\d/, '')
-    .replace(/\(/g, '')
-    .replace(/\)/g, '')
-    .replace(/[^\x20-\x7E\x1D]/g, '');
-  if (!s.startsWith('01')) {
-    // Same guarded re-anchor as parseGS1BarcodeFromScanner: only jump to an
-    // embedded "01" when a full 14-digit GTIN follows it.
-    const first01 = s.indexOf('01');
-    if (first01 > 0 && /^\d{14}/.test(s.substring(first01 + 2))) {
-      s = s.substring(first01);
-    }
-  }
-  return s;
-}
-
-function hasPostGTINAI(value) {
-  const s = normalizeScannerCandidate(value);
-  if (!s.startsWith('01') || s.length <= 16) return false;
-  const tail = s.substring(16);
-  return tail.includes('10') || tail.includes('17') || tail.includes('21') || tail.includes(String.fromCharCode(0x1d));
-}
-
-function onHandsFreeInput(event) {
-  if (!isHandsFreeSupportedPage()) return;
-
-  const target = event && event.target;
-  if (!target || !isTextEntryElement(target) || !('value' in target)) return;
-  const value = String(target.value || '').trim();
-  if (value.length >= 16 && isCandidateGS1Text(value)) {
-    rememberRecentInputCandidate(value);
-  }
-  if (scannerBuffer && scannerBuffer.length > 0) return;
-  if (value.length < SCAN_MIN_LENGTH || !isCandidateGS1Text(value)) return;
-
-  if (scannerInputTimer) {
-    clearTimeout(scannerInputTimer);
-  }
-  scannerInputTimer = setTimeout(() => {
-    const latest = String(target.value || '').trim();
-    if (!isCandidateGS1Text(latest)) return;
-    // isCandidateGS1Text is too loose to justify wiping the field — it matches
-    // dates, patient IDs, and any text containing "01". Mirror the paste path:
-    // require a full parse with a numeric 14-digit GTIN before clearing, so
-    // manually typed values are never destroyed.
-    let parsed;
-    try {
-      parsed = parseGS1BarcodeFromScanner(latest);
-    } catch (_) {
-      return;
-    }
-    if (!parsed || !parsed.gtin || !/^\d{14}$/.test(parsed.gtin)) return;
-    target.value = '';
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-    target.dispatchEvent(new Event('change', { bubbles: true }));
-    vlog('hands-free input event');
-    handleHandsFreeScan(latest, 'input-event');
-  }, SCAN_IDLE_COMMIT_MS + 120);
+  return {
+    accepted: true,
+    success,
+    pending,
+    status: autofillResult?.status || 'failed',
+    error: autofillResult?.error || (!success && !pending ? 'Could not auto-fill fields' : '')
+  };
 }
 
 function isHandsFreeSupportedPage() {
@@ -1034,81 +675,17 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
-    const recordImmsPath = '/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml';
-    const pathname = window.location.pathname;
+    const path = String(window.location.pathname || '').toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
        host === 'panorama.prod.ehealthontario.ca') &&
-      // Keep the canonical recordImms.xhtml page, and also allow Panorama's
-      // suffixed variant of the same view (e.g. recordImms.xhtml.xwar).
-      (pathname === recordImmsPath || pathname.startsWith(recordImmsPath + '.'));
+      path.includes('/recordimms/');
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
   } catch (error) {
     return false;
   }
-}
-
-function onHandsFreeKeydown(event) {
-  if (!isHandsFreeSupportedPage()) return;
-  if (event.defaultPrevented) return;
-  if (event.ctrlKey || event.metaKey || event.altKey) return;
-
-  const key = event.key;
-  const now = Date.now();
-  if (scannerLastAt && (now - scannerLastAt) > SCAN_CHAR_GAP_RESET_MS) {
-    resetScannerBuffer();
-  }
-
-  if (key === 'Tab' || key === 'Enter' || key === 'NumpadEnter') {
-    // Many scanner profiles use Tab/Enter as separators between AIs, not only as suffix.
-    // Treat them as GS markers and flush only after idle timeout.
-    if (scannerBuffer) {
-      // Only swallow the key when the buffer was typed at scanner speed
-      // (>= SCAN_MIN_LENGTH chars, machine-fast). Nurses type short values
-      // and Tab/Enter within the 1.5s gap window — unconditionally eating
-      // their navigation key breaks Panorama form entry.
-      if (isLikelyScannerSequence()) {
-        scannerLastAt = now;
-        scannerBuffer += String.fromCharCode(0x1d);
-        event.preventDefault();
-        event.stopPropagation();
-        scheduleScannerFlush();
-        return;
-      }
-      // Manual typing: drop the stale buffer and let the key act normally.
-      resetScannerBuffer();
-    }
-
-    const activeScan = getActiveElementScanCandidate();
-    if (activeScan) {
-      event.preventDefault();
-      clearActiveElementValue();
-      vlog('hands-free focused input');
-      handleHandsFreeScan(activeScan, 'focused-input');
-      return;
-    }
-
-    return;
-  }
-
-  if ((key === 'Unidentified' || key === 'Process') && scannerBuffer) {
-    scannerLastAt = now;
-    scannerBuffer += String.fromCharCode(0x1d);
-    scheduleScannerFlush();
-    return;
-  }
-
-  if (key.length !== 1) {
-    return;
-  }
-
-  if (!scannerStartedAt) scannerStartedAt = now;
-  scannerLastAt = now;
-  scannerBuffer += key;
-
-  scheduleScannerFlush();
 }
 
 function initHandsFreeScanner() {
@@ -1133,6 +710,7 @@ function initHandsFreeScanner() {
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
     reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(stored);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
+    requestPendingScannerScans();
     vlog('active workflow mode', activeWorkflowMode);
 
     // On Panorama SPA navigations the page is already fully loaded when this
@@ -1187,13 +765,9 @@ function initHandsFreeScanner() {
     adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
     reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
-    resetScannerBuffer();
     vlog('workflow mode changed', activeWorkflowMode);
   });
 
-  window.addEventListener('keydown', onHandsFreeKeydown, true);
-  window.addEventListener('paste', onHandsFreePaste, true);
-  window.addEventListener('input', onHandsFreeInput, true);
   document.addEventListener('pointerdown', cancelPanoramaFillRetriesForManualEdit, true);
   document.addEventListener('change', cancelPanoramaFillRetriesForManualEdit, true);
 }

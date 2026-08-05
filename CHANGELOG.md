@@ -8,6 +8,13 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.1](https://github.com/WDGPH/VaxLink/compare/v1.1.0...v1.1.1) (2026-07-15)
+
+
+### Fixed
+
+* stabilize expired-lot PF/NPF autofill flow in Panorama ([f6358c5](https://github.com/WDGPH/VaxLink/commit/f6358c523976d1b2ee54dd18c34e3df2973046f4))
+
 ## [1.1.0](https://github.com/WDGPH/VaxLink/compare/v1.0.7...v1.1.0) (2026-07-07)
 
 

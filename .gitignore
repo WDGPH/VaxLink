@@ -7,6 +7,8 @@ apps/web-next/.next/
 # Packaged extension zips (built by scripts/package-extension.sh)
 dist/
 
+docs/pilot/
+
 # Claude Code local state (agent memory, local settings)
 **/.claude/agent-memory/
 .claude/settings.local.json
