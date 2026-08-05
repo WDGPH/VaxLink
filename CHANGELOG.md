@@ -8,6 +8,41 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.2](https://github.com/WDGPH/VaxLink/compare/v1.1.1...v1.1.2) (2026-08-05)
+
+
+### Added
+
+* add admin date time autofill setting and UI toggle in popup ([b978539](https://github.com/WDGPH/VaxLink/commit/b978539032b11945af3f10e7dc04545894a7cccb))
+* add admin date time autofill setting and UI toggle in popup ([5606bfb](https://github.com/WDGPH/VaxLink/commit/5606bfbcef66b743a1e975454bea427d13579fbd))
+* add analytics features to popup.js ([85eb390](https://github.com/WDGPH/VaxLink/commit/85eb39021c65dc216fb821ba076aca472216cb77))
+* add inventory management and barcode parsing functionality ([bb2e155](https://github.com/WDGPH/VaxLink/commit/bb2e15541a0e407b277217ec72fa0bbfa3296d86))
+* enhance logging functionality in background and content scripts ([192271f](https://github.com/WDGPH/VaxLink/commit/192271fd81e6e44b3394cfa39540ae3d66352425))
+* enhance logging functionality in background and content scripts ([a9c6cf8](https://github.com/WDGPH/VaxLink/commit/a9c6cf8dc6be66b62bc8d7b33af899095039c1f7))
+* enhance NVC indexing and add lot-agent mapping functionality ([9a01079](https://github.com/WDGPH/VaxLink/commit/9a01079c02b76d3319f36f0f0e6611eedcba2609))
+* enhance NVC indexing and add lot-agent mapping functionality ([4a4b3a8](https://github.com/WDGPH/VaxLink/commit/4a4b3a800e7a0d68ca3012509233e8fc254e8608))
+* implement local storage management and queue record handling in background and content scripts ([957e672](https://github.com/WDGPH/VaxLink/commit/957e67214c544c356f876bddda0bdf303be5fd64))
+* implement mode switching for barcode scanning and inventory management ([dcc17ec](https://github.com/WDGPH/VaxLink/commit/dcc17ec363dabe533c484ca9f998e7a3b72a8a5d))
+* implement queue badge functionality and VaxLink command handling ([fe9675e](https://github.com/WDGPH/VaxLink/commit/fe9675ee79a80a1aa3af9b84ba203bc3175ac58a))
+* implement queue badge functionality and VaxLink command handling ([94132e3](https://github.com/WDGPH/VaxLink/commit/94132e3c90bcc0d5d2356425bdd5e986de405c33))
+* improve GS1 barcode parsing with enhanced error handling and support for AI sequences ([b398fb0](https://github.com/WDGPH/VaxLink/commit/b398fb0ddc763d0380f8a77d2378f6c96b7f3bd3))
+* improve GS1 barcode parsing with enhanced error handling and support for AI sequences ([abe7851](https://github.com/WDGPH/VaxLink/commit/abe78518bcbfeb8c69a32929f1492a7b66392524))
+* Refactor popup.js for improved vaccine scanning workflow and add panorama agent rules ([e92d20f](https://github.com/WDGPH/VaxLink/commit/e92d20f60a0cfefc358b26cbe877b220e7e385ef))
+* update version to 1.0.2 in manifest.json and enhance field handling in content.js - Pentacel ([ec1c833](https://github.com/WDGPH/VaxLink/commit/ec1c833fbb7b8d29548aeb70dd07cc91d0e9963c))
+* update version to 1.0.2 in manifest.json and enhance field handling in content.js - Pentacel ([6220273](https://github.com/WDGPH/VaxLink/commit/62202739c04289d676b49f712badaa1f848e288b))
+
+
+### Fixed
+
+* reliable HB pediatric/adult classification for lot-only barcodes ([652c3c2](https://github.com/WDGPH/VaxLink/commit/652c3c206a4165407a753426fcee3fe96aa56a1b))
+* restore 1.1.1 release baseline ([e5f8872](https://github.com/WDGPH/VaxLink/commit/e5f88721c7becfc614ba63a93c741de943a5be52))
+* strength-based HB rules use bare number tokens matching NVC data ([6501160](https://github.com/WDGPH/VaxLink/commit/6501160ce24d1b9449a29ff4769b0fcc1496fefe))
+
+
+### Chores
+
+* release VaxLink 1.1.2 ([c05e55c](https://github.com/WDGPH/VaxLink/commit/c05e55cb1a5bfdf31310e6a6460afcd10ac5d50d))
+
 ## [1.1.1](https://github.com/WDGPH/VaxLink/compare/v1.1.0...v1.1.1) (2026-07-15)
 
 
