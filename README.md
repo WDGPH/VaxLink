@@ -56,6 +56,28 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECURITY.md).
 
+## Documentation site
+
+Architecture, the EMR adapter contract, release process, and engineering
+notes are published as a [MkDocs](https://www.mkdocs.org/) site
+([Material theme](https://squidfunk.github.io/mkdocs-material/)), built from
+this README and the other project markdown files.
+
+```bash
+uv sync --group docs
+uv run mkdocs serve
+```
+
+Open <http://127.0.0.1:8000>.
+
+The `docs` workflow (`.github/workflows/docs.yml`) builds the site on every
+push to `main` and publishes it to the `gh-pages` branch. GitHub Pages can
+only serve one source per repo, and this repo's Pages site is currently
+configured to deploy `apps/web-next` via GitHub Actions
+(`deploy-web-next-pages.yml`) — enabling the docs site as-is means picking
+one of the two as the live Pages deployment, or merging the mkdocs build
+into the `apps/web-next` static export before it's uploaded.
+
 ## License
 
 [MIT](LICENSE)

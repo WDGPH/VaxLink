@@ -10,3 +10,7 @@ dist/
 # Claude Code local state (agent memory, local settings)
 **/.claude/agent-memory/
 .claude/settings.local.json
+
+# mkdocs docs site (built by `uv run mkdocs build`)
+site/
+.venv/

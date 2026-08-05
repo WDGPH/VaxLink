@@ -1,0 +1,100 @@
+name: docs
+
+# NOTE: apps/web-next is already deployed to GitHub Pages via
+# deploy-web-next-pages.yml, using the "GitHub Actions" Pages source
+# (actions/deploy-pages) at vaxlink.ca. This workflow pushes the docs
+# site to a `gh-pages` branch instead. GitHub Pages can only serve one
+# source per repo, so only one of these two can be the live Pages site
+# until they're combined (e.g. by publishing the mkdocs build under
+# apps/web-next/out/docs/ in the existing workflow) or docs are hosted
+# elsewhere.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/docs.yml
+      - '**.md'
+      - '**.svg'
+      - '**.png'
+      - uv.lock
+      - pyproject.toml
+      - mkdocs.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/docs.yml
+      - '**.md'
+      - '**.svg'
+      - '**.png'
+      - uv.lock
+      - pyproject.toml
+      - mkdocs.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install docs dependencies
+        run: uv sync --locked --group docs
+
+      - name: Build docs
+        run: uv run mkdocs build
+
+      - name: Create .nojekyll file
+        run: touch site/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: site/
+          retention-days: 1
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Configure Git Credentials
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: site
+
+      - name: Ensure .nojekyll exists
+        run: touch site/.nojekyll
+
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-pages
+          folder: site
