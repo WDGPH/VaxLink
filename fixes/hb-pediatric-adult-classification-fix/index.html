@@ -1,0 +1,1136 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the VaxLink Chrome extension and marketing site">
+      
+      
+      
+        <link rel="canonical" href="https://wdgph.github.io/VaxLink/fixes/hb-pediatric-adult-classification-fix/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/vaxlink-logo.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>HB Pediatric / Adult Classification Fix - VaxLink</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="vaxlink" data-md-color-accent="vaxlink">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#hb-pediatric-adult-classification-fix" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="VaxLink" class="md-header__button md-logo" aria-label="VaxLink" data-md-component="logo">
+      
+  <img src="../../assets/vaxlink-logo.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            VaxLink
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              HB Pediatric / Adult Classification Fix
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="vaxlink" data-md-color-accent="vaxlink"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="vaxlink" data-md-color-accent="vaxlink"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/WDGPH/VaxLink" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    WDGPH/VaxLink
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../adding-an-emr/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Adding a New EMR
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../RELEASING/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Release Process
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../roadmap/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Roadmap
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../security/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Security Policy
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="VaxLink" class="md-nav__button md-logo" aria-label="VaxLink" data-md-component="logo">
+      
+  <img src="../../assets/vaxlink-logo.svg" alt="logo">
+
+    </a>
+    VaxLink
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/WDGPH/VaxLink" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    WDGPH/VaxLink
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../adding-an-emr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a New EMR
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Process
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../roadmap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Roadmap
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#symptom" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Symptom
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#root-cause-three-separate-failure-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Root cause — three separate failure modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Root cause — three separate failure modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-lot-override-only-worked-when-a-gtin-was-scanned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Lot override only worked when a GTIN was scanned
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-most-recombivax-hb-lots-have-dual-tradename-links-in-the-nvc" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Most RECOMBIVAX HB lots have dual tradename links in the NVC
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-strength-based-fallback-rules-used-n-mcg-phrases-that-never-appear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Strength-based fallback rules used "N mcg" phrases that never appear
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#nvc-data-structure-key-facts-discovered" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        NVC data structure — key facts discovered
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix-three-layers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fix — three layers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fix — three layers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#layer-1-lot-level-tradename-override-backgroundjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 1: Lot-level tradename override (background.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-2-strength-based-rule-terms-use-bare-number-tokens-panorama-agent-rulesjs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 2: Strength-based rule terms use bare number tokens (panorama-agent-rules.js)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#layer-3-engerix-b-adult-clause-explicitly-blocks-strength-10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Layer 3: Engerix-B adult clause explicitly blocks strength '10'
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-these-approaches-were-chosen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why these approaches were chosen
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-architectural-rules-to-carry-forward" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Key architectural rules to carry forward
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="hb-pediatric-adult-classification-fix">HB Pediatric / Adult Classification Fix<a class="headerlink" href="#hb-pediatric-adult-classification-fix" title="Permanent link">&para;</a></h1>
+<p><strong>Branch:</strong> <code>fix/hb-pediatric-adult-reliability</code><br />
+<strong>Affected component:</strong> Panorama agent rule matching for hepatitis B vaccines</p>
+<hr />
+<h2 id="symptom">Symptom<a class="headerlink" href="#symptom" title="Permanent link">&para;</a></h2>
+<p>Scanning lot <code>Y020519</code> (RECOMBIVAX HB adult) with barcode <code>1727072910Y020519</code>
+caused VaxLink to select the <strong>HB-pediatric</strong> Panorama agent instead of <strong>HB</strong>.
+The barcode encodes only an expiry date (AI 17) and lot number (AI 10) — no GTIN.</p>
+<p>The same class of bug existed for lot <code>Y016312</code>, which was previously partially
+addressed with a GTIN-only override that silently did nothing on lot-only barcodes.</p>
+<hr />
+<h2 id="root-cause-three-separate-failure-modes">Root cause — three separate failure modes<a class="headerlink" href="#root-cause-three-separate-failure-modes" title="Permanent link">&para;</a></h2>
+<h3 id="1-lot-override-only-worked-when-a-gtin-was-scanned">1. Lot override only worked when a GTIN was scanned<a class="headerlink" href="#1-lot-override-only-worked-when-a-gtin-was-scanned" title="Permanent link">&para;</a></h3>
+<p>The existing <code>GTIN_TRADENAME_CODE_OVERRIDES</code> table in <code>background.js</code> maps
+<code>00067055046339</code> (adult RECOMBIVAX HB) → tradename code <code>6951000087100</code>.
+It fires inside <code>lookupVaccineLot</code> via:</p>
+<div class="language-js highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">gtinOverrideCode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">resolveTradenameCodeOverrideByGtin</span><span class="p">(</span><span class="nx">options</span><span class="p">.</span><span class="nx">gtin</span><span class="p">);</span>
+</span></code></pre></div>
+<p>When the barcode has no AI(01) field, <code>options.gtin</code> is <code>null</code> and the override
+never runs. The NVC's first tradename reference for the lot was then used — which
+for most RECOMBIVAX HB lots is the <strong>pediatric</strong> tradename (listed first in
+the NVC FHIR bundle).</p>
+<h3 id="2-most-recombivax-hb-lots-have-dual-tradename-links-in-the-nvc">2. Most RECOMBIVAX HB lots have dual tradename links in the NVC<a class="headerlink" href="#2-most-recombivax-hb-lots-have-dual-tradename-links-in-the-nvc" title="Permanent link">&para;</a></h3>
+<p>Inspection of the NVC bundle shows that most RECOMBIVAX HB lots carry <strong>two</strong>
+tradename references:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[HB] RECOMBIVAX HB pediatric   (code 6931000087109 — 5 mcg/0.5 mL)
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>[HB] RECOMBIVAX HB             (code 6951000087100 — 10 mcg/mL)
+</span></code></pre></div>
+<p>The pediatric reference is always listed first. Without an override,
+<code>byCodeCandidates[0]</code> unconditionally resolves to the pediatric tradename
+for all dual-linked lots.</p>
+<p>Engerix B lots are single-linked in the NVC (either pediatric or adult, never
+both), so they were unaffected by this specific problem.</p>
+<h3 id="3-strength-based-fallback-rules-used-n-mcg-phrases-that-never-appear">3. Strength-based fallback rules used "N mcg" phrases that never appear<a class="headerlink" href="#3-strength-based-fallback-rules-used-n-mcg-phrases-that-never-appear" title="Permanent link">&para;</a></h3>
+<p>Earlier agent rules in <code>panorama-agent-rules.js</code> included strength-based
+fallback clauses such as <code>{ all: ['recombivax', '5 mcg'] }</code>.</p>
+<p>The <code>extractTradenameStrength()</code> function in <code>background.js</code> reads the
+<code>nvc-strength</code> FHIR extension, which stores strength as a <strong>bare number
+string</strong> (<code>"5"</code>, <code>"10"</code>, <code>"20"</code>, <code>"40"</code>). There is no unit in the value.
+The function's display-fallback (<code>extractStrengthFromTradenameDisplay</code>) also
+returns only the number. Neither path ever produces <code>"5 mcg"</code> as a token
+in the source text passed to <code>buildPanoramaAgentSourceText</code>, so the
+strength-based rules were silently inert against real NVC data.</p>
+<hr />
+<h2 id="nvc-data-structure-key-facts-discovered">NVC data structure — key facts discovered<a class="headerlink" href="#nvc-data-structure-key-facts-discovered" title="Permanent link">&para;</a></h2>
+<p>Running the lookup pipeline against the full NVC bundle revealed:</p>
+<table>
+<thead>
+<tr>
+<th>NVC code</th>
+<th>Tradename display</th>
+<th>Picklist label</th>
+<th>generic_name</th>
+<th>strength</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>6951000087100</code></td>
+<td>RECOMBIVAX HB 10 mcg/mL …</td>
+<td><strong>RECOMBIVAX HB</strong></td>
+<td>[HB] Hepatitis B <strong>regular strength</strong> vaccine</td>
+<td><code>10</code></td>
+</tr>
+<tr>
+<td><code>6931000087109</code></td>
+<td>RECOMBIVAX HB 5 mcg/0.5 mL …</td>
+<td><strong>RECOMBIVAX HB</strong></td>
+<td>[HB] Hepatitis B <strong>pediatric strength</strong> vaccine</td>
+<td><code>5</code></td>
+</tr>
+<tr>
+<td><code>6911000087104</code></td>
+<td>Engerix B 20 mcg/mL …</td>
+<td><strong>Engerix B</strong></td>
+<td>[HB] Hepatitis B <strong>regular strength</strong> vaccine</td>
+<td><code>20</code></td>
+</tr>
+<tr>
+<td><code>6921000087107</code></td>
+<td>Engerix B 10 mcg/0.5 mL …</td>
+<td><strong>Engerix B</strong></td>
+<td>[HB] Hepatitis B <strong>pediatric strength</strong> vaccine</td>
+<td><code>10</code></td>
+</tr>
+<tr>
+<td><code>6941000087103</code></td>
+<td>RECOMBIVAX HB 40 mcg/mL …</td>
+<td><strong>RECOMBIVAX HB dialysis</strong></td>
+<td>[HB] Hepatitis B <strong>dialysis strength</strong> vaccine</td>
+<td><code>40</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Critical observations:</strong></p>
+<ul>
+<li>
+<p>The Panorama picklist labels (<code>enPublicPicklist</code> designation) are <strong>identical</strong>
+  for pediatric and adult variants of both brands. "Engerix B" means both the
+  10 mcg/0.5 mL pediatric vial and the 20 mcg/mL adult vial. "RECOMBIVAX HB"
+  means both the 5 mcg pediatric and 10 mcg adult formulations.</p>
+</li>
+<li>
+<p>The <code>nvc-linked-generic-concept</code> extension <strong>always</strong> contains the word
+  <code>"pediatric"</code> for pediatric codes and <code>"regular strength"</code> for adult codes.
+  This is the primary reliable signal — it flows into <code>vaccineInfo.generic_name</code>
+  and from there into <code>buildPanoramaAgentSourceText</code>.</p>
+</li>
+<li>
+<p>The <code>nvc-strength</code> extension returns bare numbers, not <code>"N mcg"</code> phrases.</p>
+</li>
+</ul>
+<hr />
+<h2 id="fix-three-layers">Fix — three layers<a class="headerlink" href="#fix-three-layers" title="Permanent link">&para;</a></h2>
+<h3 id="layer-1-lot-level-tradename-override-backgroundjs">Layer 1: Lot-level tradename override (<code>background.js</code>)<a class="headerlink" href="#layer-1-lot-level-tradename-override-backgroundjs" title="Permanent link">&para;</a></h3>
+<p>Added <code>LOT_TRADENAME_CODE_OVERRIDES</code>, a companion to <code>GTIN_TRADENAME_CODE_OVERRIDES</code>
+keyed by normalized lot number (uppercase, alphanumeric only — same as
+<code>normalizeLotMapKey</code>):</p>
+<div class="language-js highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">LOT_TRADENAME_CODE_OVERRIDES</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Object</span><span class="p">.</span><span class="nx">freeze</span><span class="p">({</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="s1">&#39;Y016312&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;6951000087100&#39;</span><span class="p">,</span><span class="w">  </span><span class="c1">// RECOMBIVAX HB adult</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span><span class="s1">&#39;Y020519&#39;</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;6951000087100&#39;</span><span class="p">,</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="p">});</span>
+</span></code></pre></div>
+<p>A new <code>resolveTradenameCodeOverrideByLot(lot)</code> function is called alongside the
+GTIN override. Both are combined with <code>||</code> — GTIN takes priority when present,
+lot override fires when no GTIN was scanned:</p>
+<div class="language-js highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">gtinOverrideCode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">resolveTradenameCodeOverrideByGtin</span><span class="p">(</span><span class="nx">options</span><span class="p">.</span><span class="nx">gtin</span><span class="p">);</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">lotOverrideCode</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="nx">resolveTradenameCodeOverrideByLot</span><span class="p">(</span><span class="nx">lotNumber</span><span class="p">);</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="kd">const</span><span class="w"> </span><span class="nx">effectiveOverrideCode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">gtinOverrideCode</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nx">lotOverrideCode</span><span class="p">;</span>
+</span></code></pre></div>
+<p>The effective override is then used for tie-breaking when a lot has multiple
+tradename candidates. If the override code is not found among the candidates
+(e.g. because this lot was later corrected in the NVC), the first candidate is
+used as before — the override degrades gracefully.</p>
+<p><strong>Adding new lots:</strong> when a new adult lot is reported as misclassified, add its
+lot number to <code>LOT_TRADENAME_CODE_OVERRIDES</code> pointing to <code>6951000087100</code>.</p>
+<h3 id="layer-2-strength-based-rule-terms-use-bare-number-tokens-panorama-agent-rulesjs">Layer 2: Strength-based rule terms use bare number tokens (<code>panorama-agent-rules.js</code>)<a class="headerlink" href="#layer-2-strength-based-rule-terms-use-bare-number-tokens-panorama-agent-rulesjs" title="Permanent link">&para;</a></h3>
+<p>All strength-based clauses now use the bare numbers that the NVC actually provides:</p>
+<table>
+<thead>
+<tr>
+<th>Old (non-functional)</th>
+<th>New (works with NVC data)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{ all: ['recombivax', '5 mcg'] }</code></td>
+<td><code>{ all: ['recombivax', '5'], notAny: ['dialysis', '10', '40'] }</code></td>
+</tr>
+<tr>
+<td><code>{ all: ['engerix', '10 mcg'], … }</code></td>
+<td><code>{ all: ['engerix', '10'], notAny: ['dialysis', '20', '40'] }</code></td>
+</tr>
+<tr>
+<td><code>{ all: ['hepatitis b', '5 mcg'], … }</code></td>
+<td><code>{ all: ['hepatitis b', '5'], notAny: ['hepatitis a', 'dialysis', '10', '20', '40'] }</code></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>'10'</code> check in the Engerix-B pediatric clause is unambiguous because:
+- Engerix-B adult is 20 mcg — <code>'20'</code> is in <code>notAny</code><br />
+- RECOMBIVAX HB adult is 10 mcg, but its source text contains <code>'recombivax'</code> not <code>'engerix'</code>,
+  so the two brands never cross-match on bare strength alone</p>
+<h3 id="layer-3-engerix-b-adult-clause-explicitly-blocks-strength-10">Layer 3: Engerix-B adult clause explicitly blocks strength <code>'10'</code><a class="headerlink" href="#layer-3-engerix-b-adult-clause-explicitly-blocks-strength-10" title="Permanent link">&para;</a></h3>
+<p>The old HB adult rule had a single catch-all clause:</p>
+<div class="language-js highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span><span class="w"> </span><span class="nx">any</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;engerix b&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;recombivax hb&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;heplisav&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;hepatitis b&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">notAny</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;dialysis&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;pediatric&#39;</span><span class="p">,</span><span class="w"> </span><span class="err">…</span><span class="p">]</span><span class="w"> </span><span class="p">}</span>
+</span></code></pre></div>
+<p>This fired for <code>{ tradename: 'Engerix B', strength: '10' }</code> because the name
+<code>'engerix b'</code> matched and nothing in <code>notAny</code> blocked it — the <code>'10'</code> token was
+not guarded. Combined with the new pediatric strength clause also firing, both
+HB and HB-pediatric would be produced simultaneously.</p>
+<p>The fix splits the adult rule into brand-specific clauses. The Engerix-B adult
+clause now explicitly blocks on <code>'10'</code>:</p>
+<div class="language-js highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="p">{</span><span class="w"> </span><span class="nx">all</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;engerix b&#39;</span><span class="p">],</span><span class="w"> </span><span class="nx">notAny</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;dialysis&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;pediatric&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;10&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;5&#39;</span><span class="p">]</span><span class="w"> </span><span class="p">},</span>
+</span></code></pre></div>
+<p>When <code>strength='10'</code> (pediatric dose) only the HB-pediatric rule fires.<br />
+When <code>strength='20'</code> or strength is absent, the adult clause fires normally.</p>
+<hr />
+<h2 id="why-these-approaches-were-chosen">Why these approaches were chosen<a class="headerlink" href="#why-these-approaches-were-chosen" title="Permanent link">&para;</a></h2>
+<p><strong>Lot override over modifying NVC tie-breaking heuristics</strong></p>
+<p>The dual-link in the NVC is a data quality issue at PHAC. We do not know
+whether PHAC will fix it or leave both links. A heuristic that always picks
+"adult when dual-linked" would silently break any future single-pediatric lot
+that PHAC happens to add. The override table is explicit: only lots we have
+confirmed are adult get overridden. Everything else follows NVC data.</p>
+<p><strong>Generic-name signal over display-label parsing</strong></p>
+<p>The picklist display label ("RECOMBIVAX HB", "Engerix B") is intentionally
+short and contains no formulation detail. The <code>nvc-linked-generic-concept</code>
+extension carries the formulation signal ("[HB] Hepatitis B pediatric strength
+vaccine") reliably across all NVC releases because PHAC uses it to describe
+what the product treats, not how it is marketed. Relying on it is more durable
+than scraping marketing copy.</p>
+<p><strong>Bare number tokens in strength rules</strong></p>
+<p><code>extractTradenameStrength()</code> normalizes multiple <code>nvc-strength</code> extension
+values by cross-referencing the display text. The display always contains
+<code>"N micrograms"</code>, so the function reliably returns the number string. There is
+no unit suffix. Rules that expect <code>"N mcg"</code> will never match NVC data.
+The bare number <code>'5'</code> only appears as a standalone source-text token from the
+<code>strength</code> field — it does not appear in tradename, generic_name, disease,
+manufacturer, or route for any HB vaccine.</p>
+<p><strong>Not using <code>dose_value</code> / <code>dose_unit</code></strong></p>
+<p>These are separate fields (<code>nvc-typical-dose-size</code> and
+<code>nvc-typical-dose-size-uom</code>) but they are <strong>not</strong> included in
+<code>buildPanoramaAgentSourceText</code>. Adding them would make more data available for
+matching but would also risk unintended rule interactions. The strength field
+alone is sufficient to distinguish all formulations currently in the NVC.</p>
+<hr />
+<h2 id="key-architectural-rules-to-carry-forward">Key architectural rules to carry forward<a class="headerlink" href="#key-architectural-rules-to-carry-forward" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Detail</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>The primary pediatric signal is <code>generic_name</code></td>
+<td>The NVC <code>nvc-linked-generic-concept</code> extension always contains "pediatric" for pediatric formulations. This flows through <code>lookupTradenameByCode</code> → <code>vaccineInfo.generic_name</code> → <code>buildPanoramaAgentSourceText</code>. Any new brand-specific rule should verify this extension exists before adding name-only clauses.</td>
+</tr>
+<tr>
+<td>Strength tokens are bare numbers</td>
+<td><code>extractTradenameStrength()</code> returns <code>"5"</code>, <code>"10"</code>, <code>"20"</code>, <code>"40"</code> — never <code>"5 mcg"</code>. Write strength-based rule terms accordingly.</td>
+</tr>
+<tr>
+<td>Engerix-B adult and RECOMBIVAX HB adult share the same strength token <code>"10"</code></td>
+<td>Engerix-B pediatric is 10 mcg/0.5 mL; RECOMBIVAX HB adult is 10 mcg/mL. Brand-specific clauses (<code>all: ['engerix b'], notAny: ['10']</code> vs <code>all: ['recombivax hb'], notAny: ['5']</code>) are required to avoid cross-brand confusion.</td>
+</tr>
+<tr>
+<td>The lot override is the only mechanism for lot-only barcodes</td>
+<td>AI(17)+AI(10) barcodes with no GTIN are common. <code>LOT_TRADENAME_CODE_OVERRIDES</code> is the only tie-breaker available in that case. When a new adult lot is reported as misclassified, add it there.</td>
+</tr>
+<tr>
+<td>GTIN override takes priority over lot override</td>
+<td>For barcodes that carry both a GTIN and a lot (AI(01)+AI(17)+AI(10)), the GTIN override runs first. This is correct because the GTIN uniquely identifies the product SKU — it is a more specific signal than the lot.</td>
+</tr>
+<tr>
+<td>Dual-linked RECOMBIVAX lots default to pediatric</td>
+<td>Without an override, the NVC's first tradename reference for dual-linked lots is pediatric. This is the NVC's stated data. Only lots confirmed to be adult should be added to <code>LOT_TRADENAME_CODE_OVERRIDES</code>.</td>
+</tr>
+<tr>
+<td><code>buildPanoramaAgentSourceText</code> does not include <code>dose_value</code> or <code>dose_unit</code></td>
+<td>Only <code>tradename</code>, <code>generic_name</code>, <code>disease</code>, <code>antigen</code>, <code>manufacturer</code>, <code>route</code>, and <code>strength</code> contribute to agent rule matching. If a future rule needs dose volume (<code>0.5 mL</code> vs <code>1 mL</code>), <code>buildPanoramaAgentSourceText</code> must be updated in <code>content.js</code> first.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>Integration test <code>tests/hb-nvc-lots.test.js</code> runs the full lookup pipeline
+(tradename resolution, override application, agent rules) against every HB
+lot in the live NVC bundle and asserts:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>HB (adult):     72
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>HB-pediatric:  117
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>HB-dialysis:    29
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>Ambiguous:       0   ← no lot produces both HB and HB-pediatric simultaneously
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>Unclassified:    0   ← every lot produces exactly one HB classification
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>Lot overrides applied: Y016312, Y020519
+</span></code></pre></div>
+<p>The test skips gracefully when <code>apps/extension/nvc_bundle.json</code> is absent (run
+<code>bash scripts/fetch-nvc.sh</code> to download it locally before running).</p>
+<p>Unit tests in <code>tests/hb-classification.test.js</code> cover all HB formulation
+variants, all override scenarios, brand/strength combinations, dialysis
+isolation, HA co-infection guard, French-labelled tradenames, and the exact
+<code>1727072910Y020519</code> scan scenario.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  <div class="md-footer-logo">
+    <a href="https://vaxlink.ca/" target="_blank" rel="noopener">
+      <img
+        src="../../assets/vaxlink-logo.svg"
+        alt="VaxLink Logo"
+        height="24"
+      />
+    </a>
+  </div>
+  
+  <div class="md-copyright__highlight">&copy; Wellington-Dufferin-Guelph Public Health</div>
+   
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/WDGPH/VaxLink" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.annotate", "content.code.copy", "navigation.footer", "navigation.indexes", "navigation.instant", "navigation.tabs", "navigation.top", "search.suggest", "search.highlight", "toc.follow"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

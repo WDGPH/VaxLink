@@ -1,0 +1,122 @@
+/* Palette sourced from apps/web-next/public/favicon.svg (VaxLink brand mark) */
+[data-md-color-primary="vaxlink"] {
+  --md-primary-fg-color: #3b82f6;
+  --md-primary-fg-color--light: #60a5fa;
+  --md-primary-fg-color--dark: #0f172a;
+  --md-primary-bg-color: hsla(0, 0%, 100%, 1);
+  --md-primary-bg-color--light: hsla(0, 0%, 100%, 0.7);
+}
+
+[data-md-color-accent="vaxlink"] {
+  --md-accent-fg-color: #f59e0b;
+  --md-accent-fg-color--transparent: #f59e0b1a;
+  --md-accent-bg-color: #fff;
+  --md-accent-bg-color--light: #ffffffb3;
+}
+
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #2563eb;
+  --md-default-fg-color--light: #0f172a;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #60a5fa;
+  --md-hue: 222;
+}
+
+/* Admonition accents mapped to the brand accent/warning colors */
+.md-typeset .admonition.tip,
+.md-typeset .admonition.success,
+.md-typeset details.tip,
+.md-typeset details.success {
+  border-color: #f59e0b;
+}
+
+.md-typeset .tip > .admonition-title,
+.md-typeset .success > .admonition-title,
+.md-typeset .tip > summary,
+.md-typeset .success > summary {
+  background-color: #f59e0b1a;
+}
+
+.md-typeset .tip > .admonition-title::before,
+.md-typeset .success > .admonition-title::before,
+.md-typeset .tip > summary::before,
+.md-typeset .success > summary::before {
+  background-color: #f59e0b;
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.failure,
+.md-typeset details.danger,
+.md-typeset details.failure {
+  border-color: #b84a3a;
+}
+
+.md-typeset .danger > .admonition-title,
+.md-typeset .failure > .admonition-title,
+.md-typeset .danger > summary,
+.md-typeset .failure > summary {
+  background-color: #b84a3a1a;
+}
+
+.md-typeset .danger > .admonition-title::before,
+.md-typeset .failure > .admonition-title::before,
+.md-typeset .danger > summary::before,
+.md-typeset .failure > summary::before {
+  background-color: #b84a3a;
+}
+
+/* Footer logo styling to match overrides/partials/copyright.html */
+.md-footer-logo {
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem;
+}
+
+.md-footer-logo img {
+  height: 24px;
+  width: auto;
+  transition: opacity 0.25s;
+  opacity: 0.7;
+}
+
+.md-footer-logo img:hover {
+  opacity: 1;
+}
+
+.md-footer-meta__inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+@media screen and (max-width: 76.234375em) {
+  .md-footer-meta__inner.md-grid {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .md-copyright,
+  .md-social {
+    width: auto;
+    max-width: 49%;
+  }
+
+  .md-social {
+    margin: 0;
+  }
+}
+
+/* Reduce margins for h2 when using grid cards */
+.grid.cards h2 {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.vaxlink-icon {
+  color: #3b82f6;
+  opacity: 0.8;
+  margin-right: 0.2em;
+}
