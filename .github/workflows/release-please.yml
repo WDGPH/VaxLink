@@ -2,67 +2,82 @@ name: Release Please
 
 on:
   push:
-    branches: [dev]
+    branches:
+      - main
+      - dev
 
 permissions:
   contents: write
+  issues: write
   pull-requests: write
-  issues: read
 
 jobs:
-  release-please:
+  stable-release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
-        id: rp
+      - name: Run Release Please for stable releases
+        id: release
+        uses: googleapis/release-please-action@v4
         with:
-          target-branch: dev
+          target-branch: main
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
 
-  publish-release-assets:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+  publish-stable-assets:
+    needs: stable-release
+    if: needs.stable-release.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
       issues: read
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ needs.release-please.outputs.tag_name }}
+      TAG: ${{ needs.stable-release.outputs.tag_name }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.stable-release.outputs.tag_name }}
           fetch-depth: 0
+      - name: Build stable extension package
+        run: ./scripts/package-extension.sh prod
+      - name: Attach stable package to the GitHub Release
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
 
-      - name: Build channel zips
-        run: |
-          ./scripts/package-extension.sh alpha
-          ./scripts/package-extension.sh prod
+  alpha-release:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Run Release Please for alpha releases
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          target-branch: dev
+          config-file: release-please-dev-config.json
+          manifest-file: .release-please-manifest.json
 
-      - name: Attach zips to the GitHub Release
-        run: gh release upload "$TAG" dist/*.zip --clobber
-
-      - name: Append clinic-feedback table to release notes
-        run: |
-          set -euo pipefail
-          # Issues labeled clinic-feedback closed since the previous release tag.
-          prev_tag=$(git tag --sort=-creatordate | grep -v "^$TAG$" | head -1 || true)
-          if [ -n "$prev_tag" ]; then
-            since=$(git log -1 --format=%cI "$prev_tag")
-          else
-            since="1970-01-01T00:00:00Z"
-          fi
-          rows=$(gh issue list --state closed --label clinic-feedback \
-            --search "closed:>=$since" \
-            --json number,title \
-            --template '{{range .}}- #{{.number}} — {{.title}}{{"\n"}}{{end}}')
-          if [ -z "$rows" ]; then
-            echo "No clinic-feedback issues closed since $prev_tag — skipping."
-            exit 0
-          fi
-          current=$(gh release view "$TAG" --json body --template '{{.body}}')
-          printf '%s\n\n## Clinic feedback addressed\n\n%s\n' "$current" "$rows" > notes.md
-          gh release edit "$TAG" --notes-file notes.md
+  publish-alpha-assets:
+    needs: alpha-release
+    if: needs.alpha-release.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.alpha-release.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.alpha-release.outputs.tag_name }}
+          fetch-depth: 0
+      - name: Build alpha extension package
+        run: ./scripts/package-extension.sh alpha
+      - name: Attach alpha package to the GitHub Release
+        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip --clobber

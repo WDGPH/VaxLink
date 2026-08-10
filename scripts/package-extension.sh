@@ -36,10 +36,19 @@ try:
     manifest_path = os.path.join(ext, "manifest.json")
     with open(manifest_path) as f:
         manifest = json.load(f)
+    with open(os.path.join(root, "package.json")) as f:
+        package_version = str(json.load(f).get("version") or manifest["version"])
 
     manifest["name"] = "VaxLink" if channel == "prod" else "VaxLink Alpha"
-    version = manifest["version"]
-    manifest["version_name"] = version if channel == "prod" else f"{version}-alpha"
+    # Chrome's manifest `version` cannot contain a prerelease suffix. Release
+    # Please may set package.json to e.g. 1.2.0-alpha.1 on dev, so package the
+    # numeric base in manifest.version while retaining the full prerelease in
+    # version_name for the alpha channel.
+    version = package_version.split("-", 1)[0]
+    manifest["version"] = version
+    manifest["version_name"] = version if channel == "prod" else package_version
+    if channel == "alpha" and "-" not in package_version:
+        manifest["version_name"] = f"{version}-alpha"
 
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
