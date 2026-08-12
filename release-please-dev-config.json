@@ -7,6 +7,7 @@
   "force-tag-creation": true,
   "prerelease": true,
   "prerelease-type": "alpha",
+  "release-as": "1.1.3",
   "bootstrap-sha": "e276a0eb845e35572feae0f7b66a8ee17c38d31d",
   "pull-request-title-pattern": "chore: release VaxLink ${version} alpha",
   "changelog-sections": [
