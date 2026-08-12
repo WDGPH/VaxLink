@@ -3,6 +3,8 @@
   "release-type": "node",
   "include-component-in-tag": false,
   "include-v-in-tag": true,
+  "last-release-sha": "7f393327bd73ebe00515b13962e602905e95c4e8",
+  "force-tag-creation": true,
   "bootstrap-sha": "e276a0eb845e35572feae0f7b66a8ee17c38d31d",
   "pull-request-title-pattern": "chore: release VaxLink ${version}",
   "changelog-sections": [

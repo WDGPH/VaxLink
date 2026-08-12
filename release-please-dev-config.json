@@ -3,6 +3,8 @@
   "release-type": "node",
   "include-component-in-tag": false,
   "include-v-in-tag": true,
+  "last-release-sha": "63516f65ecfcba637a0675cb0464df2f1050296e",
+  "force-tag-creation": true,
   "prerelease": true,
   "prerelease-type": "alpha",
   "bootstrap-sha": "e276a0eb845e35572feae0f7b66a8ee17c38d31d",
