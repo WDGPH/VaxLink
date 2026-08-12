@@ -515,12 +515,33 @@ async function updateScannerLockState(state) {
     return beginLockedScannerSession();
   }
   const existing = await getLockedScannerSession();
+  const wasLocked = isLockedScannerSession(existing);
   const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
-  if (isLockedScannerSession(existing)) {
+  if (wasLocked) {
     values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
   }
   await setStorage(values);
+  if (wasLocked) {
+    void drainPendingScansAfterUnlock(existing);
+  }
   return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
+}
+
+async function drainPendingScansAfterUnlock(lockSession, attempt = 0) {
+  let tabId = Number.isInteger(lockSession?.tabId) ? lockSession.tabId : null;
+  if (tabId === null) {
+    const activeTabs = await queryTabs({ active: true, currentWindow: true });
+    tabId = activeTabs.find(tabMayBeSupportedChart)?.id ?? null;
+  }
+  if (tabId === null) return { drained: 0, remaining: null };
+  return drainPendingScansToTab(tabId).then((result) => {
+    if (result.remaining > 0 && attempt < 2) {
+      setTimeout(() => {
+        void drainPendingScansAfterUnlock(lockSession, attempt + 1);
+      }, 1000 * (attempt + 1));
+    }
+    return result;
+  }).catch(() => ({ drained: 0, remaining: null }));
 }
 
 function initializeScannerLockMonitoring() {
@@ -824,8 +845,33 @@ async function drainPendingScansToTab(tabId) {
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = normalizeScanEvent(rawScan);
   const idleState = await queryMachineIdleState();
+  const storedWorkflow = await getStorage([
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    LEGACY_REMOTE_MODE_KEY,
+    LEGACY_HANDS_FREE_KEY
+  ]);
+  const workflowMode = normalizeWorkflowMode(storedWorkflow);
+
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
+    if (workflowMode === "single") {
+      const pendingCount = await enqueuePendingScan({
+        ...scan,
+        pending_workflow: "single",
+        ...buildLockedScanQueueContext(lockSession)
+      });
+      return {
+        routed: false,
+        queued: true,
+        queuedToWorkflow: false,
+        locked: true,
+        lockSessionId: lockSession.id,
+        pinnedTabId: lockSession.tabId,
+        workflow: "single",
+        pendingCount
+      };
+    }
     const lockedQueueResult = await saveScannerScanToWorkflowQueue(scan, "multiple", {
       context: buildLockedScanQueueContext(lockSession),
       preserveEveryScan: true
@@ -842,14 +888,6 @@ async function routeScanToActiveSupportedTab(rawScan) {
       queueSizeAfter: lockedQueueResult.record?.queueSizeAfter || 0
     };
   }
-  const storedWorkflow = await getStorage([
-    WORKFLOW_MODE_KEY,
-    LEGACY_POPUP_MODE_KEY,
-    LEGACY_REMOTE_MODE_KEY,
-    LEGACY_HANDS_FREE_KEY
-  ]);
-  const workflowMode = normalizeWorkflowMode(storedWorkflow);
-
   // Queue workflows are owned by the background daemon. Do not route these
   // scans through a chart first: the chart content script may still have a
   // stale mode during popup/storage synchronization, which previously made a
