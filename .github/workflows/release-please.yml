@@ -5,6 +5,16 @@ on:
     branches:
       - main
       - dev
+  workflow_dispatch:
+    inputs:
+      release_lane:
+        description: 'Release lane to run'
+        required: true
+        type: choice
+        options:
+          - stable
+          - alpha
+        default: stable
 
 permissions:
   contents: write
@@ -13,7 +23,7 @@ permissions:
 
 jobs:
   stable-release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.release_lane == 'stable')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -48,7 +58,7 @@ jobs:
         run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
 
   alpha-release:
-    if: github.ref == 'refs/heads/dev'
+    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
