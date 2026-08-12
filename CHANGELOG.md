@@ -8,6 +8,13 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.2.0](https://github.com/WDGPH/VaxLink/compare/v1.1.2...v1.2.0) (2026-08-12)
+
+
+### Added
+
+* add single lock-screen scanner support ([f665994](https://github.com/WDGPH/VaxLink/commit/f6659944aec0f73ff882e893b8ac98e2f637a4c8))
+
 ## [1.1.2](https://github.com/WDGPH/VaxLink/compare/v1.1.1...v1.1.2) (2026-08-05)
 
 
