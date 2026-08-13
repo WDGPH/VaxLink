@@ -15,7 +15,12 @@
       "Bash(git stash *)",
       "Bash(git rev-list *)",
       "Bash(git cat-file *)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(rtk find *)",
+      "Bash(base64 -w0 apps/extension/assets/vaxlink-icon.svg)",
+      "Bash(base64 -w0 /tmp/claude-1000/-home-jovyan-VaxLink/b07d34a3-4ae9-4d02-903f-3dd8f5583839/scratchpad/vaxlink-icon-min.svg)",
+      "Bash(rtk proxy *)",
+      "Bash(rtk curl *)"
     ]
   }
 }
