@@ -4,9 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WDGPH/VaxLink/blob/main/LICENSE)
 
 A Chrome extension that parses GS1 vaccine barcodes and auto-fills them into
-Ontario immunization EMRs (Panorama, InputHealth), plus the Next.js marketing
-site at [vaxlink.ca](https://vaxlink.ca). Built by Wellington-Dufferin-Guelph
-Public Health.
+Ontario immunization EMRs (Panorama, InputHealth), plus a Next.js marketing
+site (`apps/web-next`). Built by Wellington-Dufferin-Guelph Public Health.
 
 !!! info "Client-side by design"
     Scanned barcode data is parsed locally in the browser and never sent to a

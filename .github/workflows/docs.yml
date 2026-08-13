@@ -1,13 +1,13 @@
 name: docs
 
-# NOTE: apps/web-next is already deployed to GitHub Pages via
+# NOTE: apps/web-next also deploys to GitHub Pages via
 # deploy-web-next-pages.yml, using the "GitHub Actions" Pages source
-# (actions/deploy-pages) at vaxlink.ca. This workflow pushes the docs
-# site to a `gh-pages` branch instead. GitHub Pages can only serve one
-# source per repo, so only one of these two can be the live Pages site
-# until they're combined (e.g. by publishing the mkdocs build under
-# apps/web-next/out/docs/ in the existing workflow) or docs are hosted
-# elsewhere.
+# (actions/deploy-pages). This workflow pushes the docs site to a
+# `gh-pages` branch instead. GitHub Pages can only serve one source per
+# repo, so only one of these two can be the live Pages site at
+# https://wdgph.github.io/VaxLink/ until they're combined (e.g. by
+# publishing the mkdocs build under apps/web-next/out/docs/ in the
+# existing workflow) or docs are hosted elsewhere.
 
 permissions:
   contents: read
