@@ -1,5 +1,9 @@
 # VaxLink
 
+[![CI](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml)
+[![docs](https://github.com/WDGPH/VaxLink/actions/workflows/docs.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/docs.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 VaxLink contains:
 - A Chrome extension for GS1 vaccine barcode parsing + CHR autofill
 - A Next.js marketing site (`apps/web-next`)
