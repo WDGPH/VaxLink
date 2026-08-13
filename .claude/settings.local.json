@@ -20,7 +20,12 @@
       "Bash(base64 -w0 apps/extension/assets/vaxlink-icon.svg)",
       "Bash(base64 -w0 /tmp/claude-1000/-home-jovyan-VaxLink/b07d34a3-4ae9-4d02-903f-3dd8f5583839/scratchpad/vaxlink-icon-min.svg)",
       "Bash(rtk proxy *)",
-      "Bash(rtk curl *)"
+      "Bash(rtk curl *)",
+      "Bash(gh repo *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"https://img.shields.io/github/actions/workflow/status/WDGPH/VaxLink/extension-ci.yml?branch=main\")",
+      "Bash(curl -s \"https://img.shields.io/github/actions/workflow/status/WDGPH/VaxLink/extension-ci.yml?branch=main\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg?branch=main\")",
+      "Bash(curl -s \"https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg?branch=main\")"
     ]
   }
 }
