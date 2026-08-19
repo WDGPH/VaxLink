@@ -109,6 +109,9 @@ export class ScanQueueManager {
     onUseRecord = null,
     showUseAction = false,
     useButtonLabel = 'Use for Chart',
+    onMoveRecord = null,
+    showMoveAction = false,
+    moveButtonLabel = 'Move',
     emptySummary = 'No saved scans yet.',
     emptyMessage = 'No saved scans yet.',
     summaryBuilder = defaultSummaryBuilder,
@@ -122,6 +125,9 @@ export class ScanQueueManager {
     this.onUseRecord = typeof onUseRecord === 'function' ? onUseRecord : null;
     this.showUseAction = !!showUseAction;
     this.useButtonLabel = useButtonLabel;
+    this.onMoveRecord = typeof onMoveRecord === 'function' ? onMoveRecord : null;
+    this.showMoveAction = !!showMoveAction;
+    this.moveButtonLabel = moveButtonLabel;
     this.emptySummary = emptySummary;
     this.emptyMessage = emptyMessage;
     this.summaryBuilder = typeof summaryBuilder === 'function' ? summaryBuilder : defaultSummaryBuilder;
@@ -318,7 +324,9 @@ export class ScanQueueManager {
       .map((row, index) => buildQueueItemMarkup(row, index, {
         isActive: row.id && row.id === this.activeUseId,
         showUseAction: this.showUseAction,
-        useButtonLabel: this.useButtonLabel
+        useButtonLabel: this.useButtonLabel,
+        showMoveAction: this.showMoveAction,
+        moveButtonLabel: this.moveButtonLabel
       }))
       .join('');
 
@@ -327,6 +335,19 @@ export class ScanQueueManager {
         this.remove(button.getAttribute('data-remove-id'));
       });
     });
+
+    if (this.showMoveAction && this.onMoveRecord) {
+      this.listEl.querySelectorAll('[data-move-id]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const id = button.getAttribute('data-move-id');
+          const row = this.getById(id);
+          if (!row) {
+            return;
+          }
+          await this.onMoveRecord(row);
+        });
+      });
+    }
 
     if (this.showUseAction && this.onUseRecord) {
       this.listEl.querySelectorAll('[data-use-id]').forEach((button) => {
@@ -400,6 +421,23 @@ export class ScanQueueManager {
   }
 }
 
+// Adds to the destination before removing from the source: if the remove
+// step fails partway (e.g. a storage error), the record survives as a
+// duplicate in both queues rather than vanishing from both.
+export async function moveQueueRecord(sourceManager, destManager, id) {
+  const targetId = String(id || '');
+  if (!targetId) {
+    return null;
+  }
+  const record = sourceManager.getById(targetId);
+  if (!record) {
+    return null;
+  }
+  await destManager.add(record);
+  await sourceManager.remove(targetId);
+  return record;
+}
+
 export function buildQueueRecord(data, rawBarcode) {
   return buildLegacyQueueRecord({
     ...data,
@@ -464,6 +502,9 @@ function buildQueueItemMarkup(row, index, options) {
   const useActionMarkup = options.showUseAction
     ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
     : '';
+  const moveActionMarkup = options.showMoveAction
+    ? `<button class="inventory-move" type="button" data-move-id="${id}">${escapeHtml(options.moveButtonLabel)}</button>`
+    : '';
   const setDoseActionMarkup = `<button class="inventory-dose-set" type="button" data-set-doses-id="${id}">Set doses</button>`;
 
   return `
@@ -475,6 +516,7 @@ function buildQueueItemMarkup(row, index, options) {
         </div>
         <div class="inventory-item-actions">
           ${useActionMarkup}
+          ${moveActionMarkup}
           ${setDoseActionMarkup}
           <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
         </div>

@@ -970,6 +970,8 @@ function createAnalyticsDay(dayKey) {
       multipleCleared: 0,
       inventorySaved: 0,
       inventoryCleared: 0,
+      multipleToInventoryMoved: 0,
+      inventoryToMultipleMoved: 0,
       maxMultipleDepth: 0,
       maxInventoryDepth: 0
     },
@@ -1144,6 +1146,15 @@ function applyAnalyticsEvent(day, event) {
       }
       break;
     }
+    case 'queue_moved': {
+      const destination = normalizeQueueKey(event.queue);
+      if (destination === 'inventory') {
+        day.queues.multipleToInventoryMoved += count;
+      } else {
+        day.queues.inventoryToMultipleMoved += count;
+      }
+      break;
+    }
     case 'autofill_attempt':
       day.autofill.attempts += count;
       break;
@@ -1247,7 +1258,10 @@ function aggregateAnalyticsDays(days) {
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });
-    ['multipleSaved', 'multipleUsed', 'multipleCleared', 'inventorySaved', 'inventoryCleared'].forEach((key) => {
+    [
+      'multipleSaved', 'multipleUsed', 'multipleCleared', 'inventorySaved', 'inventoryCleared',
+      'multipleToInventoryMoved', 'inventoryToMultipleMoved'
+    ].forEach((key) => {
       rollup.queues[key] += day.queues?.[key] || 0;
     });
     rollup.queues.maxMultipleDepth = Math.max(rollup.queues.maxMultipleDepth, day.queues?.maxMultipleDepth || 0);

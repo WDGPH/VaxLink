@@ -3,6 +3,7 @@ import {
   buildInventorySummary,
   buildMultipleInjectSummary,
   buildQueueRecord,
+  moveQueueRecord,
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
@@ -171,6 +172,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     onUseRecord: handleUseMultipleInjectRecord,
     showUseAction: true,
     useButtonLabel: 'Use for Chart',
+    onMoveRecord: handleMoveMultipleToInventory,
+    showMoveAction: true,
+    moveButtonLabel: 'Move to Inventory',
     emptySummary: 'No saved vaccines yet.',
     emptyMessage: 'Leave Multiple Inject active, scan several vaccines on the live chart page, then come back and choose one to fill.',
     summaryBuilder: buildMultipleInjectSummary
@@ -182,6 +186,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     listEl: document.getElementById('inventoryList'),
     clearButton: clearInventoryBtn,
     exportButton: exportCsvBtn,
+    onMoveRecord: handleMoveInventoryToMultiple,
+    showMoveAction: true,
+    moveButtonLabel: 'Move to Multiple Queue',
     emptySummary: 'No inventory scans yet.',
     emptyMessage: 'Scan vaccines into the inventory tray, then export when ready.',
     summaryBuilder: buildInventorySummary,
@@ -940,6 +947,8 @@ function createEmptyAnalyticsDay(dayKey) {
       multipleCleared: 0,
       inventorySaved: 0,
       inventoryCleared: 0,
+      multipleToInventoryMoved: 0,
+      inventoryToMultipleMoved: 0,
       maxMultipleDepth: 0,
       maxInventoryDepth: 0
     },
@@ -1075,6 +1084,13 @@ function applyLocalAnalyticsEvent(day, event) {
         day.queues.inventoryCleared += count;
       } else {
         day.queues.multipleCleared += count;
+      }
+      break;
+    case 'queue_moved':
+      if (event.queue === 'inventory') {
+        day.queues.multipleToInventoryMoved += count;
+      } else {
+        day.queues.inventoryToMultipleMoved += count;
       }
       break;
     case 'autofill_attempt':
@@ -1750,6 +1766,50 @@ async function handleUseMultipleInjectRecord(record) {
       manufacturer: record.manufacturer || ''
     });
     writeOutput(error.message || 'Could not auto-fill fields', 'error');
+  }
+}
+
+async function handleMoveMultipleToInventory(record) {
+  const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
+  try {
+    const moved = await moveQueueRecord(multipleInjectManager, inventoryManager, record.id);
+    if (!moved) {
+      return;
+    }
+    logAnalyticsEvent('queue_moved', {
+      workflow: 'multiple',
+      queue: 'inventory',
+      source: 'popup_button',
+      count: 1,
+      vaccineLabel: label,
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+    });
+    writeOutput(`${label} moved to the Inventory Tray.`, 'info');
+  } catch (error) {
+    writeOutput(error.message || 'Could not move scan to Inventory.', 'error');
+  }
+}
+
+async function handleMoveInventoryToMultiple(record) {
+  const label = record.tradename || record.generic_name || record.name || record.lot || 'Saved vaccine';
+  try {
+    const moved = await moveQueueRecord(inventoryManager, multipleInjectManager, record.id);
+    if (!moved) {
+      return;
+    }
+    logAnalyticsEvent('queue_moved', {
+      workflow: 'inventory',
+      queue: 'multiple',
+      source: 'popup_button',
+      count: 1,
+      vaccineLabel: label,
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+    });
+    writeOutput(`${label} moved to the Multiple Inject queue.`, 'info');
+  } catch (error) {
+    writeOutput(error.message || 'Could not move scan to Multiple Inject queue.', 'error');
   }
 }
 
