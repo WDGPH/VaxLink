@@ -6,7 +6,9 @@
   "last-release-sha": "63516f65ecfcba637a0675cb0464df2f1050296e",
   "force-tag-creation": true,
   "prerelease": true,
+  "versioning": "prerelease",
   "prerelease-type": "alpha",
+  "release-as": "1.1.3",
   "bootstrap-sha": "e276a0eb845e35572feae0f7b66a8ee17c38d31d",
   "pull-request-title-pattern": "chore: release VaxLink ${version} alpha",
   "changelog-sections": [
