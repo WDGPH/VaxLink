@@ -15,6 +15,10 @@ on:
           - stable
           - alpha
         default: stable
+      existing_tag:
+        description: 'Existing stable tag to package/upload (optional repair path)'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -55,6 +59,24 @@ jobs:
       - name: Build stable extension package
         run: ./scripts/package-extension.sh prod
       - name: Attach stable package to the GitHub Release
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
+
+  repair-stable-assets:
+    if: github.event_name == 'workflow_dispatch' && inputs.release_lane == 'stable' && inputs.existing_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.existing_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.existing_tag }}
+          fetch-depth: 0
+      - name: Build stable extension package
+        run: ./scripts/package-extension.sh prod
+      - name: Attach repaired stable package to the GitHub Release
         run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
 
   alpha-release:
