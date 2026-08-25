@@ -8,6 +8,13 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.4](https://github.com/WDGPH/VaxLink/compare/v1.1.3...v1.1.4) (2026-08-25)
+
+
+### Fixed
+
+* allow repairing existing stable release assets ([5f291d5](https://github.com/WDGPH/VaxLink/commit/5f291d5639a68339db606c44022aeb5efd914c01))
+
 ## [1.1.3](https://github.com/WDGPH/VaxLink/compare/v1.1.2...v1.1.3) (2026-08-12)
 
 
