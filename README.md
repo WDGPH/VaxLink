@@ -1,8 +1,8 @@
 # VaxLink
 
 [![CI](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml)
-[![docs](https://github.com/WDGPH/VaxLink/actions/workflows/docs.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/docs.yml)
-[![Docs site](https://img.shields.io/badge/docs-wdgph.github.io%2FVaxLink-blue)](https://wdgph.github.io/VaxLink/)
+[![Docs](https://img.shields.io/badge/docs-wdgph.github.io%2FVaxLink-blue)](https://wdgph.github.io/VaxLink/)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/WDGPH/VaxLink)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
