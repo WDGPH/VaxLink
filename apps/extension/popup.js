@@ -18,6 +18,7 @@ import {
   buildScannerStatusDescriptor,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
+import { initializeUpdateNotice } from './popup-update-notice.js';
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -107,6 +108,13 @@ const MODE_CONFIG = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  void initializeUpdateNotice({
+    notice: document.getElementById('updateNotice'),
+    dismissButton: document.getElementById('dismissUpdateNotice'),
+    getStored: getLocalStorage,
+    removeStored: removeLocalStorage
+  });
+
   // Channel badge: only the alpha channel shows it. The manifest name is the
   // channel discriminator — "VaxLink Alpha" in git/unpacked and in alpha zips,
   // "VaxLink" stamped by scripts/package-extension.sh for prod uploads.
@@ -655,6 +663,18 @@ function getLocalStorage(keys) {
 function setLocalStorage(values) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.set(values, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+function removeLocalStorage(key) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.remove(key, () => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
