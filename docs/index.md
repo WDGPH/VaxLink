@@ -8,10 +8,10 @@ Ontario immunization EMRs (Panorama, InputHealth), plus a Next.js marketing
 site (`apps/web-next`). Built by Wellington-Dufferin-Guelph Public Health.
 
 !!! info "Client-side by design"
-    Scanned barcode data is parsed locally in the browser and never sent to a
-    server VaxLink controls. The only outbound call is fetching the public NVC
-    vaccine metadata bundle. See the [Security Policy](security.md) for the
-    full data-handling model.
+    Scanned barcode data is parsed locally in the browser and is not uploaded
+    to any server. The default catalogue source is the public NVC vaccine
+    bundle. See the [Security Policy](security.md) for the full data-handling
+    model.
 
 ## What it does
 
