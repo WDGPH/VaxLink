@@ -1847,13 +1847,7 @@ function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
       const message = chrome.runtime.lastError.message || '';
 
       if (message.includes('Receiving end does not exist')) {
-        chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
-          if (chrome.runtime.lastError) {
-            callback({ success: false, error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}` });
-            return;
-          }
-          chrome.tabs.sendMessage(tabId, { action: 'autoFill', data }, { frameId: 0 }, callback);
-        });
+        callback({ success: false, error: 'Refresh the supported chart page and try again.' });
         return;
       }
 
