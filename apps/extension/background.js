@@ -51,11 +51,10 @@ const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
 });
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',
-  sourceUrl: 'nvc_bundle_source_url',
   updatedAt: 'nvc_bundle_updated_at',
   lastCheckAt: 'nvc_bundle_last_check_at',
   bundleSha256: 'nvc_bundle_sha256',
-  metaVersion: 'nvc_bundle_meta_version'
+  lastModified: 'nvc_bundle_last_modified'
 };
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const ANALYTICS_MAX_RECENT_EVENTS = 2000;
@@ -201,7 +200,11 @@ function getStorage(keys) {
 }
 
 function setStorage(values) {
-  return new Promise((resolve) => chrome.storage.local.set(values, resolve));
+  return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
+    const error = chrome.runtime.lastError;
+    if (error) reject(new Error(error.message));
+    else resolve();
+  }));
 }
 
 function normalizeScannerIsoTimestamp(value) {
@@ -393,7 +396,6 @@ async function maybeStartScannerDaemon(trigger = 'startup') {
 // barcodes. 3s catches scanner double-fires (content.js additionally suppresses
 // identical scans under 1.5s) without swallowing a deliberate next-patient scan.
 const DUPLICATE_SCAN_WINDOW_MS = 3000;
-
 function scanIdentityKey(record) {
   if (!record || typeof record !== 'object') return '';
   const raw = String(record.raw_barcode || '').trim();
@@ -1364,16 +1366,6 @@ async function resetAnalyticsStore() {
   return fresh;
 }
 
-function normalizeSourceUrl(url) {
-  const value = String(url || '').trim();
-  if (!value) return DEFAULT_NVC_SOURCE_URL;
-  const lower = value.toLowerCase();
-  if (lower.includes('localhost') || lower.includes('127.0.0.1')) {
-    return DEFAULT_NVC_SOURCE_URL;
-  }
-  return value;
-}
-
 async function sha256Hex(text) {
   const encoded = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest('SHA-256', encoded);
@@ -1384,31 +1376,64 @@ function setupAutoSyncAlarm() {
   chrome.alarms.create(AUTO_SYNC_ALARM_NAME, { periodInMinutes: AUTO_SYNC_INTERVAL_MINUTES });
 }
 
-async function ensureDefaultSourceUrl() {
-  const stored = await getStorage([STORAGE_KEYS.sourceUrl]);
-  const normalized = normalizeSourceUrl(stored[STORAGE_KEYS.sourceUrl]);
-  if (stored[STORAGE_KEYS.sourceUrl] !== normalized) {
-    await setStorage({ [STORAGE_KEYS.sourceUrl]: normalized });
+async function initializeNVCSync() {
+  setupAutoSyncAlarm();
+  const loaded = await loadNVCBundle();
+  if (loaded) {
+    maybeAutoRefreshNVCBundle('startup');
+  } else {
+    // A first install or invalid legacy cache must not wait for a stale
+    // last-check timestamp before obtaining a usable catalogue.
+    await refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { force: true, trigger: 'auto' });
   }
 }
 
-async function initializeNVCSync() {
-  setupAutoSyncAlarm();
-  await ensureDefaultSourceUrl();
-  await loadNVCBundle();
-  maybeAutoRefreshNVCBundle('startup');
-}
-
 function validateBundleShape(data) {
-  return !!(data && typeof data === 'object' && Array.isArray(data.entry));
+  if (!data || data.resourceType !== 'Bundle' || data.type !== 'collection' ||
+      !Array.isArray(data.entry) || data.entry.length < 2) return false;
+  const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
+  const validObjectArray = (value) => value === undefined ||
+    (Array.isArray(value) && value.every(isObject));
+  const validCoding = (value) => value === undefined ||
+    (isObject(value) && validObjectArray(value.coding));
+  const validConceptField = (item) => validCoding(item.valueCodeableConcept) &&
+    (item.valueCoding === undefined || isObject(item.valueCoding));
+  if (!data.entry.every((entry) => entry && isObject(entry.resource) &&
+      typeof entry.resource.resourceType === 'string')) return false;
+  const resources = data.entry.map((entry) => entry.resource);
+  const validConcepts = (concepts) => !concepts || (Array.isArray(concepts) &&
+    concepts.every((concept) => isObject(concept) && typeof concept.code === 'string' &&
+      validObjectArray(concept.extension) && validObjectArray(concept.property) &&
+      validObjectArray(concept.designation) &&
+      (concept.extension || []).every(validConceptField) &&
+      (concept.property || []).every(validConceptField)));
+  if (!resources.every((resource) => validConcepts(resource.concept) &&
+      (!resource.compose?.include || (Array.isArray(resource.compose.include) &&
+        resource.compose.include.every((item) => item && validConcepts(item.concept)))) &&
+      validConcepts(resource.expansion?.contains))) return false;
+  return resources.some((resource) => resource.resourceType === 'CodeSystem' &&
+    resource.id === 'nvc-vaccine-lot-id' && Array.isArray(resource.concept) &&
+    resource.concept.some((concept) => typeof concept?.code === 'string' && concept.code)) &&
+    resources.some((resource) => resource.resourceType === 'ValueSet' &&
+      resource.id === 'Tradename' && (resource.compose?.include?.some((item) =>
+        Array.isArray(item.concept) && item.concept.length > 0) ||
+        resource.expansion?.contains?.length > 0));
 }
 
 function applyBundleData(data, source) {
   if (!validateBundleShape(data)) {
-    throw new Error('Bundle JSON is invalid: expected object with entry[]');
+    throw new Error('Invalid NVC FHIR bundle');
   }
-  nvcBundle = data;
-  buildNVCIndexes();
+  const previousBundle = nvcBundle;
+  const previousIndexes = nvcIndexes;
+  try {
+    nvcBundle = data;
+    buildNVCIndexes();
+  } catch (error) {
+    nvcBundle = previousBundle;
+    nvcIndexes = previousIndexes;
+    throw error;
+  }
   bgLog('NVC bundle applied from source:', source);
 }
 
@@ -1417,10 +1442,10 @@ function loadNVCBundle(forceReload = false) {
     return bundleLoadPromise;
   }
 
-  bundleLoadPromise = getStorage([STORAGE_KEYS.bundle, STORAGE_KEYS.sourceUrl])
+  bundleLoadPromise = getStorage([STORAGE_KEYS.bundle])
     .then((stored) => {
       if (stored[STORAGE_KEYS.bundle]) {
-        applyBundleData(stored[STORAGE_KEYS.bundle], stored[STORAGE_KEYS.sourceUrl] || 'storage');
+        applyBundleData(stored[STORAGE_KEYS.bundle], 'storage');
         return true;
       }
       // No packaged bundle is shipped (raw NVC bundles are never committed);
@@ -1437,102 +1462,84 @@ function loadNVCBundle(forceReload = false) {
   return bundleLoadPromise;
 }
 
-async function fetchJsonWithHeaders(url) {
-  const response = await fetch(url, { cache: 'no-store', headers: NVC_FETCH_HEADERS });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-  return response.json();
-}
-
 async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
-  const effectiveSourceUrl = normalizeSourceUrl(sourceUrl || DEFAULT_NVC_SOURCE_URL);
-  if (!effectiveSourceUrl) {
-    return { success: false, error: 'No valid NVC source URL available' };
+  if (sourceUrl && sourceUrl !== DEFAULT_NVC_SOURCE_URL) {
+    return { success: false, error: 'Only the official NVC source is supported' };
   }
 
   const force = !!options.force;
   const trigger = options.trigger === 'manual' ? 'manual' : 'auto';
   try {
     const nowIso = new Date().toISOString();
-    const stored = await getStorage([STORAGE_KEYS.bundleSha256, STORAGE_KEYS.updatedAt]);
-    const previousHash = stored[STORAGE_KEYS.bundleSha256];
-
-    const firstPayload = await fetchJsonWithHeaders(effectiveSourceUrl);
-    let metadata = null;
-    let bundle = null;
-    let bundleUrl = effectiveSourceUrl;
-
-    if (validateBundleShape(firstPayload)) {
-      bundle = firstPayload;
-    } else if (firstPayload && typeof firstPayload === 'object' && firstPayload.bundleUrl) {
-      metadata = firstPayload;
-      bundleUrl = String(metadata.bundleUrl).trim();
-      if (!bundleUrl) {
-        throw new Error('Metadata is missing a valid bundleUrl');
-      }
-
-      if (!force && metadata.sha256 && previousHash && String(metadata.sha256).toLowerCase() === String(previousHash).toLowerCase()) {
-        await setStorage({ [STORAGE_KEYS.lastCheckAt]: nowIso });
-        const result = {
-          success: true,
-          unchanged: true,
-          sourceUrl: effectiveSourceUrl,
-          updatedAt: stored[STORAGE_KEYS.updatedAt] || metadata.updatedAt || nowIso
-        };
-        await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true, note: 'unchanged' });
-        return result;
-      }
-
-      bundle = await fetchJsonWithHeaders(bundleUrl);
-    } else {
-      throw new Error('Expected either an NVC bundle or metadata with bundleUrl');
+    const stored = await getStorage([STORAGE_KEYS.lastModified, STORAGE_KEYS.updatedAt, STORAGE_KEYS.bundle]);
+    const usableCachedBundle = validateBundleShape(stored[STORAGE_KEYS.bundle]) &&
+      nvcBundle && Object.keys(nvcIndexes.lotByCode || {}).length > 0;
+    const headers = { ...NVC_FETCH_HEADERS };
+    if (!force && stored[STORAGE_KEYS.lastModified] && usableCachedBundle) {
+      headers['If-Modified-Since'] = stored[STORAGE_KEYS.lastModified];
     }
-
+    const response = await fetch(DEFAULT_NVC_SOURCE_URL,
+      { cache: 'no-store', redirect: 'error', headers });
+    const responseUrl = new URL(response.url);
+    if (responseUrl.origin !== new URL(DEFAULT_NVC_SOURCE_URL).origin ||
+        responseUrl.protocol !== 'https:') {
+      throw new Error('NVC response came from an unexpected origin');
+    }
+    if (response.status === 304 && stored[STORAGE_KEYS.updatedAt] && usableCachedBundle) {
+      await setStorage({ [STORAGE_KEYS.lastCheckAt]: nowIso });
+      await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true, note: 'unchanged' });
+      return { success: true, unchanged: true, sourceUrl: DEFAULT_NVC_SOURCE_URL,
+        updatedAt: stored[STORAGE_KEYS.updatedAt] };
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const bundle = await response.json();
     if (!validateBundleShape(bundle)) {
-      throw new Error('Bundle JSON is invalid: expected object with entry[]');
+      throw new Error('Invalid NVC FHIR bundle');
     }
 
     const bundleText = JSON.stringify(bundle);
     const computedSha256 = await sha256Hex(bundleText);
-    if (metadata && metadata.sha256 && String(metadata.sha256).toLowerCase() !== computedSha256.toLowerCase()) {
-      throw new Error('Bundle checksum verification failed');
+    const updatedAt = nowIso;
+    const previousBundle = nvcBundle;
+    const previousIndexes = nvcIndexes;
+    try {
+      // Build indexes before committing the cache; indexing can reject data
+      // that passes the shallow FHIR checks above.
+      applyBundleData(bundle, DEFAULT_NVC_SOURCE_URL);
+      await setStorage({
+        [STORAGE_KEYS.bundle]: bundle,
+        [STORAGE_KEYS.bundleSha256]: computedSha256,
+        [STORAGE_KEYS.lastCheckAt]: nowIso,
+        [STORAGE_KEYS.lastModified]: response.headers.get('Last-Modified') || null,
+        [STORAGE_KEYS.updatedAt]: updatedAt
+      });
+      bundleLoadPromise = Promise.resolve(true);
+    } catch (error) {
+      nvcBundle = previousBundle;
+      nvcIndexes = previousIndexes;
+      throw error;
     }
-
-    applyBundleData(bundle, bundleUrl);
-    const updatedAt = (metadata && metadata.updatedAt) ? metadata.updatedAt : nowIso;
-    await setStorage({
-      [STORAGE_KEYS.bundle]: bundle,
-      [STORAGE_KEYS.sourceUrl]: effectiveSourceUrl,
-      [STORAGE_KEYS.bundleSha256]: computedSha256,
-      [STORAGE_KEYS.lastCheckAt]: nowIso,
-      [STORAGE_KEYS.metaVersion]: metadata ? (metadata.version || null) : null,
-      [STORAGE_KEYS.updatedAt]: updatedAt
-    });
 
     const result = {
       success: true,
-      sourceUrl: effectiveSourceUrl,
-      bundleUrl,
+      sourceUrl: DEFAULT_NVC_SOURCE_URL,
       updatedAt,
       checkedAt: nowIso,
       entryCount: bundle.entry.length,
-      sha256: computedSha256,
-      version: metadata ? (metadata.version || null) : null
+      sha256: computedSha256
     };
-    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true });
+    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true }).catch(() => undefined);
     return result;
   } catch (error) {
     console.error('Failed to refresh NVC bundle:', error);
-    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: false, note: error.message });
+    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: false, note: error.message }).catch(() => undefined);
     return { success: false, error: error.message };
   }
 }
 
 async function maybeAutoRefreshNVCBundle(trigger) {
   try {
-    const stored = await getStorage([STORAGE_KEYS.sourceUrl, STORAGE_KEYS.lastCheckAt]);
-    const sourceUrl = normalizeSourceUrl(stored[STORAGE_KEYS.sourceUrl]);
+    const stored = await getStorage([STORAGE_KEYS.lastCheckAt]);
     const lastCheckAt = stored[STORAGE_KEYS.lastCheckAt];
     const now = Date.now();
     const last = lastCheckAt ? Date.parse(lastCheckAt) : 0;
@@ -1542,7 +1549,7 @@ async function maybeAutoRefreshNVCBundle(trigger) {
       return { success: true, skipped: true, reason: 'interval_not_elapsed' };
     }
 
-    const result = await refreshNVCBundleFromUrl(sourceUrl, { force: false, trigger });
+    const result = await refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { force: false, trigger });
     if (!result.success) {
       console.warn('Auto NVC refresh failed; using existing bundle:', result.error);
     }
@@ -1555,19 +1562,16 @@ async function maybeAutoRefreshNVCBundle(trigger) {
 
 async function getNVCUpdateStatus() {
   const stored = await getStorage([
-    STORAGE_KEYS.sourceUrl,
     STORAGE_KEYS.updatedAt,
     STORAGE_KEYS.lastCheckAt,
-    STORAGE_KEYS.bundleSha256,
-    STORAGE_KEYS.metaVersion
+    STORAGE_KEYS.bundleSha256
   ]);
 
   return {
-    sourceUrl: normalizeSourceUrl(stored[STORAGE_KEYS.sourceUrl]),
+    sourceUrl: DEFAULT_NVC_SOURCE_URL,
     updatedAt: stored[STORAGE_KEYS.updatedAt] || null,
     lastCheckAt: stored[STORAGE_KEYS.lastCheckAt] || null,
     sha256: stored[STORAGE_KEYS.bundleSha256] || null,
-    version: stored[STORAGE_KEYS.metaVersion] || null,
     autoSyncIntervalMinutes: AUTO_SYNC_INTERVAL_MINUTES
   };
 }
@@ -2471,9 +2475,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'refreshNVCBundle') {
-    const requestedSource = (request.sourceUrl || '').trim();
-    const sourceUrl = normalizeSourceUrl(requestedSource || DEFAULT_NVC_SOURCE_URL);
-    refreshNVCBundleFromUrl(sourceUrl, { force: true, trigger: 'manual' }).then(sendResponse);
+    refreshNVCBundleFromUrl(request.sourceUrl || DEFAULT_NVC_SOURCE_URL,
+      { force: true, trigger: 'manual' }).then(sendResponse);
     return true;
   }
 
