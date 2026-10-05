@@ -133,6 +133,7 @@ export function createBackgroundHarness(bundle, options = {}) {
   }
 
   const changedListeners = [];
+  const installedListeners = [];
   const messageListeners = [];
   const alarms = [];
   const consoleLines = [];
@@ -153,9 +154,10 @@ export function createBackgroundHarness(bundle, options = {}) {
   const chrome = {
     runtime: {
       lastError: null,
-      onInstalled: { addListener() {} },
+      onInstalled: { addListener: (fn) => installedListeners.push(fn) },
       onStartup: { addListener() {} },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
+      getManifest: () => ({ version: options.manifestVersion || '1.1.3' }),
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
@@ -290,6 +292,9 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    triggerInstalled(details) {
+      for (const listener of installedListeners) listener(details);
+    },
     storageData,
     alarms,
     consoleLines,

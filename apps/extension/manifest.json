@@ -5,8 +5,6 @@
   "version_name": "1.1.3",
   "description": "Parse GS1 vaccine barcodes and auto-fill Panorama and web-based EMR platforms",
   "permissions": [
-    "activeTab",
-    "scripting",
     "storage",
     "alarms",
     "offscreen",
@@ -34,8 +32,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.panorama.prod.ehealthontario.ca/*",
-        "https://panorama.prod.ehealthontario.ca/*",
+        "https://www.panorama.prod.ehealthontario.ca/*/ImmsWeb/pages/recordImms/*",
+        "https://panorama.prod.ehealthontario.ca/*/ImmsWeb/pages/recordImms/*",
         "https://inputhealth.com/*",
         "https://*.inputhealth.com/*"
       ],
