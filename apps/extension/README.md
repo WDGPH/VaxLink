@@ -25,7 +25,7 @@ The inventory page was split out of the old monolithic `inventory-manager.js` in
 
 ## Storage Model
 
-Everything lives in `chrome.storage.local`:
+Extension data is kept locally in two browser stores:
 
 - `chrome.storage.local`
   Used by the popup and scanner flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.

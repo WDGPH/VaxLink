@@ -34,7 +34,11 @@ extension (`apps/extension`) is the main deliverable.
 - Detects hardware barcode scanners (keystroke-timing heuristics), plus a dedicated Web Serial scanner channel for capture while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
 
-### Install (Developer Mode)
+### Installation
+
+Pilot staff can install the approved release through the Chrome Web Store. Chrome handles installation and updates for that path. When the Web Store is unavailable, partner IT can download the versioned production ZIP from a GitHub Release, verify it against that release's `SHA256SUMS`, extract it, and load the folder through Chrome's **Load unpacked** option. Partner IT must deliberately deploy each later approved version on this path. See [release instructions](docs/RELEASING.md).
+
+For local development, load the unpacked extension:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
@@ -46,7 +50,7 @@ extension (`apps/extension`) is the main deliverable.
 - Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
 - Auto-check every 24h (alarms)
 - Manual refresh from popup
-- Keeps last-known-good bundle if refresh fails
+- Stores the catalogue locally for lookup
 
 ### Inventory
 
@@ -65,10 +69,10 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 ### Release channels
 
-`./scripts/package-extension.sh alpha|prod` packages the extension for the
-Chrome Web Store, stamping the channel name at build time (`dev` → VaxLink
-Alpha, `main` → VaxLink). See `CLAUDE.md` for the full build/release
-reference.
+`./scripts/package-extension.sh alpha|prod` builds the same channel ZIPs used
+for Web Store upload and GitHub Releases, stamping the channel name at build
+time (`dev` → VaxLink Alpha, `main` → VaxLink). See the
+[release process](docs/RELEASING.md).
 
 ## Marketing site (`apps/web-next`)
 
@@ -121,4 +125,8 @@ actually served at the Pages URL; the docs site "wins."
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The licence permits use, copying, modification and
+redistribution when the copyright and licence notice is retained. It provides
+the software "as is," without warranty, and limits the liability of its authors
+and copyright holders. Separate pilot, MOU and support obligations are distinct
+from the open-source licence.
