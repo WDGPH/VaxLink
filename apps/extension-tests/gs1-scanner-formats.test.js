@@ -17,8 +17,7 @@ import test from 'node:test';
 import { parseGS1Barcode, parseInputData, formatDate } from '../extension/popup-parser.js';
 
 const GS = String.fromCharCode(0x1d);
-// 01 + GTIN, 17 + expiry, 10 + lot (lot last, no GS needed; lot text avoids
-// the "21"/"17######" substrings that trip the no-GS ambiguity rules).
+// 01 + GTIN, 17 + expiry, 10 + lot (lot last, no GS needed).
 const GTIN_LED = `01006284510000201726123110ABCD34`;
 
 test('AIM prefixes on GTIN-led barcodes parse identically', () => {
@@ -36,6 +35,30 @@ test('lot-only scans parse even when the lot contains "01"', () => {
   // truncate the payload to "016312" → "AI(01) GTIN incomplete".
   assert.equal(parseGS1Barcode('10Y016312').lot, 'Y016312');
   assert.equal(parseGS1Barcode('10AB01CD').lot, 'AB01CD');
+});
+
+test('AI-like text inside a final lot does not create serial or expiry fields', () => {
+  for (const lot of ['AHAVC219AC', 'Z012217', 'LOT17270827X']) {
+    for (const prefix of ['', ']d2', '010062845100002017280531']) {
+      for (const suffix of ['', GS, '\r\n']) {
+        const parsed = parseInputData(`${prefix}10${lot}${suffix}`);
+        assert.equal(parsed.lot, lot);
+        assert.equal(parsed.serial, null);
+        assert.equal(parsed.expiry, prefix.startsWith('01') ? '05/31/2028' : null);
+      }
+    }
+  }
+});
+
+test('a separator terminates an AI-like lot before a real serial or expiry', () => {
+  for (const lot of ['AHAVC219AC', 'Z012217']) {
+    for (const separator of [GS, '\t']) {
+      const parsed = parseInputData(`010062845100002010${lot}${separator}17280827${separator}21SER123`);
+      assert.equal(parsed.lot, lot);
+      assert.equal(parsed.expiry, '08/27/2028');
+      assert.equal(parsed.serial, 'SER123');
+    }
+  }
 });
 
 test('AIM-prefixed lot-only barcode parses (HB lot-only flow)', () => {

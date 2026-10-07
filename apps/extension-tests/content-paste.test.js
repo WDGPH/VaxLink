@@ -13,7 +13,8 @@ function isNumericGtinCandidate(text) {
 }
 
 test('real GS1 vaccine barcode (GTIN + lot + expiry) is a numeric GTIN candidate', () => {
-  const barcode = '010001234567890510LOT-ABC17240101';
+  // A variable-length lot requires a separator before the following expiry AI.
+  const barcode = '010001234567890510LOT-ABC\x1d17240101';
   assert.ok(isNumericGtinCandidate(barcode));
   const result = parseGS1Barcode(barcode);
   assert.equal(result.gtin, '00012345678905');
