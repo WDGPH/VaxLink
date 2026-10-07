@@ -55,21 +55,6 @@ lot selection. Always gate lot writes and deferred date/time behind
 handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 `dateAdministedDate`) — keep those as-is.
 
-## Next.js site
-
-`apps/web-next/` uses the Next.js App Router (no `src/` directory):
-
-- `app/` — routes: `/` (landing), `/extension/` (learn-more), `/privacy/`
-- `components/` — React components for landing page sections
-- `content/site.ts` — site-wide copy and configuration
-- `lib/` — utilities: `gs1.ts` (GS1 barcode parsing), `base-path.ts`
-  (proxy-aware asset URLs), `analytics.ts`
-
-`next.config.js` auto-detects `VSCODE_PROXY_URI` and `NB_PREFIX` to set
-`basePath`/`assetPrefix` for JupyterHub proxy environments. Always set both
-together. GitHub Pages CI sets `PAGES_BASE_PATH` and
-`BUILD_STATIC_EXPORT=true`.
-
 ## CI
 
 - `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to
@@ -77,8 +62,9 @@ together. GitHub Pages CI sets `PAGES_BASE_PATH` and
   best-effort bundle fetch fails), and both channel zips uploaded as workflow
   artifacts. Web Store uploads are manual: download the tested zip from the
   run.
-- `.github/workflows/deploy-web-next-pages.yml` — builds `apps/web-next` as a
-  static export and deploys it to GitHub Pages on every push to `main`.
+- `.github/workflows/docs.yml` — builds the MkDocs documentation site on
+  pushes and PRs to `main`; publishes it to the `gh-pages` branch on pushes
+  to `main`.
 
 ## Constraints
 
