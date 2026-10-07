@@ -41,10 +41,8 @@ if (!bundle) {
   }
   const uniqueLots = [...lotByKey.values()];
 
-  // A lot number can only confuse the no-GS GS1 heuristic when its own text
-  // contains something that looks like a follow-on AI: "21" (serial) or "17"
-  // followed by six digits (expiry).
-  const isPredictedAmbiguous = (lotNumber) =>
+  // Exercise lots whose text resembles a following serial or expiry AI.
+  const hasAILikeText = (lotNumber) =>
     lotNumber.includes('21') || /17\d{6}/.test(lotNumber);
 
   const harness = createBackgroundHarness(bundle);
@@ -64,7 +62,7 @@ if (!bundle) {
     assert.ok(uniqueLots.length > 3000, `Expected >3000 unique lot numbers, found ${uniqueLots.length}`);
   });
 
-  test('catalogue sweep: every vial barcode parses, and only AI-lookalike lots split', () => {
+  test('catalogue sweep: every final lot parses exactly, including AI-lookalike text', () => {
     for (const [index, lot] of uniqueLots.entries()) {
       const barcode = buildVialBarcode({
         gtin: makeSyntheticGtin14(index),
@@ -94,39 +92,18 @@ if (!bundle) {
       `Parser threw on ${sweep.parseErrors.length} lot(s): ` +
       sweep.parseErrors.slice(0, 5).map((f) => `${f.lot.lotNumber}: ${f.error}`).join('; '));
 
-    // Every split must be explained by AI-lookalike text inside the lot number.
-    const unexplained = sweep.parsedSplit.filter(({ lot }) => !isPredictedAmbiguous(lot.lotNumber));
-    assert.equal(unexplained.length, 0,
-      `${unexplained.length} lot(s) misparsed without containing an AI lookalike: ` +
-      unexplained.slice(0, 10).map((f) => f.lot.lotNumber).join(', '));
-
-    // And every lot WITHOUT AI-lookalike text must round-trip exactly.
-    const cleanMisses = uniqueLots.filter((lot) => !isPredictedAmbiguous(lot.lotNumber)).length -
-      sweep.parsedExact.filter(({ lot }) => !isPredictedAmbiguous(lot.lotNumber)).length;
-    assert.equal(cleanMisses, 0, `${cleanMisses} clean lot(s) failed to round-trip`);
+    assert.equal(sweep.parsedSplit.length, 0,
+      'Lot text must not be split into other fields: ' +
+      sweep.parsedSplit.slice(0, 10).map((f) => f.lot.lotNumber).join(', '));
+    for (const { lot, parsed } of sweep.parsedExact) {
+      assert.equal(parsed.serial, null, `${lot.lotNumber}: no serial was encoded`);
+    }
   });
 
-  test('catalogue sweep: KNOWN LIMITATION — lots containing "21"/"17…" misparse when AI(10) is last', () => {
-    // Real-world impact: a barcode like 01…17…10 042D21A (Moderna-style lot,
-    // no trailing serial) is split into lot "042D" + serial "A", so the NVC
-    // lookup misses. This documents the current behavior and alerts on growth.
-    const splitRate = sweep.parsedSplit.length / uniqueLots.length;
-    const notExpired = sweep.parsedSplit.filter(({ lot }) =>
-      lot.expiryIso && new Date(lot.expiryIso) >= new Date());
-
-    console.log(`\n  Ambiguous lots: ${sweep.parsedSplit.length}/${uniqueLots.length} ` +
-      `(${(splitRate * 100).toFixed(1)}%), ${notExpired.length} not yet expired:`);
-    for (const { lot, parsed } of notExpired.slice(0, 20)) {
-      console.log(`    ${lot.lotNumber} → lot="${parsed.lot}" serial="${parsed.serial}" ` +
-        `(${lot.tradenameRefs[0]?.display || 'unknown product'})`);
-    }
-
-    assert.ok(splitRate < 0.10,
-      `Ambiguous-lot rate ${(splitRate * 100).toFixed(1)}% exceeds 10% of the catalogue`);
-
-    // When a serial DOES follow the lot after a GS separator, even ambiguous
-    // lots parse exactly — verify on every ambiguous lot.
-    for (const { lot } of sweep.parsedSplit) {
+  test('catalogue sweep: AI-lookalike lots retain a real separator-delimited serial', () => {
+    const lotsWithAILikeText = uniqueLots.filter((lot) => hasAILikeText(lot.lotNumber));
+    assert.ok(lotsWithAILikeText.length > 0, 'Expected catalogue lots containing AI-like text');
+    for (const lot of lotsWithAILikeText) {
       const withSerial = buildVialBarcode({
         gtin: makeSyntheticGtin14(7),
         expiryIso: lot.expiryIso,
