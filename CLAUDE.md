@@ -8,7 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 |---|---|
 | `apps/extension/` | Chrome extension (Manifest V3) — no build step, plain JS |
 | `apps/extension-tests/` | Extension test suite (kept outside `apps/extension/` so the Chrome Web Store zip stays clean) |
-| `apps/web-next/` | Next.js 14 marketing site, deployed to GitHub Pages |
 | `scripts/` | Shell utilities (e.g. `fetch-nvc.sh` to download NVC bundle locally) |
 | `skills/` | Claude Code skill definitions for common extension workflows |
 
@@ -35,28 +34,6 @@ Install for manual testing: load `apps/extension/` as an unpacked extension in `
 ```
 
 Release channels: `dev` = VaxLink Alpha, `main` = VaxLink (two separate Web Store listings). The extension *name* is stamped by the package script, never edited in `manifest.json` — the manifest must stay identical across branches so `dev → main` merges don't conflict. Only `version` is bumped in git, and it flows through merges.
-
-### Next.js Site (`apps/web-next`)
-
-```bash
-cd apps/web-next
-npm ci                     # install deps
-npm run dev                # local dev server on port 3000
-npm run build              # production build
-npm run lint               # ESLint
-```
-
-When running behind JupyterHub or a reverse proxy, pass the base path:
-
-```bash
-BASE_PATH=/notebook/analytics/vaxlink/proxy/3000 npm run dev
-```
-
-For GitHub Pages static export (also done automatically in CI):
-
-```bash
-BUILD_STATIC_EXPORT=true PAGES_BASE_PATH=/<repo> npm run build
-```
 
 ## Extension Architecture
 
@@ -103,22 +80,11 @@ Fill order must be: `agent → lot → (deferred) date/time`. Panorama auto-popu
 
 The ROADMAP describes a planned platform registry refactor. Until that lands, new platforms are added to `content.js` by extending `isHandsFreeSupportedPage()` and `autoFillTelus()`. See `skills/vaxlink-emr-adaptation/SKILL.md` for the adapter contract.
 
-## Next.js Site Architecture
-
-`apps/web-next/` uses the Next.js App Router (no `src/` directory):
-
-- `app/` — routes: `/` (landing), `/extension/` (learn-more), `/privacy/`
-- `components/` — React components for landing page sections
-- `content/site.ts` — site-wide copy and configuration
-- `lib/` — utilities: `gs1.ts` (GS1 barcode parsing), `base-path.ts` (proxy-aware asset URLs), `analytics.ts`
-
-The `next.config.js` auto-detects `VSCODE_PROXY_URI` and `NB_PREFIX` to set `basePath`/`assetPrefix` for JupyterHub proxy environments. Always set both together. GitHub Pages CI sets `PAGES_BASE_PATH` and `BUILD_STATIC_EXPORT=true`.
-
 ## CI
 
 GitHub Actions:
 - `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `dev`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and both channel zips uploaded as workflow artifacts. Web Store uploads are manual: download the tested zip from the run.
-- `.github/workflows/deploy-web-next-pages.yml` — builds `apps/web-next` as a static export and deploys to GitHub Pages on every push to `main`.
+- `.github/workflows/docs.yml` — builds the MkDocs documentation site on pushes and PRs to `main`; publishes it to the `gh-pages` branch on pushes to `main`.
 
 ## Important Constraints
 

@@ -7,9 +7,9 @@
 
 VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
 them into Ontario immunization EMRs (Panorama, InputHealth), with an
-inventory management workflow for lot/expiry tracking. The repo also has a
-small Next.js marketing site and a MkDocs documentation site, but the
-extension (`apps/extension`) is the main deliverable.
+inventory management workflow for lot/expiry tracking. The extension
+(`apps/extension`) is the main deliverable, supported by a MkDocs
+documentation site.
 
 - 📚 **Documentation:** <https://wdgph.github.io/VaxLink/>
 - 🧩 **Extension:** `apps/extension`
@@ -18,7 +18,6 @@ extension (`apps/extension`) is the main deliverable.
 
 - `apps/extension` - Chrome extension (Manifest V3) — the main project
 - `apps/extension-tests` - extension test suite (kept out of the Web Store zip)
-- `apps/web-next` - Next.js marketing site (Pages deploy currently superseded by the docs site, see below)
 - `scripts` - shell utilities (e.g. `fetch-nvc.sh`, `package-extension.sh`)
 - `skills` - Claude Code skill definitions for common extension workflows
 - `docs` - source for the MkDocs documentation site
@@ -70,20 +69,6 @@ Chrome Web Store, stamping the channel name at build time (`dev` → VaxLink
 Alpha, `main` → VaxLink). See `CLAUDE.md` for the full build/release
 reference.
 
-## Marketing site (`apps/web-next`)
-
-A small Next.js landing page for VaxLink. `.github/workflows/deploy-web-next-pages.yml`
-builds and deploys it to GitHub Pages on every push to `main`, but see the
-[Documentation site](#documentation-site) section below — it currently loses
-the shared Pages slot to the docs site. See `content/site.ts` for the site
-copy.
-
-```bash
-cd apps/web-next
-npm ci
-npm run dev
-```
-
 ## Notes
 
 - Public access to NVC API does not automatically grant blanket redistribution rights for bundled terminology data. Keep raw bundle files out of public commits unless you have explicit permission.
@@ -109,15 +94,9 @@ uv run mkdocs serve
 
 Open <http://127.0.0.1:8000>.
 
-The `docs` workflow (`.github/workflows/docs.yml`) builds the site on every
-push to `main` and publishes it to the `gh-pages` branch. **This is
-currently the live Pages source for the repo** (confirmed via
-`gh api repos/WDGPH/VaxLink/pages`: `build_type: legacy`, `source.branch:
-gh-pages`) — a GitHub repo can only serve one Pages source at a time, and a
-`docs.yml` run after a `deploy-web-next-pages.yml` run flips it back to the
-branch-based docs deployment. In practice this means `apps/web-next`'s own
-Pages workflow succeeds as an Actions run but its output isn't what's
-actually served at the Pages URL; the docs site "wins."
+The `docs` workflow (`.github/workflows/docs.yml`) builds the documentation
+site on every push to `main` and publishes it to the `gh-pages` branch for
+GitHub Pages.
 
 ## License
 
