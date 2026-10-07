@@ -71,6 +71,7 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
+const UPDATE_NOTICE_KEY = 'vaxlink_update_notice_version_v1';
 const PENDING_SCAN_INBOX_LIMIT = 25;
 const BADGE_COLOR = '#0891b2';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
@@ -105,8 +106,15 @@ let scannerDaemonCreatePromise = null;
 let scannerDaemonStatusCache = createScannerStatusSnapshot();
 
 // Load NVC bundle on installation/startup
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
   bgLog('Vaccine Scanner extension installed');
+  if (details.reason === 'update') {
+    chrome.storage.local.set({ [UPDATE_NOTICE_KEY]: chrome.runtime.getManifest().version }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn('Could not save extension update notice:', chrome.runtime.lastError.message);
+      }
+    });
+  }
   ensureActionIcon();
   initializeNVCSync();
   void maybeStartScannerDaemon('install').catch((error) => {
