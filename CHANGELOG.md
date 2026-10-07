@@ -8,6 +8,15 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.4](https://github.com/WDGPH/VaxLink/compare/v1.1.3...v1.1.4) (2026-10-07)
+
+
+### Fixed
+
+* allow repairing existing stable release assets ([5f291d5](https://github.com/WDGPH/VaxLink/commit/5f291d5639a68339db606c44022aeb5efd914c01))
+* preserve GS1 lot numbers containing AI-like digits ([5d4efdc](https://github.com/WDGPH/VaxLink/commit/5d4efdc16f8d95ebea47f6bf3e245ecb614b0239))
+* preserve vaccine lot numbers containing GS1 AI digits ([8b3a06b](https://github.com/WDGPH/VaxLink/commit/8b3a06b11e36201d1e5a61321153321c775f49d7))
+
 ## [1.1.3](https://github.com/WDGPH/VaxLink/compare/v1.1.2...v1.1.3) (2026-08-12)
 
 
