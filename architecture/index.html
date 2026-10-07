@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Documentation for the VaxLink Chrome extension and marketing site">
+        <meta name="description" content="Documentation for the VaxLink Chrome extension">
       
       
       
@@ -526,17 +526,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#nextjs-site" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next.js site
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ci" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -761,17 +750,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#nextjs-site" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Next.js site
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#ci" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -890,19 +868,6 @@ lot selection. Always gate lot writes and deferred date/time behind
 <code>!isPrimeFacesAjaxBusy()</code>. Lot matching uses <code>normalizePanoramaLotToken</code> to
 handle formats like <code>LOT123 - Exp. ...</code>. Panorama uses misspelled IDs (e.g.
 <code>dateAdministedDate</code>) — keep those as-is.</p>
-<h2 id="nextjs-site">Next.js site<a class="headerlink" href="#nextjs-site" title="Permanent link">&para;</a></h2>
-<p><code>apps/web-next/</code> uses the Next.js App Router (no <code>src/</code> directory):</p>
-<ul>
-<li><code>app/</code> — routes: <code>/</code> (landing), <code>/extension/</code> (learn-more), <code>/privacy/</code></li>
-<li><code>components/</code> — React components for landing page sections</li>
-<li><code>content/site.ts</code> — site-wide copy and configuration</li>
-<li><code>lib/</code> — utilities: <code>gs1.ts</code> (GS1 barcode parsing), <code>base-path.ts</code>
-  (proxy-aware asset URLs), <code>analytics.ts</code></li>
-</ul>
-<p><code>next.config.js</code> auto-detects <code>VSCODE_PROXY_URI</code> and <code>NB_PREFIX</code> to set
-<code>basePath</code>/<code>assetPrefix</code> for JupyterHub proxy environments. Always set both
-together. GitHub Pages CI sets <code>PAGES_BASE_PATH</code> and
-<code>BUILD_STATIC_EXPORT=true</code>.</p>
 <h2 id="ci">CI<a class="headerlink" href="#ci" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>.github/workflows/extension-ci.yml</code> — on extension-related pushes/PRs to
@@ -910,8 +875,9 @@ together. GitHub Pages CI sets <code>PAGES_BASE_PATH</code> and
   best-effort bundle fetch fails), and both channel zips uploaded as workflow
   artifacts. Web Store uploads are manual: download the tested zip from the
   run.</li>
-<li><code>.github/workflows/deploy-web-next-pages.yml</code> — builds <code>apps/web-next</code> as a
-  static export and deploys it to GitHub Pages on every push to <code>main</code>.</li>
+<li><code>.github/workflows/docs.yml</code> — builds the MkDocs documentation site on
+  pushes and PRs to <code>main</code>; publishes it to the <code>gh-pages</code> branch on pushes
+  to <code>main</code>.</li>
 </ul>
 <h2 id="constraints">Constraints<a class="headerlink" href="#constraints" title="Permanent link">&para;</a></h2>
 <ul>
