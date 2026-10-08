@@ -127,13 +127,13 @@ export function createBackgroundHarness(bundle, options = {}) {
   // Seed storage the way a synced production install looks: cached bundle plus
   // a fresh last-check timestamp so the startup auto-refresh skips the network.
   storageData.set('nvc_bundle_override', bundle);
-  storageData.set('nvc_bundle_source_url', 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC');
   storageData.set('nvc_bundle_last_check_at', new Date().toISOString());
   for (const [key, value] of Object.entries(options.storage || {})) {
     storageData.set(key, value);
   }
 
   const changedListeners = [];
+  const installedListeners = [];
   const messageListeners = [];
   const alarms = [];
   const consoleLines = [];
@@ -154,9 +154,10 @@ export function createBackgroundHarness(bundle, options = {}) {
   const chrome = {
     runtime: {
       lastError: null,
-      onInstalled: { addListener() {} },
+      onInstalled: { addListener: (fn) => installedListeners.push(fn) },
       onStartup: { addListener() {} },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
+      getManifest: () => ({ version: options.manifestVersion || '1.1.3' }),
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
@@ -215,6 +216,13 @@ export function createBackgroundHarness(bundle, options = {}) {
           queueMicrotask(() => callback(result));
         },
         set(values, callback) {
+          if (options.failStorageSet?.(values)) {
+            queueMicrotask(() => {
+              chrome.runtime.lastError = { message: 'storage write failed' };
+              try { if (callback) callback(); } finally { chrome.runtime.lastError = null; }
+            });
+            return;
+          }
           const changes = {};
           for (const [key, value] of Object.entries(values)) {
             changes[key] = { oldValue: storageData.get(key), newValue: value };
@@ -238,7 +246,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     // Network is forbidden in tests; the icon fetch failure is caught inside
     // ensureActionIcon and the bundle path never hits fetch (storage is seeded).
-    fetch: () => Promise.reject(new Error('network disabled in clinic-sim tests')),
+    fetch: options.fetch || (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
     URL,
@@ -284,6 +292,9 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    triggerInstalled(details) {
+      for (const listener of installedListeners) listener(details);
+    },
     storageData,
     alarms,
     consoleLines,
