@@ -58,8 +58,10 @@ jobs:
           fetch-depth: 0
       - name: Build stable extension package
         run: ./scripts/package-extension.sh prod
+      - name: Checksum exact release ZIP
+        run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach stable package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
 
   repair-stable-assets:
     if: github.event_name == 'workflow_dispatch' && inputs.release_lane == 'stable' && inputs.existing_tag != ''
@@ -76,8 +78,10 @@ jobs:
           fetch-depth: 0
       - name: Build stable extension package
         run: ./scripts/package-extension.sh prod
+      - name: Checksum exact repaired ZIP
+        run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach repaired stable package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
 
   alpha-release:
     if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
@@ -111,5 +115,7 @@ jobs:
           fetch-depth: 0
       - name: Build alpha extension package
         run: ./scripts/package-extension.sh alpha
+      - name: Checksum exact release ZIP
+        run: cd dist && sha256sum vaxlink-alpha-*.zip > SHA256SUMS
       - name: Attach alpha package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip --clobber
+        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip dist/SHA256SUMS --clobber
