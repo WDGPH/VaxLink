@@ -127,7 +127,6 @@ export function createBackgroundHarness(bundle, options = {}) {
   // Seed storage the way a synced production install looks: cached bundle plus
   // a fresh last-check timestamp so the startup auto-refresh skips the network.
   storageData.set('nvc_bundle_override', bundle);
-  storageData.set('nvc_bundle_source_url', 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC');
   storageData.set('nvc_bundle_last_check_at', new Date().toISOString());
   for (const [key, value] of Object.entries(options.storage || {})) {
     storageData.set(key, value);
@@ -215,6 +214,13 @@ export function createBackgroundHarness(bundle, options = {}) {
           queueMicrotask(() => callback(result));
         },
         set(values, callback) {
+          if (options.failStorageSet?.(values)) {
+            queueMicrotask(() => {
+              chrome.runtime.lastError = { message: 'storage write failed' };
+              try { if (callback) callback(); } finally { chrome.runtime.lastError = null; }
+            });
+            return;
+          }
           const changes = {};
           for (const [key, value] of Object.entries(values)) {
             changes[key] = { oldValue: storageData.get(key), newValue: value };
@@ -238,7 +244,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     // Network is forbidden in tests; the icon fetch failure is caught inside
     // ensureActionIcon and the bundle path never hits fetch (storage is seeded).
-    fetch: () => Promise.reject(new Error('network disabled in clinic-sim tests')),
+    fetch: options.fetch || (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
     URL,
