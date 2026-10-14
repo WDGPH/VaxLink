@@ -1482,6 +1482,7 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
           firstRefresh,
           addedLotCount: 0,
           lotCount: previousLotCodes.size,
+          ...getNVCReleaseInfo(stored[STORAGE_KEYS.bundle]),
           sourceUrl: effectiveSourceUrl,
           updatedAt: stored[STORAGE_KEYS.updatedAt] || metadata.updatedAt || nowIso
         };
@@ -1527,6 +1528,7 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
       firstRefresh,
       addedLotCount,
       lotCount: lotCodes.size,
+      ...getNVCReleaseInfo(bundle),
       sha256: computedSha256,
       version: metadata ? (metadata.version || null) : null
     };
@@ -1569,7 +1571,8 @@ async function getNVCUpdateStatus() {
     STORAGE_KEYS.updatedAt,
     STORAGE_KEYS.lastCheckAt,
     STORAGE_KEYS.bundleSha256,
-    STORAGE_KEYS.metaVersion
+    STORAGE_KEYS.metaVersion,
+    STORAGE_KEYS.bundle
   ]);
 
   return {
@@ -1578,6 +1581,9 @@ async function getNVCUpdateStatus() {
     lastCheckAt: stored[STORAGE_KEYS.lastCheckAt] || null,
     sha256: stored[STORAGE_KEYS.bundleSha256] || null,
     version: stored[STORAGE_KEYS.metaVersion] || null,
+    ...getNVCReleaseInfo(stored[STORAGE_KEYS.bundle]),
+    lotCount: validateBundleShape(stored[STORAGE_KEYS.bundle])
+      ? collectLotCodesFromBundle(stored[STORAGE_KEYS.bundle]).size : null,
     autoSyncIntervalMinutes: AUTO_SYNC_INTERVAL_MINUTES
   };
 }
@@ -1698,6 +1704,17 @@ function collectTradenameConceptsFromBundle() {
     }
   }
   return concepts;
+}
+
+function getNVCReleaseInfo(bundle) {
+  const lots = bundle?.entry?.find(entry =>
+    entry.resource?.resourceType === 'CodeSystem' && entry.resource.id === 'nvc-vaccine-lot-id'
+  )?.resource;
+  return {
+    releaseVersion: lots?.version || null,
+    releaseDate: lots?.date || null,
+    bundleLastUpdated: bundle?.meta?.lastUpdated || null
+  };
 }
 
 function collectLotCodesFromBundle(bundle) {

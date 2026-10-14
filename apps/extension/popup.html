@@ -366,15 +366,39 @@
     }
 
     #nvcStatus {
-      margin-top: 8px;
-      padding: 8px 10px;
-      border-radius: 14px;
-      background: #f6fafc;
-      border: 1px dashed #cbd8e5;
+      margin: 10px 0 16px;
+      padding: 0 0 12px;
+      border-bottom: 1px solid var(--line);
       font-size: 11px;
-      line-height: 1.35;
+      line-height: 1.5;
       color: #486071;
     }
+
+    .nvc-status-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 4px 12px;
+    }
+
+    .nvc-status-version { font-size: 12px; font-weight: 600; color: #1f3d58; }
+
+    .nvc-status-count {
+      color: var(--subtle);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .nvc-status-release { margin: 3px 0 0; color: var(--subtle); }
+    .nvc-status-release > div { display: flex; gap: 5px; }
+    .nvc-status-release dd { margin: 0; }
+    .nvc-status-sync { margin-top: 5px; }
+    .nvc-status-sync summary { width: fit-content; cursor: pointer; color: #486071; }
+    .nvc-status-sync summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .nvc-status-details { margin: 8px 0 0; }
+    .nvc-status-details > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 3px 0; }
+    .nvc-status-details dd { margin: 0; text-align: right; color: #1f3d58; overflow-wrap: anywhere; }
+    .nvc-status-footer { margin-top: 5px; color: var(--subtle); }
 
     .output {
       margin-top: 10px;
@@ -982,6 +1006,7 @@
             <div class="actions">
               <button id="refreshNvcBtn">Refresh NVC Data</button>
             </div>
+            <div id="nvcStatus" role="status" aria-label="NVC catalog status"></div>
             <label class="settings-check" for="adminDateTimeAutofillToggle">
               <input id="adminDateTimeAutofillToggle" type="checkbox">
               <span>Auto-fill Date Administered from scan time</span>
@@ -1009,7 +1034,6 @@
               <span>Auto-fill Reason for Immunization and Consent</span>
             </label>
             <p class="settings-hint">When enabled, VaxLink sets Reason for Immunization to "Routine" and Consent for Service to "Consent obtained" on the Panorama immunization form.</p>
-            <div id="nvcStatus"></div>
           </div>
           <div class="analytics">
             <div class="result-heading">Local Analytics</div>
