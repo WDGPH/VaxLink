@@ -1,4 +1,9 @@
-import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
+import { buildExpiryBanner, getExpiryStatus, outputTypeForExpiry } from './popup-parser.js';
+
+export function outputTypeForScan(data) {
+  const expiryType = outputTypeForExpiry(getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry));
+  return expiryType === 'error' ? 'error' : (data.lookup_error ? 'warning' : expiryType);
+}
 
 export function formatDateTime(value) {
   if (!value) return 'Never';

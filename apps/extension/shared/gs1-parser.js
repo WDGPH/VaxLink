@@ -104,22 +104,29 @@
     return findNextAINoGS(scan, startIdx, memo, currentVariableAI);
   }
 
+  function barcodeError(message) {
+    const error = new Error(message);
+    error.code = 'malformed_barcode';
+    return error;
+  }
+
   function parseGS1Barcode(rawScan) {
     const scan = normalizeGS1BarcodeText(rawScan);
     if (!scan) {
-      throw new Error('Empty scan payload');
+      throw barcodeError('Empty scan payload');
     }
 
     const data = { gtin: null, expiry: null, lot: null, serial: null };
     let idx = 0;
     if (scan.startsWith('01')) {
       if (scan.length < 16) {
-        throw new Error('AI(01) GTIN incomplete');
+        throw barcodeError('AI(01) GTIN incomplete: expected 14 digits');
       }
       data.gtin = scan.substring(2, 16);
+      if (!/^\d{14}$/.test(data.gtin)) throw barcodeError('AI(01) GTIN must contain 14 digits');
       idx = 16;
     } else if (!isLikelyAIStart(scan, 0)) {
-      throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
+      throw barcodeError('Expected a GS1 AI sequence (01/17/10/21)');
     }
 
     while (idx < scan.length) {
@@ -131,9 +138,16 @@
       const currentAI = scan.substring(idx, idx + 2);
       if (currentAI === '17') {
         if (scan.length < idx + 8) {
-          throw new Error('AI(17) expiry date incomplete');
+          throw barcodeError('AI(17) expiry date incomplete: expected 6 digits (YYMMDD)');
         }
-        data.expiry = formatDate(scan.substring(idx + 2, idx + 8));
+        const expiry = scan.substring(idx + 2, idx + 8);
+        const year = 2000 + Number(expiry.slice(0, 2));
+        const month = Number(expiry.slice(2, 4));
+        const day = Number(expiry.slice(4, 6));
+        if (!/^\d{6}$/.test(expiry) || month < 1 || month > 12 || day > new Date(year, month, 0).getDate()) {
+          throw barcodeError('AI(17) expiry date is invalid: expected a valid YYMMDD date');
+        }
+        data.expiry = formatDate(expiry);
         idx += 8;
       } else if (currentAI === '10') {
         idx += 2;
@@ -162,7 +176,7 @@
     }
 
     if (!data.gtin && !data.expiry && !data.lot && !data.serial) {
-      throw new Error('No recognized GS1 fields found');
+      throw barcodeError('No recognized GS1 fields found');
     }
 
     return data;

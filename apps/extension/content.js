@@ -234,7 +234,7 @@ function parseGS1BarcodeFromScanner(rawScan) {
 }
 
 function lookupVaccineInfoByLot(lot, gtin) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (!lot) {
       resolve(null);
       return;
@@ -246,11 +246,11 @@ function lookupVaccineInfoByLot(lot, gtin) {
     chrome.runtime.sendMessage(request, (response) => {
       if (chrome.runtime.lastError) {
         console.warn('Hands-free lot lookup failed:', chrome.runtime.lastError.message);
-        resolve(null);
+        reject(new Error(globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed').error));
         return;
       }
       if (!response || response.error) {
-        resolve(null);
+        reject(new Error(response?.error || globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed').error));
         return;
       }
       resolve(response);
@@ -486,6 +486,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   } catch (error) {
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
     playAudioCue('error');
+    showVaxlinkToast({ _scanIssue: globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error) }, 8000);
     logAnalyticsEvent('parse_error', {
       workflow: activeWorkflowMode,
       source,
@@ -495,7 +496,8 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       accepted: true,
       success: false,
       status: 'parse_error',
-      error: error.message || 'Scan was not valid GS1'
+      errorCode: 'malformed_barcode',
+      error: globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error)
     };
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
@@ -532,6 +534,8 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     }
   } catch (error) {
     console.warn('Hands-free lookup error:', error);
+    parsed.lookup_error = error.message || globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed').error;
+    playAudioCue('error');
     logAnalyticsEvent('lookup_error', {
       workflow: activeWorkflowMode,
       source,
@@ -545,6 +549,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       parsed
     );
   }
+  if (!parsed.lot) parsed.lookup_error = globalThis.VaxLinkScanIssues.lookupIssue('missing_lot').error;
 
   const finalExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
   logAnalyticsEvent('scan_captured', {
@@ -582,7 +587,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         };
       }
       // Expired records get the expiry_warning cue from the persistent toast.
-      if (record.expiry_flag !== 'expired') {
+      if (record.expiry_flag !== 'expired' && !parsed.lookup_error) {
         playAudioCue('success');
       }
       showVaxlinkToast({ ...parsed, _queuedCount: record.queueSizeAfter || 0 });
@@ -646,9 +651,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
-  if (success) {
+  if (success || parsed.lookup_error) {
     showVaxlinkToast(parsed);
-  } else if (!pending) {
+  }
+  if (!success && !pending) {
     playAudioCue('error');
   }
   vlog('hands-free autofill', autofillResult?.status, { source, parsed });
@@ -3007,6 +3013,14 @@ function showVaxlinkToast(data, durationMs = 4000) {
     }
   };
 
+  if (data._scanIssue) {
+    showRoutineToast(`<div class="vl-toast expiring show">
+      <div class="vl-toast-title">Barcode could not be read</div>
+      <div class="vl-toast-detail">${escapeToastHtml(data._scanIssue)}</div>
+    </div>`, durationMs);
+    return;
+  }
+
   if (data._commandMode) {
     const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
     const sourceDetail = data._commandSource === 'hud'
@@ -3113,6 +3127,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
     expiryText = `${flagLabels[flag] || 'Unknown'} (exp ${friendlyDate})`;
   }
   const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+  const issueNote = data.lookup_error
+    ? `<div class="vl-toast-detail">${escapeToastHtml(data.lookup_error)}</div>` : '';
 
   if (data._duplicateIgnored) {
     showRoutineToast(`<div class="vl-toast duplicate show">
@@ -3123,7 +3139,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
+  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' || data.lookup_error ? 'expiring' : 'valid');
   const isExpired = flag === 'expired';
   const queuedNote = data._queuedCount
     ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
@@ -3133,6 +3149,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
+    ${issueNote}
     ${queuedNote}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
@@ -3146,7 +3163,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
     return;
   }
-  showRoutineToast(toastHtml, durationMs);
+  showRoutineToast(toastHtml, data.lookup_error ? Math.max(durationMs, 8000) : durationMs);
 }
 
 function dismissToast(slot) {

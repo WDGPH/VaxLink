@@ -1,5 +1,6 @@
 const VAXLINK_BG_DEBUG = false;
 importScripts('shared/gs1-parser.js');
+importScripts('shared/scan-issues.js');
 importScripts('scanner/scanner-lock-session.js');
 
 const {
@@ -767,12 +768,14 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
 
   await Promise.resolve(bundleLoadPromise || loadNVCBundle());
   if (parsed.lot) {
-    const vaccineInfo = lookupVaccineLot(parsed.lot, { gtin: parsed.gtin });
+    const vaccineInfo = nvcBundle ? lookupVaccineLot(parsed.lot, { gtin: parsed.gtin }) : null;
     if (vaccineInfo) {
       mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
     } else {
-      parsed.lookup_error = 'Vaccine not found in NVC database';
+      parsed.lookup_error = globalThis.VaxLinkScanIssues.lookupIssue(nvcBundle ? 'nvc_not_found' : 'nvc_unavailable', parsed.lot).error;
     }
+  } else {
+    parsed.lookup_error = globalThis.VaxLinkScanIssues.lookupIssue('missing_lot').error;
   }
 
   const record = await appendQueueRecord(
@@ -2493,7 +2496,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     Promise.resolve(bundleLoadPromise || loadNVCBundle())
       .then((loaded) => {
         if (loaded === false) {
-          return { error: 'Failed to load NVC database' };
+          return globalThis.VaxLinkScanIssues.lookupIssue('nvc_unavailable');
         }
 
         const vaccineInfo = lookupVaccineLot(request.lot, { gtin: request.gtin });
@@ -2503,11 +2506,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           return vaccineInfo;
         }
 
-        return { error: 'Vaccine not found in NVC database' };
+        return globalThis.VaxLinkScanIssues.lookupIssue('nvc_not_found', request.lot);
       })
       .catch((error) => {
         console.error('Lookup pipeline failed:', error);
-        return { error: error?.message || 'Failed to load NVC database' };
+        return globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed');
       })
       .then((response) => {
         sendResponse(response);

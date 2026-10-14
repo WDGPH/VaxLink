@@ -10,6 +10,15 @@ export const findNextAINoGS = GS1Parser.findNextAINoGS;
 export const formatDate = GS1Parser.formatDate;
 
 export function parseInputData(rawInput) {
+  try {
+    return parseScanInput(rawInput);
+  } catch (error) {
+    error.code = 'malformed_barcode';
+    throw error;
+  }
+}
+
+function parseScanInput(rawInput) {
   const input = String(rawInput || '').trim();
   if (!input) {
     throw new Error('No input provided');

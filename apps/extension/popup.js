@@ -7,8 +7,11 @@ import {
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
 import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-parser.js';
+import './shared/scan-issues.js';
 import {
   buildParsedOutputMarkup,
+  escapeHtml,
+  outputTypeForScan,
   renderNVCStatus,
   setButtonBusy,
   showOutput
@@ -1371,7 +1374,7 @@ function queueAutoParse(immediate = false) {
     } catch (error) {
       parsedData = null;
       logAnalyticsEvent('parse_error', { workflow: activeMode, source: 'popup_input' });
-      writeOutput(`Error parsing barcode: ${error.message}`, 'error');
+      writeOutput(escapeHtml(globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error)), 'error');
     } finally {
       if (parseRequestId === activeParseRequestId) {
         setButtonBusy(autoFillBtn, false);
@@ -1496,7 +1499,7 @@ async function lookupVaccineInfo(lot, gtin) {
     }
     lotLookupCache.set(cacheKey, response);
   }
-  return response;
+  return response || globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed');
 }
 
 async function addPreviewScanToInventory() {
@@ -1529,9 +1532,9 @@ async function addPreviewScanToInventory() {
     });
     removeLastPendingScanLine();
     queueAutoParse(true);
-    writeOutput(buildParsedOutputMarkup(enriched), outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry)));
+    writeOutput(buildParsedOutputMarkup(enriched), outputTypeForScan(enriched));
   } catch (error) {
-    writeOutput(`Could not add scan: ${error.message}`, 'error');
+    writeOutput(escapeHtml(error.code === 'malformed_barcode' ? globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error) : `Could not add scan: ${error.message}`), 'error');
   } finally {
     if (requestId === activeParseRequestId) {
       setButtonBusy(addCurrentBtn, false);
@@ -1572,9 +1575,9 @@ async function addManualScanToMultipleQueue() {
     });
     testModeBarcode.value = '';
     const label = enriched.tradename || enriched.generic_name || enriched.lot || 'Unknown vaccine';
-    writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
+    writeOutput(`✓ Added to Multiple Inject queue: ${escapeHtml(label)}${enriched.lookup_error ? `<br>${escapeHtml(enriched.lookup_error)}` : ''}`, enriched.lookup_error ? 'warning' : 'success');
   } catch (error) {
-    writeOutput(`Test mode error: ${error.message}`, 'error');
+    writeOutput(escapeHtml(error.code === 'malformed_barcode' ? globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error) : `Could not add scan: ${error.message}`), 'error');
   } finally {
     if (requestId === activeParseRequestId) {
       setButtonBusy(testModeAddBtn, false);
@@ -1595,6 +1598,7 @@ async function addPendingScansToInventory() {
   let addedCount = 0;
   let lastRecord = null;
   const errors = [];
+  const lookupWarnings = [];
 
   try {
     for (let index = 0; index < lines.length; index += 1) {
@@ -1602,11 +1606,12 @@ async function addPendingScansToInventory() {
       try {
         const baseData = parseInputData(rawBarcode);
         const enriched = await enrichParsedData(baseData);
+        if (enriched.lookup_error) lookupWarnings.push(`Line ${index + 1}: ${enriched.lookup_error}`);
         records.push(buildQueueRecord(enriched, rawBarcode));
         lastRecord = enriched;
         addedCount += 1;
       } catch (error) {
-        errors.push(`Line ${index + 1}: ${error.message}`);
+        errors.push(`Line ${index + 1}: ${globalThis.VaxLinkScanIssues.malformedBarcodeMessage(error)}`);
       }
     }
 
@@ -1642,9 +1647,10 @@ async function addPendingScansToInventory() {
       const message = errors.length
         ? `Added ${addedCount} scan(s). ${errors.length} line(s) failed.`
         : `Added ${addedCount} scan(s) to inventory.`;
-      writeOutput(message, errors.length ? 'warning' : 'success');
+      const issues = [...errors, ...lookupWarnings].map(escapeHtml).join('<br>');
+      writeOutput(`${message}${issues ? `<br>${issues}` : ''}`, issues ? 'warning' : 'success');
     } else {
-      writeOutput(errors.join('<br>') || 'No scans were added.', 'error');
+      writeOutput(errors.map(escapeHtml).join('<br>') || 'No scans were added.', 'error');
     }
   } finally {
     if (requestId === activeParseRequestId) {
@@ -1787,8 +1793,10 @@ async function enrichParsedData(baseData) {
       lookupAttempted = true;
       vaccineInfo = await lookupVaccineInfo(baseData.lot, baseData.gtin);
     } catch (error) {
-      vaccineInfo = { error: error.message || 'Lookup failed' };
+      vaccineInfo = globalThis.VaxLinkScanIssues.lookupIssue('lookup_failed');
     }
+  } else if (!baseData.name && !baseData.tradename && !baseData.generic_name) {
+    vaccineInfo = globalThis.VaxLinkScanIssues.lookupIssue('missing_lot');
   }
 
   const chosenExpiry = baseData.expiry || vaccineInfo?.lot_expiry || null;
@@ -1821,7 +1829,7 @@ async function displayParsedData(data, parseRequestId) {
     parsedData = enriched;
     writeOutput(
       buildParsedOutputMarkup(enriched),
-      outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry))
+      outputTypeForScan(enriched)
     );
   } catch (error) {
     if (parseRequestId !== activeParseRequestId) {
@@ -1847,7 +1855,7 @@ function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
       const message = chrome.runtime.lastError.message || '';
 
       if (message.includes('Receiving end does not exist')) {
-        chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['panorama-agent-rules.js', 'content.js'] }, () => {
+        chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ['panorama-agent-rules.js', 'shared/gs1-parser.js', 'shared/scan-issues.js', 'content.js'] }, () => {
           if (chrome.runtime.lastError) {
             callback({ success: false, error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}` });
             return;

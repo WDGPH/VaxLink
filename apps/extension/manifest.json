@@ -42,6 +42,7 @@
       "js": [
         "panorama-agent-rules.js",
         "shared/gs1-parser.js",
+        "shared/scan-issues.js",
         "content.js"
       ],
       "run_at": "document_start"
