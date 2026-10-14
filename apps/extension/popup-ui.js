@@ -15,6 +15,15 @@ export function renderNVCStatus(status, container) {
   container.textContent = `Last bundle update: ${updated} | Last check: ${checked} | Auto-check: every ${intervalHours}h`;
 }
 
+export function formatNVCRefreshMessage({ firstRefresh, addedLotCount, lotCount }) {
+  const available = `${lotCount.toLocaleString()} ${lotCount === 1 ? 'lot' : 'lots'} available.`;
+  if (firstRefresh) return `NVC refresh successful — ${available}`;
+  if (addedLotCount > 0) {
+    return `NVC refresh successful — ${addedLotCount.toLocaleString()} new ${addedLotCount === 1 ? 'lot' : 'lots'} added. ${available}`;
+  }
+  return `NVC data is already up to date — ${available}`;
+}
+
 export function setButtonBusy(button, busy, busyText) {
   if (!button) return;
   if (!button.dataset.defaultLabel) {

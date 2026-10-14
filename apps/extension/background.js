@@ -1455,8 +1455,10 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
   const trigger = options.trigger === 'manual' ? 'manual' : 'auto';
   try {
     const nowIso = new Date().toISOString();
-    const stored = await getStorage([STORAGE_KEYS.bundleSha256, STORAGE_KEYS.updatedAt]);
+    const stored = await getStorage([STORAGE_KEYS.bundleSha256, STORAGE_KEYS.updatedAt, STORAGE_KEYS.bundle]);
     const previousHash = stored[STORAGE_KEYS.bundleSha256];
+    const firstRefresh = !validateBundleShape(stored[STORAGE_KEYS.bundle]);
+    const previousLotCodes = collectLotCodesFromBundle(stored[STORAGE_KEYS.bundle]);
 
     const firstPayload = await fetchJsonWithHeaders(effectiveSourceUrl);
     let metadata = null;
@@ -1472,11 +1474,14 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
         throw new Error('Metadata is missing a valid bundleUrl');
       }
 
-      if (!force && metadata.sha256 && previousHash && String(metadata.sha256).toLowerCase() === String(previousHash).toLowerCase()) {
+      if (!force && !firstRefresh && metadata.sha256 && previousHash && String(metadata.sha256).toLowerCase() === String(previousHash).toLowerCase()) {
         await setStorage({ [STORAGE_KEYS.lastCheckAt]: nowIso });
         const result = {
           success: true,
           unchanged: true,
+          firstRefresh,
+          addedLotCount: 0,
+          lotCount: previousLotCodes.size,
           sourceUrl: effectiveSourceUrl,
           updatedAt: stored[STORAGE_KEYS.updatedAt] || metadata.updatedAt || nowIso
         };
@@ -1499,6 +1504,8 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
       throw new Error('Bundle checksum verification failed');
     }
 
+    const lotCodes = collectLotCodesFromBundle(bundle);
+    const addedLotCount = [...lotCodes].filter(code => !previousLotCodes.has(code)).length;
     applyBundleData(bundle, bundleUrl);
     const updatedAt = (metadata && metadata.updatedAt) ? metadata.updatedAt : nowIso;
     await setStorage({
@@ -1517,6 +1524,9 @@ async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
       updatedAt,
       checkedAt: nowIso,
       entryCount: bundle.entry.length,
+      firstRefresh,
+      addedLotCount,
+      lotCount: lotCodes.size,
       sha256: computedSha256,
       version: metadata ? (metadata.version || null) : null
     };
@@ -1690,13 +1700,19 @@ function collectTradenameConceptsFromBundle() {
   return concepts;
 }
 
-function collectLotConceptsFromBundle() {
+function collectLotCodesFromBundle(bundle) {
+  return new Set(collectLotConceptsFromBundle(bundle)
+    .map(concept => concept.code)
+    .filter(code => typeof code === 'string' && code.trim()));
+}
+
+function collectLotConceptsFromBundle(bundle = nvcBundle) {
   const concepts = [];
-  if (!nvcBundle.entry) return concepts;
+  if (!bundle?.entry) return concepts;
   
-  for (const entry of nvcBundle.entry) {
+  for (const entry of bundle.entry) {
     const resource = entry.resource;
-    if (resource.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id') {
+    if (resource?.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id') {
       concepts.push(...(resource.concept || []));
     }
   }
