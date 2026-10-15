@@ -84,7 +84,8 @@ The ROADMAP describes a planned platform registry refactor. Until that lands, ne
 
 GitHub Actions:
 - `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `dev`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and both channel zips uploaded as workflow artifacts. Web Store uploads are manual: download the tested zip from the run.
-- `.github/workflows/docs.yml` — builds the MkDocs documentation site on pushes and PRs to `main`; publishes it to the `gh-pages` branch on pushes to `main`.
+- `.github/workflows/docs.yml` — runs the locked, strict MkDocs documentation check on pushes and PRs to `main`; it does not publish.
+- `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `README.md` for token setup and historical release reconciliation.
 
 ## Important Constraints
 

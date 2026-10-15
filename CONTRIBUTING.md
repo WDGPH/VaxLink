@@ -34,4 +34,8 @@ See `apps/extension/README.md` for the module breakdown and storage model.
 ## Pull Requests
 
 - Keep `manifest.json` identical across branches — the extension *name* is stamped by `scripts/package-extension.sh` at package time, never edited directly, so `dev` → `main` merges don't conflict. Only `version` is bumped in git.
-- Run `npm test` for extension changes and `uv run mkdocs build --strict` for documentation changes before opening a PR.
+- Run `npm test` for extension changes and `uv sync --locked --group docs` followed by `uv run --locked --group docs mkdocs build --strict` for documentation changes before opening a PR.
+
+Documentation ownership and notification setup are described in the
+[README](https://github.com/WDGPH/VaxLink#documentation-site). Keep source navigation and Markdown
+extensions here; the documentation hub owns published styling and release URLs.
