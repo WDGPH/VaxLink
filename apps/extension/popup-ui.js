@@ -12,7 +12,45 @@ export function renderNVCStatus(status, container) {
   const updated = formatDateTime(status.updatedAt);
   const checked = formatDateTime(status.lastCheckAt);
   const intervalHours = Math.round((status.autoSyncIntervalMinutes || 0) / 60);
-  container.textContent = `Last bundle update: ${updated} | Last check: ${checked} | Auto-check: every ${intervalHours}h`;
+  const rows = [
+    status.bundleLastUpdated ? ['Catalog updated', formatDateTime(status.bundleLastUpdated)] : null,
+    ['Last successful refresh', updated],
+    ['Last check', checked]
+  ].filter(Boolean);
+  container.innerHTML = `
+    <div class="nvc-status-heading">
+      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `NVC v${status.releaseVersion}` : 'NVC release unavailable')}</span>
+      ${status.lotCount == null ? '' : `<span class="nvc-status-count">${escapeHtml(formatAvailableLots(status.lotCount))}</span>`}
+    </div>
+    ${status.releaseDate ? `<dl class="nvc-status-release"><div><dt>Released</dt><dd>${escapeHtml(status.releaseDate)}</dd></div></dl>` : ''}
+    <details class="nvc-status-sync">
+      <summary>Sync details</summary>
+    <dl class="nvc-status-details">${rows.map(([label, value]) =>
+      `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`
+    ).join('')}</dl>
+    <div class="nvc-status-footer">Auto-check: every ${escapeHtml(intervalHours)}h</div>
+    </details>
+  `;
+}
+
+function formatNVCReleaseLabel({ releaseVersion, releaseDate }) {
+  return [releaseVersion ? `NVC v${releaseVersion}` : '', releaseDate ? `Released ${releaseDate}` : '']
+    .filter(Boolean).join(' — ');
+}
+
+function formatAvailableLots(lotCount) {
+  return `${lotCount.toLocaleString()} ${lotCount === 1 ? 'lot' : 'lots'} available`;
+}
+
+export function formatNVCRefreshMessage(status) {
+  const { firstRefresh, addedLotCount, lotCount } = status;
+  const release = formatNVCReleaseLabel(status);
+  const available = `${formatAvailableLots(lotCount)}.${release ? ` ${escapeHtml(release)}.` : ''}`;
+  if (firstRefresh) return `NVC refresh successful — ${available}`;
+  if (addedLotCount > 0) {
+    return `NVC refresh successful — ${addedLotCount.toLocaleString()} new ${addedLotCount === 1 ? 'lot' : 'lots'} added. ${available}`;
+  }
+  return `NVC data is already up to date — ${available}`;
 }
 
 export function setButtonBusy(button, busy, busyText) {

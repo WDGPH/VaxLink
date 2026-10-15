@@ -238,7 +238,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     // Network is forbidden in tests; the icon fetch failure is caught inside
     // ensureActionIcon and the bundle path never hits fetch (storage is seeded).
-    fetch: () => Promise.reject(new Error('network disabled in clinic-sim tests')),
+    fetch: options.fetch || (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
     URL,

@@ -10,6 +10,7 @@ import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-pa
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,
+  formatNVCRefreshMessage,
   setButtonBusy,
   showOutput
 } from './popup-ui.js';
@@ -344,8 +345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           return;
         }
 
-        const count = response.entryCount ?? 'unknown';
-        writeOutput(`NVC update successful (${count} entries).`, 'success');
+        writeOutput(formatNVCRefreshMessage(response), 'success');
         loadNVCStatus();
       });
     });
