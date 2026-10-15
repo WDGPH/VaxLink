@@ -1,52 +1,13 @@
 site_name: VaxLink
 site_description: Documentation for the VaxLink Chrome extension
-site_url: https://wdgph.github.io/VaxLink/
+site_url: https://wdgph.github.io/docs/vaxlink/latest/
 repo_url: https://github.com/WDGPH/VaxLink
 repo_name: WDGPH/VaxLink
 copyright: "&copy; Wellington-Dufferin-Guelph Public Health"
 
+# The documentation hub supplies the published theme. Material supports local checks.
 theme:
   name: material
-  custom_dir: docs/overrides
-  logo: assets/vaxlink-logo.svg
-  favicon: assets/vaxlink-logo.svg
-  icon:
-    repo: fontawesome/brands/github
-  features:
-    - content.code.annotate
-    - content.code.copy
-    - navigation.footer
-    - navigation.indexes
-    - navigation.instant
-    - navigation.tabs
-    - navigation.top
-    - search.suggest
-    - search.highlight
-    - toc.follow
-  palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: vaxlink
-      accent: vaxlink
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: vaxlink
-      accent: vaxlink
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
-
-extra_css:
-  - stylesheets/extra.css
-
-extra:
-  generator: false
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/WDGPH/VaxLink
 
 markdown_extensions:
   - attr_list

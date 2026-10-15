@@ -62,9 +62,12 @@ handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
   best-effort bundle fetch fails), and both channel zips uploaded as workflow
   artifacts. Web Store uploads are manual: download the tested zip from the
   run.
-- `.github/workflows/docs.yml` — builds the MkDocs documentation site on
-  pushes and PRs to `main`; publishes it to the `gh-pages` branch on pushes
-  to `main`.
+- `.github/workflows/docs.yml` — runs the locked, strict MkDocs check on
+  pushes and PRs to `main`.
+- `.github/workflows/docs-hub-notify.yml` — opt-in notifications for `main` and
+  stable-tag changes. The PHIZ documentation hub owns publication and styling;
+  see the [repository README](https://github.com/WDGPH/VaxLink#documentation-site)
+  for setup and historical release reconciliation.
 
 ## Constraints
 
