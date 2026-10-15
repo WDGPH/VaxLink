@@ -1,7 +1,7 @@
 # VaxLink
 
 [![CI](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml)
-[![Docs](https://img.shields.io/badge/docs-PHIZ-blue)](https://wdgph.github.io/docs/vaxlink/)
+[![Docs](https://img.shields.io/badge/docs-PHIZ-blue)](https://docs.phiz.ca/vaxlink/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/WDGPH/VaxLink)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -11,7 +11,7 @@ inventory management workflow for lot/expiry tracking. The extension
 (`apps/extension`) is the main deliverable, supported by a MkDocs
 documentation site.
 
-- 📚 **Documentation:** <https://wdgph.github.io/docs/vaxlink/>
+- 📚 **Documentation:** <https://docs.phiz.ca/vaxlink/>
 - 🧩 **Extension:** `apps/extension`
 
 ## Repository Layout
@@ -81,7 +81,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECUR
 ## Documentation site
 
 Architecture, the EMR adapter contract, release process, and engineering
-notes are published in the [PHIZ documentation hub](https://wdgph.github.io/docs/vaxlink/).
+notes are published in the [PHIZ documentation hub](https://docs.phiz.ca/vaxlink/).
 This repository owns the Markdown, navigation, Markdown extensions, and locked
 build dependencies. `WDGPH/docs` owns the shared presentation and publication.
 
