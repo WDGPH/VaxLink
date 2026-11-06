@@ -26,12 +26,15 @@ src = os.path.join(root, "apps", "extension")
 dist = os.path.join(root, "dist")
 
 # Files that must never ship in a Web Store upload.
-EXCLUDE = {".claude", ".gitignore", "README.md"}
+EXCLUDE = {".claude", ".gitignore", "README.md", "nvc_bundle.json",
+           "node_modules", "__pycache__", "tests", "test", "__tests__",
+           "fixtures", ".DS_Store"}
 
 staging = tempfile.mkdtemp(prefix="vaxlink-pkg-")
 try:
     ext = os.path.join(staging, "ext")
-    shutil.copytree(src, ext, ignore=lambda d, names: [n for n in names if n in EXCLUDE])
+    shutil.copytree(src, ext, ignore=lambda d, names: [n for n in names
+        if n in EXCLUDE or n.endswith((".test.js", ".spec.js"))])
 
     manifest_path = os.path.join(ext, "manifest.json")
     with open(manifest_path) as f:
