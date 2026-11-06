@@ -560,11 +560,13 @@ function initializeScannerLockMonitoring() {
 function isSupportedChartUrl(urlValue) {
   try {
     const url = new URL(String(urlValue || ''));
+    if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
     const path = url.pathname.toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
-       host === 'panorama.prod.ehealthontario.ca') &&
+       host === 'panorama.prod.ehealthontario.ca' ||
+       host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
     return isPanorama || isInputHealth;
