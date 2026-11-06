@@ -5,8 +5,7 @@
 #   ./scripts/package-extension.sh prod    -> dist/vaxlink-prod-<version>.zip   (name: "VaxLink")
 #
 # The channel identity (extension name) is stamped HERE, not stored as a
-# branch difference. Release Please owns version changes on main; the Alpha
-# packaging option remains available while its branch-based automation is dormant.
+# branch difference. Release Please owns version changes on main and alpha.
 
 set -euo pipefail
 
@@ -18,7 +17,7 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHANNEL="$CHANNEL" ROOT="$ROOT" python3 - <<'PY'
-import json, os, shutil, tempfile, zipfile
+import json, os, re, shutil, tempfile, zipfile
 
 channel = os.environ["CHANNEL"]
 root = os.environ["ROOT"]
@@ -43,22 +42,26 @@ try:
         package_version = str(json.load(f).get("version") or manifest["version"])
 
     manifest["name"] = "VaxLink" if channel == "prod" else "VaxLink Alpha"
-    # Chrome's manifest `version` cannot contain a prerelease suffix. Release
-    # Please may set package.json to e.g. 1.2.0-alpha.1 on dev, so package the
-    # numeric base in manifest.version while retaining the full prerelease in
-    # version_name for the alpha channel.
-    version = package_version.split("-", 1)[0]
-    manifest["version"] = version
-    manifest["version_name"] = version if channel == "prod" else package_version
-    if channel == "alpha" and "-" not in package_version:
-        manifest["version_name"] = f"{version}-alpha"
+    # Keep the prerelease sequence in Chrome's numeric version so successive
+    # Alpha uploads can update the same listing. The initial -alpha is sequence 0.
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-alpha(?:\.(\d+))?)?", package_version)
+    if not match:
+        raise ValueError(f"Unsupported package version: {package_version}")
+    version = match.group(1)
+    prerelease = "-" in package_version
+    if channel == "prod" and prerelease:
+        raise ValueError("Production packages require a stable package version")
+    manifest["version"] = f"{version}.{int(match.group(2) or 0)}" if prerelease else version
+    manifest["version_name"] = package_version if prerelease or channel == "prod" else f"{version}-alpha"
+    if any(int(part) > 65535 for part in manifest["version"].split(".")):
+        raise ValueError("Chrome version components must not exceed 65535")
 
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
 
     os.makedirs(dist, exist_ok=True)
-    out = os.path.join(dist, f"vaxlink-{channel}-{version}.zip")
+    out = os.path.join(dist, f"vaxlink-{channel}-{package_version}.zip")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for dirpath, dirnames, filenames in os.walk(ext):
             for name in sorted(filenames):

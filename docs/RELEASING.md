@@ -3,7 +3,8 @@
 ## Current release process
 
 Production releases run from `main`. v1.1.5 was released directly from `main`
-using release-please; the former `dev`-based Alpha process is not active.
+using release-please. Prerelease development now uses `alpha`, created from the
+same v1.1.5 commit; the former `dev` branch is not used.
 
 1. Merge changes with conventional commit subjects into `main`.
 2. Release-please creates or updates a release PR containing the version changes
@@ -27,17 +28,38 @@ higher than the one already uploaded to that listing.
 | Channel | Status | Web Store listing | Packaged manifest name | Popup badge |
 |---|---|---|---|---|
 | Production | Active, releases from `main` | VaxLink | `VaxLink` | hidden |
-| Alpha | Separate listing; branch-based automation dormant | VaxLink Alpha | `VaxLink Alpha` | shown |
+| Alpha | Prereleases from `alpha` | VaxLink Alpha | `VaxLink Alpha` | shown |
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
 branch differences; runtime channel behaviour derives from the manifest name.
 
-The Alpha jobs and `release-please-dev-config.json` are retained for possible
-future use. They require `dev`, which is no longer active. If reinstated, they
-would create an Alpha release PR, tag and prerelease, then attach the Alpha ZIP
-and its checksum. Uploading to the separate Alpha listing would still be manual.
-The current production process does not require Alpha-to-production promotion.
+### Alpha releases
+
+1. Merge conventional commits into `alpha`. Release-please uses
+   `release-please-alpha-config.json` to open or update its Alpha release PR.
+2. Review and merge that release PR into `alpha`. The workflow creates an Alpha
+   tag and GitHub prerelease, then uploads the Alpha ZIP and `SHA256SUMS`.
+3. An authorized publisher verifies the ZIP and uploads it to the separate
+   VaxLink Alpha listing for review. Store publication remains manual.
+
+Alpha versioning starts after v1.1.5, without the old 1.1.3 override. For patch
+changes the sequence is `1.1.6-alpha`, `1.1.6-alpha.1`, and so on; features or
+breaking changes can advance the minor or major version instead. Release-please
+owns these version changes; do not edit the version files or tag releases by hand.
+
+Chrome requires numeric versions. Packaging maps `1.1.6-alpha` to `1.1.6.0`,
+`1.1.6-alpha.1` to `1.1.6.1`, and so on, while `version_name` and the ZIP filename
+retain the full prerelease version. This lets successive Alpha uploads update
+the same listing. Production packaging requires a stable package version and
+keeps its three-part numeric version. Check the version against the target store
+listing before every upload.
+
+Promote reviewed changes to `main` when ready for production; its separate stable
+release PR and store submission still apply. Direct production fixes on `main`
+remain supported. Keep `alpha` current with those fixes. Alpha prereleases do
+not publish the stable documentation manual or notify its release reconciliation;
+the existing stable documentation-hub integration is unchanged.
 
 ## Installation and updates
 
@@ -80,7 +102,7 @@ The external pilot FAQ should distinguish these paths: automatic updates apply t
    ```
    Credit non-code contributions explicitly (e.g. `clinic feedback: WDGPH immunization nursing team`).
 
-Review the generated changelog in the release PR on `main`. Keep useful hand-curated feedback tables and a `### Known issues (tracked)` subsection with issue numbers so testers know what not to re-report. Do not manually rename sections or bump versions as a separate release step.
+Review the generated changelog in the release PR on its target branch (`main` or `alpha`). Keep useful hand-curated feedback tables and a `### Known issues (tracked)` subsection with issue numbers so testers know what not to re-report. Do not manually rename sections or bump versions as a separate release step.
 
 ## Feedback traceability (feedback → issue → fix → changelog)
 
@@ -93,7 +115,7 @@ This gives both directions: from a nurse's complaint to the exact commit, and fr
 
 ## Commit conventions
 
-Use conventional commit subjects on `main`:
+Use conventional commit subjects on `main` and `alpha`:
 
 - `fix: stop eating Tab keystrokes (#30)` → patch bump, "Fixed" section
 - `feat: preset dose for prefilled syringes (#24)` → minor bump, "Added" section

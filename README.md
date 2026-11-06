@@ -84,8 +84,8 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 `./scripts/package-extension.sh alpha|prod` builds the same channel ZIPs used
 for Web Store upload and GitHub Releases, stamping the channel name at build
-time. Production releases run from `main`; the separate Alpha listing and
-packaging option remain available, but the `dev`-based automation is dormant. See the
+time. Production releases run from `main`; prereleases run from `alpha` for the
+separate VaxLink Alpha listing. Store uploads remain manual. See the
 [release process](docs/RELEASING.md).
 
 ## Notes
@@ -114,8 +114,8 @@ uv run --locked --group docs python -m mkdocs serve
 
 Open <http://127.0.0.1:8000/docs/vaxlink/latest/>. The local Material theme is
 for source checks; the hub applies its shared theme when publishing.
-The `docs.yml` workflow runs the strict check on pushes and pull requests to
-`main`. It does not publish a separate site or write to `gh-pages`.
+The `docs.yml` workflow runs the strict check on pushes to `main` and `alpha`,
+and on pull requests. It does not publish a separate site or write to `gh-pages`.
 
 ### Hub notifications and versions
 

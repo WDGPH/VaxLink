@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - dev
+      - alpha
   workflow_dispatch:
     inputs:
       release_lane:
@@ -105,7 +105,7 @@ jobs:
         run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
 
   alpha-release:
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
+    if: github.ref == 'refs/heads/alpha' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -115,8 +115,8 @@ jobs:
         id: release
         uses: googleapis/release-please-action@v4
         with:
-          target-branch: dev
-          config-file: release-please-dev-config.json
+          target-branch: alpha
+          config-file: release-please-alpha-config.json
           manifest-file: .release-please-manifest.json
 
   publish-alpha-assets:
