@@ -35,7 +35,16 @@ documentation site.
 
 ### Installation
 
-Pilot staff can install the approved release through the Chrome Web Store. Chrome handles installation and updates for that path. When the Web Store is unavailable, partner IT can download the versioned production ZIP from a GitHub Release, verify it against that release's `SHA256SUMS`, extract it, and load the folder through Chrome's **Load unpacked** option. Partner IT must deliberately deploy each later approved version on this path. See [release instructions](docs/RELEASING.md).
+Use the approved Chrome Web Store listing for production installation. Chrome
+manages updates for this path.
+
+Manual GitHub deployment is an IT-managed fallback, subject to organizational
+Chrome policies. Partner IT downloads an approved production ZIP from its GitHub
+Release, verifies it, extracts it, and loads the folder through Chrome's **Load
+unpacked** option. Manual deployments do not receive Chrome Web Store updates;
+partner IT must deliberately install subsequent approved versions. See the
+[release instructions](docs/RELEASING.md) for verification and historical
+checksum availability.
 
 For local development, load the unpacked extension:
 
@@ -45,7 +54,7 @@ For local development, load the unpacked extension:
 4. Select `apps/extension`
 
 First test VaxLink in the Panorama training environment with synthetic training
-records. Reload the training page after installing or updating the extension.
+records. Reload supported Panorama tabs after installing or updating the extension.
 Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
 before moving to production.
 
@@ -54,7 +63,7 @@ before moving to production.
 - Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
 - Auto-check every 24h (alarms)
 - Manual refresh from popup
-- Stores the catalogue locally for lookup
+- Keeps the last-known-good catalogue if refresh fails
 
 ### Inventory
 
@@ -75,7 +84,8 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 `./scripts/package-extension.sh alpha|prod` builds the same channel ZIPs used
 for Web Store upload and GitHub Releases, stamping the channel name at build
-time (`dev` → VaxLink Alpha, `main` → VaxLink). See the
+time. Production releases run from `main`; the separate Alpha listing and
+packaging option remain available, but the `dev`-based automation is dormant. See the
 [release process](docs/RELEASING.md).
 
 ## Notes

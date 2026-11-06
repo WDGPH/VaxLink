@@ -33,7 +33,7 @@ Install for manual testing: load `apps/extension/` as an unpacked extension in `
 ./scripts/package-extension.sh prod    # dist/vaxlink-prod-<v>.zip,  name "VaxLink"
 ```
 
-Release channels: `dev` = VaxLink Alpha, `main` = VaxLink (two separate Web Store listings). The extension *name* is stamped by the package script, never edited in `manifest.json` — the manifest must stay identical across branches so `dev → main` merges don't conflict. Only `version` is bumped in git, and it flows through merges.
+Production releases run from `main` through release-please. The separate VaxLink Alpha listing and `alpha` packaging option remain available, but the `dev`-based release automation is dormant. The extension name is stamped by the package script; release-please owns version changes. See `docs/RELEASING.md`.
 
 ## Extension Architecture
 

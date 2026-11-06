@@ -16,7 +16,7 @@ on:
           - alpha
         default: stable
       existing_tag:
-        description: 'Existing stable tag to package/upload (optional repair path)'
+        description: 'Existing stable tag for exceptional asset replacement (prefer a new version)'
         required: false
         type: string
 
@@ -81,7 +81,7 @@ jobs:
       - name: Checksum exact release ZIP
         run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach stable package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS
 
   repair-stable-assets:
     if: github.event_name == 'workflow_dispatch' && inputs.release_lane == 'stable' && inputs.existing_tag != ''
@@ -101,6 +101,7 @@ jobs:
       - name: Checksum exact repaired ZIP
         run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach repaired stable package to the GitHub Release
+        # Exceptional administrative repair: this can replace previously distributed bytes.
         run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
 
   alpha-release:
@@ -138,4 +139,4 @@ jobs:
       - name: Checksum exact release ZIP
         run: cd dist && sha256sum vaxlink-alpha-*.zip > SHA256SUMS
       - name: Attach alpha package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip dist/SHA256SUMS --clobber
+        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip dist/SHA256SUMS

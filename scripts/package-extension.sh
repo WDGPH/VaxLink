@@ -5,8 +5,8 @@
 #   ./scripts/package-extension.sh prod    -> dist/vaxlink-prod-<version>.zip   (name: "VaxLink")
 #
 # The channel identity (extension name) is stamped HERE, not stored as a
-# branch difference — manifest.json must stay identical on dev and main so
-# merges never conflict on it. Version flows through git normally.
+# branch difference. Release Please owns version changes on main; the Alpha
+# packaging option remains available while its branch-based automation is dormant.
 
 set -euo pipefail
 
