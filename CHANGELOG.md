@@ -8,6 +8,14 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.1.5](https://github.com/WDGPH/VaxLink/compare/v1.1.4...v1.1.5) (2026-11-06)
+
+
+### Fixed
+
+* support the Panorama training site ([dd3ac80](https://github.com/WDGPH/VaxLink/commit/dd3ac80a3387774aeb859a8c71f0313ed1a4b647))
+* support the Panorama training site ([adddd5e](https://github.com/WDGPH/VaxLink/commit/adddd5e60c3e883e842ebd4241816da3e57ca203))
+
 ## [1.1.4](https://github.com/WDGPH/VaxLink/compare/v1.1.3...v1.1.4) (2026-10-07)
 
 
