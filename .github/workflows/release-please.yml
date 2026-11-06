@@ -41,6 +41,26 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  notify-documentation-release:
+    needs: stable-release
+    if: github.repository == 'WDGPH/VaxLink' && needs.stable-release.outputs.release_created == 'true' && vars.DOCS_HUB_NOTIFY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Request documentation release reconciliation
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_HUB_TRIGGER_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::error::DOCS_HUB_NOTIFY_ENABLED requires DOCS_HUB_TRIGGER_TOKEN with Actions: write on WDGPH/docs.'
+            exit 1
+          fi
+          gh api --method POST repos/WDGPH/docs/actions/workflows/refresh-releases.yml/dispatches \
+            -f ref=main -f 'inputs[source_repo]=WDGPH/VaxLink'
+
   publish-stable-assets:
     needs: stable-release
     if: needs.stable-release.outputs.release_created == 'true'

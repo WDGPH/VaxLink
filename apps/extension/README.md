@@ -2,6 +2,25 @@
 
 Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, and CHR autofill.
 
+## Panorama Training Site
+
+First test VaxLink in the Panorama training environment using synthetic training
+records.
+
+The training hostname is allowed explicitly, alongside
+the existing production Panorama and InputHealth hosts. No wildcard permission
+for other eHealth Ontario sites or new extension API permissions is added.
+
+Scanner routing, hands-free workflows, and the Panorama HUD still require an
+immunization page with `/recordImms/` in its path. Runtime page detection requires
+HTTPS, matching the manifest. Reload an already-open training page after
+installing or updating the extension.
+
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+in the training environment before moving to production.
+Automated URL and routing tests do not verify the live training site's DOM,
+scanner hardware, or organization-specific access.
+
 ## Main Pieces
 
 - `popup.js` drives popup workflow state, scan parsing, queue management, and inventory page launch.

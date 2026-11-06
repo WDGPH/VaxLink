@@ -663,6 +663,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
 function isHandsFreeSupportedPage() {
   try {
+    if (window.location.protocol !== 'https:') return false;
     if (window.top !== window.self) {
       return false;
     }
@@ -678,7 +679,8 @@ function isHandsFreeSupportedPage() {
     const path = String(window.location.pathname || '').toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
-       host === 'panorama.prod.ehealthontario.ca') &&
+       host === 'panorama.prod.ehealthontario.ca' ||
+       host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
@@ -2257,10 +2259,12 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
 
 function isPanoramaRecordImmsPage() {
   try {
+    if (window.location.protocol !== 'https:') return false;
     const host = String(window.location.hostname || '').toLowerCase();
     const isPanorama =
       host === 'www.panorama.prod.ehealthontario.ca' ||
-      host === 'panorama.prod.ehealthontario.ca';
+      host === 'panorama.prod.ehealthontario.ca' ||
+      host === 'trpanoramadhir.prod.ehealthontario.ca';
     if (!isPanorama) return false;
     return window.location.pathname.toLowerCase().includes('/recordimms/');
   } catch {
