@@ -26,6 +26,11 @@ Wellington-Dufferin-Guelph Public Health.
 
 ## Get started
 
+First test VaxLink in the Panorama training environment using synthetic training
+records. After installing or updating the extension, reload the training page
+and open an immunization record. Check Single Inject, Multiple Inject, Inventory, and lock-screen
+capture/replay before moving to production.
+
 <div class="grid cards" markdown>
 
 - :material-source-branch: **Architecture**

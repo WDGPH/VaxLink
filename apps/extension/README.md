@@ -4,8 +4,10 @@ Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, and CHR autofi
 
 ## Panorama Training Site
 
-VaxLink also supports `https://trpanoramadhir.prod.ehealthontario.ca/*` for
-non-production testing. The training hostname is allowed explicitly, alongside
+First test VaxLink in the Panorama training environment using synthetic training
+records.
+
+The training hostname is allowed explicitly, alongside
 the existing production Panorama and InputHealth hosts. No wildcard permission
 for other eHealth Ontario sites or new extension API permissions is added.
 
@@ -14,8 +16,8 @@ immunization page with `/recordImms/` in its path. Runtime page detection requir
 HTTPS, matching the manifest. Reload an already-open training page after
 installing or updating the extension.
 
-Before clinical use, check Single Inject, Multiple Inject, Inventory, and
-lock-screen capture/replay in the training environment with synthetic records.
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+in the training environment before moving to production.
 Automated URL and routing tests do not verify the live training site's DOM,
 scanner hardware, or organization-specific access.
 

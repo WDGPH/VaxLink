@@ -40,6 +40,11 @@ documentation site.
 3. Click **Load unpacked**
 4. Select `apps/extension`
 
+First test VaxLink in the Panorama training environment with synthetic training
+records. Reload the training page after installing or updating the extension.
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+before moving to production.
+
 ### Data update model
 
 - Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
