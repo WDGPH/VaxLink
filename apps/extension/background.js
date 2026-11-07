@@ -78,6 +78,7 @@ const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
+let pendingInboxWriteQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
 let iconInitPromise = null;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -87,7 +88,6 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
-const PENDING_SCAN_INBOX_LIMIT = 25;
 const BADGE_COLOR = '#0891b2';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
@@ -782,34 +782,40 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  await logAnalyticsEvent('scan_captured', {
-    workflow: mode,
-    source: scan.source || 'web-serial',
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      record.gtin ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
-  await logAnalyticsEvent('queue_saved', {
-    workflow: mode,
-    queue: mode === 'inventory' ? 'inventory' : 'multiple',
-    source: scan.source || 'web-serial',
-    count: 1,
-    queueSizeAfter: record.queueSizeAfter || 0,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
+  // A saved scan must remain successful if optional usage counters cannot be written.
+  try {
+    await logAnalyticsEvent('scan_captured', {
+      workflow: mode,
+      source: scan.source || 'web-serial',
+      vaccineLabel:
+        record.tradename ||
+        record.generic_name ||
+        record.name ||
+        record.lot ||
+        record.gtin ||
+        '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag
+    });
+    if (!record.duplicate_ignored)
+      await logAnalyticsEvent('queue_saved', {
+        workflow: mode,
+        queue: mode === 'inventory' ? 'inventory' : 'multiple',
+        source: scan.source || 'web-serial',
+        count: 1,
+        queueSizeAfter: record.queueSizeAfter || 0,
+        vaccineLabel:
+          record.tradename ||
+          record.generic_name ||
+          record.name ||
+          record.lot ||
+          '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag
+      });
+  } catch (_) {
+    console.warn('Scanner scan retained; usage counters could not be updated.');
+  }
 
   return {
     queuedToWorkflow: true,
@@ -819,18 +825,31 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   };
 }
 
-async function enqueuePendingScan(scan) {
+function mutatePendingInbox(action) {
+  const result = pendingInboxWriteQueue.catch(() => undefined).then(action);
+  pendingInboxWriteQueue = result;
+  return result;
+}
+
+function enqueuePendingScan(scan) {
+  return mutatePendingInbox(() => enqueuePendingScanNow(scan));
+}
+
+async function enqueuePendingScanNow(scan) {
   const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
   const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
     ? stored[PENDING_SCAN_INBOX_KEY]
     : [];
-  rows.push(scan);
-  const nextRows = rows.slice(-PENDING_SCAN_INBOX_LIMIT);
+  const nextRows = [...rows, scan];
   await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
   return nextRows.length;
 }
 
-async function drainPendingScansToTab(tabId) {
+function drainPendingScansToTab(tabId) {
+  return mutatePendingInbox(() => drainPendingScansToTabNow(tabId));
+}
+
+async function drainPendingScansToTabNow(tabId) {
   const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
   const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
     ? stored[PENDING_SCAN_INBOX_KEY]
@@ -915,8 +934,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
     );
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
@@ -955,8 +975,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
   if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0

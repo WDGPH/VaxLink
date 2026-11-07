@@ -135,6 +135,15 @@ function applyDaemonStatus(status) {
 }
 
 function renderDaemonRouteResult(response) {
+  if (response?.duplicate_ignored) {
+    setStatus(
+      els.routeStatus,
+      'Duplicate scan ignored; no queue row was added.',
+      'warning'
+    );
+    return;
+  }
+
   if (response?.locked) {
     const message =
       response.workflow === 'single'

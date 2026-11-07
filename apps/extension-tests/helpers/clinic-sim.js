@@ -241,11 +241,13 @@ export function createBackgroundHarness(bundle, options = {}) {
       },
       sendMessage(tabId, message, sendOptions, callback) {
         tabMessages.push({ tabId, message, options: sendOptions });
-        const response = options.tabResponse || {
+        const response = (typeof options.tabResponse === 'function'
+          ? options.tabResponse(tabId, message)
+          : options.tabResponse) || {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };
-        queueMicrotask(() => callback(response));
+        Promise.resolve(response).then(callback);
       }
     },
     alarms: {
@@ -339,7 +341,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     filename: 'background.js'
   });
 
-  function sendMessage(request) {
+  function sendMessage(request, sender = { id: 'clinic-sim' }) {
     return new Promise((resolve, reject) => {
       let settled = false;
       const sendResponse = (response) => {
@@ -349,7 +351,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       };
       let isAsync = false;
       for (const listener of messageListeners) {
-        if (listener(request, { id: 'clinic-sim' }, sendResponse) === true) {
+        if (listener(request, sender, sendResponse) === true) {
           isAsync = true;
         }
       }

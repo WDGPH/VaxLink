@@ -49,6 +49,12 @@ In Single mode, locked scans wait in the pending inbox. Multiple and Inventory
 mode lock captures enter Multiple Inject for review. Connection warnings also
 appear in Single mode; manual barcode input remains available.
 
+The pending inbox retains scans until chart acceptance; it no longer drops the
+oldest scan after 25 captures. A failed storage write returns failure to its
+sender. Queue saves remain successful when optional usage counters fail. Delivery and inbox persistence are separate:
+a worker interruption after chart acceptance can leave an uncertain replay.
+This is not an exactly-once guarantee across worker interruptions.
+
 ## Reconnect test
 
 1. Lock Windows again while the scanner status is connected.
