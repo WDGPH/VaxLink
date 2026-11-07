@@ -132,3 +132,50 @@ test('a failed post-delivery inbox write reports failure and leaves an uncertain
   assert.equal(harness.tabMessages.length, 1);
   assert.equal(harness.storageData.get(PENDING).length, 1);
 });
+
+test('an accepted not-ready scan stays on its intended tab until a ready replay succeeds', async () => {
+  let ready = false;
+  const other = { id: 23, url: chart.url };
+  const tabs = [{ ...chart, active: true }, other];
+  const delivered = [];
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs,
+    setTimeout: () => 0,
+    tabResponse: (tabId) => {
+      delivered.push(tabId);
+      return { accepted: true, success: ready, retryable: !ready };
+    }
+  });
+  const captured = await capture(harness, 0);
+  assert.equal(captured.pending, true);
+  assert.equal(harness.storageData.get(PENDING).length, 1);
+  assert.equal(harness.storageData.get(PENDING)[0].pending_tab_id, chart.id);
+  assert.equal((await drain(harness)).drained, 0);
+  assert.equal(harness.storageData.get(PENDING).length, 1);
+  const wrongTab = await harness.sendMessage(
+    { action: 'drainPendingScannerScans' },
+    { ...sender, tab: other }
+  );
+  assert.equal(wrongTab.drained, 0);
+  assert.equal(harness.storageData.get(PENDING).length, 1);
+  ready = true;
+  assert.equal((await drain(harness)).drained, 1);
+  assert.equal(harness.storageData.get(PENDING).length, 0);
+  assert.ok(delivered.every((tabId) => tabId === chart.id));
+});
+
+test('a failed inbox save after an unready acceptance never retries another chart', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [
+      { ...chart, active: true },
+      { id: 23, url: chart.url }
+    ],
+    failStorageSet: (values) => Object.hasOwn(values, PENDING),
+    tabResponse: { accepted: true, retryable: true, success: false }
+  });
+  assert.equal((await capture(harness, 0)).success, false);
+  assert.deepEqual(
+    harness.tabMessages.map(({ tabId }) => tabId),
+    [chart.id]
+  );
+});

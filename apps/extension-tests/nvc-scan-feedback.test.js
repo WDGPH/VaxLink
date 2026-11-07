@@ -27,6 +27,11 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
       console,
       window,
       location,
+      Date: class extends Date {
+        static now() {
+          return 100000;
+        }
+      },
       testSlot: slot,
       document: {
         readyState: 'loading',
@@ -76,6 +81,12 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
       '01001234567890121727123110TRAININGLOT'
     );
     assert.equal(result.success, false);
+    assert.equal(result.retryable, true);
+    const retry = await context.handleHandsFreeScan(
+      '01001234567890121727123110TRAININGLOT'
+    );
+    assert.equal(retry.retryable, true);
+    assert.equal(retry.duplicate_ignored, undefined);
     assert.equal(fillPayload.lot, 'TRAININGLOT');
     assert.equal(fillPayload.gtin, '00123456789012');
     assert.ok(fillPayload.expiry);

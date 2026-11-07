@@ -531,31 +531,33 @@ async function updateScannerLockState(state) {
   }
   await setStorage(values);
   if (wasLocked) {
-    void drainPendingScansAfterUnlock(existing);
+    void drainPendingScansWithRetries(existing).catch(() =>
+      console.warn('Pending scanner replay did not complete.')
+    );
   }
   return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
 }
 
-async function drainPendingScansAfterUnlock(lockSession, attempt = 0) {
+async function drainPendingScansWithRetries(lockSession, attempt = 0) {
   let tabId = Number.isInteger(lockSession?.tabId) ? lockSession.tabId : null;
   if (tabId === null) {
     const activeTabs = await queryTabs({ active: true, currentWindow: true });
     tabId = activeTabs.find(tabMayBeSupportedChart)?.id ?? null;
   }
   if (tabId === null) return { drained: 0, remaining: null };
-  return drainPendingScansToTab(tabId)
-    .then((result) => {
-      if (result.remaining > 0 && attempt < 2) {
-        setTimeout(
-          () => {
-            void drainPendingScansAfterUnlock(lockSession, attempt + 1);
-          },
-          1000 * (attempt + 1)
-        );
-      }
-      return result;
-    })
-    .catch(() => ({ drained: 0, remaining: null }));
+  return drainPendingScansToTab(tabId).then((result) => {
+    if (result.remaining > 0 && attempt < 2) {
+      setTimeout(
+        () => {
+          void drainPendingScansWithRetries(lockSession, attempt + 1).catch(
+            () => console.warn('Pending scanner replay did not complete.')
+          );
+        },
+        1000 * (attempt + 1)
+      );
+    }
+    return result;
+  });
 }
 
 function initializeScannerLockMonitoring() {
@@ -972,6 +974,10 @@ async function drainPendingScansToTabNow(tabId) {
   const remaining = [];
   let drained = 0;
   for (const row of rows) {
+    if (Number.isInteger(row.pending_tab_id) && row.pending_tab_id !== tabId) {
+      remaining.push(row);
+      continue;
+    }
     try {
       const parent = diagnosticRecorder?.parentForQueue(
         diagnosticRecorder?.pendingKey(row.capturedAt)
@@ -981,14 +987,16 @@ async function drainPendingScansToTabNow(tabId) {
         diagnosticRecorder.record(link, 'lifecycle', 'partial', {
           reason: 'unknown'
         });
-      await sendScanToTab(
+      const response = await sendScanToTab(
         tabId,
         normalizeScanEvent({
           ...row,
           ...(link ? { diagnosticLink: link } : {})
         })
       );
-      drained += 1;
+      if (response.retryable === true)
+        remaining.push({ ...row, pending_tab_id: tabId });
+      else drained += 1;
     } catch (_) {
       remaining.push(row);
     }
@@ -1091,17 +1099,32 @@ async function routeScanToActiveSupportedTab(rawScan) {
   for (const tab of candidates) {
     if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
     tried.add(tab.id);
+    let response;
     try {
-      const response = await sendScanToTab(tab.id, scan);
+      response = await sendScanToTab(tab.id, scan);
+    } catch (_) {
+      continue;
+    }
+    // Acceptance stops cross-tab routing even when the form needs more time.
+    // Keep that capture for this destination instead of treating it as a fill.
+    if (response.retryable === true) {
+      const pendingCount = await enqueuePendingScan({
+        ...scan,
+        pending_tab_id: tab.id
+      });
+      void drainPendingScansWithRetries({ tabId: tab.id }).catch(() =>
+        console.warn('Pending scanner replay did not complete.')
+      );
       return {
         routed: true,
-        queued: false,
+        queued: true,
+        pending: true,
+        pendingCount,
         tabId: tab.id,
         response
       };
-    } catch (_) {
-      // Try the next tab; unsupported pages simply do not have the content script.
     }
+    return { routed: true, queued: false, tabId: tab.id, response };
   }
 
   const workflowQueueResult = await saveScannerScanToWorkflowQueue(
@@ -3294,7 +3317,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    drainPendingScansToTab(tabId)
+    drainPendingScansWithRetries({ tabId })
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) =>
         sendResponse({

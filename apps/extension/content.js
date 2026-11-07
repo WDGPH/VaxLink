@@ -42,8 +42,7 @@ let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
 let lastVaxlinkFillAt = 0;
-let lastHandledScanValue = '';
-let lastHandledScanAt = 0;
+let lastHandledScan = null;
 let audioContextRef = null;
 let expiryGuardHost = null;
 let expiryGuardRoot = null;
@@ -240,6 +239,7 @@ function setupMessageListener() {
             accepted,
             success: !!result?.success,
             pending: !!result?.pending,
+            retryable: result?.retryable === true,
             status: result?.status || (result?.success ? 'success' : 'failed'),
             error: result?.error || '',
             queued: !!result?.queued,
@@ -590,7 +590,7 @@ async function handleHandsFreeScan(
   const scanCapturedAt = new Date().toISOString();
 
   const now = Date.now();
-  if (trimmed === lastHandledScanValue && now - lastHandledScanAt < 1500) {
+  if (trimmed === lastHandledScan?.value && now - lastHandledScan.at < 1500) {
     diagnosticEvent(diagnostic, 'parse', 'skipped', { reason: 'duplicate' });
     return {
       accepted: true,
@@ -599,8 +599,8 @@ async function handleHandsFreeScan(
       duplicate_ignored: true
     };
   }
-  lastHandledScanValue = trimmed;
-  lastHandledScanAt = now;
+  const handledScan = { value: trimmed, at: now };
+  lastHandledScan = handledScan;
 
   let parsed;
   try {
@@ -821,7 +821,13 @@ async function handleHandsFreeScan(
   }
   const autofillResult = autoFillPanorama(parsed);
   const success = isAutofillSuccess(autofillResult);
-  const pending = isAutofillPending(autofillResult);
+  const retryable = autofillResult?.reason === 'form_not_ready';
+  const pending = isAutofillPending(autofillResult) || retryable;
+  if (retryable) {
+    // An unprocessed capture must not make its later inbox replay a duplicate.
+    if (lastHandledScan === handledScan) lastHandledScan = null;
+    diagnosticEvent(parsed, 'fill', 'pending', { reason: 'unavailable' });
+  }
   logAnalyticsEvent('autofill_result', {
     workflow: activeWorkflowMode,
     source,
@@ -838,15 +844,16 @@ async function handleHandsFreeScan(
   });
   if (success) {
     showVaxlinkToast(parsed);
-  } else if (!pending) {
-    playAudioCue('error');
+  } else if (!pending || parsed.lookup_error) {
+    if (!pending) playAudioCue('error');
     if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
   return {
     accepted: true,
     success,
     pending,
-    status: autofillResult?.status || 'failed',
+    retryable,
+    status: retryable ? 'pending' : autofillResult?.status || 'failed',
     error:
       autofillResult?.error ||
       (!success && !pending ? 'Could not auto-fill fields' : '')
