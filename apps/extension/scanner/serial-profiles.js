@@ -1,5 +1,6 @@
 export const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
-export const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
+export const SCANNER_PORT_INFO_STORAGE_KEY =
+  'vaxlink_serial_scanner_port_info_v1';
 
 export const ZEBRA_USB_VENDOR_ID = 0x05e0;
 
@@ -28,7 +29,8 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       idleFlushMs: 150,
       maxFrameLength: 512
     },
-    setupNote: 'Use the DS8178 cradle in USB CDC / virtual COM mode, not HID keyboard emulation.'
+    setupNote:
+      'Use the DS8178 cradle in USB CDC / virtual COM mode, not HID keyboard emulation.'
   },
   {
     id: 'generic-usb-cdc',
@@ -54,12 +56,16 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       idleFlushMs: 150,
       maxFrameLength: 512
     },
-    setupNote: 'Use when the scanner exposes a browser-visible virtual COM port.'
+    setupNote:
+      'Use when the scanner exposes a browser-visible virtual COM port.'
   }
 ]);
 
 export function getSerialScannerProfile(profileId) {
-  return SERIAL_SCANNER_PROFILES.find((profile) => profile.id === profileId) || SERIAL_SCANNER_PROFILES[0];
+  return (
+    SERIAL_SCANNER_PROFILES.find((profile) => profile.id === profileId) ||
+    SERIAL_SCANNER_PROFILES[0]
+  );
 }
 
 export function portMatchesProfile(port, profile) {
@@ -68,8 +74,10 @@ export function portMatchesProfile(port, profile) {
   const filters = Array.isArray(profile.filters) ? profile.filters : [];
   if (filters.length === 0) return true;
   return filters.some((filter) => {
-    if (filter.usbVendorId && info.usbVendorId !== filter.usbVendorId) return false;
-    if (filter.usbProductId && info.usbProductId !== filter.usbProductId) return false;
+    if (filter.usbVendorId && info.usbVendorId !== filter.usbVendorId)
+      return false;
+    if (filter.usbProductId && info.usbProductId !== filter.usbProductId)
+      return false;
     return true;
   });
 }

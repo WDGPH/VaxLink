@@ -9,20 +9,26 @@ export function formatDateTime(value) {
 
 export function describeNVCHealth(status) {
   if (status.state === 'refreshing') {
-    return status.usable ? 'NVC is refreshing. Cached catalogue remains available.' : 'NVC is loading.';
+    return status.usable
+      ? 'NVC is refreshing. Cached catalogue remains available.'
+      : 'NVC is loading.';
   }
-  if (!status.usable) return 'NVC catalogue is unavailable. Barcode details can still be captured.';
-  if (status.freshnessDegraded) return 'NVC refresh failed. Previously downloaded catalogue remains available.';
+  if (!status.usable)
+    return 'NVC catalogue is unavailable. Barcode details can still be captured.';
+  if (status.freshnessDegraded)
+    return 'NVC refresh failed. Previously downloaded catalogue remains available.';
   return 'NVC is ready.';
 }
 
 export function formatNVCRefreshMessage(status) {
-  if (!status?.success) return status?.usable
-    ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
-    : 'Unable to refresh NVC. No usable catalogue is available.';
+  if (!status?.success)
+    return status?.usable
+      ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
+      : 'Unable to refresh NVC. No usable catalogue is available.';
   const count = Number(status.lotCount || 0).toLocaleString();
   const codes = status.lotCount === 1 ? 'lot code' : 'lot codes';
-  if (status.firstRefresh) return `NVC catalogue loaded successfully — ${count} distinct ${codes}.`;
+  if (status.firstRefresh)
+    return `NVC catalogue loaded successfully — ${count} distinct ${codes}.`;
   if (status.unchanged) return 'NVC catalogue checked — no changes detected.';
   if (status.addedLotCount > 0) {
     return `NVC catalogue updated — ${status.addedLotCount.toLocaleString()} new lot codes; ${count} total.`;
@@ -32,8 +38,10 @@ export function formatNVCRefreshMessage(status) {
 
 export function renderNVCStatus(status, container) {
   if (!container || !status) return;
-  const publication = status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
-    ? status.releaseDate : 'Unavailable';
+  const publication =
+    status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
+      ? status.releaseDate
+      : 'Unavailable';
   const rows = [
     ['Last downloaded', formatDateTime(status.updatedAt)],
     ['Last checked by VaxLink', formatDateTime(status.lastCheckAt)],
@@ -48,8 +56,12 @@ export function renderNVCStatus(status, container) {
     <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
     <details class="nvc-status-sync">
       <summary>Refresh details</summary>
-      <dl class="nvc-status-details">${rows.map(([label, value]) =>
-        `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      <dl class="nvc-status-details">${rows
+        .map(
+          ([label, value]) =>
+            `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`
+        )
+        .join('')}</dl>
       <div class="nvc-status-footer">Auto-check: every ${Math.round((status.autoSyncIntervalMinutes || 0) / 60)}h</div>
     </details>`;
 }
@@ -61,7 +73,8 @@ export function setButtonBusy(button, busy, busyText) {
   }
   button.disabled = busy;
   button.classList.toggle('button-busy', busy);
-  button.textContent = busy && busyText ? busyText : button.dataset.defaultLabel;
+  button.textContent =
+    busy && busyText ? busyText : button.dataset.defaultLabel;
 }
 
 export function getLoadingMarkup(text) {
@@ -93,7 +106,8 @@ function buildResultRow(label, value) {
 
 export function buildParsedOutputMarkup(data, options = {}) {
   const loading = !!options.loading;
-  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || null;
+  const inventoryExpiry =
+    data.inventory_expiry || data.expiry || data.nvc_lot_expiry || null;
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const warningBanner = buildExpiryBanner(expiryStatus);
 
@@ -110,7 +124,12 @@ export function buildParsedOutputMarkup(data, options = {}) {
         buildResultRow('Manufacturer', displayValue(data.manufacturer)),
         buildResultRow('Route', displayValue(data.route)),
         buildResultRow('Strength', displayValue(data.strength)),
-        buildResultRow('Dose', displayValue([data.dose_value, data.dose_unit].filter(Boolean).join(' '))),
+        buildResultRow(
+          'Dose',
+          displayValue(
+            [data.dose_value, data.dose_unit].filter(Boolean).join(' ')
+          )
+        ),
         buildResultRow('DIN', displayValue(data.din)),
         buildResultRow('NVC Lot Expiry', displayValue(data.nvc_lot_expiry))
       ].join('');

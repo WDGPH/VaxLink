@@ -16,7 +16,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: '22'
       - name: Test commit-message guard
         run: node --test scripts/check-commit-title.test.js
       - name: Check squash-merge title

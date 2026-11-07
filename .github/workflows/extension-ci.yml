@@ -4,24 +4,24 @@ on:
   push:
     branches: [alpha, main]
     paths:
-      - "apps/extension/**"
-      - "apps/extension-tests/**"
-      - "scripts/package-extension.sh"
-      - "package.json"
-      - ".github/workflows/extension-ci.yml"
-      - ".github/workflows/release-please.yml"
-      - "release-please*-config.json"
-      - ".release-please-manifest.json"
+      - 'apps/extension/**'
+      - 'apps/extension-tests/**'
+      - 'scripts/package-extension.sh'
+      - 'package.json'
+      - '.github/workflows/extension-ci.yml'
+      - '.github/workflows/release-please.yml'
+      - 'release-please*-config.json'
+      - '.release-please-manifest.json'
   pull_request:
     paths:
-      - "apps/extension/**"
-      - "apps/extension-tests/**"
-      - "scripts/package-extension.sh"
-      - "package.json"
-      - ".github/workflows/extension-ci.yml"
-      - ".github/workflows/release-please.yml"
-      - "release-please*-config.json"
-      - ".release-please-manifest.json"
+      - 'apps/extension/**'
+      - 'apps/extension-tests/**'
+      - 'scripts/package-extension.sh'
+      - 'package.json'
+      - '.github/workflows/extension-ci.yml'
+      - '.github/workflows/release-please.yml'
+      - 'release-please*-config.json'
+      - '.release-please-manifest.json'
   workflow_dispatch:
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Syntax-check extension sources
         run: |

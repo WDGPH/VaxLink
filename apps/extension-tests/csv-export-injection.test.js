@@ -40,7 +40,12 @@ function installBrowserGlobals() {
   globalThis.URL = { createObjectURL: () => 'blob:test', revokeObjectURL() {} };
   globalThis.document = {
     body: { appendChild() {}, removeChild() {} },
-    createElement: () => ({ click() {}, remove() {}, set href(_) {}, set download(_) {} })
+    createElement: () => ({
+      click() {},
+      remove() {},
+      set href(_) {},
+      set download(_) {}
+    })
   };
   return { store, csvCaptures };
 }
@@ -49,14 +54,16 @@ const { store, csvCaptures } = installBrowserGlobals();
 const { ScanQueueManager } = await import('../extension/popup-inventory.js');
 
 test('CSV export neutralizes formula-prefixed cells but keeps numbers numeric', async () => {
-  store.set(QUEUE_KEY, [{
-    id: 'x',
-    tradename: '=HYPERLINK("http://evil","x")',
-    lot: '=1+1',
-    name: '+SUM(A1:A9)',
-    manufacturer: '@cmd',
-    expiry_days_remaining: -5
-  }]);
+  store.set(QUEUE_KEY, [
+    {
+      id: 'x',
+      tradename: '=HYPERLINK("http://evil","x")',
+      lot: '=1+1',
+      name: '+SUM(A1:A9)',
+      manufacturer: '@cmd',
+      expiry_days_remaining: -5
+    }
+  ]);
   const manager = new ScanQueueManager({
     storageKey: QUEUE_KEY,
     summaryEl: null,
@@ -68,9 +75,18 @@ test('CSV export neutralizes formula-prefixed cells but keeps numbers numeric', 
 
   const csv = csvCaptures.at(-1);
   assert.ok(csv.includes(`"'=1+1"`), 'formula lot must be prefixed inert');
-  assert.ok(csv.includes(`"'=HYPERLINK(""http://evil"",""x"")"`), 'HYPERLINK payload must be inert');
+  assert.ok(
+    csv.includes(`"'=HYPERLINK(""http://evil"",""x"")"`),
+    'HYPERLINK payload must be inert'
+  );
   assert.ok(csv.includes(`"'+SUM(A1:A9)"`), '+ prefix must be inert');
   assert.ok(csv.includes(`"'@cmd"`), '@ prefix must be inert');
-  assert.ok(csv.includes(`"-5"`), 'negative plain numbers must stay numeric (no apostrophe)');
-  assert.ok(!csv.includes(`"'-5"`), 'negative plain numbers must not be guarded');
+  assert.ok(
+    csv.includes(`"-5"`),
+    'negative plain numbers must stay numeric (no apostrophe)'
+  );
+  assert.ok(
+    !csv.includes(`"'-5"`),
+    'negative plain numbers must not be guarded'
+  );
 });

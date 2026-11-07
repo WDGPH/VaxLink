@@ -8,22 +8,25 @@ import {
 } from '../extension/popup-inventory.js';
 
 test('buildQueueRecord preserves popup inventory export fields', () => {
-  const row = buildQueueRecord({
-    scanned_at: '2026-04-01T12:00:00.000Z',
-    name: 'Comirnaty',
-    tradename: 'Comirnaty',
-    generic_name: 'COVID-19 mRNA',
-    manufacturer: 'Pfizer',
-    gtin: '00012345678901',
-    lot: 'LOT-123',
-    serial: 'SER-1',
-    barcode_expiry: '2099-12-31',
-    inventory_expiry: '2099-12-31',
-    total_doses: '5',
-    din: 'DIN-001',
-    dose_value: '0.3',
-    dose_unit: 'mL'
-  }, '01000123456789011799123110LOT-12321SER-1');
+  const row = buildQueueRecord(
+    {
+      scanned_at: '2026-04-01T12:00:00.000Z',
+      name: 'Comirnaty',
+      tradename: 'Comirnaty',
+      generic_name: 'COVID-19 mRNA',
+      manufacturer: 'Pfizer',
+      gtin: '00012345678901',
+      lot: 'LOT-123',
+      serial: 'SER-1',
+      barcode_expiry: '2099-12-31',
+      inventory_expiry: '2099-12-31',
+      total_doses: '5',
+      din: 'DIN-001',
+      dose_value: '0.3',
+      dose_unit: 'mL'
+    },
+    '01000123456789011799123110LOT-12321SER-1'
+  );
 
   assert.equal(row.raw_barcode, '01000123456789011799123110LOT-12321SER-1');
   assert.equal(row.name, 'Comirnaty');

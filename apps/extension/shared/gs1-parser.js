@@ -55,14 +55,18 @@
     let ok = false;
     const ai = scan.substring(idx, idx + 2);
     if (ai === '17') {
-      ok = idx + 8 <= scan.length
-        && /^\d{6}$/.test(scan.substring(idx + 2, idx + 8))
-        && canParseTailNoGS(scan, idx + 8, memo);
+      ok =
+        idx + 8 <= scan.length &&
+        /^\d{6}$/.test(scan.substring(idx + 2, idx + 8)) &&
+        canParseTailNoGS(scan, idx + 8, memo);
     } else if (ai === '10' || ai === '21') {
       const valueStart = idx + 2;
       if (valueStart < scan.length) {
         const next = findNextAINoGS(scan, valueStart, memo, ai);
-        ok = next === -1 ? true : (next > valueStart && canParseTailNoGS(scan, next, memo));
+        ok =
+          next === -1
+            ? true
+            : next > valueStart && canParseTailNoGS(scan, next, memo);
       }
     }
 
@@ -90,11 +94,19 @@
       return separator ? scan.indexOf(separator, startIdx) : -1;
     }
 
-    if (separator && scan.includes(separator) && scan.substring(startIdx).includes(separator)) {
+    if (
+      separator &&
+      scan.includes(separator) &&
+      scan.substring(startIdx).includes(separator)
+    ) {
       const ais = ['17', '10', '21'];
       for (let i = startIdx; i < scan.length - 1; i += 1) {
         const twoChar = scan.substring(i, i + 2);
-        if (ais.includes(twoChar) && i > 0 && scan.charAt(i - 1) === separator) {
+        if (
+          ais.includes(twoChar) &&
+          i > 0 &&
+          scan.charAt(i - 1) === separator
+        ) {
           return i;
         }
       }
@@ -175,7 +187,9 @@
     if (!normalized) return false;
     if (normalized.startsWith('01') || normalized.includes('01')) return true;
     if (normalized.startsWith('17')) {
-      return normalized.length >= 8 && /^\d{6}$/.test(normalized.substring(2, 8));
+      return (
+        normalized.length >= 8 && /^\d{6}$/.test(normalized.substring(2, 8))
+      );
     }
     if (normalized.startsWith('10') || normalized.startsWith('21')) {
       return normalized.length > 2;

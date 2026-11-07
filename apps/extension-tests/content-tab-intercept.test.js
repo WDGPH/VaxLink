@@ -41,7 +41,10 @@ test('lot number like "LOT01-2024" is not a numeric GTIN candidate', () => {
 });
 
 test('clinical note containing "01" is not a numeric GTIN candidate', () => {
-  assert.equal(isFocusedFieldNumericGtinCandidate('Dose 01 administered today at clinic'), '');
+  assert.equal(
+    isFocusedFieldNumericGtinCandidate('Dose 01 administered today at clinic'),
+    ''
+  );
 });
 
 test('health card number starting with "01" is not a numeric GTIN candidate', () => {

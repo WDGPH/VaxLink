@@ -8,10 +8,10 @@ Ontario immunization EMRs (Panorama, InputHealth). Built by
 Wellington-Dufferin-Guelph Public Health.
 
 !!! info "Client-side by design"
-    Scanned barcode data is parsed locally in the browser and is not uploaded
-    to any server. The default catalogue source is the public NVC vaccine
-    bundle. See the [Security Policy](security.md) for the full data-handling
-    model.
+Scanned barcode data is parsed locally in the browser and is not uploaded
+to any server. The default catalogue source is the public NVC vaccine
+bundle. See the [Security Policy](security.md) for the full data-handling
+model.
 
 ## What it does
 
@@ -35,47 +35,47 @@ capture/replay before moving to production.
 
 - :material-source-branch: **Architecture**
 
-    ---
+  ***
 
-    The three extension execution contexts, key storage schema, and the
-    Panorama autofill sequence.
+  The three extension execution contexts, key storage schema, and the
+  Panorama autofill sequence.
 
-    [:octicons-arrow-right-24: Architecture](architecture.md)
+  [:octicons-arrow-right-24: Architecture](architecture.md)
 
 - :material-puzzle-plus: **Adding a new EMR**
 
-    ---
+  ***
 
-    How the platform registry works and what a new adapter profile needs
-    before it can ship.
+  How the platform registry works and what a new adapter profile needs
+  before it can ship.
 
-    [:octicons-arrow-right-24: Adding a New EMR](adding-an-emr.md)
+  [:octicons-arrow-right-24: Adding a New EMR](adding-an-emr.md)
 
 - :material-package-up: **Release process**
 
-    ---
+  ***
 
-    Alpha vs. prod channels, versioning, and how `package-extension.sh`
-    stamps channel identity at build time.
+  Alpha vs. prod channels, versioning, and how `package-extension.sh`
+  stamps channel identity at build time.
 
-    [:octicons-arrow-right-24: Release Process](RELEASING.md)
+  [:octicons-arrow-right-24: Release Process](RELEASING.md)
 
 - :material-map: **Roadmap**
 
-    ---
+  ***
 
-    The planned platform-registry refactor and the backlog beyond it.
+  The planned platform-registry refactor and the backlog beyond it.
 
-    [:octicons-arrow-right-24: Roadmap](roadmap.md)
+  [:octicons-arrow-right-24: Roadmap](roadmap.md)
 
 - :material-account-group: **Contributing**
 
-    ---
+  ***
 
-    Repository layout, local dev setup, and the rules around Panorama DOM
-    fixtures.
+  Repository layout, local dev setup, and the rules around Panorama DOM
+  fixtures.
 
-    [:octicons-arrow-right-24: Contributing](contributing.md)
+  [:octicons-arrow-right-24: Contributing](contributing.md)
 
 </div>
 

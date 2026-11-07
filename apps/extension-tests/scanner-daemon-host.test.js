@@ -37,7 +37,9 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
       sendMessage(message, callback) {
         runtimeMessages.push(message);
         if (message.action === 'scannerScanCaptured') {
-          queueMicrotask(() => callback?.({ success: true, locked: true, queueSizeAfter: 1 }));
+          queueMicrotask(() =>
+            callback?.({ success: true, locked: true, queueSizeAfter: 1 })
+          );
           return;
         }
         queueMicrotask(() => callback?.({ success: true }));
@@ -60,7 +62,9 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
     trigger: 'test'
   };
   let connectResponse = null;
-  runtimeListeners[0](connectRequest, {}, (response) => { connectResponse = response; });
+  runtimeListeners[0](connectRequest, {}, (response) => {
+    connectResponse = response;
+  });
   assert.equal(connectResponse.success, true);
   assert.equal(worker.messages.at(-1).type, 'connectGranted');
   assert.equal(worker.messages.at(-1).profileId, 'zebra-ds8178-usb-cdc');
@@ -71,8 +75,12 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  const captured = runtimeMessages.find((message) => message.action === 'scannerScanCaptured');
-  const echo = runtimeMessages.find((message) => message.action === 'scannerDaemon.scanEcho');
+  const captured = runtimeMessages.find(
+    (message) => message.action === 'scannerScanCaptured'
+  );
+  const echo = runtimeMessages.find(
+    (message) => message.action === 'scannerDaemon.scanEcho'
+  );
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
   assert.equal(echo.response.locked, true);
 

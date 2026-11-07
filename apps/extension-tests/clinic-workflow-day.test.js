@@ -53,18 +53,32 @@ function installBrowserGlobals() {
       }
     }
   };
-  globalThis.Blob = class { constructor(parts) { this.text = parts.join(''); csvCaptures.push(this.text); } };
-  globalThis.URL = { createObjectURL: () => 'blob:clinic-sim', revokeObjectURL() {} };
+  globalThis.Blob = class {
+    constructor(parts) {
+      this.text = parts.join('');
+      csvCaptures.push(this.text);
+    }
+  };
+  globalThis.URL = {
+    createObjectURL: () => 'blob:clinic-sim',
+    revokeObjectURL() {}
+  };
   globalThis.window = { prompt: () => null };
   globalThis.document = {
     body: { appendChild() {}, removeChild() {} },
-    createElement: () => ({ click() {}, remove() {}, set href(_) {}, set download(_) {} })
+    createElement: () => ({
+      click() {},
+      remove() {},
+      set href(_) {},
+      set download(_) {}
+    })
   };
   return { store, csvCaptures };
 }
 
 const browser = installBrowserGlobals();
-const { ScanQueueManager, buildQueueRecord } = await import('../extension/popup-inventory.js');
+const { ScanQueueManager, buildQueueRecord } =
+  await import('../extension/popup-inventory.js');
 
 const bundle = loadNvcBundle();
 
@@ -83,14 +97,20 @@ if (!bundle) {
   }
 
   function findLot(pattern) {
-    return catalogueLots.find((lot) =>
-      isCleanLot(lot.lotNumber) &&
-      lot.tradenameRefs.some((ref) => pattern.test(ref.display || '')));
+    return catalogueLots.find(
+      (lot) =>
+        isCleanLot(lot.lotNumber) &&
+        lot.tradenameRefs.some((ref) => pattern.test(ref.display || ''))
+    );
   }
 
   const basket = [
     { label: 'COVID-19', lot: findLot(/COMIRNATY|SPIKEVAX/i), doses: 6 },
-    { label: 'Influenza', lot: findLot(/FLUZONE|FLULAVAL|FLUCELVAX|AFLURIA/i), doses: 10 },
+    {
+      label: 'Influenza',
+      lot: findLot(/FLUZONE|FLULAVAL|FLUCELVAX|AFLURIA/i),
+      doses: 10
+    },
     { label: 'Hepatitis B', lot: findLot(/ENGERIX|RECOMBIVAX/i), doses: 1 },
     { label: 'HPV', lot: findLot(/GARDASIL/i), doses: 1 },
     { label: 'Tdap', lot: findLot(/BOOSTRIX|ADACEL/i), doses: 1 },
@@ -100,9 +120,11 @@ if (!bundle) {
   ].filter((item) => item.lot);
 
   test(`clinic basket: assembled ${basket.length} representative vaccine families from the catalogue`, () => {
-    assert.ok(basket.length >= 6,
+    assert.ok(
+      basket.length >= 6,
       `Expected at least 6 vaccine families available in the bundle, got ${basket.length}: ` +
-      basket.map((b) => b.label).join(', '));
+        basket.map((b) => b.label).join(', ')
+    );
   });
 
   // --- Helper: simulate one vial scan from payload text to resolved vaccine ---
@@ -126,10 +148,24 @@ if (!bundle) {
   test('single-inject workflow: scan → lookup → resolved vaccine for immediate chart fill', async () => {
     for (const { label, lot } of basket) {
       const { parsed, info } = await scanVial(lot);
-      assert.equal(parsed.lot, lot.lotNumber, `${label}: lot must parse cleanly`);
-      assert.ok(info && !info.error, `${label}: lookup must succeed (got ${JSON.stringify(info)})`);
-      assert.ok(String(info.tradename || '').trim(), `${label}: must resolve a tradename`);
-      assert.equal(info.lot_number, lot.lotNumber, `${label}: resolved lot must echo the scan`);
+      assert.equal(
+        parsed.lot,
+        lot.lotNumber,
+        `${label}: lot must parse cleanly`
+      );
+      assert.ok(
+        info && !info.error,
+        `${label}: lookup must succeed (got ${JSON.stringify(info)})`
+      );
+      assert.ok(
+        String(info.tradename || '').trim(),
+        `${label}: must resolve a tradename`
+      );
+      assert.equal(
+        info.lot_number,
+        lot.lotNumber,
+        `${label}: resolved lot must echo the scan`
+      );
     }
   });
 
@@ -139,15 +175,18 @@ if (!bundle) {
 
     for (const { lot, doses } of basket) {
       const { barcode, parsed, info } = await scanVial(lot);
-      const record = buildLegacyQueueRecord({
-        ...info,
-        gtin: parsed.gtin || '',
-        lot: parsed.lot,
-        serial: parsed.serial || '',
-        expiry: parsed.expiry || '',
-        nvc_lot_expiry: info.lot_expiry || '',
-        total_doses: doses
-      }, barcode);
+      const record = buildLegacyQueueRecord(
+        {
+          ...info,
+          gtin: parsed.gtin || '',
+          lot: parsed.lot,
+          serial: parsed.serial || '',
+          expiry: parsed.expiry || '',
+          nvc_lot_expiry: info.lot_expiry || '',
+          total_doses: doses
+        },
+        barcode
+      );
 
       const response = await harness.sendMessage({
         action: 'appendQueueRecord',
@@ -158,17 +197,29 @@ if (!bundle) {
     }
 
     const queue = harness.storageData.get('multiple_inject_queue_v1');
-    assert.equal(queue.length, basket.length, 'every basket scan must land in the queue');
-    assert.equal(harness.getBadgeText(), String(basket.length),
-      'action badge must reflect the queue depth');
+    assert.equal(
+      queue.length,
+      basket.length,
+      'every basket scan must land in the queue'
+    );
+    assert.equal(
+      harness.getBadgeText(),
+      String(basket.length),
+      'action badge must reflect the queue depth'
+    );
 
     // Each queued row must carry the chart-critical fields.
     for (const row of queue) {
-      assert.ok(row.tradename, `queued row missing tradename: ${JSON.stringify(row)}`);
+      assert.ok(
+        row.tradename,
+        `queued row missing tradename: ${JSON.stringify(row)}`
+      );
       assert.ok(row.lot, 'queued row missing lot');
       assert.ok(row.raw_barcode, 'queued row missing raw barcode');
-      assert.ok(Number.isFinite(row.total_doses) && row.total_doses >= 1,
-        'queued row must have a positive dose count');
+      assert.ok(
+        Number.isFinite(row.total_doses) && row.total_doses >= 1,
+        'queued row must have a positive dose count'
+      );
     }
   });
 
@@ -194,19 +245,26 @@ if (!bundle) {
 
     for (const { lot, doses } of basket) {
       const { barcode, parsed, info } = await scanVial(lot);
-      const record = buildQueueRecord({
-        ...info,
-        gtin: parsed.gtin || '',
-        lot: parsed.lot,
-        serial: parsed.serial || '',
-        expiry: parsed.expiry || '',
-        nvc_lot_expiry: info.lot_expiry || '',
-        total_doses: doses
-      }, barcode);
+      const record = buildQueueRecord(
+        {
+          ...info,
+          gtin: parsed.gtin || '',
+          lot: parsed.lot,
+          serial: parsed.serial || '',
+          expiry: parsed.expiry || '',
+          nvc_lot_expiry: info.lot_expiry || '',
+          total_doses: doses
+        },
+        barcode
+      );
       await tray.add(record);
     }
 
-    assert.equal(tray.count, basket.length, 'every scan must be in the inventory tray');
+    assert.equal(
+      tray.count,
+      basket.length,
+      'every scan must be in the inventory tray'
+    );
     assert.deepEqual(
       browser.store.get('inventory_scan_batch_v1').map((r) => r.lot),
       basket.map((b) => b.lot.lotNumber),
@@ -216,13 +274,20 @@ if (!bundle) {
 
   test('inventory workflow: dose tracking decrements and removes empty vials', async () => {
     browser.store.clear();
-    const tray = new ScanQueueManager({ storageKey: 'inventory_scan_batch_v1', summaryEl: null, listEl: null });
+    const tray = new ScanQueueManager({
+      storageKey: 'inventory_scan_batch_v1',
+      summaryEl: null,
+      listEl: null
+    });
     await tray.load();
 
     // A 6-dose COVID vial.
     const covid = basket.find((b) => b.label === 'COVID-19') || basket[0];
     const { barcode, parsed, info } = await scanVial(covid.lot);
-    const record = buildQueueRecord({ ...info, lot: parsed.lot, gtin: parsed.gtin || '', total_doses: 6 }, barcode);
+    const record = buildQueueRecord(
+      { ...info, lot: parsed.lot, gtin: parsed.gtin || '', total_doses: 6 },
+      barcode
+    );
     await tray.add(record);
     const id = tray.rows[0].id;
 
@@ -231,12 +296,20 @@ if (!bundle) {
       const after = await tray.consumeById(id);
       assert.ok(after, `dose ${i + 1}: vial should still exist`);
     }
-    assert.equal(tray.getById(id).remaining_doses, 1, 'COVID vial should have 1 dose left');
+    assert.equal(
+      tray.getById(id).remaining_doses,
+      1,
+      'COVID vial should have 1 dose left'
+    );
 
     // 6th dose empties and removes the vial.
     const emptied = await tray.consumeById(id);
     assert.equal(emptied, null, 'last dose must remove the vial');
-    assert.equal(tray.count, 0, 'tray should be empty after the vial is used up');
+    assert.equal(
+      tray.count,
+      0,
+      'tray should be empty after the vial is used up'
+    );
   });
 
   test('inventory workflow: CSV export is well-formed and chart-ready', async () => {
@@ -252,21 +325,47 @@ if (!bundle) {
 
     for (const { lot, doses } of basket) {
       const { barcode, parsed, info } = await scanVial(lot);
-      await tray.add(buildQueueRecord({
-        ...info, gtin: parsed.gtin || '', lot: parsed.lot, total_doses: doses
-      }, barcode));
+      await tray.add(
+        buildQueueRecord(
+          {
+            ...info,
+            gtin: parsed.gtin || '',
+            lot: parsed.lot,
+            total_doses: doses
+          },
+          barcode
+        )
+      );
     }
 
     const filename = tray.exportCsv();
-    assert.ok(/^vaxlink-inventory-.*\.csv$/.test(filename), `unexpected export filename: ${filename}`);
-    assert.equal(browser.csvCaptures.length, 1, 'exactly one CSV blob must be produced');
+    assert.ok(
+      /^vaxlink-inventory-.*\.csv$/.test(filename),
+      `unexpected export filename: ${filename}`
+    );
+    assert.equal(
+      browser.csvCaptures.length,
+      1,
+      'exactly one CSV blob must be produced'
+    );
 
     const csv = browser.csvCaptures[0];
     const lines = csv.split('\r\n');
-    assert.equal(lines.length, basket.length + 1, 'CSV must have a header plus one row per scan');
+    assert.equal(
+      lines.length,
+      basket.length + 1,
+      'CSV must have a header plus one row per scan'
+    );
 
     const header = lines[0].split(',');
-    for (const required of ['scan_index', 'tradename', 'lot', 'expiry_flag', 'total_doses', 'raw_barcode']) {
+    for (const required of [
+      'scan_index',
+      'tradename',
+      'lot',
+      'expiry_flag',
+      'total_doses',
+      'raw_barcode'
+    ]) {
       assert.ok(header.includes(required), `CSV header missing ${required}`);
     }
 
@@ -277,7 +376,11 @@ if (!bundle) {
     const indexCol = header.indexOf('scan_index');
     lines.slice(1).forEach((line, i) => {
       const cells = parseCsvLine(line);
-      assert.equal(cells[indexCol], String(i + 1), `row ${i + 1}: scan_index out of order`);
+      assert.equal(
+        cells[indexCol],
+        String(i + 1),
+        `row ${i + 1}: scan_index out of order`
+      );
       assert.ok(cells[tradenameCol].trim(), `row ${i + 1}: missing tradename`);
       assert.ok(cells[lotCol].trim(), `row ${i + 1}: missing lot`);
     });
@@ -286,12 +389,29 @@ if (!bundle) {
   // --- Expiry-handling scenarios (what the HUD/banner warns on) --------------
   test('expiry workflow: expired, expiring-soon, and valid lots flag correctly', () => {
     const day = 24 * 60 * 60 * 1000;
-    const iso = (offsetDays) => new Date(Date.now() + offsetDays * day).toISOString().slice(0, 10);
+    const iso = (offsetDays) =>
+      new Date(Date.now() + offsetDays * day).toISOString().slice(0, 10);
 
-    assert.equal(getExpiryStatus(iso(-1)).flag, 'expired', 'yesterday must read as expired');
-    assert.equal(getExpiryStatus(iso(10)).flag, 'expiring_soon', '10 days out must warn');
-    assert.equal(getExpiryStatus(iso(200)).flag, 'valid', '200 days out must be valid');
-    assert.equal(getExpiryStatus('').flag, 'unknown', 'missing expiry must read as unknown');
+    assert.equal(
+      getExpiryStatus(iso(-1)).flag,
+      'expired',
+      'yesterday must read as expired'
+    );
+    assert.equal(
+      getExpiryStatus(iso(10)).flag,
+      'expiring_soon',
+      '10 days out must warn'
+    );
+    assert.equal(
+      getExpiryStatus(iso(200)).flag,
+      'valid',
+      '200 days out must be valid'
+    );
+    assert.equal(
+      getExpiryStatus('').flag,
+      'unknown',
+      'missing expiry must read as unknown'
+    );
   });
 
   test('expiry workflow: real catalogue lots split into expired vs in-date as expected', () => {
@@ -309,7 +429,9 @@ if (!bundle) {
     // flatten everything into one bucket.
     assert.ok(expired > 0, 'expected some expired catalogue lots');
     assert.ok(inDate > 0, 'expected some in-date catalogue lots');
-    console.log(`\n  Catalogue expiry split: ${expired} expired, ${inDate} in-date`);
+    console.log(
+      `\n  Catalogue expiry split: ${expired} expired, ${inDate} in-date`
+    );
   });
 }
 
@@ -321,8 +443,10 @@ function parseCsvLine(line) {
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
     if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i += 1; }
-      else if (ch === '"') inQuotes = false;
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else if (ch === '"') inQuotes = false;
       else cur += ch;
     } else if (ch === '"') {
       inQuotes = true;

@@ -20,7 +20,7 @@ The problem is not reproducible in other applications (the clipboard works norma
 `onHandsFreePaste` in `content.js` intercepts all paste events on the page (captured at the `window` level) and decides whether to redirect the clipboard content to the barcode scanner pipeline instead of allowing it to land in the target element:
 
 ```js
-window.addEventListener('paste', onHandsFreePaste, true);   // capture phase
+window.addEventListener('paste', onHandsFreePaste, true); // capture phase
 ```
 
 The decision logic before the fix:
@@ -29,11 +29,13 @@ The decision logic before the fix:
 function onHandsFreePaste(event) {
   if (!isHandsFreeSupportedPage()) return;
 
-  const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
+  const text = String(
+    (event.clipboardData && event.clipboardData.getData('text')) || ''
+  ).trim();
   if (!text || text.length < SCAN_MIN_LENGTH) return;
-  if (!isCandidateGS1Text(text)) return;   // ← the only gate
+  if (!isCandidateGS1Text(text)) return; // ← the only gate
 
-  event.preventDefault();                  // ← blocks the paste
+  event.preventDefault(); // ← blocks the paste
   handleHandsFreeScan(text, 'paste');
 }
 ```
@@ -52,12 +54,11 @@ The function delegates to `normalizeScannerCandidate` before testing:
 
 ```js
 function normalizeScannerCandidate(value) {
-  let s = String(value || '').trim()
-    /* ... strip control chars, brackets ... */;
-  if (!s.startsWith('01')) {
+  let s = String(value || '').trim();
+  /* ... strip control chars, brackets ... */ if (!s.startsWith('01')) {
     const first01 = s.indexOf('01');
     if (first01 > 0) {
-      s = s.substring(first01);   // ← extract everything from the first "01"
+      s = s.substring(first01); // ← extract everything from the first "01"
     }
   }
   return s;
@@ -76,13 +77,13 @@ if (normalized.startsWith('01') || normalized.includes('01')) return true;
 
 ### Affected clipboard content — concrete examples
 
-| Pasted text | What normalization extracts | Candidate check |
-|---|---|---|
-| `"01/01/2024"` | `"01/01/2024"` (starts with "01") | ✓ — **intercepted** |
-| `"Administered 01 dose today"` | `"01 dose today"` (offset 13) | ✓ — **intercepted** |
+| Pasted text                            | What normalization extracts       | Candidate check     |
+| -------------------------------------- | --------------------------------- | ------------------- |
+| `"01/01/2024"`                         | `"01/01/2024"` (starts with "01") | ✓ — **intercepted** |
+| `"Administered 01 dose today"`         | `"01 dose today"` (offset 13)     | ✓ — **intercepted** |
 | `"DOB: 01-15-1985, health card 01234"` | `"01-15-1985, health card 01234"` | ✓ — **intercepted** |
-| `"Chart note: visit #0156, dose #01"` | `"0156, dose #01"` | ✓ — **intercepted** |
-| `"Phone: 01 800 555 0199"` | `"01 800 555 0199"` | ✓ — **intercepted** |
+| `"Chart note: visit #0156, dose #01"`  | `"0156, dose #01"`                | ✓ — **intercepted** |
+| `"Phone: 01 800 555 0199"`             | `"01 800 555 0199"`               | ✓ — **intercepted** |
 
 All of the above triggered `event.preventDefault()` before the fix.
 
@@ -168,7 +169,9 @@ Same actions:
 function onHandsFreePaste(event) {
   if (!isHandsFreeSupportedPage()) return;
 
-  const text = String((event.clipboardData && event.clipboardData.getData('text')) || '').trim();
+  const text = String(
+    (event.clipboardData && event.clipboardData.getData('text')) || ''
+  ).trim();
   if (!text || text.length < SCAN_MIN_LENGTH) return;
   if (!isCandidateGS1Text(text)) return;
 
@@ -207,15 +210,15 @@ function onHandsFreePaste(event) {
 
 ### Decision matrix after the fix
 
-| Pasted content | Candidate? | Parses? | GTIN numeric? | Intercepted? |
-|---|---|---|---|---|
-| Real GS1 vaccine barcode | ✓ | ✓ | ✓ | **Yes** |
-| GTIN-only barcode (`0100012345678905`) | ✓ | ✓ | ✓ | **Yes** |
-| `"01/01/2024"` (date) | ✓ | ✗ (< 16 chars) | — | No |
-| `"Administered 01 dose today"` | ✓ | ✓ | ✗ (non-digit) | No |
-| `"DOB: 01-15-1985, ..."` | ✓ | ✓ | ✗ (non-digit) | No |
-| `"0123456789"` (short ID) | ✓ | ✗ (< 16 chars) | — | No |
-| Any text without `"01"/"17"/"10"/"21"` | ✗ | — | — | No |
+| Pasted content                         | Candidate? | Parses?        | GTIN numeric? | Intercepted? |
+| -------------------------------------- | ---------- | -------------- | ------------- | ------------ |
+| Real GS1 vaccine barcode               | ✓          | ✓              | ✓             | **Yes**      |
+| GTIN-only barcode (`0100012345678905`) | ✓          | ✓              | ✓             | **Yes**      |
+| `"01/01/2024"` (date)                  | ✓          | ✗ (< 16 chars) | —             | No           |
+| `"Administered 01 dose today"`         | ✓          | ✓              | ✗ (non-digit) | No           |
+| `"DOB: 01-15-1985, ..."`               | ✓          | ✓              | ✗ (non-digit) | No           |
+| `"0123456789"` (short ID)              | ✓          | ✗ (< 16 chars) | —             | No           |
+| Any text without `"01"/"17"/"10"/"21"` | ✗          | —              | —             | No           |
 
 ---
 
@@ -223,18 +226,18 @@ function onHandsFreePaste(event) {
 
 `apps/extension/tests/content-paste.test.js` tests the exact gate logic using pure copies of the parsing functions (no Chrome or DOM dependencies):
 
-| Test | Assertion |
-|---|---|
+| Test                                   | Assertion                         |
+| -------------------------------------- | --------------------------------- |
 | Real GS1 barcode (GTIN + lot + expiry) | intercepted, correct field values |
-| GTIN-only barcode | intercepted |
-| GS1 barcode with GS separator | intercepted |
-| Date string `"01/01/2024"` | not intercepted |
-| Clinical note with embedded `"01"` | not intercepted |
-| DOB with `"01"` prefix | not intercepted |
-| Short patient ID starting with `"01"` | not intercepted |
-| Phone number starting with `"01"` | not intercepted |
-| Text below `SCAN_MIN_LENGTH` | not intercepted |
-| Empty / null | not intercepted |
+| GTIN-only barcode                      | intercepted                       |
+| GS1 barcode with GS separator          | intercepted                       |
+| Date string `"01/01/2024"`             | not intercepted                   |
+| Clinical note with embedded `"01"`     | not intercepted                   |
+| DOB with `"01"` prefix                 | not intercepted                   |
+| Short patient ID starting with `"01"`  | not intercepted                   |
+| Phone number starting with `"01"`      | not intercepted                   |
+| Text below `SCAN_MIN_LENGTH`           | not intercepted                   |
+| Empty / null                           | not intercepted                   |
 
 Run with:
 
@@ -246,10 +249,10 @@ cd apps/extension && npm test
 
 ## Key architectural rules to carry forward
 
-| Rule | Detail |
-|---|---|
-| `isCandidateGS1Text` is a **loose pre-filter only** | It is intentionally broad (catches anything containing `"01"`). Never use it as the sole gate for an irreversible action like `event.preventDefault()`. |
+| Rule                                                          | Detail                                                                                                                                                                                            |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isCandidateGS1Text` is a **loose pre-filter only**           | It is intentionally broad (catches anything containing `"01"`). Never use it as the sole gate for an irreversible action like `event.preventDefault()`.                                           |
 | Paste interception requires **strict, full-parse validation** | Use `parseGS1BarcodeFromScanner` + numeric GTIN check. Loose candidate matching is appropriate only for incremental keystroke accumulation, where the cost of a false positive is a buffer reset. |
-| GTINs are always **14 ASCII digits** | `parseGS1BarcodeFromScanner` enforces length but not digit type. Any downstream consumer that relies on the GTIN being numeric must validate `\d{14}` explicitly. |
-| `event.preventDefault()` on paste is **irreversible** | Once called, the text will not reach the target element. The bar for calling it must be high. If there is any doubt about whether the text is a barcode, do not call it. |
-| Copy (`Ctrl+C`, `Ctrl+X`) is **unaffected** | `onHandsFreeKeydown` returns early for `ctrlKey`/`metaKey`. The copy path has never been at risk; this bug was paste-specific. |
+| GTINs are always **14 ASCII digits**                          | `parseGS1BarcodeFromScanner` enforces length but not digit type. Any downstream consumer that relies on the GTIN being numeric must validate `\d{14}` explicitly.                                 |
+| `event.preventDefault()` on paste is **irreversible**         | Once called, the text will not reach the target element. The bar for calling it must be high. If there is any doubt about whether the text is a barcode, do not call it.                          |
+| Copy (`Ctrl+C`, `Ctrl+X`) is **unaffected**                   | `onHandsFreeKeydown` returns early for `ctrlKey`/`metaKey`. The copy path has never been at risk; this bug was paste-specific.                                                                    |

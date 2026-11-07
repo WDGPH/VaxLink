@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import '../extension/shared/gs1-parser.js';
 
-const { hasNumericGtin, isCandidateGS1Text, parseGS1Barcode } = globalThis.VaxLinkGS1Parser;
+const { hasNumericGtin, isCandidateGS1Text, parseGS1Barcode } =
+  globalThis.VaxLinkGS1Parser;
 
 function isNumericGtinCandidate(text) {
   const SCAN_MIN_LENGTH = 8;

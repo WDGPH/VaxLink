@@ -35,8 +35,8 @@ const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
 });
 
 const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
-  'Y016312': '6951000087100',
-  'Y020519': '6951000087100'
+  Y016312: '6951000087100',
+  Y020519: '6951000087100'
 });
 
 // ---------------------------------------------------------------------------
@@ -57,7 +57,9 @@ function normalizeLotKey(value) {
 }
 
 function normalizeCodeKey(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function resolveTradenameCodeOverrideByGtin(gtin) {
@@ -89,22 +91,26 @@ function normalizeForMatch(value) {
 }
 
 function buildPanoramaAgentSourceText(data) {
-  return normalizeForMatch([
-    data?.name,
-    data?.generic_name,
-    data?.tradename,
-    data?.disease,
-    data?.antigen,
-    data?.manufacturer,
-    data?.route,
-    data?.strength
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [
+      data?.name,
+      data?.generic_name,
+      data?.tradename,
+      data?.disease,
+      data?.antigen,
+      data?.manufacturer,
+      data?.route,
+      data?.strength
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
 }
 
 function getNormalizedSourceTokens(sourceText) {
   return String(sourceText || '')
     .split(' ')
-    .map(t => t.trim())
+    .map((t) => t.trim())
     .filter(Boolean);
 }
 
@@ -119,32 +125,48 @@ function panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term) {
     return sourceTokens.includes(token) || sourceText.includes(token);
   }
   if (sourceText.includes(normalizedTerm)) return true;
-  return termTokens.every((token) => (
+  return termTokens.every((token) =>
     token.length <= 3
       ? sourceTokens.includes(token)
-      : (sourceTokens.includes(token) || sourceText.includes(token))
-  ));
+      : sourceTokens.includes(token) || sourceText.includes(token)
+  );
 }
 
 function panoramaSourceHasAll(sourceText, sourceTokens, terms) {
-  return terms.every(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.every((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaSourceHasAny(sourceText, sourceTokens, terms) {
-  return terms.some(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.some((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaAgentRuleClauseMatches(sourceText, clause) {
   const sourceTokens = getNormalizedSourceTokens(sourceText);
-  if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any)) return false;
-  if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all)) return false;
-  if (clause.notAny && panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)) return false;
-  if (clause.notAll && panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)) return false;
+  if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any))
+    return false;
+  if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all))
+    return false;
+  if (
+    clause.notAny &&
+    panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)
+  )
+    return false;
+  if (
+    clause.notAll &&
+    panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)
+  )
+    return false;
   return true;
 }
 
 function panoramaAgentRuleMatches(sourceText, rule) {
-  return (rule.clauses || []).some(clause => panoramaAgentRuleClauseMatches(sourceText, clause));
+  return (rule.clauses || []).some((clause) =>
+    panoramaAgentRuleClauseMatches(sourceText, clause)
+  );
 }
 
 /** Returns every agent candidate string produced by the rules for a given vaccineInfo object. */
@@ -220,13 +242,19 @@ test('lot override: different lot with same prefix does not match', () => {
 // ===========================================================================
 
 test('GTIN override: 00067055046339 resolves to adult RECOMBIVAX HB code', () => {
-  assert.equal(resolveTradenameCodeOverrideByGtin('00067055046339'), '6951000087100');
+  assert.equal(
+    resolveTradenameCodeOverrideByGtin('00067055046339'),
+    '6951000087100'
+  );
 });
 
 test('GTIN override: leading zeros stripped correctly (13-digit variant)', () => {
   // normalizeGtinKey is digits-only, so 13-digit is fine too
-  assert.equal(resolveTradenameCodeOverrideByGtin('0067055046339'), '');  // 13 digits — not same key
-  assert.equal(resolveTradenameCodeOverrideByGtin('00067055046339'), '6951000087100'); // full 14-digit
+  assert.equal(resolveTradenameCodeOverrideByGtin('0067055046339'), ''); // 13 digits — not same key
+  assert.equal(
+    resolveTradenameCodeOverrideByGtin('00067055046339'),
+    '6951000087100'
+  ); // full 14-digit
 });
 
 test('GTIN override: unknown GTIN returns empty string', () => {
@@ -248,7 +276,7 @@ test('override precedence: GTIN override wins when both GTIN and lot override ex
 });
 
 test('override precedence: lot override fires when GTIN is absent', () => {
-  const gtinCode = resolveTradenameCodeOverrideByGtin('');  // no GTIN in barcode
+  const gtinCode = resolveTradenameCodeOverrideByGtin(''); // no GTIN in barcode
   const lotCode = resolveTradenameCodeOverrideByLot('Y020519');
   const effectiveCode = gtinCode || lotCode;
   assert.equal(effectiveCode, '6951000087100');
@@ -296,7 +324,10 @@ test('HB-pediatric: hepatitis B recombinant pediatric (NVC generic name variant)
 
 test('HB-pediatric: disease field containing pediatric hepatitis B', () => {
   // Some NVC records carry pediatric info in disease/antigen rather than tradename
-  const info = { tradename: 'vaccine lot 123', disease: 'hepatitis b pediatric' };
+  const info = {
+    tradename: 'vaccine lot 123',
+    disease: 'hepatitis b pediatric'
+  };
   assert.equal(hasCandidate(info, 'HB-pediatric'), true);
 });
 
@@ -329,7 +360,10 @@ test('HB-pediatric strength: Engerix B with NVC bare-number strength="10" (pedia
 });
 
 test('HB-pediatric strength: generic hepatitis b vaccine with bare strength "5"', () => {
-  const info = { generic_name: 'hepatitis b vaccine recombinant', strength: '5' };
+  const info = {
+    generic_name: 'hepatitis b vaccine recombinant',
+    strength: '5'
+  };
   assert.equal(hasCandidate(info, 'HB-pediatric'), true);
   assert.equal(hasCandidate(info, 'HB'), false);
 });
@@ -472,7 +506,7 @@ test('scenario: Y020519 (mislinked adult lot) — with lot override, adult trade
   // We simulate the expected vaccineInfo after the override resolves correctly:
   const vaccineInfoAfterOverride = {
     lot_number: 'Y020519',
-    tradename: 'RECOMBIVAX HB',          // adult tradename, override worked
+    tradename: 'RECOMBIVAX HB', // adult tradename, override worked
     generic_name: 'hepatitis b vaccine recombinant',
     manufacturer: 'Merck',
     din: '02084260'
@@ -488,8 +522,8 @@ test('scenario: Y020519 without override would misclassify as pediatric', () => 
   // and no override is applied, the agent rules correctly follow the (wrong) NVC data.
   const vaccineInfoWithoutOverride = {
     lot_number: 'Y020519',
-    tradename: 'RECOMBIVAX HB Pediatric',  // what NVC incorrectly returns
-    generic_name: 'hepatitis b vaccine recombinant',
+    tradename: 'RECOMBIVAX HB Pediatric', // what NVC incorrectly returns
+    generic_name: 'hepatitis b vaccine recombinant'
   };
   assert.equal(hasCandidate(vaccineInfoWithoutOverride, 'HB-pediatric'), true);
   assert.equal(hasCandidate(vaccineInfoWithoutOverride, 'HB'), false);
@@ -501,13 +535,17 @@ test('scenario: Y020519 without override would misclassify as pediatric', () => 
 test('scenario: Y020519 barcode 1727072910Y020519 — no GTIN, lot override fires', () => {
   // GS1 barcode: AI(17)=270729 (expiry), AI(10)=Y020519 (lot). No AI(01)/GTIN.
   const lot = 'Y020519';
-  const gtin = null;  // barcode has no GTIN
+  const gtin = null; // barcode has no GTIN
   const gtinCode = resolveTradenameCodeOverrideByGtin(gtin);
   const lotCode = resolveTradenameCodeOverrideByLot(lot);
   const effectiveCode = gtinCode || lotCode;
   assert.equal(gtinCode, '', 'no GTIN override without GTIN');
   assert.equal(lotCode, '6951000087100', 'lot override fires');
-  assert.equal(effectiveCode, '6951000087100', 'effective override is adult code');
+  assert.equal(
+    effectiveCode,
+    '6951000087100',
+    'effective override is adult code'
+  );
 });
 
 test('scenario: Y016312 with GTIN 00067055046339 — both override paths resolve to adult', () => {
@@ -574,9 +612,15 @@ test('HB pediatric: RECOMBIVAX-HB Pédiatrique (French NVC label, hyphen and acc
   const info = { tradename: 'RECOMBIVAX-HB Pédiatrique' };
   // French spelling: pédiatrique ≠ pediatric — name-based rule won't fire.
   // Strength-based fallback would cover it IF the strength field is also present.
-  const infoWithStrength = { tradename: 'RECOMBIVAX-HB Pédiatrique', strength: '5 mcg' };
-  assert.equal(hasCandidate(infoWithStrength, 'HB-pediatric'), true,
-    'strength fallback covers French-named tradename when strength is present');
+  const infoWithStrength = {
+    tradename: 'RECOMBIVAX-HB Pédiatrique',
+    strength: '5 mcg'
+  };
+  assert.equal(
+    hasCandidate(infoWithStrength, 'HB-pediatric'),
+    true,
+    'strength fallback covers French-named tradename when strength is present'
+  );
 });
 
 test('HB rules: "pediatric" in disease field blocks HB adult', () => {

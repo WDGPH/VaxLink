@@ -14,7 +14,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseGS1Barcode, parseInputData, formatDate } from '../extension/popup-parser.js';
+import {
+  parseGS1Barcode,
+  parseInputData,
+  formatDate
+} from '../extension/popup-parser.js';
 
 const GS = String.fromCharCode(0x1d);
 // 01 + GTIN, 17 + expiry, 10 + lot (lot last, no GS needed).
@@ -24,7 +28,11 @@ test('AIM prefixes on GTIN-led barcodes parse identically', () => {
   const plain = parseGS1Barcode(GTIN_LED);
   for (const prefix of [']C1', ']d2', ']Q3', ']e0']) {
     const parsed = parseGS1Barcode(`${prefix}${GTIN_LED}`);
-    assert.deepEqual(parsed, plain, `prefix ${prefix} must not change the parse`);
+    assert.deepEqual(
+      parsed,
+      plain,
+      `prefix ${prefix} must not change the parse`
+    );
   }
   assert.equal(plain.gtin, '00628451000020');
   assert.equal(plain.lot, 'ABCD34');
@@ -44,7 +52,10 @@ test('AI-like text inside a final lot does not create serial or expiry fields', 
         const parsed = parseInputData(`${prefix}10${lot}${suffix}`);
         assert.equal(parsed.lot, lot);
         assert.equal(parsed.serial, null);
-        assert.equal(parsed.expiry, prefix.startsWith('01') ? '05/31/2028' : null);
+        assert.equal(
+          parsed.expiry,
+          prefix.startsWith('01') ? '05/31/2028' : null
+        );
       }
     }
   }
@@ -53,7 +64,9 @@ test('AI-like text inside a final lot does not create serial or expiry fields', 
 test('a separator terminates an AI-like lot before a real serial or expiry', () => {
   for (const lot of ['AHAVC219AC', 'Z012217']) {
     for (const separator of [GS, '\t']) {
-      const parsed = parseInputData(`010062845100002010${lot}${separator}17280827${separator}21SER123`);
+      const parsed = parseInputData(
+        `010062845100002010${lot}${separator}17280827${separator}21SER123`
+      );
       assert.equal(parsed.lot, lot);
       assert.equal(parsed.expiry, '08/27/2028');
       assert.equal(parsed.serial, 'SER123');
@@ -64,7 +77,11 @@ test('a separator terminates an AI-like lot before a real serial or expiry', () 
 test('AIM-prefixed lot-only barcode parses (HB lot-only flow)', () => {
   for (const prefix of [']d2', ']Q3', ']C1']) {
     const parsed = parseGS1Barcode(`${prefix}10Y016312`);
-    assert.equal(parsed.lot, 'Y016312', `lot-only scan with ${prefix} prefix must parse`);
+    assert.equal(
+      parsed.lot,
+      'Y016312',
+      `lot-only scan with ${prefix} prefix must parse`
+    );
   }
 });
 

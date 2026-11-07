@@ -10,7 +10,10 @@ process.env.TZ = 'America/Toronto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 const ANALYTICS_KEY = 'vaxlink_analytics_v1';
 
@@ -27,10 +30,17 @@ test('analytics events bucket by local calendar day, not UTC', async () => {
 
   const analytics = harness.storageData.get(ANALYTICS_KEY);
   assert.ok(analytics, 'analytics store must exist');
-  assert.equal(analytics.recentEvents.at(-1).day, '2026-06-11',
-    'evening-EDT event must bucket into the local day, not the next UTC day');
+  assert.equal(
+    analytics.recentEvents.at(-1).day,
+    '2026-06-11',
+    'evening-EDT event must bucket into the local day, not the next UTC day'
+  );
   assert.ok(analytics.days['2026-06-11'], 'local day bucket must exist');
-  assert.equal(analytics.days['2026-06-12'], undefined, 'no spillover UTC day bucket');
+  assert.equal(
+    analytics.days['2026-06-12'],
+    undefined,
+    'no spillover UTC day bucket'
+  );
 });
 
 test('a malformed ts falls back to today instead of throwing', async () => {
@@ -40,5 +50,9 @@ test('a malformed ts falls back to today instead of throwing', async () => {
     eventType: 'scan_captured',
     payload: { workflow: 'multiple', ts: 'not-a-date' }
   });
-  assert.equal(response.success, true, 'invalid ts must not crash the analytics writer');
+  assert.equal(
+    response.success,
+    true,
+    'invalid ts must not crash the analytics writer'
+  );
 });

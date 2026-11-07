@@ -39,11 +39,19 @@ function normalizeIsoTimestamp(value) {
 export function normalizeScannerPortInfo(info) {
   if (!info || typeof info !== 'object') return null;
   const normalized = {};
-  if (info.usbVendorId !== undefined && info.usbVendorId !== null && info.usbVendorId !== '') {
+  if (
+    info.usbVendorId !== undefined &&
+    info.usbVendorId !== null &&
+    info.usbVendorId !== ''
+  ) {
     const vendorId = Number(info.usbVendorId);
     if (Number.isFinite(vendorId)) normalized.usbVendorId = vendorId;
   }
-  if (info.usbProductId !== undefined && info.usbProductId !== null && info.usbProductId !== '') {
+  if (
+    info.usbProductId !== undefined &&
+    info.usbProductId !== null &&
+    info.usbProductId !== ''
+  ) {
     const productId = Number(info.usbProductId);
     if (Number.isFinite(productId)) normalized.usbProductId = productId;
   }
@@ -81,28 +89,41 @@ export function normalizeScannerStatusSnapshot(snapshot) {
     lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
     captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
     lastError: String(source.lastError || '').trim(),
-    recoverAttemptCount: Math.max(0, Number.parseInt(source.recoverAttemptCount, 10) || 0)
+    recoverAttemptCount: Math.max(
+      0,
+      Number.parseInt(source.recoverAttemptCount, 10) || 0
+    )
   };
 }
 
-export function buildDefaultScannerStatus({ enabled = false, profileId = '', portInfo = null } = {}) {
+export function buildDefaultScannerStatus({
+  enabled = false,
+  profileId = '',
+  portInfo = null
+} = {}) {
   const normalizedProfileId = String(profileId || '').trim();
   if (!normalizedProfileId) {
     return createScannerStatusSnapshot();
   }
   return createScannerStatusSnapshot({
-    state: enabled ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE : SCANNER_STATUS_STATES.DISABLED,
+    state: enabled
+      ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
+      : SCANNER_STATUS_STATES.DISABLED,
     profileId: normalizedProfileId,
     portInfo: normalizeScannerPortInfo(portInfo)
   });
 }
 
 export function isScannerConnected(status) {
-  return normalizeScannerStatusSnapshot(status).state === SCANNER_STATUS_STATES.CONNECTED;
+  return (
+    normalizeScannerStatusSnapshot(status).state ===
+    SCANNER_STATUS_STATES.CONNECTED
+  );
 }
 
 export function shouldShowScannerWorkflowBanner(mode, status) {
-  const normalizedMode = mode === 'multiple' || mode === 'inventory' ? mode : 'single';
+  const normalizedMode =
+    mode === 'multiple' || mode === 'inventory' ? mode : 'single';
   return normalizedMode !== 'single' && !isScannerConnected(status);
 }
 
@@ -125,23 +146,30 @@ export function portInfoMatches(preferredInfo, candidateInfo) {
   return compared > 0;
 }
 
-export function selectGrantedPort(ports, profile, preferredPortInfo, profileMatcher) {
+export function selectGrantedPort(
+  ports,
+  profile,
+  preferredPortInfo,
+  profileMatcher
+) {
   const candidates = Array.isArray(ports) ? ports.filter(Boolean) : [];
   if (!candidates.length) {
     return { port: null, reason: 'none' };
   }
 
   const preferred = candidates.find((candidate) => {
-    const info = typeof candidate.getInfo === 'function' ? candidate.getInfo() : null;
+    const info =
+      typeof candidate.getInfo === 'function' ? candidate.getInfo() : null;
     return portInfoMatches(preferredPortInfo, info);
   });
   if (preferred) {
     return { port: preferred, reason: 'preferred' };
   }
 
-  const matchesProfile = typeof profileMatcher === 'function'
-    ? candidates.find((candidate) => profileMatcher(candidate, profile))
-    : null;
+  const matchesProfile =
+    typeof profileMatcher === 'function'
+      ? candidates.find((candidate) => profileMatcher(candidate, profile))
+      : null;
   if (matchesProfile) {
     return { port: matchesProfile, reason: 'profile' };
   }
@@ -155,7 +183,10 @@ export function normalizeScannerErrorMessage(error) {
   return String(error.message || error.name || error).trim();
 }
 
-export function classifyScannerConnectionFailure(error, fallbackState = SCANNER_STATUS_STATES.ERROR) {
+export function classifyScannerConnectionFailure(
+  error,
+  fallbackState = SCANNER_STATUS_STATES.ERROR
+) {
   const rawMessage = normalizeScannerErrorMessage(error);
   const message = rawMessage.toLowerCase();
   const name = String(error?.name || '').toLowerCase();
@@ -261,9 +292,10 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
   switch (snapshot.state) {
     case SCANNER_STATUS_STATES.CONNECTED:
       descriptor.label = 'Connected';
-      descriptor.detail = snapshot.captureCount > 0
-        ? `Scanner online. ${snapshot.captureCount} hardware scan(s) captured; latest ${snapshot.lastCaptureAt || 'time unavailable'}.`
-        : 'Scanner online. No hardware scan has reached Web Serial since this daemon started.';
+      descriptor.detail =
+        snapshot.captureCount > 0
+          ? `Scanner online. ${snapshot.captureCount} hardware scan(s) captured; latest ${snapshot.lastCaptureAt || 'time unavailable'}.`
+          : 'Scanner online. No hardware scan has reached Web Serial since this daemon started.';
       descriptor.tone = 'success';
       descriptor.showSetup = true;
       break;
@@ -277,34 +309,42 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
       descriptor.detail = 'Scanner link dropped. Retrying automatically.';
       descriptor.tone = 'warning';
       descriptor.showReconnect = true;
-      descriptor.bannerText = 'Scanner link dropped. VaxLink is retrying automatically.';
+      descriptor.bannerText =
+        'Scanner link dropped. VaxLink is retrying automatically.';
       break;
     case SCANNER_STATUS_STATES.NEVER_CONFIGURED:
       descriptor.label = 'Needs Setup';
       descriptor.detail = 'No granted scanner found. Open setup once to pair.';
       descriptor.tone = 'warning';
-      descriptor.bannerText = 'Scanner setup is required before unattended scan capture will work.';
+      descriptor.bannerText =
+        'Scanner setup is required before unattended scan capture will work.';
       break;
     case SCANNER_STATUS_STATES.WAITING_FOR_DEVICE:
       descriptor.label = 'Disconnected';
-      descriptor.detail = 'Scanner not detected. Reconnect the cradle or power it on.';
+      descriptor.detail =
+        'Scanner not detected. Reconnect the cradle or power it on.';
       descriptor.tone = 'warning';
       descriptor.showReconnect = true;
-      descriptor.bannerText = 'Scanner is offline. New scans will not be captured until it reconnects.';
+      descriptor.bannerText =
+        'Scanner is offline. New scans will not be captured until it reconnects.';
       break;
     case SCANNER_STATUS_STATES.PERMISSION_LOST:
       descriptor.label = 'Needs Setup';
-      descriptor.detail = 'Scanner permission was lost. Open setup to grant the port again.';
+      descriptor.detail =
+        'Scanner permission was lost. Open setup to grant the port again.';
       descriptor.tone = 'error';
-      descriptor.bannerText = 'Scanner permission was lost. Open setup to re-grant access.';
+      descriptor.bannerText =
+        'Scanner permission was lost. Open setup to re-grant access.';
       descriptor.bannerTone = 'error';
       break;
     case SCANNER_STATUS_STATES.BUSY:
       descriptor.label = 'Busy in Another App';
-      descriptor.detail = 'Scanner is unavailable because another app or browser context is using the COM port.';
+      descriptor.detail =
+        'Scanner is unavailable because another app or browser context is using the COM port.';
       descriptor.tone = 'error';
       descriptor.showReconnect = true;
-      descriptor.bannerText = 'Scanner COM port is busy in another app. Release it, then reconnect.';
+      descriptor.bannerText =
+        'Scanner COM port is busy in another app. Release it, then reconnect.';
       descriptor.bannerTone = 'error';
       break;
     case SCANNER_STATUS_STATES.DISABLED:
@@ -319,7 +359,8 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
       descriptor.detail = snapshot.lastError || 'Scanner connection failed.';
       descriptor.tone = 'error';
       descriptor.showReconnect = true;
-      descriptor.bannerText = 'Scanner connection failed. Reconnect to resume unattended scan capture.';
+      descriptor.bannerText =
+        'Scanner connection failed. Reconnect to resume unattended scan capture.';
       descriptor.bannerTone = 'error';
       break;
     default:

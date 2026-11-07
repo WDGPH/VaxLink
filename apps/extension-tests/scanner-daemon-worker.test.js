@@ -9,7 +9,9 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
     getReader() {
       return {
         read() {
-          return new Promise((resolve) => { resolveRead = resolve; });
+          return new Promise((resolve) => {
+            resolveRead = resolve;
+          });
         },
         async cancel() {
           resolveRead?.({ value: undefined, done: true });
@@ -20,7 +22,9 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   };
   let closeCount = 0;
   const port = {
-    get readable() { return readable; },
+    get readable() {
+      return readable;
+    },
     writable: null,
     getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
     open: async () => undefined,
@@ -40,7 +44,9 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
     value: { serial: { getPorts: async () => [port] } }
   });
 
-  await import(`../extension/scanner/scanner-daemon-worker.js?test=${Date.now()}`);
+  await import(
+    `../extension/scanner/scanner-daemon-worker.js?test=${Date.now()}`
+  );
   workerListeners.get('message')({
     data: {
       type: 'connectGranted',
@@ -50,7 +56,9 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  const connected = workerMessages.find((message) => message.status?.state === 'connected');
+  const connected = workerMessages.find(
+    (message) => message.status?.state === 'connected'
+  );
   assert.ok(connected, 'worker must report a connected background serial port');
 
   resolveRead({
@@ -59,9 +67,14 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   const captured = workerMessages.find((message) => message.type === 'scan');
-  const captureStatus = workerMessages.find((message) => message.status?.captureCount === 1);
+  const captureStatus = workerMessages.find(
+    (message) => message.status?.captureCount === 1
+  );
   assert.ok(captured, 'worker must emit the decoded hardware scan');
-  assert.ok(captureStatus, 'worker must expose a non-PHI hardware capture counter');
+  assert.ok(
+    captureStatus,
+    'worker must expose a non-PHI hardware capture counter'
+  );
   assert.ok(captureStatus.status.lastCaptureAt);
 
   workerListeners.get('message')({ data: { type: 'disconnect' } });

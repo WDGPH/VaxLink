@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 test('background creates exactly one persistent WORKERS offscreen document', async () => {
   const harness = createBackgroundHarness(makeTestNvcBundle());
@@ -12,6 +15,11 @@ test('background creates exactly one persistent WORKERS offscreen document', asy
   assert.equal(first.success, true);
   assert.equal(second.success, true);
   assert.equal(harness.offscreenCreations.length, 1);
-  assert.deepEqual(Array.from(harness.offscreenCreations[0].reasons), ['WORKERS']);
-  assert.match(harness.offscreenCreations[0].justification, /scanner connection active/i);
+  assert.deepEqual(Array.from(harness.offscreenCreations[0].reasons), [
+    'WORKERS'
+  ]);
+  assert.match(
+    harness.offscreenCreations[0].justification,
+    /scanner connection active/i
+  );
 });

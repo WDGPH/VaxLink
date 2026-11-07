@@ -2,12 +2,12 @@
 
 Today, platform support is hardcoded in two places in `content.js`:
 
-| Location | What it does |
-|---|---|
-| `isHandsFreeSupportedPage()` | Whitelist of allowed hostnames |
-| `autoFillTelus()` | Routes to Panorama fill OR generic fill |
-| `isPanoramaImmunizationPage()` | Detects Panorama-specific DOM |
-| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic |
+| Location                           | What it does                            |
+| ---------------------------------- | --------------------------------------- |
+| `isHandsFreeSupportedPage()`       | Whitelist of allowed hostnames          |
+| `autoFillTelus()`                  | Routes to Panorama fill OR generic fill |
+| `isPanoramaImmunizationPage()`     | Detects Panorama-specific DOM           |
+| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic            |
 
 Adding OSCAR/Wolf/PS Suite today means copy-pasting more `if (isOSCAR)`
 branches into those same functions. The [roadmap](roadmap.md) describes a
@@ -51,20 +51,20 @@ each EMR as an **adapter profile** rather than inline branches.
   behavior.
 
 !!! tip "Claude Code skill"
-    `skills/vaxlink-emr-adaptation/SKILL.md` packages this same adapter
-    contract for use with Claude Code, including a pointer to
-    `references/emr-adapter-contract.md` — read that before adding a new site
-    profile.
+`skills/vaxlink-emr-adaptation/SKILL.md` packages this same adapter
+contract for use with Claude Code, including a pointer to
+`references/emr-adapter-contract.md` — read that before adding a new site
+profile.
 
 ## Platform research notes
 
 From the [roadmap](roadmap.md)'s survey of likely next platforms:
 
-| Platform | Common hostnames | Notes |
-|---|---|---|
+| Platform  | Common hostnames                                | Notes                                                                |
+| --------- | ----------------------------------------------- | -------------------------------------------------------------------- |
 | OSCAR EMR | `oscar.*`, `*.oscarhost.com`, `*.oscar-emr.com` | Open-source Java; immunizations under `/oscarRx/` or `/appointment/` |
-| Wolf EMR | `*.wolfemr.com`, `wolfmedical.com` | Field names tend to follow `vaccine_`, `lot_`, `expiry_` patterns |
-| PS Suite | `*.ps-suite.com`, `pssuite.ca` | Telus Health product; likely similar to InputHealth |
+| Wolf EMR  | `*.wolfemr.com`, `wolfmedical.com`              | Field names tend to follow `vaccine_`, `lot_`, `expiry_` patterns    |
+| PS Suite  | `*.ps-suite.com`, `pssuite.ca`                  | Telus Health product; likely similar to InputHealth                  |
 
 Inspect actual running instances before implementing a new adapter — no
 selectors are confirmed for these yet.

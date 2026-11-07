@@ -53,7 +53,7 @@ function buildExpiryFields(data, inventoryExpiry) {
     expiry_days_remaining: status.daysRemaining ?? '',
     expiry_source:
       data?.expiry_source ||
-      (data?.expiry ? 'barcode' : (data?.nvc_lot_expiry ? 'nvc' : 'none'))
+      (data?.expiry ? 'barcode' : data?.nvc_lot_expiry ? 'nvc' : 'none')
   };
 }
 

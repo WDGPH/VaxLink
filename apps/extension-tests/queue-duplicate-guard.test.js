@@ -15,7 +15,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 const MULTIPLE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_KEY = 'inventory_scan_batch_v1';
@@ -52,9 +55,15 @@ test('two patients, same lot, scanned 8s apart must both be queued', async () =>
   await append(harness, MULTIPLE_KEY, first);
 
   // Same lot, same barcode (no per-unit serial on vaccine packs), next patient.
-  const second = makeRecord({ scanned_at: new Date(Date.parse(first.scanned_at) + 8000).toISOString() });
+  const second = makeRecord({
+    scanned_at: new Date(Date.parse(first.scanned_at) + 8000).toISOString()
+  });
   const result = await append(harness, MULTIPLE_KEY, second);
-  assert.equal(result.duplicate_ignored, undefined, 'a next-patient same-lot scan must not be dropped');
+  assert.equal(
+    result.duplicate_ignored,
+    undefined,
+    'a next-patient same-lot scan must not be dropped'
+  );
   assert.equal(harness.storageData.get(MULTIPLE_KEY).length, 2);
 });
 
@@ -65,9 +74,15 @@ test('double-fire of the same barcode within 3s is ignored in multiple mode', as
   assert.equal(firstResult.duplicate_ignored, undefined);
   assert.equal(firstResult.queueSizeAfter, 1);
 
-  const second = makeRecord({ scanned_at: new Date(Date.parse(first.scanned_at) + 1200).toISOString() });
+  const second = makeRecord({
+    scanned_at: new Date(Date.parse(first.scanned_at) + 1200).toISOString()
+  });
   const secondResult = await append(harness, MULTIPLE_KEY, second);
-  assert.equal(secondResult.duplicate_ignored, true, 'second scan must be flagged as duplicate');
+  assert.equal(
+    secondResult.duplicate_ignored,
+    true,
+    'second scan must be flagged as duplicate'
+  );
   assert.equal(secondResult.duplicate_of, first.id);
   assert.equal(secondResult.queueSizeAfter, 1, 'queue must not grow');
 
@@ -80,9 +95,15 @@ test('the same barcode scanned again outside the window is queued', async () => 
   const first = makeRecord();
   await append(harness, MULTIPLE_KEY, first);
 
-  const later = makeRecord({ scanned_at: new Date(Date.parse(first.scanned_at) + 30000).toISOString() });
+  const later = makeRecord({
+    scanned_at: new Date(Date.parse(first.scanned_at) + 30000).toISOString()
+  });
   const result = await append(harness, MULTIPLE_KEY, later);
-  assert.equal(result.duplicate_ignored, undefined, 'a deliberate later re-scan is legitimate');
+  assert.equal(
+    result.duplicate_ignored,
+    undefined,
+    'a deliberate later re-scan is legitimate'
+  );
   assert.equal(harness.storageData.get(MULTIPLE_KEY).length, 2);
 });
 
@@ -120,8 +141,14 @@ test('inventory queue is exempt: identical scans are stock counts', async () => 
   const first = makeRecord();
   await append(harness, INVENTORY_KEY, first);
 
-  const second = makeRecord({ scanned_at: new Date(Date.parse(first.scanned_at) + 500).toISOString() });
+  const second = makeRecord({
+    scanned_at: new Date(Date.parse(first.scanned_at) + 500).toISOString()
+  });
   const result = await append(harness, INVENTORY_KEY, second);
-  assert.equal(result.duplicate_ignored, undefined, 'inventory counting must allow identical scans');
+  assert.equal(
+    result.duplicate_ignored,
+    undefined,
+    'inventory counting must allow identical scans'
+  );
   assert.equal(harness.storageData.get(INVENTORY_KEY).length, 2);
 });

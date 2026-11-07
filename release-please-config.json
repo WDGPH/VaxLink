@@ -19,8 +19,16 @@
   "packages": {
     ".": {
       "extra-files": [
-        { "type": "json", "path": "apps/extension/manifest.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "apps/extension/manifest.json", "jsonpath": "$.version_name" }
+        {
+          "type": "json",
+          "path": "apps/extension/manifest.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "apps/extension/manifest.json",
+          "jsonpath": "$.version_name"
+        }
       ]
     }
   }

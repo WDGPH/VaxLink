@@ -39,15 +39,20 @@ export function extractCatalogueLots(bundle) {
   const lots = [];
   for (const entry of bundle.entry || []) {
     const r = entry.resource;
-    if (!r || r.resourceType !== 'CodeSystem' || r.id !== 'nvc-vaccine-lot-id') continue;
+    if (!r || r.resourceType !== 'CodeSystem' || r.id !== 'nvc-vaccine-lot-id')
+      continue;
     for (const concept of r.concept || []) {
       let lotNumber = null;
       let expiryIso = null;
       for (const prop of concept.property || []) {
-        if (prop.code === 'lotNumber' && prop.valueString) lotNumber = prop.valueString;
+        if (prop.code === 'lotNumber' && prop.valueString)
+          lotNumber = prop.valueString;
         // Same precedence as background.js extractLotExpiry: first matching
         // property in document order wins.
-        if (!expiryIso && (prop.code === 'expiryDate' || prop.code === 'originalExpiryDate')) {
+        if (
+          !expiryIso &&
+          (prop.code === 'expiryDate' || prop.code === 'originalExpiryDate')
+        ) {
           expiryIso = prop.valueDateTime || null;
         }
       }
@@ -59,14 +64,23 @@ export function extractCatalogueLots(bundle) {
         const url = String(ext.url || '').toLowerCase();
         const coding = ext.valueCodeableConcept?.coding?.[0] || null;
         if (url.includes('linked-tradename-concept') && coding) {
-          tradenameRefs.push({ code: coding.code || '', display: coding.display || '' });
+          tradenameRefs.push({
+            code: coding.code || '',
+            display: coding.display || ''
+          });
         }
         if (url.includes('market-authorization-holder') && coding) {
           manufacturer = coding.display || coding.code || null;
         }
       }
 
-      lots.push({ lotNumber, code: concept.code || '', expiryIso, manufacturer, tradenameRefs });
+      lots.push({
+        lotNumber,
+        code: concept.code || '',
+        expiryIso,
+        manufacturer,
+        tradenameRefs
+      });
     }
   }
   return lots;
@@ -123,17 +137,41 @@ const BACKGROUND_PATH = path.resolve(
 const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
 export function makeTestNvcBundle(code = 'TESTLOT') {
-  return { resourceType: 'Bundle', type: 'collection', entry: [
-    { resource: { resourceType: 'ValueSet', id: 'Tradename', compose: {
-      include: [{ concept: [{ code: 'trade-1', display: 'Test vaccine' }] }]
-    } } },
-    { resource: { resourceType: 'CodeSystem', id: 'nvc-vaccine-lot-id', concept: [
-      { code, property: [{ code: 'lotNumber', valueString: code }], extension: [{
-        url: 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-tradename-concept',
-        valueCodeableConcept: { coding: [{ code: 'trade-1' }] }
-      }] }
-    ] } }
-  ] };
+  return {
+    resourceType: 'Bundle',
+    type: 'collection',
+    entry: [
+      {
+        resource: {
+          resourceType: 'ValueSet',
+          id: 'Tradename',
+          compose: {
+            include: [
+              { concept: [{ code: 'trade-1', display: 'Test vaccine' }] }
+            ]
+          }
+        }
+      },
+      {
+        resource: {
+          resourceType: 'CodeSystem',
+          id: 'nvc-vaccine-lot-id',
+          concept: [
+            {
+              code,
+              property: [{ code: 'lotNumber', valueString: code }],
+              extension: [
+                {
+                  url: 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-tradename-concept',
+                  valueCodeableConcept: { coding: [{ code: 'trade-1' }] }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  };
 }
 
 export function createBackgroundHarness(bundle, options = {}) {
@@ -194,12 +232,16 @@ export function createBackgroundHarness(bundle, options = {}) {
       query(queryInfo, callback) {
         let tabs = Array.isArray(options.tabs) ? options.tabs : [];
         if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);
-        if (queryInfo?.currentWindow) tabs = tabs.filter((tab) => tab.currentWindow !== false);
+        if (queryInfo?.currentWindow)
+          tabs = tabs.filter((tab) => tab.currentWindow !== false);
         queueMicrotask(() => callback(tabs));
       },
       sendMessage(tabId, message, sendOptions, callback) {
         tabMessages.push({ tabId, message, options: sendOptions });
-        const response = options.tabResponse || { success: false, error: 'No content tab in clinic-sim harness' };
+        const response = options.tabResponse || {
+          success: false,
+          error: 'No content tab in clinic-sim harness'
+        };
         queueMicrotask(() => callback(response));
       }
     },
@@ -209,7 +251,9 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     action: {
       setIcon() {},
-      setBadgeText: ({ text }) => { badgeText = text; },
+      setBadgeText: ({ text }) => {
+        badgeText = text;
+      },
       setBadgeBackgroundColor() {}
     },
     storage: {
@@ -231,7 +275,11 @@ export function createBackgroundHarness(bundle, options = {}) {
           if (options.failStorageSet?.(values)) {
             queueMicrotask(() => {
               chrome.runtime.lastError = { message: 'storage write failed' };
-              try { if (callback) callback(); } finally { chrome.runtime.lastError = null; }
+              try {
+                if (callback) callback();
+              } finally {
+                chrome.runtime.lastError = null;
+              }
             });
             return;
           }
@@ -258,7 +306,9 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     // Network is forbidden in tests; the icon fetch failure is caught inside
     // ensureActionIcon and the bundle path never hits fetch (storage is seeded).
-    fetch: options.fetch || (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
+    fetch:
+      options.fetch ||
+      (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
     URL,
@@ -273,11 +323,18 @@ export function createBackgroundHarness(bundle, options = {}) {
   vm.createContext(sandbox);
   sandbox.importScripts = (...scriptPaths) => {
     for (const scriptPath of scriptPaths) {
-      const resolvedPath = path.resolve(BACKGROUND_DIR, String(scriptPath || ''));
-      vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, { filename: path.basename(resolvedPath) });
+      const resolvedPath = path.resolve(
+        BACKGROUND_DIR,
+        String(scriptPath || '')
+      );
+      vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, {
+        filename: path.basename(resolvedPath)
+      });
     }
   };
-  vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, { filename: 'background.js' });
+  vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, {
+    filename: 'background.js'
+  });
 
   function sendMessage(request) {
     return new Promise((resolve, reject) => {
@@ -298,7 +355,10 @@ export function createBackgroundHarness(bundle, options = {}) {
         resolve(undefined);
       }
       setTimeout(() => {
-        if (!settled) reject(new Error(`sendResponse never called for action ${request?.action}`));
+        if (!settled)
+          reject(
+            new Error(`sendResponse never called for action ${request?.action}`)
+          );
       }, 15000).unref();
     });
   }
@@ -323,7 +383,12 @@ export function createBackgroundHarness(bundle, options = {}) {
 // ---------------------------------------------------------------------------
 
 const require = createRequire(import.meta.url);
-require(path.resolve(fileURLToPath(import.meta.url), '../../../extension/panorama-agent-rules.js'));
+require(
+  path.resolve(
+    fileURLToPath(import.meta.url),
+    '../../../extension/panorama-agent-rules.js'
+  )
+);
 const PANORAMA_AGENT_RULES = globalThis.VAXLINK_PANORAMA_AGENT_RULES;
 
 function normalizeForMatch(value) {
@@ -339,10 +404,20 @@ function normalizeForMatch(value) {
 }
 
 function buildPanoramaAgentSourceText(data) {
-  return normalizeForMatch([
-    data?.name, data?.generic_name, data?.tradename, data?.disease,
-    data?.antigen, data?.manufacturer, data?.route, data?.strength
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [
+      data?.name,
+      data?.generic_name,
+      data?.tradename,
+      data?.disease,
+      data?.antigen,
+      data?.manufacturer,
+      data?.route,
+      data?.strength
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
 }
 
 function panoramaSourceHasNormalizedTerm(src, tokens, term) {
@@ -352,20 +427,43 @@ function panoramaSourceHasNormalizedTerm(src, tokens, term) {
   if (!termTokens.length) return false;
   if (termTokens.length === 1) {
     const token = termTokens[0];
-    return token.length <= 3 ? tokens.includes(token) : (tokens.includes(token) || src.includes(token));
+    return token.length <= 3
+      ? tokens.includes(token)
+      : tokens.includes(token) || src.includes(token);
   }
   if (src.includes(normalizedTerm)) return true;
   return termTokens.every((token) =>
-    token.length <= 3 ? tokens.includes(token) : (tokens.includes(token) || src.includes(token))
+    token.length <= 3
+      ? tokens.includes(token)
+      : tokens.includes(token) || src.includes(token)
   );
 }
 
 function clauseMatches(src, clause) {
-  const tokens = src.split(' ').map((t) => t.trim()).filter(Boolean);
-  if (clause.any && !clause.any.some((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))) return false;
-  if (clause.all && !clause.all.every((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))) return false;
-  if (clause.notAny && clause.notAny.some((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))) return false;
-  if (clause.notAll && clause.notAll.every((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))) return false;
+  const tokens = src
+    .split(' ')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  if (
+    clause.any &&
+    !clause.any.some((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))
+  )
+    return false;
+  if (
+    clause.all &&
+    !clause.all.every((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))
+  )
+    return false;
+  if (
+    clause.notAny &&
+    clause.notAny.some((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))
+  )
+    return false;
+  if (
+    clause.notAll &&
+    clause.notAll.every((t) => panoramaSourceHasNormalizedTerm(src, tokens, t))
+  )
+    return false;
   return true;
 }
 

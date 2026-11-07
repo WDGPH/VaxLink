@@ -25,10 +25,10 @@ higher than the one already uploaded to that listing.
 
 ## Channels
 
-| Channel | Status | Web Store listing | Packaged manifest name | Popup badge |
-|---|---|---|---|---|
-| Production | Active, releases from `main` | VaxLink | `VaxLink` | hidden |
-| Alpha | Prereleases from `alpha` | VaxLink Alpha | `VaxLink Alpha` | shown |
+| Channel    | Status                       | Web Store listing | Packaged manifest name | Popup badge |
+| ---------- | ---------------------------- | ----------------- | ---------------------- | ----------- |
+| Production | Active, releases from `main` | VaxLink           | `VaxLink`              | hidden      |
+| Alpha      | Prereleases from `alpha`     | VaxLink Alpha     | `VaxLink Alpha`        | shown       |
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
@@ -128,12 +128,14 @@ Examples:
 - `chore:`/`docs:`/`test:`/`refactor:` → hidden from the generated changelog
 
 ### Conventions the automation relies on
+
 - Label feedback-driven issues **`clinic-feedback`** so they can be found when preparing release notes.
 - Reference issues in commit subjects (`(#25)`) so changelog entries link back.
-- Don't hand-edit `version` anywhere; the Release PR owns version bumps. (Hand-written changelog content *above* the generated sections is preserved — the historical 1.0.0–1.0.7 entries stay.)
+- Don't hand-edit `version` anywhere; the Release PR owns version bumps. (Hand-written changelog content _above_ the generated sections is preserved — the historical 1.0.0–1.0.7 entries stay.)
 - Write "Clinic feedback addressed" tables by hand for major pilot rounds; release-please generates commit-based changelog entries, not these feedback tables.
 
 ### Sanity checks before any store upload
+
 - Open the zip and confirm `manifest.json` has the right `name`/`version_name` for the listing.
 - Load the extracted zip unpacked and open the popup: badge present on alpha, absent on prod.
 - No downloaded `nvc_bundle.json`, tests, fixtures, `node_modules`, or development-only files inside the ZIP (the package script excludes them). Verify the checksum against the final ZIP before uploading.

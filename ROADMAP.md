@@ -4,12 +4,12 @@
 
 Two places in `content.js` are hardcoded per-platform:
 
-| Location | What it does | Line |
-|---|---|---|
-| `isHandsFreeSupportedPage()` | Whitelist of allowed hostnames | 1023 |
-| `autoFillTelus()` | Routes to Panorama fill OR generic fill | 3084 |
-| `isPanoramaImmunizationPage()` | Detects Panorama-specific DOM | 2697 |
-| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic | 2720 |
+| Location                           | What it does                            | Line |
+| ---------------------------------- | --------------------------------------- | ---- |
+| `isHandsFreeSupportedPage()`       | Whitelist of allowed hostnames          | 1023 |
+| `autoFillTelus()`                  | Routes to Panorama fill OR generic fill | 3084 |
+| `isPanoramaImmunizationPage()`     | Detects Panorama-specific DOM           | 2697 |
+| `fillPanoramaImmunizationFields()` | Panorama-specific fill logic            | 2720 |
 
 Adding OSCAR/Wolf/PS Suite today = copy-pasting more `if (isOSCAR)` branches into those same functions. It will get messy fast.
 
@@ -38,30 +38,36 @@ apps/extension/
 ```
 
 **Each platform file registers itself:**
+
 ```js
 // platforms/oscar.js
 VAXLINK_PLATFORMS.push({
   id: 'oscar',
   name: 'OSCAR EMR',
   hostPatterns: ['oscar.', '.oscarhost.com', 'oscar-emr.'],
-  detect(host, doc) { /* optional DOM check */ return true; },
-  fill(data) { /* platform-specific fill */ }
+  detect(host, doc) {
+    /* optional DOM check */ return true;
+  },
+  fill(data) {
+    /* platform-specific fill */
+  }
 });
 ```
 
 **`content.js` becomes platform-agnostic:**
+
 ```js
 // isHandsFreeSupportedPage() becomes:
 function isHandsFreeSupportedPage() {
   const host = window.location.hostname.toLowerCase();
-  return VAXLINK_PLATFORMS.some(p => matchesHost(p, host));
+  return VAXLINK_PLATFORMS.some((p) => matchesHost(p, host));
 }
 
 // autoFillTelus() becomes:
 function autoFillTelus(data) {
   const host = window.location.hostname.toLowerCase();
   const platform = VAXLINK_PLATFORMS.find(
-    p => matchesHost(p, host) && p.detect?.(host, document) !== false
+    (p) => matchesHost(p, host) && p.detect?.(host, document) !== false
   );
   return platform ? platform.fill(data) : genericFill(data);
 }
@@ -72,6 +78,7 @@ function autoFillTelus(data) {
 ## Phase Breakdown
 
 ### Phase 1 — Refactor (no behavior change)
+
 - Create `platforms/registry.js` with `VAXLINK_PLATFORMS = []`
 - Create `platforms/panorama.js` — extract existing Panorama logic
 - Create `platforms/inputhealth.js` — extract existing InputHealth logic
@@ -80,12 +87,14 @@ function autoFillTelus(data) {
 - **Zero behavior change** — Panorama + InputHealth work identically
 
 ### Phase 2 — New Platforms
+
 - `platforms/oscar.js` — OSCAR EMR (widely used in Ontario/BC/AB)
 - `platforms/wolf.js` — Wolf EMR
 - `platforms/psuite.js` — PS Suite (Telus Health)
 - Requires inspecting each platform's immunization form field selectors
 
 ### Phase 3 — Community Config System
+
 - `settings.html` / `settings.js` — settings page linked from popup
 - UI to add **custom hostname patterns** (stored in `chrome.storage`)
 - UI to **enable/disable** built-in platforms
@@ -93,6 +102,7 @@ function autoFillTelus(data) {
 - Add a gear icon to popup linking to settings
 
 ### Phase 4 — Popup Enhancement
+
 - Show detected platform name in popup (e.g., "OSCAR EMR detected")
 - Show "No supported platform on this page" when on an unsupported site
 - Make "Auto-fill CHR" button label dynamic per platform
@@ -101,11 +111,11 @@ function autoFillTelus(data) {
 
 ## Platform Research Notes
 
-| Platform | Common Hostnames | Notes |
-|---|---|---|
+| Platform  | Common Hostnames                                | Notes                                                                |
+| --------- | ----------------------------------------------- | -------------------------------------------------------------------- |
 | OSCAR EMR | `oscar.*`, `*.oscarhost.com`, `*.oscar-emr.com` | Open-source Java; immunizations under `/oscarRx/` or `/appointment/` |
-| Wolf EMR | `*.wolfemr.com`, `wolfmedical.com` | Field names tend to be `vaccine_`, `lot_`, `expiry_` patterns |
-| PS Suite | `*.ps-suite.com`, `pssuite.ca` | Telus Health product; likely similar to InputHealth |
+| Wolf EMR  | `*.wolfemr.com`, `wolfmedical.com`              | Field names tend to be `vaccine_`, `lot_`, `expiry_` patterns        |
+| PS Suite  | `*.ps-suite.com`, `pssuite.ca`                  | Telus Health product; likely similar to InputHealth                  |
 
 > **TODO:** Inspect actual running instances of OSCAR/Wolf/PS Suite to get accurate field selectors before implementing Phase 2.
 

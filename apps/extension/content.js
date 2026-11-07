@@ -5,7 +5,14 @@ function vlog(...args) {
 }
 
 const HANDS_FREE_BUILD = '2026-03-11-hf-recovery-1';
-vlog('content script', location.href, 'readyState=', document.readyState, 'build=', HANDS_FREE_BUILD);
+vlog(
+  'content script',
+  location.href,
+  'readyState=',
+  document.readyState,
+  'build=',
+  HANDS_FREE_BUILD
+);
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -46,7 +53,8 @@ function normalizeAudioFeedbackSetting(stored) {
 
 function getAudioContext() {
   if (audioContextRef) return audioContextRef;
-  const AudioContextCtor = globalThis.AudioContext || globalThis.webkitAudioContext;
+  const AudioContextCtor =
+    globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!AudioContextCtor) return null;
   audioContextRef = new AudioContextCtor();
   return audioContextRef;
@@ -60,18 +68,32 @@ function playAudioCue(kind) {
     void ctx.resume().catch(() => undefined);
   }
 
-  const playTone = (frequency, durationMs, type = 'sine', gainValue = 0.06, delayMs = 0) => {
+  const playTone = (
+    frequency,
+    durationMs,
+    type = 'sine',
+    gainValue = 0.06,
+    delayMs = 0
+  ) => {
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
     oscillator.type = type;
     oscillator.frequency.value = frequency;
-    gain.gain.setValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000));
-    gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + (delayMs / 1000) + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (delayMs / 1000) + (durationMs / 1000));
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime + delayMs / 1000);
+    gain.gain.exponentialRampToValueAtTime(
+      gainValue,
+      ctx.currentTime + delayMs / 1000 + 0.01
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      ctx.currentTime + delayMs / 1000 + durationMs / 1000
+    );
     oscillator.connect(gain);
     gain.connect(ctx.destination);
-    oscillator.start(ctx.currentTime + (delayMs / 1000));
-    oscillator.stop(ctx.currentTime + (delayMs / 1000) + (durationMs / 1000) + 0.02);
+    oscillator.start(ctx.currentTime + delayMs / 1000);
+    oscillator.stop(
+      ctx.currentTime + delayMs / 1000 + durationMs / 1000 + 0.02
+    );
   };
 
   if (kind === 'success') {
@@ -135,9 +157,12 @@ function getQueueStorageKeyForWorkflow(mode) {
 
 function logAnalyticsEvent(eventType, payload = {}) {
   try {
-    chrome.runtime.sendMessage({ action: 'logAnalyticsEvent', eventType, payload }, () => {
-      void chrome.runtime.lastError;
-    });
+    chrome.runtime.sendMessage(
+      { action: 'logAnalyticsEvent', eventType, payload },
+      () => {
+        void chrome.runtime.lastError;
+      }
+    );
   } catch (_) {
     // Ignore analytics failures on client pages.
   }
@@ -171,7 +196,12 @@ function setupMessageListener() {
         sendResponse({ success: false, error: 'Unsupported chart page' });
         return true;
       }
-      Promise.resolve(handleHandsFreeScan(request.scan?.rawText || '', request.scan?.source || 'scanner-channel'))
+      Promise.resolve(
+        handleHandsFreeScan(
+          request.scan?.rawText || '',
+          request.scan?.source || 'scanner-channel'
+        )
+      )
         .then((result) => {
           const accepted = result?.accepted !== false;
           sendResponse({
@@ -186,7 +216,12 @@ function setupMessageListener() {
             queueSizeAfter: result?.queueSizeAfter || 0
           });
         })
-        .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan handling failed' }));
+        .catch((error) =>
+          sendResponse({
+            success: false,
+            error: error?.message || 'Scan handling failed'
+          })
+        );
       return true;
     }
     if (request.action === 'autoFill') {
@@ -245,12 +280,23 @@ function lookupVaccineInfoByLot(lot, gtin) {
     }
     chrome.runtime.sendMessage(request, (response) => {
       if (chrome.runtime.lastError) {
-        console.warn('Hands-free lot lookup failed:', chrome.runtime.lastError.message);
-        resolve({ error: 'NVC lookup is unavailable', errorCategory: 'unavailable' });
+        console.warn(
+          'Hands-free lot lookup failed:',
+          chrome.runtime.lastError.message
+        );
+        resolve({
+          error: 'NVC lookup is unavailable',
+          errorCategory: 'unavailable'
+        });
         return;
       }
       if (!response || response.error) {
-        resolve(response || { error: 'NVC lookup is unavailable', errorCategory: 'unavailable' });
+        resolve(
+          response || {
+            error: 'NVC lookup is unavailable',
+            errorCategory: 'unavailable'
+          }
+        );
         return;
       }
       resolve(response);
@@ -284,17 +330,20 @@ function setLocalStorage(values) {
 
 function appendQueueRecordViaBackground(storageKey, record) {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: 'appendQueueRecord', storageKey, record }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
+    chrome.runtime.sendMessage(
+      { action: 'appendQueueRecord', storageKey, record },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response || !response.success) {
+          reject(new Error(response?.error || 'Queue append failed'));
+          return;
+        }
+        resolve(response.record || null);
       }
-      if (!response || !response.success) {
-        reject(new Error(response?.error || 'Queue append failed'));
-        return;
-      }
-      resolve(response.record || null);
-    });
+    );
   });
 }
 
@@ -328,9 +377,15 @@ function getExpiryStatus(value) {
   }
 
   const today = new Date();
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayMidnight = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
   const msPerDay = 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / msPerDay);
+  const daysRemaining = Math.floor(
+    (expiry.getTime() - todayMidnight.getTime()) / msPerDay
+  );
 
   if (daysRemaining < 0) {
     return { flag: 'expired', daysRemaining };
@@ -344,11 +399,14 @@ function getExpiryStatus(value) {
 function buildInventoryRecordFromParsed(data, rawBarcode) {
   const totalDoses = getPositiveInt(data.total_doses, null);
   const fallbackDose = getPositiveInt(totalDoses, null);
-  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+  const inventoryExpiry =
+    data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
     ? 'barcode'
-    : (data.nvc_lot_expiry ? 'nvc' : (data.expiry_source || 'none'));
+    : data.nvc_lot_expiry
+      ? 'nvc'
+      : data.expiry_source || 'none';
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -410,7 +468,10 @@ function buildQueueRowsAfterRecordUse(rows, record, recordIndex) {
   if (remaining === null) {
     nextRows.splice(recordIndex, 0, record);
   } else if (remaining > 1) {
-    nextRows.splice(recordIndex, 0, { ...record, remaining_doses: remaining - 1 });
+    nextRows.splice(recordIndex, 0, {
+      ...record,
+      remaining_doses: remaining - 1
+    });
   }
 
   return nextRows;
@@ -440,36 +501,64 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   parsed.dose_unit = vaccineInfo.dose_unit;
   parsed.drug_code = vaccineInfo.din;
   parsed.nvc_override = vaccineInfo.nvc_override || null;
-  parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
+  parsed.name =
+    vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
 
   if (!parsed.lot && vaccineInfo.lot_number) {
     parsed.lot = vaccineInfo.lot_number;
   }
   if (!parsed.expiry && vaccineInfo.lot_expiry) {
-    parsed.expiry = toIsoDate(vaccineInfo.lot_expiry) || vaccineInfo.lot_expiry || parsed.expiry;
+    parsed.expiry =
+      toIsoDate(vaccineInfo.lot_expiry) ||
+      vaccineInfo.lot_expiry ||
+      parsed.expiry;
   }
 }
 
 async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (!isHandsFreeSupportedPage()) {
-    return { accepted: false, success: false, status: 'unsupported_page', error: 'Unsupported chart page' };
+    return {
+      accepted: false,
+      success: false,
+      status: 'unsupported_page',
+      error: 'Unsupported chart page'
+    };
   }
 
   const trimmed = String(scanValue || '').trim();
   if (!trimmed) {
-    return { accepted: true, success: false, status: 'empty_scan', error: 'Scan event missing raw text' };
+    return {
+      accepted: true,
+      success: false,
+      status: 'empty_scan',
+      error: 'Scan event missing raw text'
+    };
   }
 
   if (handleVaxlinkCommand(trimmed)) {
-    return { accepted: true, success: true, status: 'command_handled', command_handled: true };
+    return {
+      accepted: true,
+      success: true,
+      status: 'command_handled',
+      command_handled: true
+    };
   }
 
   const scanCapturedAt = new Date().toISOString();
-  vlog('hands-free candidate', { source, length: trimmed.length, preview: trimmed.slice(0, 80) });
+  vlog('hands-free candidate', {
+    source,
+    length: trimmed.length,
+    preview: trimmed.slice(0, 80)
+  });
 
   const now = Date.now();
-  if (trimmed === lastHandledScanValue && (now - lastHandledScanAt) < 1500) {
-    return { accepted: true, success: true, status: 'duplicate_ignored', duplicate_ignored: true };
+  if (trimmed === lastHandledScanValue && now - lastHandledScanAt < 1500) {
+    return {
+      accepted: true,
+      success: true,
+      status: 'duplicate_ignored',
+      duplicate_ignored: true
+    };
   }
   lastHandledScanValue = trimmed;
   lastHandledScanAt = now;
@@ -520,14 +609,21 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     }
 
     if (lookupAttempted) {
-      const lookupExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+      const lookupExpiryFlag = getExpiryStatus(
+        parsed.expiry || parsed.nvc_lot_expiry
+      ).flag;
       if (!vaccineInfo) {
         playAudioCue('error');
       }
       logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
         workflow: activeWorkflowMode,
         source,
-        vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+        vaccineLabel:
+          parsed.tradename ||
+          parsed.generic_name ||
+          parsed.lot ||
+          parsed.gtin ||
+          '',
         manufacturer: parsed.manufacturer || '',
         expiryFlag: lookupExpiryFlag
       });
@@ -548,11 +644,18 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     );
   }
 
-  const finalExpiryFlag = getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+  const finalExpiryFlag = getExpiryStatus(
+    parsed.expiry || parsed.nvc_lot_expiry
+  ).flag;
   logAnalyticsEvent('scan_captured', {
     workflow: activeWorkflowMode,
     source,
-    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    vaccineLabel:
+      parsed.tradename ||
+      parsed.generic_name ||
+      parsed.lot ||
+      parsed.gtin ||
+      '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
@@ -561,16 +664,26 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (queueStorageKey) {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
-      const queueKey = activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
+      const queueKey =
+        activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
       if (record.duplicate_ignored) {
         playAudioCue('duplicate');
         showVaxlinkToast({ ...parsed, _duplicateIgnored: true });
-        vlog('duplicate scan ignored', { mode: activeWorkflowMode, source, lot: record.lot });
+        vlog('duplicate scan ignored', {
+          mode: activeWorkflowMode,
+          source,
+          lot: record.lot
+        });
         logAnalyticsEvent('queue_duplicate_ignored', {
           workflow: activeWorkflowMode,
           queue: queueKey,
           source,
-          vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+          vaccineLabel:
+            record.tradename ||
+            record.generic_name ||
+            record.name ||
+            record.lot ||
+            '',
           manufacturer: record.manufacturer || '',
           expiryFlag: record.expiry_flag || finalExpiryFlag
         });
@@ -601,7 +714,12 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         source,
         count: 1,
         queueSizeAfter: record.queueSizeAfter || 0,
-        vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+        vaccineLabel:
+          record.tradename ||
+          record.generic_name ||
+          record.name ||
+          record.lot ||
+          '',
         manufacturer: record.manufacturer || '',
         expiryFlag: record.expiry_flag || finalExpiryFlag
       });
@@ -627,12 +745,18 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   logAnalyticsEvent('autofill_attempt', {
     workflow: activeWorkflowMode,
     source,
-    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    vaccineLabel:
+      parsed.tradename ||
+      parsed.generic_name ||
+      parsed.lot ||
+      parsed.gtin ||
+      '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
   if (adminDateTimeAutofillEnabled) {
-    parsed.administered_at = parsed.administered_at || parsed.scanned_at || scanCapturedAt;
+    parsed.administered_at =
+      parsed.administered_at || parsed.scanned_at || scanCapturedAt;
   } else {
     delete parsed.administered_at;
   }
@@ -644,7 +768,12 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     source,
     success,
     pending,
-    vaccineLabel: parsed.tradename || parsed.generic_name || parsed.lot || parsed.gtin || '',
+    vaccineLabel:
+      parsed.tradename ||
+      parsed.generic_name ||
+      parsed.lot ||
+      parsed.gtin ||
+      '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
@@ -660,7 +789,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     success,
     pending,
     status: autofillResult?.status || 'failed',
-    error: autofillResult?.error || (!success && !pending ? 'Could not auto-fill fields' : '')
+    error:
+      autofillResult?.error ||
+      (!success && !pending ? 'Could not auto-fill fields' : '')
   };
 }
 
@@ -682,10 +813,11 @@ function isHandsFreeSupportedPage() {
     const path = String(window.location.pathname || '').toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
-       host === 'panorama.prod.ehealthontario.ca' ||
-       host === 'trpanoramadhir.prod.ehealthontario.ca') &&
+        host === 'panorama.prod.ehealthontario.ca' ||
+        host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
-    const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
+    const isInputHealth =
+      host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
     return isPanorama || isInputHealth;
   } catch (error) {
@@ -702,41 +834,46 @@ function initHandsFreeScanner() {
   }
   window.__vaxlinkHandsFreeInitialized = true;
 
-  chrome.storage.local.get([
-    WORKFLOW_MODE_KEY,
-    LEGACY_POPUP_MODE_KEY,
-    LEGACY_REMOTE_MODE_KEY,
-    LEGACY_HANDS_FREE_KEY,
-    ADMIN_DATETIME_AUTOFILL_KEY,
-    REASON_CONSENT_AUTOFILL_KEY,
-    AUDIO_FEEDBACK_KEY
-  ], (stored) => {
-    activeWorkflowMode = normalizeWorkflowMode(stored);
-    adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(stored);
-    reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(stored);
-    audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
-    requestPendingScannerScans();
-    vlog('active workflow mode', activeWorkflowMode);
+  chrome.storage.local.get(
+    [
+      WORKFLOW_MODE_KEY,
+      LEGACY_POPUP_MODE_KEY,
+      LEGACY_REMOTE_MODE_KEY,
+      LEGACY_HANDS_FREE_KEY,
+      ADMIN_DATETIME_AUTOFILL_KEY,
+      REASON_CONSENT_AUTOFILL_KEY,
+      AUDIO_FEEDBACK_KEY
+    ],
+    (stored) => {
+      activeWorkflowMode = normalizeWorkflowMode(stored);
+      adminDateTimeAutofillEnabled =
+        normalizeAdminDateTimeAutofillSetting(stored);
+      reasonConsentAutofillEnabled =
+        normalizeReasonConsentAutofillSetting(stored);
+      audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
+      requestPendingScannerScans();
+      vlog('active workflow mode', activeWorkflowMode);
 
-    // On Panorama SPA navigations the page is already fully loaded when this
-    // content script injects, so document.readyState is NOT 'loading'.
-    // initClickReductionFeatures() therefore ran synchronously — BEFORE this
-    // callback fired.  At that point activeWorkflowMode was still the default
-    // 'single', so every mode guard in checkGrid() and the tryAutoDrain
-    // setTimeout evaluated false and bailed.
-    //
-    // Now that the real mode is known, re-kick both paths:
-    //  • maybeAutoFillPanoramaMultipleGrid – fills the agent+date grid
-    //  • tryAutoDrain – fills the single-immunization form after save
-    //
-    // A 250 ms head-start lets PrimeFaces settle; both functions guard
-    // internally (isPrimeFacesAjaxBusy, multiGridFillPending, etc.) and
-    // the MutationObserver catches any subsequent retry-worthy mutations.
-    if (activeWorkflowMode === 'multiple') {
-      setTimeout(() => void maybeAutoFillPanoramaMultipleGrid(), 250);
-      setTimeout(() => tryAutoDrain(), 1200);
+      // On Panorama SPA navigations the page is already fully loaded when this
+      // content script injects, so document.readyState is NOT 'loading'.
+      // initClickReductionFeatures() therefore ran synchronously — BEFORE this
+      // callback fired.  At that point activeWorkflowMode was still the default
+      // 'single', so every mode guard in checkGrid() and the tryAutoDrain
+      // setTimeout evaluated false and bailed.
+      //
+      // Now that the real mode is known, re-kick both paths:
+      //  • maybeAutoFillPanoramaMultipleGrid – fills the agent+date grid
+      //  • tryAutoDrain – fills the single-immunization form after save
+      //
+      // A 250 ms head-start lets PrimeFaces settle; both functions guard
+      // internally (isPrimeFacesAjaxBusy, multiGridFillPending, etc.) and
+      // the MutationObserver catches any subsequent retry-worthy mutations.
+      if (activeWorkflowMode === 'multiple') {
+        setTimeout(() => void maybeAutoFillPanoramaMultipleGrid(), 250);
+        setTimeout(() => tryAutoDrain(), 1200);
+      }
     }
-  });
+  );
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -752,29 +889,54 @@ function initHandsFreeScanner() {
       return;
     }
     const nextState = {
-      [WORKFLOW_MODE_KEY]: WORKFLOW_MODE_KEY in changes ? changes[WORKFLOW_MODE_KEY].newValue : activeWorkflowMode,
-      [LEGACY_POPUP_MODE_KEY]: LEGACY_POPUP_MODE_KEY in changes ? changes[LEGACY_POPUP_MODE_KEY].newValue : undefined,
-      [LEGACY_REMOTE_MODE_KEY]: LEGACY_REMOTE_MODE_KEY in changes ? changes[LEGACY_REMOTE_MODE_KEY].newValue : undefined,
-      [LEGACY_HANDS_FREE_KEY]: LEGACY_HANDS_FREE_KEY in changes ? changes[LEGACY_HANDS_FREE_KEY].newValue : undefined,
-      [ADMIN_DATETIME_AUTOFILL_KEY]: ADMIN_DATETIME_AUTOFILL_KEY in changes
-        ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
-        : adminDateTimeAutofillEnabled,
-      [REASON_CONSENT_AUTOFILL_KEY]: REASON_CONSENT_AUTOFILL_KEY in changes
-        ? changes[REASON_CONSENT_AUTOFILL_KEY].newValue
-        : reasonConsentAutofillEnabled,
-      [AUDIO_FEEDBACK_KEY]: AUDIO_FEEDBACK_KEY in changes
-        ? changes[AUDIO_FEEDBACK_KEY].newValue
-        : audioFeedbackEnabled
+      [WORKFLOW_MODE_KEY]:
+        WORKFLOW_MODE_KEY in changes
+          ? changes[WORKFLOW_MODE_KEY].newValue
+          : activeWorkflowMode,
+      [LEGACY_POPUP_MODE_KEY]:
+        LEGACY_POPUP_MODE_KEY in changes
+          ? changes[LEGACY_POPUP_MODE_KEY].newValue
+          : undefined,
+      [LEGACY_REMOTE_MODE_KEY]:
+        LEGACY_REMOTE_MODE_KEY in changes
+          ? changes[LEGACY_REMOTE_MODE_KEY].newValue
+          : undefined,
+      [LEGACY_HANDS_FREE_KEY]:
+        LEGACY_HANDS_FREE_KEY in changes
+          ? changes[LEGACY_HANDS_FREE_KEY].newValue
+          : undefined,
+      [ADMIN_DATETIME_AUTOFILL_KEY]:
+        ADMIN_DATETIME_AUTOFILL_KEY in changes
+          ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
+          : adminDateTimeAutofillEnabled,
+      [REASON_CONSENT_AUTOFILL_KEY]:
+        REASON_CONSENT_AUTOFILL_KEY in changes
+          ? changes[REASON_CONSENT_AUTOFILL_KEY].newValue
+          : reasonConsentAutofillEnabled,
+      [AUDIO_FEEDBACK_KEY]:
+        AUDIO_FEEDBACK_KEY in changes
+          ? changes[AUDIO_FEEDBACK_KEY].newValue
+          : audioFeedbackEnabled
     };
     activeWorkflowMode = normalizeWorkflowMode(nextState);
-    adminDateTimeAutofillEnabled = normalizeAdminDateTimeAutofillSetting(nextState);
-    reasonConsentAutofillEnabled = normalizeReasonConsentAutofillSetting(nextState);
+    adminDateTimeAutofillEnabled =
+      normalizeAdminDateTimeAutofillSetting(nextState);
+    reasonConsentAutofillEnabled =
+      normalizeReasonConsentAutofillSetting(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     vlog('workflow mode changed', activeWorkflowMode);
   });
 
-  document.addEventListener('pointerdown', cancelPanoramaFillRetriesForManualEdit, true);
-  document.addEventListener('change', cancelPanoramaFillRetriesForManualEdit, true);
+  document.addEventListener(
+    'pointerdown',
+    cancelPanoramaFillRetriesForManualEdit,
+    true
+  );
+  document.addEventListener(
+    'change',
+    cancelPanoramaFillRetriesForManualEdit,
+    true
+  );
 }
 
 // Register listener immediately
@@ -823,7 +985,12 @@ function isPanoramaAgentControl(field) {
   // 'agentmenu'        → multi-immunization grid page  (historicalfactoryTable:…:immsAgentMenu)
   //                      NOTE: \bagent\b does NOT fire here because 'immsAgentMenu' lowercases to
   //                      'immsagentmenu' where 'agent' has no word boundaries on either side.
-  return hint.includes('agentiterm') || hint.includes('recordimms_agent') || hint.includes('agentmenu') || /\bagent\b/.test(hint);
+  return (
+    hint.includes('agentiterm') ||
+    hint.includes('recordimms_agent') ||
+    hint.includes('agentmenu') ||
+    /\bagent\b/.test(hint)
+  );
 }
 
 function extractBracketAgentCode(optionText) {
@@ -842,8 +1009,10 @@ function fillField(field, value) {
   }
 
   const role = (field.getAttribute && field.getAttribute('role')) || '';
-  const ariaAuto = (field.getAttribute && field.getAttribute('aria-autocomplete')) || '';
-  const ariaHasPopup = (field.getAttribute && field.getAttribute('aria-haspopup')) || '';
+  const ariaAuto =
+    (field.getAttribute && field.getAttribute('aria-autocomplete')) || '';
+  const ariaHasPopup =
+    (field.getAttribute && field.getAttribute('aria-haspopup')) || '';
   const classHint = (field.className || '').toLowerCase();
   const idHint = (field.id || '').toLowerCase();
   if (
@@ -862,7 +1031,11 @@ function fillField(field, value) {
   if (field.type === 'date') {
     const iso = toIsoDate(nextValue);
     if (!iso) {
-      console.warn('Could not convert date for field:', field.name || field.id, nextValue);
+      console.warn(
+        'Could not convert date for field:',
+        field.name || field.id,
+        nextValue
+      );
       return false;
     }
     nextValue = iso;
@@ -912,7 +1085,7 @@ function getValueAliases(rawValue, contextField) {
     aliases.push(...unitAliases[compact]);
   }
 
-  return [...new Set(aliases.map(v => normalizeForMatch(v)).filter(Boolean))];
+  return [...new Set(aliases.map((v) => normalizeForMatch(v)).filter(Boolean))];
 }
 
 function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
@@ -924,12 +1097,17 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
 
   // Allow short forms (e.g. "IM") only as full tokens, not fuzzy substring matches.
   if (desiredNorm.length <= 2 || optionTextNorm.length <= 2) {
-    return optionTokens.includes(desiredNorm) || desiredTokens.includes(optionTextNorm);
+    return (
+      optionTokens.includes(desiredNorm) ||
+      desiredTokens.includes(optionTextNorm)
+    );
   }
 
   // Prevent downgrading specific values to broader ones (e.g., "mmr var" -> "mmr").
   if (desiredTokens.length > optionTokens.length) {
-    const optionIsSubset = optionTokens.every(token => desiredTokens.includes(token));
+    const optionIsSubset = optionTokens.every((token) =>
+      desiredTokens.includes(token)
+    );
     if (optionIsSubset) {
       return false;
     }
@@ -941,20 +1119,28 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
     return false;
   }
 
-  return optionTextNorm.includes(desiredNorm) || desiredNorm.includes(optionTextNorm);
+  return (
+    optionTextNorm.includes(desiredNorm) || desiredNorm.includes(optionTextNorm)
+  );
 }
 
 function fillSelectField(field, value) {
   const rawValue = String(value).trim();
   if (!rawValue) return false;
   const candidates = getValueAliases(rawValue, field);
-  const options = Array.from(field.options || []).filter(opt => opt && opt.value !== '');
+  const options = Array.from(field.options || []).filter(
+    (opt) => opt && opt.value !== ''
+  );
   if (!options.length) return false;
   const agentStrict = isPanoramaAgentControl(field);
 
-  let matched = options.find(opt => opt.value === rawValue || opt.text.trim() === rawValue);
+  let matched = options.find(
+    (opt) => opt.value === rawValue || opt.text.trim() === rawValue
+  );
   if (!matched) {
-    matched = options.find(opt => candidates.includes(normalizeForMatch(opt.text)));
+    matched = options.find((opt) =>
+      candidates.includes(normalizeForMatch(opt.text))
+    );
   }
   if (!matched && agentStrict && candidates.length > 0) {
     matched = options.find((opt) => {
@@ -963,9 +1149,11 @@ function fillSelectField(field, value) {
     });
   }
   if (!matched && !agentStrict && candidates.length > 0) {
-    matched = options.find(opt => {
+    matched = options.find((opt) => {
       const optNorm = normalizeForMatch(opt.text);
-      return candidates.some(desired => isLooseSelectTextMatch(optNorm, desired));
+      return candidates.some((desired) =>
+        isLooseSelectTextMatch(optNorm, desired)
+      );
     });
   }
   if (!matched) return false;
@@ -1010,10 +1198,14 @@ function fillComboTextField(field, value) {
   if ('value' in field) {
     field.value = preferredTypedValue;
     field.dispatchEvent(new Event('input', { bubbles: true }));
-    field.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', bubbles: true }));
+    field.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'a', bubbles: true })
+    );
   }
   field.click();
-  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+  );
 
   // Best-effort pick for custom dropdown implementations (ng-select/react-select).
   const optionSelectors = [
@@ -1031,7 +1223,7 @@ function fillComboTextField(field, value) {
   ];
   for (const selector of optionSelectors) {
     const options = Array.from(document.querySelectorAll(selector));
-    const hit = options.find(opt => {
+    const hit = options.find((opt) => {
       const text = opt.textContent || '';
       const optNorm = normalizeForMatch(text);
       if (agentStrict) {
@@ -1039,7 +1231,9 @@ function fillComboTextField(field, value) {
         const bracket = extractBracketAgentCode(text);
         return !!(bracket && candidates.includes(bracket));
       }
-      return candidates.some(desired => isLooseSelectTextMatch(optNorm, desired));
+      return candidates.some((desired) =>
+        isLooseSelectTextMatch(optNorm, desired)
+      );
     });
     if (hit) {
       hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -1051,7 +1245,9 @@ function fillComboTextField(field, value) {
   }
 
   // Keyboard fallback for autocomplete controls.
-  field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+  );
   field.dispatchEvent(new Event('change', { bubbles: true }));
   field.blur();
   return String(field.value || '').trim().length > 0;
@@ -1065,7 +1261,9 @@ function isVisible(el) {
 
 function hasExtComboTrigger(field) {
   if (!field || field.tagName !== 'INPUT') return false;
-  const container = field.closest('.x-form-trigger-wrap, .x-form-field-wrap') || field.parentElement;
+  const container =
+    field.closest('.x-form-trigger-wrap, .x-form-field-wrap') ||
+    field.parentElement;
   if (!container) return false;
   return !!container.querySelector('.x-form-trigger, .x-form-arrow-trigger');
 }
@@ -1081,21 +1279,29 @@ function normalizeLabelText(value) {
 
 function isFillableControl(el) {
   if (!el) return false;
-  const isStandardControl = el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA';
-  const isRoleCombobox = (el.getAttribute && el.getAttribute('role') === 'combobox');
+  const isStandardControl =
+    el.tagName === 'INPUT' ||
+    el.tagName === 'SELECT' ||
+    el.tagName === 'TEXTAREA';
+  const isRoleCombobox =
+    el.getAttribute && el.getAttribute('role') === 'combobox';
   if (!isStandardControl && !isRoleCombobox) return false;
   if (el.disabled) return false;
-  if (el.tagName === 'INPUT' && String(el.type || '').toLowerCase() === 'hidden') return false;
+  if (
+    el.tagName === 'INPUT' &&
+    String(el.type || '').toLowerCase() === 'hidden'
+  )
+    return false;
   return isVisible(el);
 }
 
 function scoreControlNearLabel(labelEl, controlEl) {
   const labelRect = labelEl.getBoundingClientRect();
   const controlRect = controlEl.getBoundingClientRect();
-  const labelY = labelRect.top + (labelRect.height / 2);
-  const controlY = controlRect.top + (controlRect.height / 2);
+  const labelY = labelRect.top + labelRect.height / 2;
+  const controlY = controlRect.top + controlRect.height / 2;
   const verticalDistance = Math.abs(labelY - controlY);
-  const rightOfLabel = controlRect.left >= (labelRect.left - 8);
+  const rightOfLabel = controlRect.left >= labelRect.left - 8;
   const horizontalDistance = rightOfLabel
     ? Math.max(0, controlRect.left - labelRect.right)
     : 500 + Math.abs(controlRect.left - labelRect.left);
@@ -1109,7 +1315,9 @@ function findNearestControlForLabel(labelEl, scope = document) {
   if (labelEl.tagName === 'LABEL') {
     const htmlFor = labelEl.getAttribute('for');
     if (htmlFor) {
-      const direct = scope.getElementById ? scope.getElementById(htmlFor) : document.getElementById(htmlFor);
+      const direct = scope.getElementById
+        ? scope.getElementById(htmlFor)
+        : document.getElementById(htmlFor);
       if (isFillableControl(direct)) {
         return direct;
       }
@@ -1144,7 +1352,10 @@ function findNearestControlForLabel(labelEl, scope = document) {
   if (!candidates.length) return null;
 
   const ranked = candidates
-    .map(control => ({ control, score: scoreControlNearLabel(labelEl, control) }))
+    .map((control) => ({
+      control,
+      score: scoreControlNearLabel(labelEl, control)
+    }))
     .sort((a, b) => a.score - b.score);
 
   return ranked.length ? ranked[0].control : null;
@@ -1155,16 +1366,21 @@ function findFieldByLabelText(labelTexts, options = {}) {
   const wanted = labels.map(normalizeLabelText).filter(Boolean);
   if (!wanted.length) return null;
 
-  const scope = options.scope && options.scope.querySelectorAll ? options.scope : document;
+  const scope =
+    options.scope && options.scope.querySelectorAll ? options.scope : document;
   const labelSelector = 'label, span, div, td, th, strong';
   const allLabelNodes = Array.from(scope.querySelectorAll(labelSelector));
   const matchingLabels = allLabelNodes.filter((node) => {
     const text = normalizeLabelText(node.textContent || '');
     if (!text) return false;
-    return wanted.some(target => text === target || text.startsWith(`${target} `));
+    return wanted.some(
+      (target) => text === target || text.startsWith(`${target} `)
+    );
   });
 
-  const labelOrder = options.preferLast ? matchingLabels.slice().reverse() : matchingLabels;
+  const labelOrder = options.preferLast
+    ? matchingLabels.slice().reverse()
+    : matchingLabels;
   for (const labelEl of labelOrder) {
     const control = findNearestControlForLabel(labelEl, scope);
     if (control) {
@@ -1176,7 +1392,10 @@ function findFieldByLabelText(labelTexts, options = {}) {
 
 function canFillPanoramaControl(field) {
   if (!field || field.disabled) return false;
-  if (field.tagName === 'INPUT' && String(field.type || '').toLowerCase() === 'hidden') {
+  if (
+    field.tagName === 'INPUT' &&
+    String(field.type || '').toLowerCase() === 'hidden'
+  ) {
     return false;
   }
   return true;
@@ -1196,7 +1415,10 @@ function fillFirstMatchingField(selectors, value) {
 function getFieldFilledText(field) {
   if (!field) return '';
   if (field.tagName === 'SELECT') {
-    const selected = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    const selected =
+      field.options && field.selectedIndex >= 0
+        ? field.options[field.selectedIndex]
+        : null;
     return String(selected?.text || field.value || '').trim();
   }
   const id = String(field.id || '');
@@ -1232,11 +1454,21 @@ function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   // normalizeForMatch converts dashes to spaces, so "HB-pediatric" → "hb pediatric", which would
   // otherwise pass the .includes("hb") check below and falsely accept the pediatric agent for adults.
   const candidateRaw = String(candidate || '').trim();
-  if (candidateRaw && filledRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
+  if (
+    candidateRaw &&
+    filledRaw
+      .trim()
+      .toLowerCase()
+      .startsWith(candidateRaw.toLowerCase() + '-')
+  )
+    return false;
   if (filledNorm.includes(candidateNorm)) return true;
 
-  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
-  return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
+  return (
+    candidateTokens.length > 0 &&
+    candidateTokens.every((t) => filledNorm.includes(t))
+  );
 }
 
 function isAgentTextAccepted(candidate, filledRawValue) {
@@ -1254,11 +1486,17 @@ function isAgentTextAccepted(candidate, filledRawValue) {
     // filledTokens.includes(token) is intentionally NOT used here — it would accept "HB-pediatric"
     // (normalized to "hb pediatric") for the adult "HB" candidate since "hb" appears as a token.
     const bracketMatch = filledNorm.match(/\[([^\]]+)\]/);
-    return !!(bracketMatch && normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token);
+    return !!(
+      bracketMatch &&
+      normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token
+    );
   }
 
-  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
-  return candidateTokens.length > 0 && candidateTokens.every(t => filledNorm.includes(t));
+  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
+  return (
+    candidateTokens.length > 0 &&
+    candidateTokens.every((t) => filledNorm.includes(t))
+  );
 }
 
 function fieldFilledTextMatchesCandidate(field, candidate) {
@@ -1293,7 +1531,9 @@ function parseAdministeredDateTime(value) {
     return direct;
   }
 
-  const mdyHm = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  const mdyHm = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/
+  );
   if (mdyHm) {
     const month = Number(mdyHm[1]);
     const day = Number(mdyHm[2]);
@@ -1320,7 +1560,9 @@ function formatPanoramaTimeValue(dateValue) {
 }
 
 function getPanoramaAdministeredDateTimeValues(data) {
-  const sourceValue = data?.administered_at || (adminDateTimeAutofillEnabled ? data?.scanned_at : '');
+  const sourceValue =
+    data?.administered_at ||
+    (adminDateTimeAutofillEnabled ? data?.scanned_at : '');
   const parsed = parseAdministeredDateTime(sourceValue);
   if (!parsed) {
     return { date: '', time: '' };
@@ -1360,11 +1602,15 @@ function getPanoramaTradeSelectors() {
 function hasPanoramaTradeSelection(data) {
   const candidates = getPanoramaTradeCandidates(data);
   if (!candidates.length) return false;
-  const fields = getFields(getPanoramaTradeSelectors()).filter(canFillPanoramaControl);
+  const fields = getFields(getPanoramaTradeSelectors()).filter(
+    canFillPanoramaControl
+  );
   if (!fields.length) return false;
-  return fields.some((field) => (
-    candidates.some((candidate) => fieldFilledTextMatchesCandidate(field, candidate))
-  ));
+  return fields.some((field) =>
+    candidates.some((candidate) =>
+      fieldFilledTextMatchesCandidate(field, candidate)
+    )
+  );
 }
 
 function fillPanoramaTradeName(data) {
@@ -1387,7 +1633,9 @@ function getPanoramaAgentSelectors() {
 }
 
 function getPanoramaCurrentAgentSelectionText() {
-  const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
+  const fields = getFields(getPanoramaAgentSelectors()).filter(
+    canFillPanoramaControl
+  );
   for (const field of fields) {
     const raw = String(getFieldFilledText(field) || '').trim();
     const norm = normalizeForMatch(raw);
@@ -1399,22 +1647,30 @@ function getPanoramaCurrentAgentSelectionText() {
 }
 
 function hasPanoramaAgentSelection(data) {
-  const fields = getFields(getPanoramaAgentSelectors()).filter(canFillPanoramaControl);
+  const fields = getFields(getPanoramaAgentSelectors()).filter(
+    canFillPanoramaControl
+  );
   if (!fields.length) return false;
 
   const candidates = getPanoramaAgentCandidates(data);
   if (!candidates.length) {
-    return fields.some((field) => normalizeForMatch(getFieldFilledText(field)).length > 0);
+    return fields.some(
+      (field) => normalizeForMatch(getFieldFilledText(field)).length > 0
+    );
   }
 
-  return fields.some((field) => candidates.some((candidate) => isAgentCandidateAccepted(candidate, field)));
+  return fields.some((field) =>
+    candidates.some((candidate) => isAgentCandidateAccepted(candidate, field))
+  );
 }
 
 function queueRecordMatchesPanoramaAgentText(record, agentText) {
   const payload = buildAutofillPayloadFromQueueRecord(record);
   if (!payload) return false;
   const candidates = getPanoramaAgentCandidates(payload);
-  return candidates.some((candidate) => isAgentTextAccepted(candidate, agentText));
+  return candidates.some((candidate) =>
+    isAgentTextAccepted(candidate, agentText)
+  );
 }
 
 function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
@@ -1442,7 +1698,8 @@ function hasPanoramaDeferredDetailData(data) {
   // those controls exist on the immunization form, regardless of scan payload —
   // unless the nurse turned that off in Data Tools.
   if (reasonConsentAutofillEnabled) {
-    if (getFields(getPanoramaReasonForImmunizationSelectors()).length) return true;
+    if (getFields(getPanoramaReasonForImmunizationSelectors()).length)
+      return true;
     if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
   }
   return false;
@@ -1453,27 +1710,35 @@ function getPanoramaAdministeredDateTimeFields() {
     dateField: getFields([
       'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
       'input[id*="dateAdministedDate:dateInput_input"]'
-    ]).find(field => canFillPanoramaControl(field) && isVisible(field)),
+    ]).find((field) => canFillPanoramaControl(field) && isVisible(field)),
     timeField: getFields([
       'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
       'input[id*="dateAdministedDate:timeInput:timeInput"]'
-    ]).find(field => canFillPanoramaControl(field) && isVisible(field))
+    ]).find((field) => canFillPanoramaControl(field) && isVisible(field))
   };
 }
 
 function hasPanoramaDeferredDetailFieldsFilled(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
-  const dateMatches = !administered.date || String(dateField?.value || '').trim() === administered.date;
-  const timeMatches = !administered.time || String(timeField?.value || '').trim() === administered.time;
-  const reasonSatisfied = !reasonConsentAutofillEnabled || panoramaSelectAutofillSatisfied(
-    getPanoramaReasonForImmunizationSelectors(),
-    getPanoramaReasonForImmunizationValue(data)
-  );
-  const consentSatisfied = !reasonConsentAutofillEnabled || panoramaSelectAutofillSatisfied(
-    getPanoramaConsentReasonSelectors(),
-    getPanoramaConsentReasonValue(data)
-  );
+  const dateMatches =
+    !administered.date ||
+    String(dateField?.value || '').trim() === administered.date;
+  const timeMatches =
+    !administered.time ||
+    String(timeField?.value || '').trim() === administered.time;
+  const reasonSatisfied =
+    !reasonConsentAutofillEnabled ||
+    panoramaSelectAutofillSatisfied(
+      getPanoramaReasonForImmunizationSelectors(),
+      getPanoramaReasonForImmunizationValue(data)
+    );
+  const consentSatisfied =
+    !reasonConsentAutofillEnabled ||
+    panoramaSelectAutofillSatisfied(
+      getPanoramaConsentReasonSelectors(),
+      getPanoramaConsentReasonValue(data)
+    );
   return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
 }
 
@@ -1486,7 +1751,9 @@ function fillPanoramaMaskedTextInput(field, nextValue) {
   field.dispatchEvent(new Event('input', { bubbles: true }));
   field.value = value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
-  field.dispatchEvent(new KeyboardEvent('keyup', { key: value.slice(-1) || '0', bubbles: true }));
+  field.dispatchEvent(
+    new KeyboardEvent('keyup', { key: value.slice(-1) || '0', bubbles: true })
+  );
   field.dispatchEvent(new Event('change', { bubbles: true }));
   field.blur();
   return String(field.value || '').trim() === value;
@@ -1504,14 +1771,18 @@ function fillPanoramaAdministeredDateTimeFields(data) {
   // a re-fill pass (e.g. after the PF/NPF chooser is answered) must leave a
   // matching date/time untouched.
   let fillCount = 0;
-  if (administered.date
-      && String(dateField?.value || '').trim() !== administered.date
-      && fillPanoramaMaskedTextInput(dateField, administered.date)) {
+  if (
+    administered.date &&
+    String(dateField?.value || '').trim() !== administered.date &&
+    fillPanoramaMaskedTextInput(dateField, administered.date)
+  ) {
     fillCount += 1;
   }
-  if (administered.time
-      && String(timeField?.value || '').trim() !== administered.time
-      && fillPanoramaMaskedTextInput(timeField, administered.time)) {
+  if (
+    administered.time &&
+    String(timeField?.value || '').trim() !== administered.time &&
+    fillPanoramaMaskedTextInput(timeField, administered.time)
+  ) {
     fillCount += 1;
   }
   return fillCount;
@@ -1522,9 +1793,7 @@ function fillPanoramaAdministeredDateTimeFields(data) {
 // the consent reason ("Consent obtained") only becomes enabled after the lot is
 // selected, so both are handled as deferred fields and retried by the scheduler.
 function getPanoramaReasonForImmunizationSelectors() {
-  return [
-    'select[id*="reasonForImmunizationSelect:iTermSelectOneMenu_input"]'
-  ];
+  return ['select[id*="reasonForImmunizationSelect:iTermSelectOneMenu_input"]'];
 }
 
 function getPanoramaConsentReasonSelectors() {
@@ -1548,7 +1817,10 @@ function panoramaSelectHasDesiredSelection(selectors, desiredText) {
   if (!desiredNorm) return true;
   return getFields(selectors).some((field) => {
     if (field.tagName !== 'SELECT') return false;
-    const opt = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    const opt =
+      field.options && field.selectedIndex >= 0
+        ? field.options[field.selectedIndex]
+        : null;
     return !!opt && normalizeForMatch(opt.text) === desiredNorm;
   });
 }
@@ -1582,7 +1854,10 @@ function fillPanoramaConsentReason(data) {
 
 function isPrimeFacesAjaxBusy() {
   try {
-    const queue = globalThis.PrimeFaces && globalThis.PrimeFaces.ajax && globalThis.PrimeFaces.ajax.Queue;
+    const queue =
+      globalThis.PrimeFaces &&
+      globalThis.PrimeFaces.ajax &&
+      globalThis.PrimeFaces.ajax.Queue;
     if (!queue) return false;
     if (typeof queue.isEmpty === 'function') {
       return !queue.isEmpty();
@@ -1629,18 +1904,20 @@ const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
 ]);
 
 function buildPanoramaFundingSourceText(data) {
-  return normalizeForMatch([
-    data?.name,
-    data?.tradename,
-    data?.generic_name
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [data?.name, data?.tradename, data?.generic_name].filter(Boolean).join(' ')
+  );
 }
 
 function getPanoramaSharedFundingLotProductLabel(data) {
   const source = buildPanoramaFundingSourceText(data);
   if (!source) return '';
   for (const product of PANORAMA_SHARED_FUNDING_LOT_PRODUCTS) {
-    if ((product.terms || []).some((term) => source.includes(normalizeForMatch(term)))) {
+    if (
+      (product.terms || []).some((term) =>
+        source.includes(normalizeForMatch(term))
+      )
+    ) {
       return product.label;
     }
   }
@@ -1652,8 +1929,9 @@ function hasPanoramaFundedRadio() {
 }
 
 function getPanoramaFundedRadioValue() {
-  const checked = Array.from(document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]'))
-    .find((radio) => radio && radio.checked);
+  const checked = Array.from(
+    document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]')
+  ).find((radio) => radio && radio.checked);
   return String(checked?.value || '').trim();
 }
 
@@ -1693,9 +1971,11 @@ function optionTextContainsLot(optionText, lotValue) {
 // substring match, so a scanned lot that prefixes a longer lot in the
 // dropdown never selects the wrong one.
 function findBestLotMatch(candidates, getText, lotValue) {
-  return candidates.find(c => optionTextMatchesLotExactly(getText(c), lotValue))
-    || candidates.find(c => optionTextContainsLot(getText(c), lotValue))
-    || null;
+  return (
+    candidates.find((c) => optionTextMatchesLotExactly(getText(c), lotValue)) ||
+    candidates.find((c) => optionTextContainsLot(getText(c), lotValue)) ||
+    null
+  );
 }
 
 function fillPanoramaLotFromSelect(lotValue) {
@@ -1706,8 +1986,10 @@ function fillPanoramaLotFromSelect(lotValue) {
   ];
   const fields = getFields(selectors).filter(canFillPanoramaControl);
   for (const field of fields) {
-    const options = Array.from(field.options || []).filter(opt => opt && opt.value !== '');
-    const matched = findBestLotMatch(options, opt => opt.text, lotValue);
+    const options = Array.from(field.options || []).filter(
+      (opt) => opt && opt.value !== ''
+    );
+    const matched = findBestLotMatch(options, (opt) => opt.text, lotValue);
     if (!matched) continue;
 
     field.focus();
@@ -1730,10 +2012,14 @@ function fillPanoramaLotFromSelect(lotValue) {
 
 function setPanoramaFundedRadioValue(value) {
   const desired = String(value || '').trim();
-  const radio = document.querySelector(`input[id*="fundedRadio:selectOneRadio"][value="${desired}"]`);
+  const radio = document.querySelector(
+    `input[id*="fundedRadio:selectOneRadio"][value="${desired}"]`
+  );
   if (!radio) return 'not_found';
   if (radio.checked) return 'already';
-  const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
+  const box = radio
+    .closest('.ui-radiobutton')
+    ?.querySelector('.ui-radiobutton-box');
   if (box) {
     // A single widget click mirrors a manual selection exactly. Dispatching a
     // synthetic change on top of it queues a SECOND radio AJAX whose
@@ -1782,8 +2068,11 @@ function resetPanoramaFundedRadioToShowAll() {
 }
 
 function isExpiredPanoramaScan(data) {
-  const flag = data?.expiry_flag
-    || getExpiryStatus(data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry).flag;
+  const flag =
+    data?.expiry_flag ||
+    getExpiryStatus(
+      data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry
+    ).flag;
   return flag === 'expired';
 }
 
@@ -1793,7 +2082,9 @@ function isExpiredPanoramaScan(data) {
 // and resets that checkbox, so an expired scan must re-assert it before each
 // lot fill attempt or the lot silently disappears from the options.
 function ensurePanoramaExpiredRecalledLotsVisible() {
-  const input = document.querySelector('input[id*="displayExpiredRecalledCheckbox:selectBooleanCheckboxId_input"]');
+  const input = document.querySelector(
+    'input[id*="displayExpiredRecalledCheckbox:selectBooleanCheckboxId_input"]'
+  );
   if (!input) return 'not_found';
   if (input.checked) return 'already';
   const box = input.closest('.ui-chkbox')?.querySelector('.ui-chkbox-box');
@@ -1831,11 +2122,14 @@ function openPanoramaLotDropdown() {
   // and at most once per cooldown — Panorama re-renders close the panel, and
   // reopening it on every pass flickers the form just the same.
   const openPanel = Array.from(
-    document.querySelectorAll('.ui-selectonemenu-panel[id*="LotInfo:lotNumberSelect"]')
+    document.querySelectorAll(
+      '.ui-selectonemenu-panel[id*="LotInfo:lotNumberSelect"]'
+    )
   ).some(isVisible);
   if (openPanel) return true;
   const now = Date.now();
-  if ((now - lastLotDropdownOpenClickAt) < LOT_DROPDOWN_OPEN_COOLDOWN_MS) return false;
+  if (now - lastLotDropdownOpenClickAt < LOT_DROPDOWN_OPEN_COOLDOWN_MS)
+    return false;
 
   const selectors = [
     '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
@@ -1868,7 +2162,12 @@ function fillPanoramaLotFromPanelItems(lotValue) {
     filterInput.focus();
     filterInput.value = lotText;
     filterInput.dispatchEvent(new Event('input', { bubbles: true }));
-    filterInput.dispatchEvent(new KeyboardEvent('keyup', { key: lotText.slice(-1) || 'a', bubbles: true }));
+    filterInput.dispatchEvent(
+      new KeyboardEvent('keyup', {
+        key: lotText.slice(-1) || 'a',
+        bubbles: true
+      })
+    );
     filterInput.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
@@ -1879,24 +2178,27 @@ function fillPanoramaLotFromPanelItems(lotValue) {
     '.ui-selectonemenu-panel .ui-selectonemenu-item'
   ];
   for (const selector of itemSelectors) {
-    const items = Array.from(document.querySelectorAll(selector))
-      .filter((item) => {
+    const items = Array.from(document.querySelectorAll(selector)).filter(
+      (item) => {
         if (!item) return false;
-        if (item.classList && item.classList.contains('ui-helper-hidden')) return false;
+        if (item.classList && item.classList.contains('ui-helper-hidden'))
+          return false;
         const text = String(
-          item.getAttribute?.('data-label')
-          || item.getAttribute?.('title')
-          || item.textContent
-          || ''
+          item.getAttribute?.('data-label') ||
+            item.getAttribute?.('title') ||
+            item.textContent ||
+            ''
         ).trim();
         return isVisible(item) && text.length > 0;
-      });
-    const getItemText = (item) => String(
-      item.getAttribute?.('data-label')
-      || item.getAttribute?.('title')
-      || item.textContent
-      || ''
+      }
     );
+    const getItemText = (item) =>
+      String(
+        item.getAttribute?.('data-label') ||
+          item.getAttribute?.('title') ||
+          item.textContent ||
+          ''
+      );
     const matched = findBestLotMatch(items, getItemText, lotValue);
     if (!matched) continue;
     matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
@@ -1908,9 +2210,9 @@ function fillPanoramaLotFromPanelItems(lotValue) {
       'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
       'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
     ]);
-    const confirmed = selectedLotLabels.some((label) => (
+    const confirmed = selectedLotLabels.some((label) =>
       normalizePanoramaLotToken(label?.textContent || '').includes(lotToken)
-    ));
+    );
     if (confirmed) {
       return true;
     }
@@ -1956,7 +2258,11 @@ function hasPanoramaLotSelection(lotValue) {
     'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
     'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
   ]).filter(canFillPanoramaControl);
-  if (selectFields.some((field) => optionTextContainsLot(getFieldFilledText(field), lotValue))) {
+  if (
+    selectFields.some((field) =>
+      optionTextContainsLot(getFieldFilledText(field), lotValue)
+    )
+  ) {
     return true;
   }
 
@@ -1965,7 +2271,9 @@ function hasPanoramaLotSelection(lotValue) {
     'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
     'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
   ]);
-  return selectedLotLabels.some((label) => optionTextContainsLot(label?.textContent || '', lotValue));
+  return selectedLotLabels.some((label) =>
+    optionTextContainsLot(label?.textContent || '', lotValue)
+  );
 }
 
 function hasPanoramaLotOrTradeSelection(data) {
@@ -1982,11 +2290,14 @@ let stopPanoramaLotTradeWatcher = null;
 // the nurse is taking over — pending VaxLink fill retries must not overwrite
 // her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
 // and so do VaxLink's own fills, so only trusted events count as manual.
-const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN = /agentiterm|tradenameinput|lotnumberselect/i;
+const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN =
+  /agentiterm|tradenameinput|lotnumberselect/i;
 
 function isPanoramaAgentLotWidgetNode(node) {
   if (!node || typeof node.closest !== 'function') return false;
-  const widget = node.closest('.ui-selectonemenu, .ui-selectonemenu-panel, select');
+  const widget = node.closest(
+    '.ui-selectonemenu, .ui-selectonemenu-panel, select'
+  );
   if (!widget) return false;
   return PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN.test(String(widget.id || ''));
 }
@@ -2000,7 +2311,11 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
   vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
 }
 
-function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options = {}) {
+function schedulePanoramaLotOrTradeSelection(
+  data,
+  initialDelayMs = 0,
+  options = {}
+) {
   if (!data) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
     stopPanoramaLotTradeWatcher();
@@ -2017,7 +2332,9 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
   }
 
   const maxDurationMs = 16000;
-  const attemptDelaysMs = [0, 120, 260, 450, 800, 1300, 1900, 2800, 4100, 5600, 8000, 11000, 14000];
+  const attemptDelaysMs = [
+    0, 120, 260, 450, 800, 1300, 1900, 2800, 4100, 5600, 8000, 11000, 14000
+  ];
   const minAttemptGapMs = 110;
   let observer = null;
   const timers = [];
@@ -2087,13 +2404,14 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
   const runAttempt = () => {
     if (stopped) return;
     const now = Date.now();
-    if ((now - lastAttemptAt) < minAttemptGapMs) return;
+    if (now - lastAttemptAt < minAttemptGapMs) return;
     lastAttemptAt = now;
     const busy = isPrimeFacesAjaxBusy();
 
     let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
     if (!hasResolvedAgent && !busy) {
-      hasResolvedAgent = tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
+      hasResolvedAgent =
+        tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
     }
 
     let resolved = !shouldTryLotOrTrade;
@@ -2104,7 +2422,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         const fundedValue = getPanoramaFundedRadioValue();
         if (!isExplicitPanoramaFundingValue(fundedValue)) {
-          if ((now - lastFundingReapplyClickAt) < FUNDING_REAPPLY_COOLDOWN_MS) {
+          if (now - lastFundingReapplyClickAt < FUNDING_REAPPLY_COOLDOWN_MS) {
             return; // a reapply click is still settling — don't stack another radio AJAX
           }
           const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
@@ -2116,12 +2434,16 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
             if (isExpiredPanoramaScan(data)) {
               ensurePanoramaExpiredRecalledLotsVisible();
             }
-            showVaxlinkToast({
-              ...data,
-              _sharedFundingLotFilterRequired: true,
-              _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
-              _fundedRadioValue: fundedValue
-            }, 12000);
+            showVaxlinkToast(
+              {
+                ...data,
+                _sharedFundingLotFilterRequired: true,
+                _sharedFundingLotLabel:
+                  getPanoramaSharedFundingLotProductLabel(data),
+                _fundedRadioValue: fundedValue
+              },
+              12000
+            );
             stop();
             return;
           }
@@ -2138,30 +2460,45 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
       // Click it at most once per cooldown and keep going — returning here
       // would starve the deferred date/reason/consent fills and the 3-miss
       // prompt whenever Panorama keeps resetting the checkbox.
-      if (hasLot && isExpiredPanoramaScan(data)
-          && (now - lastExpiredVisibilityClickAt) >= EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS) {
+      if (
+        hasLot &&
+        isExpiredPanoramaScan(data) &&
+        now - lastExpiredVisibilityClickAt >=
+          EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS
+      ) {
         if (ensurePanoramaExpiredRecalledLotsVisible() === 'clicked') {
           lastExpiredVisibilityClickAt = now;
           restartSharedFundingMissWindow();
         }
       }
 
-      const panelRescue = (now - scheduleStartedAt) >= PANEL_RESCUE_AFTER_MS;
+      const panelRescue = now - scheduleStartedAt >= PANEL_RESCUE_AFTER_MS;
 
       // Try lot fill with the current radio state first — avoids triggering a
       // funded-radio AJAX that can reset the agent and create a re-fill cascade.
-      resolved = tryFillPanoramaLotOrTrade(data, { panelRescue }) || hasPanoramaLotOrTradeSelection(data);
-      if (!resolved && preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
-        if ((now - lastSharedFundingMissAt) >= SHARED_FUNDING_MISS_GAP_MS) {
+      resolved =
+        tryFillPanoramaLotOrTrade(data, { panelRescue }) ||
+        hasPanoramaLotOrTradeSelection(data);
+      if (
+        !resolved &&
+        preserveFundingFilter &&
+        hasLot &&
+        hasPanoramaFundedRadio()
+      ) {
+        if (now - lastSharedFundingMissAt >= SHARED_FUNDING_MISS_GAP_MS) {
           lastSharedFundingMissAt = now;
           sharedFundingMisses += 1;
           if (sharedFundingMisses >= 3) {
-            showVaxlinkToast({
-              ...data,
-              _sharedFundingLotSwitchFilter: true,
-              _sharedFundingLotLabel: getPanoramaSharedFundingLotProductLabel(data),
-              _fundedRadioValue: getPanoramaFundedRadioValue()
-            }, 12000);
+            showVaxlinkToast(
+              {
+                ...data,
+                _sharedFundingLotSwitchFilter: true,
+                _sharedFundingLotLabel:
+                  getPanoramaSharedFundingLotProductLabel(data),
+                _fundedRadioValue: getPanoramaFundedRadioValue()
+              },
+              12000
+            );
             stop();
             return;
           }
@@ -2174,21 +2511,33 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
         const radioResult = resetPanoramaFundedRadioToShowAll();
         if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
         // Radio was already at SHOW_ALL or not found — retry immediately
-        resolved = tryFillPanoramaLotOrTrade(data, { panelRescue }) || hasPanoramaLotOrTradeSelection(data);
+        resolved =
+          tryFillPanoramaLotOrTrade(data, { panelRescue }) ||
+          hasPanoramaLotOrTradeSelection(data);
       }
     }
 
     // Last-ditch visible-dropdown pass: only for layouts without a fillable
     // native select, or once the silent select path has had its rescue window.
-    if (!resolved && hasLot && hasResolvedAgent && !busy
-        && (!hasFillablePanoramaLotSelect() || (now - scheduleStartedAt) >= PANEL_RESCUE_AFTER_MS)) {
+    if (
+      !resolved &&
+      hasLot &&
+      hasResolvedAgent &&
+      !busy &&
+      (!hasFillablePanoramaLotSelect() ||
+        now - scheduleStartedAt >= PANEL_RESCUE_AFTER_MS)
+    ) {
       if (!hasPanoramaLotSelection(data?.lot)) {
         openPanoramaLotDropdown();
       }
-      resolved = fillPanoramaLotFromPanelItems(data?.lot) || hasPanoramaLotSelection(data?.lot) || resolved;
+      resolved =
+        fillPanoramaLotFromPanelItems(data?.lot) ||
+        hasPanoramaLotSelection(data?.lot) ||
+        resolved;
     }
 
-    let deferredResolved = !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
+    let deferredResolved =
+      !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
     if (!deferredResolved && !busy) {
       fillPanoramaDeferredDetailFields(data);
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
@@ -2197,7 +2546,7 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
     // Require spaced stable follow-up passes before stopping so we do not exit
     // while PrimeFaces is still applying dependent field refreshes.
     if (!busy && resolved && deferredResolved) {
-      if ((now - lastStablePassAt) >= STABLE_PASS_GAP_MS) {
+      if (now - lastStablePassAt >= STABLE_PASS_GAP_MS) {
         lastStablePassAt = now;
         stablePasses += 1;
       }
@@ -2269,24 +2618,35 @@ function isPanoramaImmunizationPage() {
     'select[id*="addimmsdetails_vaccDetailssection1createImms_routeSelOne:iTermSelectOneMenu_input"]',
     'input[id*="addimmsdetails_vaccDetailssection1_createImms_manufacturerinput:inputText"]'
   ];
-  if (markerSelectors.some(selector => document.querySelector(selector))) {
+  if (markerSelectors.some((selector) => document.querySelector(selector))) {
     return true;
   }
 
-  const hasTitle = Array.from(document.querySelectorAll('h1, h2, h3, legend, div, span, td, th, strong'))
-    .some(el => normalizeLabelText(el.textContent || '') === 'immunizations');
+  const hasTitle = Array.from(
+    document.querySelectorAll('h1, h2, h3, legend, div, span, td, th, strong')
+  ).some((el) => normalizeLabelText(el.textContent || '') === 'immunizations');
   if (!hasTitle) return false;
 
-  const hasDateAdminLabel = Array.from(document.querySelectorAll('label, span, div, td, th, strong'))
-    .some(el => normalizeLabelText(el.textContent || '') === 'date administered');
+  const hasDateAdminLabel = Array.from(
+    document.querySelectorAll('label, span, div, td, th, strong')
+  ).some(
+    (el) => normalizeLabelText(el.textContent || '') === 'date administered'
+  );
   return hasDateAdminLabel;
 }
 
 function fillPanoramaImmunizationFields(data) {
-  const sharedFundingProductLabel = getPanoramaSharedFundingLotProductLabel(data);
-  const preserveFundingFilter = !!(sharedFundingProductLabel && String(data?.lot || '').trim());
+  const sharedFundingProductLabel =
+    getPanoramaSharedFundingLotProductLabel(data);
+  const preserveFundingFilter = !!(
+    sharedFundingProductLabel && String(data?.lot || '').trim()
+  );
   const fundedValue = getPanoramaFundedRadioValue();
-  if (preserveFundingFilter && hasPanoramaFundedRadio() && !isExplicitPanoramaFundingValue(fundedValue)) {
+  if (
+    preserveFundingFilter &&
+    hasPanoramaFundedRadio() &&
+    !isExplicitPanoramaFundingValue(fundedValue)
+  ) {
     // If the nurse already answered the chooser, re-apply their pick rather than
     // re-prompting; only summon the chooser when there is no recorded answer yet.
     if (!reapplyAnsweredPanoramaFundingChoice(data)) {
@@ -2297,13 +2657,18 @@ function fillPanoramaImmunizationFields(data) {
       if (isExpiredPanoramaScan(data)) {
         ensurePanoramaExpiredRecalledLotsVisible();
       }
-      showVaxlinkToast({
-        ...data,
-        _sharedFundingLotFilterRequired: true,
-        _sharedFundingLotLabel: sharedFundingProductLabel,
-        _fundedRadioValue: fundedValue
-      }, 12000);
-      return createAutofillResult('pending', { reason: 'funding_choice_required' });
+      showVaxlinkToast(
+        {
+          ...data,
+          _sharedFundingLotFilterRequired: true,
+          _sharedFundingLotLabel: sharedFundingProductLabel,
+          _fundedRadioValue: fundedValue
+        },
+        12000
+      );
+      return createAutofillResult('pending', {
+        reason: 'funding_choice_required'
+      });
     }
   }
 
@@ -2311,7 +2676,9 @@ function fillPanoramaImmunizationFields(data) {
   // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
   // expiry not selected after selecting the agent). The scheduler below only
   // falls back to resetting it again if this attempt found no radio at all.
-  const radioResult = preserveFundingFilter ? 'preserved' : resetPanoramaFundedRadioToShowAll();
+  const radioResult = preserveFundingFilter
+    ? 'preserved'
+    : resetPanoramaFundedRadioToShowAll();
 
   let agentCount = 0;
   if (hasPanoramaAgentSelection(data) || tryFillPanoramaAgent(data)) {
@@ -2319,13 +2686,24 @@ function fillPanoramaImmunizationFields(data) {
   }
 
   let fillCount = agentCount;
-  const lotCount = (data.lot && !isPrimeFacesAjaxBusy()) ? (tryFillPanoramaLot(data.lot) ? 1 : 0) : 0;
+  const lotCount =
+    data.lot && !isPrimeFacesAjaxBusy()
+      ? tryFillPanoramaLot(data.lot)
+        ? 1
+        : 0
+      : 0;
   fillCount += lotCount;
   fillCount += fillPanoramaDeferredDetailFields(data);
 
   // Panorama refreshes lot options and dependent controls asynchronously after selection.
-  const finalizeOnResolved = preserveFundingFilter && !!data?.lot && !hasPanoramaLotSelection(data.lot);
-  if (agentCount > 0 || data.lot || hasPanoramaDeferredDetailData(data) || getPanoramaTradeCandidates(data).length > 0) {
+  const finalizeOnResolved =
+    preserveFundingFilter && !!data?.lot && !hasPanoramaLotSelection(data.lot);
+  if (
+    agentCount > 0 ||
+    data.lot ||
+    hasPanoramaDeferredDetailData(data) ||
+    getPanoramaTradeCandidates(data).length > 0
+  ) {
     // Start the scheduler (and its MutationObserver) almost immediately: every
     // pass is now a silent, idempotent no-op until there is real work, so the
     // old 1200ms head start was pure dead time — the observer is what reacts
@@ -2361,7 +2739,12 @@ function fillPanoramaImmunizationFields(data) {
 
   const fallbackMapping = [
     {
-      value: getPanoramaAgentCandidates(data)[0] || (data.name || data.generic_name || data.tradename || data.din),
+      value:
+        getPanoramaAgentCandidates(data)[0] ||
+        data.name ||
+        data.generic_name ||
+        data.tradename ||
+        data.din,
       labels: ['Agent'],
       preferLast: false
     }
@@ -2371,12 +2754,18 @@ function fillPanoramaImmunizationFields(data) {
   const usedFields = new Set();
   for (const entry of fallbackMapping) {
     if (!entry.value) continue;
-    const field = findFieldByLabelText(entry.labels, { preferLast: entry.preferLast });
+    const field = findFieldByLabelText(entry.labels, {
+      preferLast: entry.preferLast
+    });
     if (!field || usedFields.has(field)) continue;
     if (!fillField(field, entry.value)) {
       continue;
     }
-    if (entry.labels && entry.labels.includes('Agent') && !isAgentCandidateAccepted(entry.value, field)) {
+    if (
+      entry.labels &&
+      entry.labels.includes('Agent') &&
+      !isAgentCandidateAccepted(entry.value, field)
+    ) {
       continue;
     }
     {
@@ -2384,30 +2773,38 @@ function fillPanoramaImmunizationFields(data) {
       fallbackCount += 1;
     }
   }
-  return createAutofillResult(fallbackCount > 0 ? 'success' : 'failed', { fillCount: fallbackCount });
+  return createAutofillResult(fallbackCount > 0 ? 'success' : 'failed', {
+    fillCount: fallbackCount
+  });
 }
 
-const PANORAMA_AGENT_RULES = Array.isArray(globalThis.VAXLINK_PANORAMA_AGENT_RULES)
+const PANORAMA_AGENT_RULES = Array.isArray(
+  globalThis.VAXLINK_PANORAMA_AGENT_RULES
+)
   ? globalThis.VAXLINK_PANORAMA_AGENT_RULES
   : [];
 
 function buildPanoramaAgentSourceText(data) {
-  return normalizeForMatch([
-    data?.name,
-    data?.generic_name,
-    data?.tradename,
-    data?.disease,
-    data?.antigen,
-    data?.manufacturer,
-    data?.route,
-    data?.strength
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [
+      data?.name,
+      data?.generic_name,
+      data?.tradename,
+      data?.disease,
+      data?.antigen,
+      data?.manufacturer,
+      data?.route,
+      data?.strength
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
 }
 
 function getNormalizedSourceTokens(sourceText) {
   return String(sourceText || '')
     .split(' ')
-    .map(token => token.trim())
+    .map((token) => token.trim())
     .filter(Boolean);
 }
 
@@ -2432,32 +2829,48 @@ function panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term) {
     return true;
   }
 
-  return termTokens.every((token) => (
+  return termTokens.every((token) =>
     token.length <= 3
       ? sourceTokens.includes(token)
-      : (sourceTokens.includes(token) || sourceText.includes(token))
-  ));
+      : sourceTokens.includes(token) || sourceText.includes(token)
+  );
 }
 
 function panoramaSourceHasAll(sourceText, sourceTokens, terms) {
-  return terms.every(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.every((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaSourceHasAny(sourceText, sourceTokens, terms) {
-  return terms.some(term => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.some((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaAgentRuleClauseMatches(sourceText, clause) {
   const sourceTokens = getNormalizedSourceTokens(sourceText);
-  if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any)) return false;
-  if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all)) return false;
-  if (clause.notAny && panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)) return false;
-  if (clause.notAll && panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)) return false;
+  if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any))
+    return false;
+  if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all))
+    return false;
+  if (
+    clause.notAny &&
+    panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)
+  )
+    return false;
+  if (
+    clause.notAll &&
+    panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)
+  )
+    return false;
   return true;
 }
 
 function panoramaAgentRuleMatches(sourceText, rule) {
-  return (rule.clauses || []).some(clause => panoramaAgentRuleClauseMatches(sourceText, clause));
+  return (rule.clauses || []).some((clause) =>
+    panoramaAgentRuleClauseMatches(sourceText, clause)
+  );
 }
 
 function getPanoramaAgentCandidates(data) {
@@ -2510,12 +2923,15 @@ function getDoseUnitFieldByLayout() {
 
       const controls = Array.from(
         container.querySelectorAll(controlSelector)
-      ).filter(el => isVisible(el) && el.type !== 'hidden' && !el.disabled);
+      ).filter((el) => isVisible(el) && el.type !== 'hidden' && !el.disabled);
 
       if (controls.length >= 2) {
         const unitControl =
-          controls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
-          controls[1];
+          controls.find(
+            (el) =>
+              el.tagName === 'SELECT' ||
+              (el.getAttribute && el.getAttribute('role') === 'combobox')
+          ) || controls[1];
         if (unitControl) return unitControl;
       }
 
@@ -2523,11 +2939,14 @@ function getDoseUnitFieldByLayout() {
       if (next) {
         const nextControls = Array.from(
           next.querySelectorAll(controlSelector)
-        ).filter(el => isVisible(el) && el.type !== 'hidden' && !el.disabled);
+        ).filter((el) => isVisible(el) && el.type !== 'hidden' && !el.disabled);
         if (nextControls.length >= 2) {
           const unitControl =
-            nextControls.find(el => el.tagName === 'SELECT' || (el.getAttribute && el.getAttribute('role') === 'combobox')) ||
-            nextControls[1];
+            nextControls.find(
+              (el) =>
+                el.tagName === 'SELECT' ||
+                (el.getAttribute && el.getAttribute('role') === 'combobox')
+            ) || nextControls[1];
           if (unitControl) return unitControl;
         }
       }
@@ -2554,7 +2973,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     nvc_lot_expiry: record.nvc_lot_expiry || '',
     expiry_flag: record.expiry_flag || '',
     expiry_days_remaining: record.expiry_days_remaining ?? '',
-    expiry_source: record.expiry_source || (record.barcode_expiry ? 'barcode' : 'none'),
+    expiry_source:
+      record.expiry_source || (record.barcode_expiry ? 'barcode' : 'none'),
     tradename: record.tradename || '',
     generic_name: record.generic_name || '',
     disease: record.disease || '',
@@ -2567,7 +2987,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
     lookup_error: record.lookup_error || '',
-    name: record.name || record.generic_name || record.tradename || record.din || ''
+    name:
+      record.name || record.generic_name || record.tradename || record.din || ''
   };
   if (adminDateTimeAutofillEnabled) {
     payload.administered_at = record.scanned_at || new Date().toISOString();
@@ -2595,8 +3016,11 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
   }
 
   const stored = await getLocalStorage([storageKey]);
-  const rows = (stored && Array.isArray(stored[storageKey])) ? stored[storageKey] : [];
-  const recordIndex = rows.findIndex((row) => row && String(row.id || '') === recordId);
+  const rows =
+    stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  const recordIndex = rows.findIndex(
+    (row) => row && String(row.id || '') === recordId
+  );
   if (recordIndex < 0) {
     return null;
   }
@@ -2607,14 +3031,21 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
 
   const workflow = queueContext.workflow || 'multiple';
   const source = queueContext.source || 'queue';
-  const expiryFlag = record.expiry_flag || getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag;
+  const expiryFlag =
+    record.expiry_flag ||
+    getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag;
   logAnalyticsEvent('queue_used', {
     workflow,
     queue: queueContext.queue || workflow,
     source,
     count: 1,
     queueSizeAfter: nextRows.length,
-    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    vaccineLabel:
+      record.tradename ||
+      record.generic_name ||
+      record.name ||
+      record.lot ||
+      '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -2623,7 +3054,12 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     source,
     success: true,
     deferred: true,
-    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    vaccineLabel:
+      record.tradename ||
+      record.generic_name ||
+      record.name ||
+      record.lot ||
+      '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -2711,10 +3147,7 @@ function autoFillTelus(data) {
       },
       {
         value: data.generic_name,
-        selectors: [
-          'input[name="generic_name"]',
-          'input[id="generic_name"]'
-        ]
+        selectors: ['input[name="generic_name"]', 'input[id="generic_name"]']
       },
       {
         value: data.name || data.generic_name || data.tradename || data.din,
@@ -2731,17 +3164,11 @@ function autoFillTelus(data) {
       },
       {
         value: data.disease,
-        selectors: [
-          'input[name="disease"]',
-          'input[id="disease"]'
-        ]
+        selectors: ['input[name="disease"]', 'input[id="disease"]']
       },
       {
         value: data.antigen,
-        selectors: [
-          'input[name="antigen"]',
-          'input[id="antigen"]'
-        ]
+        selectors: ['input[name="antigen"]', 'input[id="antigen"]']
       },
       {
         value: data.manufacturer,
@@ -2846,10 +3273,14 @@ function autoFillTelus(data) {
     }
 
     vlog('generic auto-fill fields', fillCount);
-    return createAutofillResult(fillCount > 0 ? 'success' : 'failed', { fillCount });
+    return createAutofillResult(fillCount > 0 ? 'success' : 'failed', {
+      fillCount
+    });
   } catch (e) {
     console.error('Auto-fill error:', e);
-    return createAutofillResult('failed', { error: e.message || 'Auto-fill failed' });
+    return createAutofillResult('failed', {
+      error: e.message || 'Auto-fill failed'
+    });
   }
 }
 
@@ -2861,7 +3292,11 @@ function handleVaxlinkCommand(value) {
   const upper = String(value).trim().toUpperCase();
   if (!upper.startsWith('VAXLINK:')) return false;
   const command = upper.slice('VAXLINK:'.length).trim();
-  const modeMap = { SINGLE: 'single', MULTIPLE: 'multiple', INVENTORY: 'inventory' };
+  const modeMap = {
+    SINGLE: 'single',
+    MULTIPLE: 'multiple',
+    INVENTORY: 'inventory'
+  };
   const newMode = modeMap[command];
   if (!newMode) {
     vlog('unknown VAXLINK command', command);
@@ -2869,7 +3304,10 @@ function handleVaxlinkCommand(value) {
   }
   activeWorkflowMode = newMode;
   chrome.storage.local.set({ [WORKFLOW_MODE_KEY]: newMode });
-  logAnalyticsEvent('workflow_mode_set', { workflow: newMode, source: 'scanner_command' });
+  logAnalyticsEvent('workflow_mode_set', {
+    workflow: newMode,
+    source: 'scanner_command'
+  });
   showVaxlinkToast({ _commandMode: newMode });
   vlog('scanner command mode switch', newMode);
   return true;
@@ -2999,37 +3437,61 @@ function showVaxlinkToast(data, durationMs = 4000) {
   };
 
   if (data._commandMode) {
-    const modeLabels = { single: 'Single Inject', multiple: 'Multiple Inject', inventory: 'Inventory' };
-    const sourceDetail = data._commandSource === 'hud'
-      ? 'Switched from VaxLink HUD'
-      : 'Switched via scanner command';
-    showRoutineToast(`<div class="vl-toast info show">
+    const modeLabels = {
+      single: 'Single Inject',
+      multiple: 'Multiple Inject',
+      inventory: 'Inventory'
+    };
+    const sourceDetail =
+      data._commandSource === 'hud'
+        ? 'Switched from VaxLink HUD'
+        : 'Switched via scanner command';
+    showRoutineToast(
+      `<div class="vl-toast info show">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
       <div class="vl-toast-detail">${sourceDetail}</div>
-    </div>`, durationMs);
+    </div>`,
+      durationMs
+    );
     return;
   }
 
   if (data._queueEmpty) {
-    showRoutineToast(`<div class="vl-toast info show">
+    showRoutineToast(
+      `<div class="vl-toast info show">
       <div class="vl-toast-title">Queue empty</div>
       <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
-    </div>`, durationMs);
+    </div>`,
+      durationMs
+    );
     return;
   }
 
   if (data._stepMatchMissing) {
-    showRoutineToast(`<div class="vl-toast info show">
+    showRoutineToast(
+      `<div class="vl-toast info show">
       <div class="vl-toast-title">No queued match for this agent</div>
       <div class="vl-toast-detail">Panorama selected an agent that is not represented in the queue. VaxLink left the queue unchanged.</div>
-    </div>`, durationMs + 2000);
+    </div>`,
+      durationMs + 2000
+    );
     return;
   }
 
-  if (data._sharedFundingLotFilterRequired || data._sharedFundingLotSwitchFilter) {
-    const productLabel = data._sharedFundingLotLabel || data.tradename || data.generic_name || data.name || 'This product';
+  if (
+    data._sharedFundingLotFilterRequired ||
+    data._sharedFundingLotSwitchFilter
+  ) {
+    const productLabel =
+      data._sharedFundingLotLabel ||
+      data.tradename ||
+      data.generic_name ||
+      data.name ||
+      'This product';
     const needsInitialChoice = !!data._sharedFundingLotFilterRequired;
-    const title = needsInitialChoice ? 'Choose PF or NPF' : 'Try the other funding bucket';
+    const title = needsInitialChoice
+      ? 'Choose PF or NPF'
+      : 'Try the other funding bucket';
     const detail = needsInitialChoice
       ? `${productLabel} can use the same lot in both Panorama funding buckets.`
       : `${productLabel}${data.lot ? ` lot ${data.lot}` : ''} was not found under ${getPanoramaFundingLabel(data._fundedRadioValue)}.`;
@@ -3037,7 +3499,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
       ? `Pick Publicly Funded or Non-Publicly Funded and VaxLink will continue automatically.`
       : 'Pick the funding bucket to try and VaxLink will continue automatically.';
 
-    showRoutineToast(`<div class="vl-toast info persistent show">
+    showRoutineToast(
+      `<div class="vl-toast info persistent show">
       <div class="vl-toast-title">${escapeToastHtml(title)}</div>
       <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
       <div class="vl-toast-detail">${escapeToastHtml(followUp)}</div>
@@ -3046,75 +3509,106 @@ function showVaxlinkToast(data, durationMs = 4000) {
         <button class="vl-toast-action" type="button" data-vl-funded-choice="NON_PUBLICLY_FUNDED">Non-Publicly Funded</button>
         <button class="vl-toast-action secondary" type="button" data-vl-funded-choice-dismiss="true">Not now</button>
       </div>
-    </div>`, durationMs, { persistent: true });
+    </div>`,
+      durationMs,
+      { persistent: true }
+    );
 
-    toastRoutineSlot.querySelectorAll('[data-vl-funded-choice]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        const fundedChoice = button.getAttribute('data-vl-funded-choice');
-        if (toastDismissTimer) {
-          clearTimeout(toastDismissTimer);
-          toastDismissTimer = null;
-        }
-        toastRoutineSlot.innerHTML = '';
-        const radioResult = setPanoramaFundedRadioValue(fundedChoice);
-        if (radioResult === 'not_found') {
-          showRoutineToast(`<div class="vl-toast info show">
+    toastRoutineSlot
+      .querySelectorAll('[data-vl-funded-choice]')
+      .forEach((button) => {
+        button.addEventListener('click', async () => {
+          const fundedChoice = button.getAttribute('data-vl-funded-choice');
+          if (toastDismissTimer) {
+            clearTimeout(toastDismissTimer);
+            toastDismissTimer = null;
+          }
+          toastRoutineSlot.innerHTML = '';
+          const radioResult = setPanoramaFundedRadioValue(fundedChoice);
+          if (radioResult === 'not_found') {
+            showRoutineToast(
+              `<div class="vl-toast info show">
             <div class="vl-toast-title">Funding selector not found</div>
             <div class="vl-toast-detail">Panorama did not expose the PF/NPF selector yet. Try again once the lot section finishes loading.</div>
-          </div>`, 7000);
-          return;
-        }
-        // Drop the chooser flags now that the nurse has answered. Otherwise the
-        // deferred finalize (and any success toast) re-runs showVaxlinkToast with
-        // _sharedFundingLotFilterRequired still set and re-summons this same
-        // persistent prompt, which then only "Not now" can clear.
-        const {
-          _sharedFundingLotFilterRequired,
-          _sharedFundingLotSwitchFilter,
-          _sharedFundingLotLabel,
-          _fundedRadioValue,
-          ...rest
-        } = data;
-        // Record the nurse's answer so any later fill pass re-applies it instead
-        // of re-summoning this persistent chooser (which then only "Not now"
-        // could clear).
-        const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
-        const autofillResult = autoFillTelus(fillData);
-        if (isAutofillSuccess(autofillResult)) {
-          await finalizeDeferredPanoramaAutofill(fillData);
-        }
+          </div>`,
+              7000
+            );
+            return;
+          }
+          // Drop the chooser flags now that the nurse has answered. Otherwise the
+          // deferred finalize (and any success toast) re-runs showVaxlinkToast with
+          // _sharedFundingLotFilterRequired still set and re-summons this same
+          // persistent prompt, which then only "Not now" can clear.
+          const {
+            _sharedFundingLotFilterRequired,
+            _sharedFundingLotSwitchFilter,
+            _sharedFundingLotLabel,
+            _fundedRadioValue,
+            ...rest
+          } = data;
+          // Record the nurse's answer so any later fill pass re-applies it instead
+          // of re-summoning this persistent chooser (which then only "Not now"
+          // could clear).
+          const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
+          const autofillResult = autoFillTelus(fillData);
+          if (isAutofillSuccess(autofillResult)) {
+            await finalizeDeferredPanoramaAutofill(fillData);
+          }
+        });
       });
-    });
-    const dismissBtn = toastRoutineSlot.querySelector('[data-vl-funded-choice-dismiss]');
+    const dismissBtn = toastRoutineSlot.querySelector(
+      '[data-vl-funded-choice-dismiss]'
+    );
     if (dismissBtn) {
-      dismissBtn.addEventListener('click', () => dismissToast(toastRoutineSlot));
+      dismissBtn.addEventListener('click', () =>
+        dismissToast(toastRoutineSlot)
+      );
     }
     return;
   }
 
-  const label = data.tradename || data.generic_name || data.name || data.lot || 'Vaccine';
+  const label =
+    data.tradename || data.generic_name || data.name || data.lot || 'Vaccine';
   const lot = data.lot || '';
-  const flag = data.expiry_flag || getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry).flag;
-  const expiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+  const flag =
+    data.expiry_flag ||
+    getExpiryStatus(data.inventory_expiry || data.expiry || data.nvc_lot_expiry)
+      .flag;
+  const expiry =
+    data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
 
   let expiryText = '';
   if (expiry) {
     const friendlyDate = expiry.length > 10 ? expiry.slice(0, 10) : expiry;
-    const flagLabels = { valid: 'Valid', expiring_soon: 'Expiring soon', expired: 'Expired' };
+    const flagLabels = {
+      valid: 'Valid',
+      expiring_soon: 'Expiring soon',
+      expired: 'Expired'
+    };
     expiryText = `${flagLabels[flag] || 'Unknown'} (exp ${friendlyDate})`;
   }
-  const detail = [lot ? `Lot ${lot}` : '', expiryText].filter(Boolean).join(' \u2014 ');
+  const detail = [lot ? `Lot ${lot}` : '', expiryText]
+    .filter(Boolean)
+    .join(' \u2014 ');
 
   if (data._duplicateIgnored) {
-    showRoutineToast(`<div class="vl-toast duplicate show">
+    showRoutineToast(
+      `<div class="vl-toast duplicate show">
       <div class="vl-toast-title">Duplicate scan ignored</div>
       <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
       ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
-    </div>`, durationMs);
+    </div>`,
+      durationMs
+    );
     return;
   }
 
-  const cssClass = flag === 'expired' ? 'expired' : (flag === 'expiring_soon' ? 'expiring' : 'valid');
+  const cssClass =
+    flag === 'expired'
+      ? 'expired'
+      : flag === 'expiring_soon'
+        ? 'expiring'
+        : 'valid';
   const isExpired = flag === 'expired';
   const queuedNote = data._queuedCount
     ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
@@ -3135,7 +3629,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
     toastWarningSlot.innerHTML = toastHtml;
     playAudioCue('expiry_warning');
     const dismissBtn = toastWarningSlot.querySelector('.vl-toast-dismiss');
-    if (dismissBtn) dismissBtn.addEventListener('click', () => dismissToast(toastWarningSlot));
+    if (dismissBtn)
+      dismissBtn.addEventListener('click', () =>
+        dismissToast(toastWarningSlot)
+      );
     return;
   }
   showRoutineToast(toastHtml, durationMs);
@@ -3144,7 +3641,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
 function dismissToast(slot) {
   const el = slot && slot.querySelector('.vl-toast');
   if (el) el.classList.remove('show');
-  setTimeout(() => { if (slot) slot.innerHTML = ''; }, 300);
+  setTimeout(() => {
+    if (slot) slot.innerHTML = '';
+  }, 300);
 }
 
 function escapeToastHtml(text) {
@@ -3209,7 +3708,10 @@ async function setHudWorkflowMode(newMode) {
   updateHudState();
   try {
     await setLocalStorage({ [WORKFLOW_MODE_KEY]: nextMode });
-    logAnalyticsEvent('workflow_mode_set', { workflow: nextMode, source: 'hud_toggle' });
+    logAnalyticsEvent('workflow_mode_set', {
+      workflow: nextMode,
+      source: 'hud_toggle'
+    });
     showVaxlinkToast({ _commandMode: nextMode, _commandSource: 'hud' });
   } catch (error) {
     console.warn('VaxLink HUD mode switch error:', error);
@@ -3599,13 +4101,19 @@ function initHud() {
     if (hudIsDragging) {
       let newLeft = e.clientX - hudDragOffsetX;
       let newTop = e.clientY - hudDragOffsetY;
-      newLeft = Math.max(0, Math.min(window.innerWidth - hudContainer.offsetWidth, newLeft));
-      newTop = Math.max(0, Math.min(window.innerHeight - hudContainer.offsetHeight, newTop));
+      newLeft = Math.max(
+        0,
+        Math.min(window.innerWidth - hudContainer.offsetWidth, newLeft)
+      );
+      newTop = Math.max(
+        0,
+        Math.min(window.innerHeight - hudContainer.offsetHeight, newTop)
+      );
       applyHudPosition({ left: newLeft, top: newTop });
     } else if (hudMiniPointerDown) {
       const dx = e.clientX - hudMiniDownX;
       const dy = e.clientY - hudMiniDownY;
-      if (!hudMiniDidDrag && (Math.abs(dx) + Math.abs(dy) > 4)) {
+      if (!hudMiniDidDrag && Math.abs(dx) + Math.abs(dy) > 4) {
         hudMiniDidDrag = true;
       }
       if (hudMiniDidDrag) {
@@ -3625,13 +4133,17 @@ function initHud() {
       hudIsDragging = false;
       head.classList.remove('dragging');
       if (hudCurrentLeft !== null && hudCurrentTop !== null) {
-        chrome.storage.local.set({ [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop } });
+        chrome.storage.local.set({
+          [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop }
+        });
       }
     } else if (hudMiniPointerDown) {
       hudMiniPointerDown = false;
       hudMiniEl.style.cursor = '';
       if (hudMiniDidDrag) {
-        chrome.storage.local.set({ [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop } });
+        chrome.storage.local.set({
+          [HUD_POSITION_KEY]: { left: hudCurrentLeft, top: hudCurrentTop }
+        });
       } else {
         setHudHidden(false);
       }
@@ -3702,11 +4214,16 @@ function setHudHidden(hidden) {
 
 function updateHudState() {
   chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
-    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
-      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    const rows =
+      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
+        : [];
     const count = rows.length;
     const shouldShow = isPanoramaRecordImmsPage();
-    const showQueueControls = activeWorkflowMode === 'multiple' && count > 0 && isPanoramaImmunizationPage();
+    const showQueueControls =
+      activeWorkflowMode === 'multiple' &&
+      count > 0 &&
+      isPanoramaImmunizationPage();
 
     if (hudContainer) {
       hudContainer.classList.toggle('hidden', !shouldShow || hudUserHidden);
@@ -3767,8 +4284,10 @@ function renderHudQueueList(rows, visible) {
 async function removeHudQueueRow(id) {
   if (!id || applyQueueInFlight) return;
   const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-  const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
-    ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+  const rows =
+    stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+      ? stored[MULTIPLE_INJECT_QUEUE_KEY]
+      : [];
   const next = rows.filter((row) => row && row.id !== id);
   if (next.length === rows.length) return;
   await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: next });
@@ -3795,8 +4314,10 @@ async function applyNextQueueItem(options = {}) {
     const matchCurrentAgent = options.matchCurrentAgent === true;
     const suppressQueueEmptyToast = options.suppressQueueEmptyToast === true;
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
-      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    const rows =
+      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
+        : [];
     if (!rows.length) {
       if (!suppressQueueEmptyToast) {
         showVaxlinkToast({ _queueEmpty: true });
@@ -3806,13 +4327,20 @@ async function applyNextQueueItem(options = {}) {
     }
 
     const currentAgentText = getPanoramaCurrentAgentSelectionText();
-    const shouldRespectPanoramaAgent = !!currentAgentText && isPanoramaImmunizationPage();
+    const shouldRespectPanoramaAgent =
+      !!currentAgentText && isPanoramaImmunizationPage();
 
     let recordIndex = 0;
     if (matchCurrentAgent || shouldRespectPanoramaAgent) {
-      recordIndex = findMatchingQueueRecordIndexForPanoramaAgent(rows, currentAgentText);
+      recordIndex = findMatchingQueueRecordIndexForPanoramaAgent(
+        rows,
+        currentAgentText
+      );
       if (recordIndex < 0) {
-        vlog('auto-fill skipped: no queued vaccine matches current Panorama agent', currentAgentText);
+        vlog(
+          'auto-fill skipped: no queued vaccine matches current Panorama agent',
+          currentAgentText
+        );
         showVaxlinkToast({ _stepMatchMissing: true });
         updateHudState();
         return 'no_match';
@@ -3835,7 +4363,12 @@ async function applyNextQueueItem(options = {}) {
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source: 'hud',
-      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+      vaccineLabel:
+        record.tradename ||
+        record.generic_name ||
+        record.name ||
+        record.lot ||
+        '',
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
@@ -3851,7 +4384,12 @@ async function applyNextQueueItem(options = {}) {
       source: 'hud',
       success,
       pending,
-      vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+      vaccineLabel:
+        record.tradename ||
+        record.generic_name ||
+        record.name ||
+        record.lot ||
+        '',
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
@@ -3894,7 +4432,12 @@ function isImmunizationFormEmpty() {
   const fields = getFields(agentSelectors).filter(canFillPanoramaControl);
   for (const field of fields) {
     const filled = getFieldFilledText(field);
-    if (filled && filled !== '--' && filled.toLowerCase() !== 'select' && filled.length > 1) {
+    if (
+      filled &&
+      filled !== '--' &&
+      filled.toLowerCase() !== 'select' &&
+      filled.length > 1
+    ) {
       return false;
     }
   }
@@ -3913,8 +4456,8 @@ async function tryAutoDrain() {
   if (isPrimeFacesAjaxBusy()) return;
 
   const now = Date.now();
-  if ((now - lastAutoDrainAt) < 3000) return;
-  if ((now - lastVaxlinkFillAt) < 2000) return;
+  if (now - lastAutoDrainAt < 3000) return;
+  if (now - lastVaxlinkFillAt < 2000) return;
 
   if (!isImmunizationFormEmpty()) return;
 
@@ -3939,49 +4482,78 @@ let multiStepAutoFillPending = false;
 
 function isPanoramaMultipleImmunizationGridPage() {
   if (!isHandsFreeSupportedPage()) return false;
-  const tableBody = document.querySelector('tbody[id*="historicalfactoryTable:dataTable_data"]');
+  const tableBody = document.querySelector(
+    'tbody[id*="historicalfactoryTable:dataTable_data"]'
+  );
   if (!tableBody) return false;
-  const hasAddRowsButton = !!document.querySelector('button[id*="historicalfactoryTable:addButtonId:commandButtonId"]');
+  const hasAddRowsButton = !!document.querySelector(
+    'button[id*="historicalfactoryTable:addButtonId:commandButtonId"]'
+  );
   if (!hasAddRowsButton) return false;
-  const hasAgentField = !!document.querySelector('select[id*="historicalfactoryTable:dataTable:0:immsAgentMenu:selectOneMenu_input"]');
-  const hasDateField = !!document.querySelector('input[id*="historicalfactoryTable:dataTable:0:dateIn1:dateInput_input"]');
+  const hasAgentField = !!document.querySelector(
+    'select[id*="historicalfactoryTable:dataTable:0:immsAgentMenu:selectOneMenu_input"]'
+  );
+  const hasDateField = !!document.querySelector(
+    'input[id*="historicalfactoryTable:dataTable:0:dateIn1:dateInput_input"]'
+  );
   return hasAgentField && hasDateField;
 }
 
 function getPanoramaMultipleGridRows() {
-  const body = document.querySelector('tbody[id*="historicalfactoryTable:dataTable_data"]');
+  const body = document.querySelector(
+    'tbody[id*="historicalfactoryTable:dataTable_data"]'
+  );
   if (!body) return [];
   return Array.from(body.querySelectorAll('tr[data-ri]'));
 }
 
 function getPanoramaMultipleGridAgentField(rowIndex) {
-  return document.querySelector(`select[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_input"]`);
+  return document.querySelector(
+    `select[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_input"]`
+  );
 }
 
 function getPanoramaMultipleGridAgentFocusField(rowIndex) {
-  return document.querySelector(`input[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_focus"]`);
+  return document.querySelector(
+    `input[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_focus"]`
+  );
 }
 
 function getPanoramaMultipleGridAgentLabel(rowIndex) {
-  return document.querySelector(`label[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_label"]`);
+  return document.querySelector(
+    `label[id*="historicalfactoryTable:dataTable:${rowIndex}:immsAgentMenu:selectOneMenu_label"]`
+  );
 }
 
 function getPanoramaMultipleGridDate1Field(rowIndex) {
-  return document.querySelector(`input[id*="historicalfactoryTable:dataTable:${rowIndex}:dateIn1:dateInput_input"]`);
+  return document.querySelector(
+    `input[id*="historicalfactoryTable:dataTable:${rowIndex}:dateIn1:dateInput_input"]`
+  );
 }
 
 function gridAgentLabelMatchesCandidate(rowIndex, candidate) {
-  const labelRaw = getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '';
+  const labelRaw =
+    getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '';
   const labelText = normalizeForMatch(labelRaw);
   const candidateNorm = normalizeForMatch(candidate);
   if (!labelText || !candidateNorm) return false;
   if (labelText === candidateNorm) return true;
   // Reject if label is a compound variant of the candidate (e.g. "HB-pediatric" label for "HB").
   const candidateRaw = String(candidate || '').trim();
-  if (candidateRaw && labelRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
+  if (
+    candidateRaw &&
+    labelRaw
+      .trim()
+      .toLowerCase()
+      .startsWith(candidateRaw.toLowerCase() + '-')
+  )
+    return false;
   if (labelText.includes(candidateNorm)) return true;
-  const candidateTokens = candidateNorm.split(' ').filter(t => t.length >= 3);
-  return candidateTokens.length > 0 && candidateTokens.every(t => labelText.includes(t));
+  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
+  return (
+    candidateTokens.length > 0 &&
+    candidateTokens.every((t) => labelText.includes(t))
+  );
 }
 
 function getPanoramaMultipleGridRowState(rowIndex) {
@@ -4010,13 +4582,20 @@ function fillPanoramaMultipleGridAgent(rowIndex, data) {
   const candidates = getPanoramaAgentCandidates(data);
   for (const candidate of candidates) {
     if (!candidate) continue;
-    if (fillField(agentField, candidate) && isAgentCandidateAccepted(candidate, agentField)) {
+    if (
+      fillField(agentField, candidate) &&
+      isAgentCandidateAccepted(candidate, agentField)
+    ) {
       return true;
     }
     if (agentLabel && gridAgentLabelMatchesCandidate(rowIndex, candidate)) {
       return true;
     }
-    if (agentFocusField && fillField(agentFocusField, candidate) && isAgentCandidateAccepted(candidate, agentFocusField)) {
+    if (
+      agentFocusField &&
+      fillField(agentFocusField, candidate) &&
+      isAgentCandidateAccepted(candidate, agentFocusField)
+    ) {
       return true;
     }
   }
@@ -4056,8 +4635,10 @@ async function maybeAutoFillPanoramaMultipleGrid() {
   multiGridFillPending = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
-      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    const rows =
+      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
+        : [];
     if (!rows.length) return;
     if (!isPanoramaMultipleImmunizationGridPage()) return;
 
@@ -4078,7 +4659,9 @@ async function maybeAutoFillPanoramaMultipleGrid() {
 }
 
 function getPanoramaCurrentTradeSelectionText() {
-  const fields = getFields(getPanoramaTradeSelectors()).filter(canFillPanoramaControl);
+  const fields = getFields(getPanoramaTradeSelectors()).filter(
+    canFillPanoramaControl
+  );
   for (const field of fields) {
     const text = normalizeForMatch(getFieldFilledText(field));
     if (text && text !== 'select') {
@@ -4116,9 +4699,13 @@ function getPanoramaCurrentLotSelectionText() {
 }
 
 function getPanoramaMultiStepIndicatorKey() {
-  const nodes = Array.from(document.querySelectorAll('div, span, td, th, strong, label'));
+  const nodes = Array.from(
+    document.querySelectorAll('div, span, td, th, strong, label')
+  );
   for (const node of nodes) {
-    const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+    const text = String(node.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     const match = text.match(/\b(\d+)\s+of\s+(\d+)\s+immunizations?\b/i);
     if (match) {
       return `${match[1]}-of-${match[2]}`;
@@ -4135,7 +4722,9 @@ function isPanoramaMultiStepDetailPageReadyForAutofill() {
   if (!hasPanoramaAgentSelection(null)) return false;
 
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
-  const hasDateTime = !!String(dateField?.value || '').trim() || !!String(timeField?.value || '').trim();
+  const hasDateTime =
+    !!String(dateField?.value || '').trim() ||
+    !!String(timeField?.value || '').trim();
   if (!hasDateTime) return false;
 
   const hasTrade = !!getPanoramaCurrentTradeSelectionText();
@@ -4148,16 +4737,27 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
   if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
   const stepKey = getPanoramaMultiStepIndicatorKey();
-  const currentAgentKey = normalizeForMatch(getPanoramaCurrentAgentSelectionText());
-  const attemptKey = currentAgentKey ? `${stepKey}|${currentAgentKey}` : stepKey;
-  if (!stepKey || stepKey === lastAutoFilledPanoramaStepKey || attemptKey === lastSkippedPanoramaAgentKey) return;
-  if ((Date.now() - lastVaxlinkFillAt) < 1200) return;
+  const currentAgentKey = normalizeForMatch(
+    getPanoramaCurrentAgentSelectionText()
+  );
+  const attemptKey = currentAgentKey
+    ? `${stepKey}|${currentAgentKey}`
+    : stepKey;
+  if (
+    !stepKey ||
+    stepKey === lastAutoFilledPanoramaStepKey ||
+    attemptKey === lastSkippedPanoramaAgentKey
+  )
+    return;
+  if (Date.now() - lastVaxlinkFillAt < 1200) return;
 
   multiStepAutoFillPending = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    const rows = (stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY]))
-      ? stored[MULTIPLE_INJECT_QUEUE_KEY] : [];
+    const rows =
+      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
+        : [];
     if (!rows.length) return;
     if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
@@ -4193,7 +4793,7 @@ function initPostSaveWatcher() {
     // Detect filled -> empty transition (Panorama form reset after save)
     if (wasFilledBefore && isEmptyNow) {
       const now = Date.now();
-      if ((now - lastVaxlinkFillAt) < 2000) return;
+      if (now - lastVaxlinkFillAt < 2000) return;
       vlog('post-save: agent field reset detected, auto-advancing');
       setTimeout(() => tryAutoDrain(), 800);
     }
@@ -4262,7 +4862,10 @@ function initPanoramaMultiStepWatcher() {
       return;
     }
 
-    if (stepKey !== lastAutoFilledPanoramaStepKey && isPanoramaMultiStepDetailPageReadyForAutofill()) {
+    if (
+      stepKey !== lastAutoFilledPanoramaStepKey &&
+      isPanoramaMultiStepDetailPageReadyForAutofill()
+    ) {
       setTimeout(() => {
         void maybeAutoFillPanoramaMultiStepDetailPage();
       }, 200);
