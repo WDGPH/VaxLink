@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
 
 test('background creates exactly one persistent WORKERS offscreen document', async () => {
-  const harness = createBackgroundHarness({ resourceType: 'Bundle', entry: [] });
+  const harness = createBackgroundHarness(makeTestNvcBundle());
 
   const first = await harness.sendMessage({ action: 'scannerDaemon.ensure' });
   const second = await harness.sendMessage({ action: 'scannerDaemon.ensure' });

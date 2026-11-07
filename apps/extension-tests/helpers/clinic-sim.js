@@ -122,6 +122,17 @@ const BACKGROUND_PATH = path.resolve(
 );
 const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
+export function makeTestNvcBundle(code = 'TESTLOT') {
+  return { resourceType: 'Bundle', type: 'collection', entry: [
+    { resource: { resourceType: 'ValueSet', id: 'Tradename', compose: {
+      include: [{ concept: [{ code: 'trade-1', display: 'Test vaccine' }] }]
+    } } },
+    { resource: { resourceType: 'CodeSystem', id: 'nvc-vaccine-lot-id', concept: [
+      { code, property: [{ code: 'lotNumber', valueString: code }] }
+    ] } }
+  ] };
+}
+
 export function createBackgroundHarness(bundle, options = {}) {
   const storageData = new Map();
   // Seed storage the way a synced production install looks: cached bundle plus
@@ -248,7 +259,8 @@ export function createBackgroundHarness(bundle, options = {}) {
     crypto: globalThis.crypto,
     TextEncoder,
     URL,
-    setTimeout,
+    AbortController,
+    setTimeout: options.setTimeout || setTimeout,
     clearTimeout,
     setInterval,
     clearInterval,

@@ -7,12 +7,18 @@ export function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+export function describeNVCHealth(status) {
+  if (status.state === 'refreshing') {
+    return status.usable ? 'NVC is refreshing. Cached catalogue remains available.' : 'NVC is loading.';
+  }
+  if (!status.usable) return 'NVC catalogue is unavailable. Barcode details can still be captured.';
+  if (status.freshnessDegraded) return 'NVC refresh failed. Previously downloaded catalogue remains available.';
+  return 'NVC is ready.';
+}
+
 export function renderNVCStatus(status, container) {
   if (!container || !status) return;
-  const updated = formatDateTime(status.updatedAt);
-  const checked = formatDateTime(status.lastCheckAt);
-  const intervalHours = Math.round((status.autoSyncIntervalMinutes || 0) / 60);
-  container.textContent = `Last bundle update: ${updated} | Last check: ${checked} | Auto-check: every ${intervalHours}h`;
+  container.textContent = `${describeNVCHealth(status)} Last downloaded: ${formatDateTime(status.updatedAt)} | Last checked: ${formatDateTime(status.lastCheckAt)}`;
 }
 
 export function setButtonBusy(button, busy, busyText) {

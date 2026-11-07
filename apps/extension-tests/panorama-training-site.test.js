@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
 
 const extension = new URL('../extension/', import.meta.url);
 const TRAINING_HOST = 'trpanoramadhir.prod.ehealthontario.ca';
@@ -81,7 +81,7 @@ test('runtime gates recognize supported URLs and preserve the hands-free frame b
 });
 
 test('background routes a Single scan to the active training chart', async () => {
-  const harness = createBackgroundHarness({ resourceType: 'Bundle', entry: [] }, {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
     idleState: 'active',
     storage: { vaxlink_workflow_mode_v1: 'single' },
     tabs: [{ id: 44, windowId: 9, active: true, currentWindow: true, url: TRAINING_URL }],

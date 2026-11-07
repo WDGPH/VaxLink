@@ -1,141 +1,183 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
+import { describeNVCHealth } from '../extension/popup-ui.js';
 
 const officialUrl = 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC';
-const bundle = (code = 'LOT1') => ({
-  resourceType: 'Bundle', type: 'collection', entry: [
-    { resource: { resourceType: 'ValueSet', id: 'Tradename', compose: {
-      include: [{ concept: [{ code: 'trade-1', display: 'Test vaccine' }] }]
-    } } },
-    { resource: { resourceType: 'CodeSystem', id: 'nvc-vaccine-lot-id',
-      concept: [{ code, property: [{ code: 'lotNumber', valueString: code }] }] } }
-  ]
-});
-const response = (data, { url = officialUrl, status = 200, lastModified = null } = {}) => ({
-  url, status, ok: status >= 200 && status < 300,
+const bundle = makeTestNvcBundle;
+const refresh = (harness) => harness.sendMessage({ action: 'refreshNVCBundle' });
+const lookup = (harness, lot = 'LOT1') => harness.sendMessage({ action: 'lookupVaccineInfo', lot });
+const status = (harness) => harness.sendMessage({ action: 'getNVCUpdateStatus' });
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+const response = (data, { url = officialUrl, status = 200, lastModified = null, redirected = false } = {}) => ({
+  url, status, redirected, ok: status >= 200 && status < 300,
   headers: { get: (name) => name === 'Last-Modified' ? lastModified : null },
   json: async () => data
 });
+const fetchCatalogue = (callback) => async (url, init) => {
+  if (url !== officialUrl) throw new Error('icon unavailable');
+  return callback(init);
+};
 
-test('NVC source is pinned to the official endpoint', () => {
-  const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
-  assert.match(background, /const DEFAULT_NVC_SOURCE_URL = 'https:\/\/nvc-cnv\.canada\.ca\/fhir\/v2\/Bundle\/NVC'/);
+test('NVC restricts downloads to its official source and rejects redirects', async () => {
+  for (const reply of [
+    { url: 'https://evil.example/NVC' },
+    { url: officialUrl + '?other=1' },
+    { redirected: true }
+  ]) {
+    let requests = 0;
+    const harness = createBackgroundHarness(bundle('LOT1'), { fetch: fetchCatalogue((init) => {
+      requests++;
+      assert.equal(init.redirect, 'error');
+      return response(bundle('LOT2'), reply);
+    }) });
+    assert.equal((await harness.sendMessage({ action: 'refreshNVCBundle', sourceUrl: 'https://evil.example/NVC' })).errorCategory, 'source');
+    assert.equal(requests, 0);
+    assert.equal((await refresh(harness)).errorCategory, 'source');
+    assert.equal((await lookup(harness)).lot_number, 'LOT1');
+  }
 });
 
-test('NVC rejects custom sources and cross-origin responses without replacing cache', async () => {
-  const requests = [];
-  const harness = createBackgroundHarness(bundle(), {
-    fetch: async (url, init) => {
-      if (url !== officialUrl) throw new Error('icon unavailable');
-      requests.push({ url, init });
-      return response(bundle('LOT2'), { url: 'https://evil.example/NVC' });
-    }
-  });
-  const custom = await harness.sendMessage({ action: 'refreshNVCBundle', sourceUrl: 'https://evil.example/NVC' });
-  assert.equal(custom.success, false);
-  assert.equal(requests.length, 0);
-  const redirected = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(redirected.success, false);
-  assert.equal(requests[0].url, officialUrl);
-  assert.equal(requests[0].init.redirect, 'error');
-  assert.equal(harness.storageData.get('nvc_bundle_override').entry[1].resource.concept[0].code, 'LOT1');
+test('invalid data and failed writes preserve accepted catalogue, indexes, and health dates', async () => {
+  const malformed = bundle('LOT2');
+  malformed.entry[1].resource.concept[0].extension = [null];
+  const noUsableNames = bundle('LOT2');
+  noUsableNames.entry[0].resource.compose.include[0].concept[0].code = ' ';
+  for (const scenario of ['empty', 'malformed', 'unusable', 'write']) {
+    const previous = bundle('LOT1');
+    let lookupDuringWrite;
+    let harness;
+    harness = createBackgroundHarness(previous, {
+      storage: { nvc_bundle_updated_at: '2026-09-22T00:00:00Z' },
+      fetch: fetchCatalogue(() => response(scenario === 'empty' ? { resourceType: 'Bundle', entry: [] }
+        : scenario === 'malformed' ? malformed : scenario === 'unusable' ? noUsableNames : bundle('LOT2'))),
+      failStorageSet: (values) => {
+        if (scenario !== 'write' || !Object.hasOwn(values, 'nvc_bundle_override')) return false;
+        lookupDuringWrite = lookup(harness);
+        return true;
+      }
+    });
+    const before = await status(harness);
+    assert.equal((await refresh(harness)).errorCategory, scenario === 'write' ? 'storage' : 'invalid');
+    if (lookupDuringWrite) assert.equal((await lookupDuringWrite).lot_number, 'LOT1');
+    assert.equal(harness.storageData.get('nvc_bundle_override'), previous);
+    assert.equal((await lookup(harness)).lot_number, 'LOT1');
+    assert.equal((await lookup(harness, 'LOT2')).errorCategory, 'not_found');
+    const after = await status(harness);
+    assert.equal(after.updatedAt, before.updatedAt);
+    assert.equal(after.lastCheckAt, before.lastCheckAt);
+    assert.equal(after.freshnessDegraded, true);
+    assert.equal(after.usingCache, true);
+    assert.match(describeNVCHealth(after), /Previously downloaded catalogue remains available/);
+    const restarted = createBackgroundHarness(previous, { storage: Object.fromEntries(harness.storageData) });
+    assert.equal((await status(restarted)).lastError, after.lastError);
+  }
 });
 
-test('NVC validates catalogue shape, keeps known good on failure and changes fingerprint with content', async () => {
-  const malformed = bundle('LOT_BAD');
-  malformed.entry[1].resource.concept.push(null);
-  const nestedMalformed = bundle('LOT_BAD');
-  nestedMalformed.entry[1].resource.concept[0].extension = [null];
-  const replies = [response({ resourceType: 'Bundle', entry: [] }), response(malformed), response(nestedMalformed), response(bundle('LOT2')),
-    response(bundle('LOT3'))];
-  const harness = createBackgroundHarness(bundle(), { fetch: async (url) => {
-    if (url !== officialUrl) throw new Error('icon unavailable');
-    return replies.shift();
-  } });
-  const bad = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(bad.success, false);
-  const nestedBad = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(nestedBad.success, false);
-  const lookupBad = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(lookupBad.success, false);
-  assert.equal(harness.storageData.get('nvc_bundle_override').entry[1].resource.concept[0].code, 'LOT1');
-  const previousLookup = await harness.sendMessage({ action: 'lookupVaccineInfo', lot: 'LOT1' });
-  assert.equal(previousLookup.lot_number, 'LOT1');
-  const first = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  const second = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(first.success, true);
-  assert.equal(second.success, true);
-  assert.match(first.sha256, /^[a-f0-9]{64}$/);
-  assert.notEqual(first.sha256, second.sha256);
-  assert.equal(harness.storageData.get('nvc_bundle_override').entry[1].resource.concept[0].code, 'LOT3');
-});
-
-test('automatic NVC check uses Last-Modified and handles unchanged response', async () => {
-  const requests = [];
-  const modified = 'Wed, 23 Sep 2026 10:00:00 GMT';
-  const harness = createBackgroundHarness(bundle(), {
-    storage: { nvc_bundle_last_check_at: '2020-01-01T00:00:00Z',
-      nvc_bundle_last_modified: modified, nvc_bundle_updated_at: '2026-09-22T00:00:00Z' },
-    fetch: async (url, init) => {
-      if (url !== officialUrl) throw new Error('icon unavailable');
-      requests.push(init); return response(null, { status: 304 });
-    }
-  });
-  const result = await harness.sendMessage({ action: 'checkNVCBundleUpdates' });
-  assert.equal(result.unchanged, true);
-  assert.equal(requests[0].headers['If-Modified-Since'], modified);
-  assert.equal(harness.storageData.get('nvc_bundle_updated_at'), '2026-09-22T00:00:00Z');
-});
-
-test('failed NVC cache write restores the previous indexed catalogue', async () => {
-  const previous = bundle('LOT1');
-  const harness = createBackgroundHarness(previous, {
-    fetch: async (url) => {
-      if (url !== officialUrl) throw new Error('icon unavailable');
-      return response(bundle('LOT2'));
-    },
-    failStorageSet: (values) => Object.hasOwn(values, 'nvc_bundle_override')
-  });
-  const result = await harness.sendMessage({ action: 'refreshNVCBundle' });
-  assert.equal(result.success, false);
-  assert.equal(harness.storageData.get('nvc_bundle_override'), previous);
-  const lookup = await harness.sendMessage({ action: 'lookupVaccineInfo', lot: 'LOT1' });
-  assert.notEqual(lookup?.error, 'Failed to load NVC database');
-});
-
-test('first install fetches a usable catalogue even with a recent legacy check time', async () => {
-  const harness = createBackgroundHarness(null, {
-    fetch: async (url) => {
-      if (url !== officialUrl) throw new Error('icon unavailable');
-      return response(bundle('NEWLOT'));
-    }
-  });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(harness.storageData.get('nvc_bundle_override').entry[1].resource.concept[0].code, 'NEWLOT');
-  const lookup = await harness.sendMessage({ action: 'lookupVaccineInfo', lot: 'NEWLOT' });
-  assert.notEqual(lookup?.error, 'Failed to load NVC database');
-});
-
-test('invalid cached indexes trigger an unconditional recovery fetch', async () => {
-  const invalid = bundle('BADLOT');
+test('missing or invalid cache shares initialization with lookups and reports bounded waiting', async () => {
+  const invalid = bundle('BAD');
   invalid.entry[1].resource.concept[0].property = [null];
-  const requests = [];
-  const harness = createBackgroundHarness(invalid, {
-    storage: { nvc_bundle_last_modified: 'Wed, 23 Sep 2026 10:00:00 GMT',
-      nvc_bundle_updated_at: '2026-09-23T10:00:00Z' },
-    fetch: async (url, init) => {
-      if (url !== officialUrl) throw new Error('icon unavailable');
-      requests.push(init);
-      return init.headers['If-Modified-Since']
-        ? response(null, { status: 304 }) : response(bundle('NEWLOT'));
-    }
+  for (const cached of [null, invalid]) {
+    const started = deferred();
+    const download = deferred();
+    let requests = 0;
+    const harness = createBackgroundHarness(cached, {
+      storage: { nvc_bundle_last_modified: 'Wed, 23 Sep 2026 10:00:00 GMT' },
+      fetch: fetchCatalogue((init) => {
+        requests++;
+        assert.equal(init.headers['If-Modified-Since'], undefined);
+        started.resolve();
+        return download.promise;
+      })
+    });
+    const pendingLookup = lookup(harness, 'NEWLOT');
+    await started.promise;
+    assert.equal((await status(harness)).state, 'refreshing');
+    assert.equal((await status(harness)).usable, false);
+    const manual = refresh(harness);
+    download.resolve(response(bundle('NEWLOT')));
+    assert.equal((await manual).success, true);
+    assert.equal((await pendingLookup).lot_number, 'NEWLOT');
+    assert.equal(requests, 1);
+    assert.equal((await status(harness)).state, 'ready');
+  }
+
+  const waitTimer = deferred();
+  const networkTimer = deferred();
+  const started = deferred();
+  const download = deferred();
+  const harness = createBackgroundHarness(null, {
+    setTimeout: (callback, ms) => {
+      (ms === 5000 ? waitTimer : networkTimer).resolve(callback);
+      return 0;
+    },
+    fetch: fetchCatalogue(() => { started.resolve(); return download.promise; })
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].headers['If-Modified-Since'], undefined);
-  assert.equal(harness.storageData.get('nvc_bundle_override').entry[1].resource.concept[0].code, 'NEWLOT');
-  const lookup = await harness.sendMessage({ action: 'lookupVaccineInfo', lot: 'NEWLOT' });
-  assert.equal(lookup.lot_number, 'NEWLOT');
+  const pendingLookup = lookup(harness);
+  await started.promise;
+  (await waitTimer.promise)();
+  assert.equal((await pendingLookup).errorCategory, 'initializing');
+  const pendingRefresh = refresh(harness);
+  (await networkTimer.promise)();
+  assert.equal((await pendingRefresh).errorCategory, 'timeout');
+  assert.equal((await lookup(harness)).errorCategory, 'unavailable');
+  assert.equal((await status(harness)).state, 'unavailable');
+  download.resolve(response(bundle('TOO_LATE')));
+  assert.equal((await lookup(harness, 'TOO_LATE')).errorCategory, 'unavailable');
+});
+
+test('conditional refresh accepts 304 only with usable cache and keeps download date', async () => {
+  const modified = 'Wed, 23 Sep 2026 10:00:00 GMT';
+  const harness = createBackgroundHarness(bundle('LOT1'), {
+    storage: { nvc_bundle_last_modified: modified, nvc_bundle_updated_at: '2026-09-22T00:00:00Z' },
+    fetch: fetchCatalogue((init) => {
+      assert.equal(init.headers['If-Modified-Since'], modified);
+      return response(null, { status: 304 });
+    })
+  });
+  const result = await refresh(harness);
+  assert.equal(result.unchanged, true);
+  assert.equal((await status(harness)).updatedAt, '2026-09-22T00:00:00Z');
+  assert.equal((await status(harness)).lastCheckAt, result.checkedAt);
+  assert.equal((await lookup(harness)).lot_number, 'LOT1');
+  const missing = createBackgroundHarness(null, { fetch: fetchCatalogue(() => response(null, { status: 304 })) });
+  assert.equal((await refresh(missing)).errorCategory, 'invalid');
+  assert.equal((await lookup(missing)).errorCategory, 'invalid');
+});
+
+test('simultaneous refreshes share results, retain ready lookups, and recover after failure', async () => {
+  const started = deferred();
+  const download = deferred();
+  let requests = 0;
+  const harness = createBackgroundHarness(bundle('LOT1'), { fetch: fetchCatalogue(() => {
+    requests++;
+    if (requests === 1) { started.resolve(); return download.promise; }
+    if (requests === 2) return response(bundle('LOT2'));
+    throw new Error('Network exception with private detail');
+  }) });
+  const first = refresh(harness);
+  await started.promise;
+  const second = refresh(harness);
+  const auto = harness.sendMessage({ action: 'checkNVCBundleUpdates' });
+  assert.equal((await status(harness)).state, 'refreshing');
+  assert.equal((await lookup(harness)).lot_number, 'LOT1');
+  download.resolve(response(null, { status: 503 }));
+  const results = await Promise.all([first, second, auto]);
+  assert.equal(requests, 1);
+  assert.ok(results.every((result) => result.errorCategory === 'http'));
+  assert.equal((await refresh(harness)).success, true);
+  const accepted = await status(harness);
+  assert.match(accepted.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(accepted.lastError, null);
+  assert.equal((await lookup(harness, 'LOT2')).lot_number, 'LOT2');
+  assert.equal((await refresh(harness)).errorCategory, 'network');
+  const degraded = await status(harness);
+  assert.equal(degraded.sha256, accepted.sha256);
+  assert.equal(degraded.updatedAt, accepted.updatedAt);
+  assert.doesNotMatch(JSON.stringify(degraded), /private detail/);
+  assert.equal((await lookup(harness, 'LOT2')).lot_number, 'LOT2');
 });

@@ -20,6 +20,13 @@ function bgLog(...args) {
 let nvcBundle = null;
 let nvcIndexes = {};
 let bundleLoadPromise = null;
+let nvcInitializationPromise = null;
+let nvcRefreshPromise = null;
+let nvcCacheInvalid = false;
+let nvcHealth = {};
+let nvcUsingCache = false;
+const NVC_LOOKUP_WAIT_MS = 5000;
+const NVC_DOWNLOAD_TIMEOUT_MS = 15000;
 const DEFAULT_NVC_SOURCE_URL = 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC';
 const AUTO_SYNC_INTERVAL_MINUTES = 24 * 60;
 const AUTO_SYNC_ALARM_NAME = 'nvc-auto-sync';
@@ -54,7 +61,8 @@ const STORAGE_KEYS = {
   updatedAt: 'nvc_bundle_updated_at',
   lastCheckAt: 'nvc_bundle_last_check_at',
   bundleSha256: 'nvc_bundle_sha256',
-  lastModified: 'nvc_bundle_last_modified'
+  lastModified: 'nvc_bundle_last_modified',
+  health: 'nvc_bundle_health'
 };
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const ANALYTICS_MAX_RECENT_EVENTS = 2000;
@@ -196,7 +204,10 @@ function initQueueBadge() {
 }
 
 function getStorage(keys) {
-  return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
+  return new Promise((resolve, reject) => chrome.storage.local.get(keys, (stored) => {
+    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+    else resolve(stored);
+  }));
 }
 
 function setStorage(values) {
@@ -769,14 +780,10 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const parsed = parser.parseGS1Barcode(scan.rawText);
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
-  await Promise.resolve(bundleLoadPromise || loadNVCBundle());
   if (parsed.lot) {
-    const vaccineInfo = lookupVaccineLot(parsed.lot, { gtin: parsed.gtin });
-    if (vaccineInfo) {
-      mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
-    } else {
-      parsed.lookup_error = 'Vaccine not found in NVC database';
-    }
+    const vaccineInfo = await lookupVaccineInfo(parsed.lot, { gtin: parsed.gtin });
+    if (!vaccineInfo.error) mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
+    else parsed.lookup_error = vaccineInfo.error;
   }
 
   const record = await appendQueueRecord(
@@ -1378,16 +1385,56 @@ function setupAutoSyncAlarm() {
   chrome.alarms.create(AUTO_SYNC_ALARM_NAME, { periodInMinutes: AUTO_SYNC_INTERVAL_MINUTES });
 }
 
-async function initializeNVCSync() {
+function initializeNVCSync() {
   setupAutoSyncAlarm();
-  const loaded = await loadNVCBundle();
-  if (loaded) {
-    maybeAutoRefreshNVCBundle('startup');
-  } else {
-    // A first install or invalid legacy cache must not wait for a stale
-    // last-check timestamp before obtaining a usable catalogue.
-    await refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { force: true, trigger: 'auto' });
+  if (!nvcInitializationPromise) {
+    nvcInitializationPromise = (async () => {
+      const loaded = await loadNVCBundle();
+      return loaded ? maybeAutoRefreshNVCBundle('startup')
+        : refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { trigger: 'startup' });
+    })();
   }
+  return nvcInitializationPromise;
+}
+
+function hasUsableNVCCatalogue() {
+  return !!nvcBundle;
+}
+
+function nvcFailure(category) {
+  const messages = {
+    source: 'Only the official NVC source is supported',
+    network: 'Unable to download the NVC catalogue',
+    timeout: 'NVC catalogue download timed out',
+    http: 'The NVC server could not provide the catalogue',
+    invalid: 'The NVC catalogue could not support vaccine lookups',
+    storage: 'Unable to save the NVC catalogue',
+    initializing: 'NVC catalogue is still loading. Try the lookup again.',
+    unavailable: 'NVC catalogue is unavailable. Barcode details have been kept.',
+    not_found: 'Lot not found in the NVC catalogue'
+  };
+  return { success: false, error: messages[category], errorCategory: category,
+    usable: hasUsableNVCCatalogue() };
+}
+
+async function lookupVaccineInfo(lot, options = {}) {
+  await loadNVCBundle();
+  if (!hasUsableNVCCatalogue()) {
+    let timer;
+    try {
+      await Promise.race([
+        nvcRefreshPromise || initializeNVCSync(),
+        new Promise((resolve) => { timer = setTimeout(resolve, NVC_LOOKUP_WAIT_MS); })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  if (!hasUsableNVCCatalogue()) {
+    return nvcFailure(nvcRefreshPromise ? 'initializing'
+      : nvcCacheInvalid || nvcHealth.lastError === 'invalid' ? 'invalid' : 'unavailable');
+  }
+  return lookupVaccineLot(lot, options) || nvcFailure('not_found');
 }
 
 function validateBundleShape(data) {
@@ -1409,7 +1456,10 @@ function validateBundleShape(data) {
       validObjectArray(concept.designation) &&
       (concept.extension || []).every(validConceptField) &&
       (concept.property || []).every(validConceptField)));
-  if (!resources.every((resource) => validConcepts(resource.concept) &&
+  const usedResources = resources.filter((resource) =>
+    resource.id === 'Tradename' || resource.id === 'nvc-vaccine-lot-id' ||
+    /tradename|lotagentmapping/i.test([resource.id, resource.name, resource.title, resource.url].join(' ')));
+  if (!usedResources.every((resource) => validConcepts(resource.concept) &&
       (!resource.compose?.include || (Array.isArray(resource.compose.include) &&
         resource.compose.include.every((item) => item && validConcepts(item.concept)))) &&
       validConcepts(resource.expansion?.contains))) return false;
@@ -1422,183 +1472,202 @@ function validateBundleShape(data) {
         resource.expansion?.contains?.length > 0));
 }
 
-function applyBundleData(data, source) {
-  if (!validateBundleShape(data)) {
-    throw new Error('Invalid NVC FHIR bundle');
+function prepareNVCCatalogue(data) {
+  if (!validateBundleShape(data)) throw new Error('Invalid NVC catalogue');
+  const indexes = buildNVCIndexes(data);
+  if (!Object.keys(indexes.lotByCode).length || !Object.keys(indexes.tradenameByCode).length) {
+    throw new Error('NVC catalogue has no usable lots or vaccine names');
   }
-  const previousBundle = nvcBundle;
-  const previousIndexes = nvcIndexes;
-  try {
-    nvcBundle = data;
-    buildNVCIndexes();
-  } catch (error) {
-    nvcBundle = previousBundle;
-    nvcIndexes = previousIndexes;
-    throw error;
-  }
-  bgLog('NVC bundle applied from source:', source);
+  return indexes;
 }
 
-function loadNVCBundle(forceReload = false) {
-  if (bundleLoadPromise && !forceReload) {
-    return bundleLoadPromise;
-  }
-
-  bundleLoadPromise = getStorage([STORAGE_KEYS.bundle])
-    .then((stored) => {
-      if (stored[STORAGE_KEYS.bundle]) {
-        applyBundleData(stored[STORAGE_KEYS.bundle], 'storage');
+function loadNVCBundle() {
+  if (bundleLoadPromise) return bundleLoadPromise;
+  bundleLoadPromise = (async () => {
+    try {
+      const stored = await getStorage(Object.values(STORAGE_KEYS));
+      const health = stored[STORAGE_KEYS.health];
+      const errors = ['source', 'network', 'timeout', 'http', 'invalid', 'storage'];
+      nvcHealth = {
+        updatedAt: stored[STORAGE_KEYS.updatedAt] || null,
+        lastCheckAt: stored[STORAGE_KEYS.lastCheckAt] || null,
+        sha256: stored[STORAGE_KEYS.bundleSha256] || null,
+        lastModified: stored[STORAGE_KEYS.lastModified] || null,
+        lastAttemptAt: health?.lastAttemptAt || null,
+        lastError: errors.includes(health?.lastError) ? health.lastError : null
+      };
+      if (!stored[STORAGE_KEYS.bundle]) return false;
+      try {
+        const indexes = prepareNVCCatalogue(stored[STORAGE_KEYS.bundle]);
+        nvcBundle = stored[STORAGE_KEYS.bundle];
+        nvcIndexes = indexes;
+        nvcUsingCache = true;
         return true;
+      } catch {
+        nvcCacheInvalid = true;
+        nvcHealth.lastError = 'invalid';
+        return false;
       }
-      // No packaged bundle is shipped (raw NVC bundles are never committed);
-      // first-run lookups stay unavailable until the remote sync in
-      // maybeAutoRefreshNVCBundle populates storage.
-      bgLog('No cached NVC bundle yet; waiting for remote sync');
+    } catch {
+      nvcHealth.lastError = 'storage';
       return false;
-    })
-    .catch(error => {
-      console.error('Failed to load NVC bundle:', error);
-      return false;
-    });
-
+    }
+  })();
   return bundleLoadPromise;
 }
 
-async function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
+function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
   if (sourceUrl && sourceUrl !== DEFAULT_NVC_SOURCE_URL) {
-    return { success: false, error: 'Only the official NVC source is supported' };
+    return Promise.resolve(nvcFailure('source'));
   }
+  // All callers share this download and its result, including manual refreshes.
+  if (nvcRefreshPromise) return nvcRefreshPromise;
+  nvcRefreshPromise = performNVCRefresh(options).finally(() => { nvcRefreshPromise = null; });
+  return nvcRefreshPromise;
+}
 
-  const force = !!options.force;
-  const trigger = options.trigger === 'manual' ? 'manual' : 'auto';
+async function downloadNVCCatalogue(headers) {
+  const controller = new AbortController();
+  let timer;
   try {
-    const nowIso = new Date().toISOString();
-    const stored = await getStorage([STORAGE_KEYS.lastModified, STORAGE_KEYS.updatedAt, STORAGE_KEYS.bundle]);
-    const usableCachedBundle = validateBundleShape(stored[STORAGE_KEYS.bundle]) &&
-      nvcBundle && Object.keys(nvcIndexes.lotByCode || {}).length > 0;
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(DEFAULT_NVC_SOURCE_URL,
+          { cache: 'no-store', redirect: 'error', headers, signal: controller.signal });
+        if (response.redirected || response.url !== DEFAULT_NVC_SOURCE_URL) {
+          throw Object.assign(new Error(), { category: 'source' });
+        }
+        if (response.status === 304) return { response };
+        if (!response.ok) throw Object.assign(new Error(), { category: 'http' });
+        try {
+          return { response, bundle: await response.json() };
+        } catch {
+          throw Object.assign(new Error(), { category: 'invalid' });
+        }
+      })(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(Object.assign(new Error(), { category: 'timeout' }));
+          controller.abort();
+        }, NVC_DOWNLOAD_TIMEOUT_MS);
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function performNVCRefresh(options) {
+  await loadNVCBundle();
+  const trigger = options.trigger === 'manual' ? 'manual' : 'auto';
+  nvcHealth.lastAttemptAt = new Date().toISOString();
+  let category = 'storage';
+  try {
+    await setStorage({ [STORAGE_KEYS.health]: {
+      lastAttemptAt: nvcHealth.lastAttemptAt, lastError: nvcHealth.lastError
+    } });
     const headers = { ...NVC_FETCH_HEADERS };
-    if (!force && stored[STORAGE_KEYS.lastModified] && usableCachedBundle) {
-      headers['If-Modified-Since'] = stored[STORAGE_KEYS.lastModified];
+    if (nvcHealth.lastModified && hasUsableNVCCatalogue()) {
+      headers['If-Modified-Since'] = nvcHealth.lastModified;
     }
-    const response = await fetch(DEFAULT_NVC_SOURCE_URL,
-      { cache: 'no-store', redirect: 'error', headers });
-    const responseUrl = new URL(response.url);
-    if (responseUrl.origin !== new URL(DEFAULT_NVC_SOURCE_URL).origin ||
-        responseUrl.protocol !== 'https:') {
-      throw new Error('NVC response came from an unexpected origin');
-    }
-    if (response.status === 304 && stored[STORAGE_KEYS.updatedAt] && usableCachedBundle) {
-      await setStorage({ [STORAGE_KEYS.lastCheckAt]: nowIso });
-      await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true, note: 'unchanged' });
+    category = 'network';
+    const { response, bundle } = await downloadNVCCatalogue(headers);
+    const checkedAt = new Date().toISOString();
+    const health = { lastAttemptAt: nvcHealth.lastAttemptAt, lastError: null };
+    if (response.status === 304) {
+      if (!hasUsableNVCCatalogue()) throw Object.assign(new Error(), { category: 'invalid' });
+      category = 'storage';
+      await setStorage({ [STORAGE_KEYS.lastCheckAt]: checkedAt, [STORAGE_KEYS.health]: health });
+      Object.assign(nvcHealth, { lastCheckAt: checkedAt, lastError: null });
       return { success: true, unchanged: true, sourceUrl: DEFAULT_NVC_SOURCE_URL,
-        updatedAt: stored[STORAGE_KEYS.updatedAt] };
+        updatedAt: nvcHealth.updatedAt, checkedAt, usable: true };
     }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const bundle = await response.json();
-    if (!validateBundleShape(bundle)) {
-      throw new Error('Invalid NVC FHIR bundle');
-    }
-
-    const bundleText = JSON.stringify(bundle);
-    const computedSha256 = await sha256Hex(bundleText);
-    const updatedAt = nowIso;
-    const previousBundle = nvcBundle;
-    const previousIndexes = nvcIndexes;
-    try {
-      // Build indexes before committing the cache; indexing can reject data
-      // that passes the shallow FHIR checks above.
-      applyBundleData(bundle, DEFAULT_NVC_SOURCE_URL);
-      await setStorage({
-        [STORAGE_KEYS.bundle]: bundle,
-        [STORAGE_KEYS.bundleSha256]: computedSha256,
-        [STORAGE_KEYS.lastCheckAt]: nowIso,
-        [STORAGE_KEYS.lastModified]: response.headers.get('Last-Modified') || null,
-        [STORAGE_KEYS.updatedAt]: updatedAt
-      });
-      bundleLoadPromise = Promise.resolve(true);
-    } catch (error) {
-      nvcBundle = previousBundle;
-      nvcIndexes = previousIndexes;
-      throw error;
-    }
-
-    const result = {
-      success: true,
-      sourceUrl: DEFAULT_NVC_SOURCE_URL,
-      updatedAt,
-      checkedAt: nowIso,
-      entryCount: bundle.entry.length,
-      sha256: computedSha256
-    };
+    category = 'invalid';
+    const indexes = prepareNVCCatalogue(bundle);
+    const computedSha256 = await sha256Hex(JSON.stringify(bundle));
+    const lastModified = response.headers.get('Last-Modified') || null;
+    category = 'storage';
+    await setStorage({
+      [STORAGE_KEYS.bundle]: bundle,
+      [STORAGE_KEYS.bundleSha256]: computedSha256,
+      [STORAGE_KEYS.lastCheckAt]: checkedAt,
+      [STORAGE_KEYS.lastModified]: lastModified,
+      [STORAGE_KEYS.updatedAt]: checkedAt,
+      [STORAGE_KEYS.health]: health
+    });
+    // Make the replacement visible only after both indexing and saving succeed.
+    nvcBundle = bundle;
+    nvcIndexes = indexes;
+    nvcUsingCache = false;
+    nvcCacheInvalid = false;
+    Object.assign(nvcHealth, { updatedAt: checkedAt, lastCheckAt: checkedAt,
+      sha256: computedSha256, lastModified, lastError: null });
     await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true }).catch(() => undefined);
-    return result;
+    return { success: true, sourceUrl: DEFAULT_NVC_SOURCE_URL, updatedAt: checkedAt,
+      checkedAt, entryCount: bundle.entry.length, sha256: computedSha256, usable: true };
   } catch (error) {
-    console.error('Failed to refresh NVC bundle:', error);
-    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: false, note: error.message }).catch(() => undefined);
-    return { success: false, error: error.message };
+    nvcHealth.lastError = error.category || category;
+    if (hasUsableNVCCatalogue()) nvcUsingCache = true;
+    await setStorage({ [STORAGE_KEYS.health]: {
+      lastAttemptAt: nvcHealth.lastAttemptAt, lastError: nvcHealth.lastError
+    } }).catch(() => undefined);
+    await logAnalyticsEvent('nvc_refresh_result', {
+      trigger, success: false, note: nvcHealth.lastError
+    }).catch(() => undefined);
+    return nvcFailure(nvcHealth.lastError);
   }
 }
 
 async function maybeAutoRefreshNVCBundle(trigger) {
-  try {
-    const stored = await getStorage([STORAGE_KEYS.lastCheckAt]);
-    const lastCheckAt = stored[STORAGE_KEYS.lastCheckAt];
-    const now = Date.now();
-    const last = lastCheckAt ? Date.parse(lastCheckAt) : 0;
-    const intervalMs = AUTO_SYNC_INTERVAL_MINUTES * 60 * 1000;
-
-    if (last && (now - last) < intervalMs) {
-      return { success: true, skipped: true, reason: 'interval_not_elapsed' };
-    }
-
-    const result = await refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { force: false, trigger });
-    if (!result.success) {
-      console.warn('Auto NVC refresh failed; using existing bundle:', result.error);
-    }
-    return result;
-  } catch (error) {
-    console.error('Auto refresh process failed:', error);
-    return { success: false, error: error.message };
+  await loadNVCBundle();
+  if (nvcRefreshPromise) return nvcRefreshPromise;
+  const last = Date.parse(nvcHealth.lastCheckAt || '');
+  if (hasUsableNVCCatalogue() && Date.now() - last < AUTO_SYNC_INTERVAL_MINUTES * 60000) {
+    return { success: true, skipped: true, reason: 'interval_not_elapsed' };
   }
+  return refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { trigger });
 }
 
 async function getNVCUpdateStatus() {
-  const stored = await getStorage([
-    STORAGE_KEYS.updatedAt,
-    STORAGE_KEYS.lastCheckAt,
-    STORAGE_KEYS.bundleSha256
-  ]);
-
+  await loadNVCBundle();
+  const usable = hasUsableNVCCatalogue();
   return {
     sourceUrl: DEFAULT_NVC_SOURCE_URL,
-    updatedAt: stored[STORAGE_KEYS.updatedAt] || null,
-    lastCheckAt: stored[STORAGE_KEYS.lastCheckAt] || null,
-    sha256: stored[STORAGE_KEYS.bundleSha256] || null,
+    state: nvcRefreshPromise ? 'refreshing' : usable ? 'ready'
+      : nvcCacheInvalid || nvcHealth.lastError === 'invalid' ? 'invalid' : 'unavailable',
+    usable,
+    usingCache: usable && nvcUsingCache,
+    freshnessDegraded: usable && !!nvcHealth.lastError,
+    updatedAt: nvcHealth.updatedAt || null,
+    lastCheckAt: nvcHealth.lastCheckAt || null,
+    lastAttemptAt: nvcHealth.lastAttemptAt || null,
+    lastError: nvcHealth.lastError || null,
+    sha256: nvcHealth.sha256 || null,
     autoSyncIntervalMinutes: AUTO_SYNC_INTERVAL_MINUTES
   };
 }
 
-function buildNVCIndexes() {
+function buildNVCIndexes(bundle) {
   bgLog('buildNVCIndexes called');
-  if (!nvcBundle || !nvcBundle.entry) {
-    console.error('nvcBundle not loaded or no entries');
+  if (!bundle || !bundle.entry) {
+    console.error('bundle not loaded or no entries');
     return;
   }
   
-  bgLog('nvcBundle has', nvcBundle.entry.length, 'entries');
+  bgLog('bundle has', bundle.entry.length, 'entries');
   
-  const tradenames = collectTradenameConceptsFromBundle();
-  const lots = collectLotConceptsFromBundle();
-  const lotAgentRows = collectLotAgentMappingRowsFromBundle();
+  const tradenames = collectTradenameConceptsFromBundle(bundle);
+  const lots = collectLotConceptsFromBundle(bundle);
+  const lotAgentRows = collectLotAgentMappingRowsFromBundle(bundle);
   
   bgLog('Collected', tradenames.length, 'tradename concepts');
   bgLog('Collected', lots.length, 'lot concepts');
   bgLog('Collected', lotAgentRows.length, 'lot-agent mapping rows');
   
   // Index tradenames by code and by DIN
-  const tradenameByCode = {};
-  const tradenameByDin = {};
-  const tradenameByName = {};
+  const tradenameByCode = Object.create(null);
+  const tradenameByDin = Object.create(null);
+  const tradenameByName = Object.create(null);
   
   for (const concept of tradenames) {
     const codeKey = normalizeCodeKey(concept.code);
@@ -1624,14 +1693,14 @@ function buildNVCIndexes() {
   bgLog('Indexed', Object.keys(tradenameByName).length, 'tradenames by name');
   
   // Index lots by lot number and by code
-  const lotByLotNumber = {};
-  const lotByCode = {};
-  const lotByCodePrefix = {};
+  const lotByLotNumber = Object.create(null);
+  const lotByCode = Object.create(null);
+  const lotByCodePrefix = Object.create(null);
   
   for (const concept of lots) {
     const code = concept.code;
-    if (code) {
-      const codeKey = code.toLowerCase();
+    if (normalizeCodeKey(code)) {
+      const codeKey = normalizeCodeKey(code);
       lotByCode[codeKey] = concept;
       const underscoreIdx = codeKey.indexOf('_');
       const prefix = underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
@@ -1641,7 +1710,7 @@ function buildNVCIndexes() {
     }
     const lotNumber = extractLotNumber(concept);
     if (lotNumber) {
-      lotByLotNumber[lotNumber.toLowerCase()] = concept;
+      lotByLotNumber[normalizeCodeKey(lotNumber)] = concept;
     }
   }
   
@@ -1650,7 +1719,7 @@ function buildNVCIndexes() {
   const lotAgentMappingByLot = buildLotAgentMappingIndex(lotAgentRows);
   bgLog('Indexed', Object.keys(lotAgentMappingByLot).length, 'lot-agent mappings by lot key');
   
-  nvcIndexes = {
+  return {
     tradenameByCode,
     tradenameByDin,
     tradenameByName,
@@ -1660,15 +1729,13 @@ function buildNVCIndexes() {
     lotByCodePrefix,
     lotAgentMappingByLot
   };
-  
-  bgLog('NVC Indexes built successfully');
 }
 
-function collectTradenameConceptsFromBundle() {
+function collectTradenameConceptsFromBundle(bundle) {
   const concepts = [];
-  if (!nvcBundle.entry) return concepts;
+  if (!bundle.entry) return concepts;
   
-  for (const entry of nvcBundle.entry) {
+  for (const entry of bundle.entry) {
     const resource = entry.resource;
     if (!resource || !resource.resourceType) continue;
     if (resource.resourceType === 'ValueSet' && resource.id === 'Tradename') {
@@ -1696,11 +1763,11 @@ function collectTradenameConceptsFromBundle() {
   return concepts;
 }
 
-function collectLotConceptsFromBundle() {
+function collectLotConceptsFromBundle(bundle) {
   const concepts = [];
-  if (!nvcBundle.entry) return concepts;
+  if (!bundle.entry) return concepts;
   
-  for (const entry of nvcBundle.entry) {
+  for (const entry of bundle.entry) {
     const resource = entry.resource;
     if (resource.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id') {
       concepts.push(...(resource.concept || []));
@@ -1709,11 +1776,11 @@ function collectLotConceptsFromBundle() {
   return concepts;
 }
 
-function collectLotAgentMappingRowsFromBundle() {
+function collectLotAgentMappingRowsFromBundle(bundle) {
   const rows = [];
-  if (!nvcBundle.entry) return rows;
+  if (!bundle.entry) return rows;
 
-  for (const entry of nvcBundle.entry) {
+  for (const entry of bundle.entry) {
     const resource = entry.resource;
     if (!resource || !resource.resourceType) continue;
     const identity = normalizeCodeKey([
@@ -2478,7 +2545,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'refreshNVCBundle') {
     refreshNVCBundleFromUrl(request.sourceUrl || DEFAULT_NVC_SOURCE_URL,
-      { force: true, trigger: 'manual' }).then(sendResponse);
+      { trigger: 'manual' }).then(sendResponse);
     return true;
   }
 
@@ -2493,30 +2560,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'lookupVaccineInfo') {
-    bgLog('Looking up vaccine info for lot:', request.lot, 'gtin:', request.gtin || '');
-
-    Promise.resolve(bundleLoadPromise || loadNVCBundle())
-      .then((loaded) => {
-        if (loaded === false) {
-          return { error: 'Failed to load NVC database' };
-        }
-
-        const vaccineInfo = lookupVaccineLot(request.lot, { gtin: request.gtin });
-        bgLog('Lookup result:', vaccineInfo);
-
-        if (vaccineInfo) {
-          return vaccineInfo;
-        }
-
-        return { error: 'Vaccine not found in NVC database' };
-      })
-      .catch((error) => {
-        console.error('Lookup pipeline failed:', error);
-        return { error: error?.message || 'Failed to load NVC database' };
-      })
-      .then((response) => {
-        sendResponse(response);
-      });
+    lookupVaccineInfo(request.lot, { gtin: request.gtin })
+      .catch(() => nvcFailure('unavailable')).then(sendResponse);
 
     return true;
   }
