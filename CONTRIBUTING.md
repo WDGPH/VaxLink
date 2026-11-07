@@ -31,9 +31,37 @@ See `apps/extension/README.md` for the module breakdown and storage model.
 - Sanitize to the minimal structural fragment you actually need (e.g. the specific `<select>`/`<input>` elements and their field IDs), not the full page.
 - See `apps/extension-tests/panorama-reason-consent.test.js` for the pattern: inline HTML fragments embedded directly in the test, no fixture files on disk.
 
+## Commit and pull request titles
+
+Use Conventional Commit titles for local commits and pull requests. With squash
+merging, the PR title becomes the commit subject that release-please reads.
+For example, use `fix: preserve vaccine lot numbers`, `feat: add a workflow`, or
+`ci: check release packaging`. An optional scope and `!` for breaking changes are
+supported, such as `fix(scanner)!: change scan framing`.
+
+Enable the local `commit-msg` hook once per clone (Node.js is required):
+
+```bash
+npm run setup:hooks
+```
+
+The hook rejects invalid commit subjects before Git creates the commit. Normal
+merge commits keep Git's generated message. If you already use a custom hooks
+path, integrate `.githooks/commit-msg` into your existing setup instead of
+replacing it.
+
+The **PR title / conventional-title** check applies the same rule to PR titles
+and reruns when a title changes. Keep the conventional subject when confirming a
+squash merge; local hooks do not run on GitHub. The CI check reports failures;
+blocking a merge also depends on the repository's required-check settings.
+
+`fix:` and `feat:` are release-worthy changes; maintenance titles such as `ci:`
+and `docs:` remain valid without forcing a release. See the
+[release process](https://github.com/WDGPH/VaxLink/blob/alpha/docs/RELEASING.md#commit-conventions).
+
 ## Pull Requests
 
-- Keep `manifest.json` identical across branches — the extension *name* is stamped by `scripts/package-extension.sh` at package time, never edited directly, so `dev` → `main` merges don't conflict. Only `version` is bumped in git.
+- Keep `manifest.json` identical across branches — the extension *name* is stamped by `scripts/package-extension.sh` at package time, never edited directly, so `alpha` → `main` merges don't conflict. Release-please owns version changes.
 - Run `npm test` for extension changes and `uv sync --locked --group docs` followed by `uv run --locked --group docs mkdocs build --strict` for documentation changes before opening a PR.
 
 Documentation ownership and notification setup are described in the
