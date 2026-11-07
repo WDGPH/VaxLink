@@ -32,7 +32,8 @@ higher than the one already uploaded to that listing.
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
-branch differences; runtime channel behaviour derives from the manifest name.
+branch differences. The manifest name controls the popup badge; the stamped
+capability facade controls diagnostic availability.
 
 ### Diagnostic capabilities
 
@@ -73,6 +74,66 @@ release PR and store submission still apply. Direct production fixes on `main`
 remain supported. Keep `alpha` current with those fixes. Alpha prereleases do
 not publish the stable documentation manual or notify its release reconciliation;
 the existing stable documentation-hub integration is unchanged.
+
+## Promote reviewed Alpha code
+
+Use a promotion PR from a new branch based on current `main`. Merge the reviewed
+Alpha ref into that branch with `--no-commit --no-ff`, resolve the bookkeeping
+below, and commit the merge. This preserves the feature and fix commits for
+release-please. Use a `chore:` promotion title; promotion itself is not a new
+product feature. A maintainer must use GitHub's **Create a merge commit** method
+for this promotion PR. Do not squash it into a single `chore:` commit: that
+discards the feature/fix history used by the tested release path. Agents must
+not merge their own PRs or push directly to `main` or `alpha`.
+
+Keep the stable release's existing values from `main` until release-please
+creates the stable release PR:
+
+- Keep `package.json`'s version and `.release-please-manifest.json` at the current
+  stable release. Retain the incoming scripts and dependencies.
+- Keep that stable version in both `package-lock.json`'s top-level `version` and
+  `packages[""].version`. Retain the incoming dependency lock; do not remove a
+  lockfile because an older `main` did not have one.
+- Keep the extension manifest's `version` and `version_name` from `main`.
+  Retain incoming scripts, permissions, and other reviewed fields.
+- Keep the stable changelog history from `main`. Let the stable release PR
+  generate new entries from the promoted commits. Alpha release notes remain
+  available in the Alpha history and prereleases.
+
+Keep both release configurations, the branch-specific release workflow, and the
+stable-only documentation release notification. Promoting source does not
+promote Alpha recorder capabilities: production packaging still excludes them.
+Do not strip a prerelease suffix to make a production build pass.
+
+Run `npm ci`, the normal checks, and both package checks on the promotion branch.
+After maintainer merge, inspect the actual stable release PR before merging it:
+package and lockfile versions, release manifest, both extension version fields,
+and changelog must agree. Review the generated notes for channel accuracy;
+Alpha-only recorder features must not be described as available in production.
+The stable release PR, tag, package publication, and Store upload remain separate
+steps.
+
+The JSON extra-file updater can expand the manifest differently from the locked
+formatter. On the generated release branch, run `npm run format -- package.json
+package-lock.json .release-please-manifest.json apps/extension/manifest.json`,
+stage those files, run `npm run format:check`, and commit any formatting changes
+before merge. Repeat after release-please regenerates the PR. This keeps the
+generated version values and lets the normal formatting check pass.
+
+A disposable merge from stable 1.1.5 with this bookkeeping produced a stable
+1.2.0 candidate using release-please 17.3.0's real manifest, Node strategy, and
+file updaters. It updated all version fields above, retained the new dependency
+lock, and packaged successfully as production with diagnostic assets excluded.
+GitHub release and commit iteration were modeled from local history and the
+verified stable release; this does not establish that a future hosted workflow
+or release PR has run. Inspect that PR's output. The existing stable configuration
+also contains an older `last-release-sha`; if stable release discovery fails,
+review its fallback range before accepting generated notes.
+
+For an urgent fix, cherry-pick only the required commits and their dependencies
+onto a branch from `main`, retaining stable bookkeeping. Send a separate PR and
+reconcile those commits back into Alpha afterward. Bring direct main hotfixes
+back into Alpha too. Prefer periodic promotion PRs over permanent channel forks.
 
 ## Installation and updates
 
