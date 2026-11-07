@@ -1,5 +1,7 @@
 # Contributing to VaxLink
 
+Coding agents should read [AGENTS.md](AGENTS.md) for shared project guidance.
+
 ## Repository Layout
 
 - `apps/extension/` — Chrome extension (Manifest V3), no build step, plain JS
