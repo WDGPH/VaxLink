@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm --prefix apps/extension-tests test"
+    "test": "npm run test:commit-titles && npm --prefix apps/extension-tests test",
+    "test:commit-titles": "node --test scripts/check-commit-title.test.js",
+    "setup:hooks": "git config --local core.hooksPath .githooks"
   }
 }

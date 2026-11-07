@@ -115,7 +115,12 @@ This gives both directions: from a nurse's complaint to the exact commit, and fr
 
 ## Commit conventions
 
-Use conventional commit subjects on `main` and `alpha`:
+Use conventional commit subjects on `main` and `alpha`. For squash merges,
+the PR title must follow the same convention. Enable the local `commit-msg`
+hook with `npm run setup:hooks`; PR title CI also checks GitHub changes.
+See [contributor setup](contributing.md#commit-and-pull-request-titles).
+
+Examples:
 
 - `fix: stop eating Tab keystrokes (#30)` → patch bump, "Fixed" section
 - `feat: preset dose for prefilled syringes (#24)` → minor bump, "Added" section
