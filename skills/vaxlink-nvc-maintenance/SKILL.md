@@ -31,6 +31,6 @@ The goal is a fast, predictable mapping from barcode to structured vaccine metad
 
 - AI/GS1 parsing of `01`, `10`, `17`, and `21`.
 - NVC lookup keyed by lot and optionally GTIN.
-- JSON/CSV inventory export columns.
+- CSV inventory export columns.
 - Legacy popup inventory row compatibility via `buildLegacyQueueRecord`.
 - Local bundle refresh cadence and fallback bundle handling.

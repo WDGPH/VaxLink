@@ -20,5 +20,5 @@
 
 - Run `node --check` on the changed extension file.
 - Run `cd apps/extension-tests && npm test` when inventory model or export behavior changes.
-- Trace the same scan through popup, background, and content logs.
+- Use the privacy-filtered diagnostic recorder for workflow traces. Use synthetic data for developer captures; logs may contain raw scan data or page URLs.
 - Verify `chrome.runtime.lastError` is handled, not ignored.

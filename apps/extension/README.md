@@ -14,34 +14,25 @@ for other eHealth Ontario sites or new extension API permissions is added.
 Scanner routing, hands-free workflows, and the Panorama HUD still require an
 immunization page with `/recordImms/` in its path. Runtime page detection requires
 HTTPS, matching the manifest. Reload an already-open training page after
-installing or updating the extension.
+installing or updating the extension. Reload previously open InputHealth tabs
+too; removing a manifest match does not rewrite an already-running page.
 
-Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
-in the training environment before moving to production.
+Check Panorama chart fills using synthetic training records. Also check capture,
+queueing, and inventory export without an open chart, plus lock-screen replay,
+before moving to production.
 Automated URL and routing tests do not verify the live training site's DOM,
 scanner hardware, or organization-specific access.
 
-## Main Pieces
+## Runtime and storage
 
-- `popup.js` drives popup workflow state, manual scan parsing, and queue management.
-- `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
-- `content.js` handles scan routing, autofill, and workflow automation on supported chart pages.
-- `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
-- `scanner-setup.html` + `scanner/` provide the Web Serial scanner channel and diagnostics.
-- `diagnostics.html` and `diagnostics/` provide opted-in Alpha workflow recordings; production packaging excludes them.
+See [architecture](../../docs/architecture.md) for the execution contexts, current
+storage keys, and Panorama fill order. Operational queues, catalogue data,
+settings, scanner status, and usage counters use `chrome.storage.local`. Alpha
+recordings and their correlation links use `chrome.storage.session`.
 
-## Storage Model
-
-Operational queues, catalogue cache, workflow settings, scanner settings/status,
-and usage counters use `chrome.storage.local`. The active Multiple Inject queue
-is `multiple_inject_queue_v1`; the inventory tray uses
-`inventory_scan_batch_v1`; pending Single scans use
-`vaxlink_pending_scan_inbox_v1`.
-
-The Alpha diagnostic collector and queue-correlation map use
-`chrome.storage.session`. They do not copy operational queue records or usage
-counter labels. Source still loads directly without transpilation; packaging
-selects channel capabilities and stamps the loaded build identity.
+Older profiles may retain data from earlier versions. This cleanup does not
+migrate or delete it. Source loads directly without transpilation; packaging
+selects channel capabilities and stamps the build identity.
 
 ## Dedicated Scanner Channel
 

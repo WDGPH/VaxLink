@@ -8,7 +8,7 @@ description: Maintain and update Panorama DOM selectors, PrimeFaces rerender tim
 ## Focus
 
 Use this skill for Panorama-specific DOM work only.
-Keep the source of truth in `references/panorama-selector-map.md` and the current `content.js` selector flow. Do not commit live-session DOM captures as fixtures — they can contain real patient data; sanitize to structural fragments only (field IDs, option lists) as done in `apps/extension-tests/panorama-reason-consent.test.js`.
+Use `apps/extension/content.js` as the source of truth for selectors and their flow. Do not commit live-session DOM captures as fixtures — they can contain real patient data; sanitize to structural fragments only (field IDs, option lists) as done in `apps/extension-tests/panorama-reason-consent.test.js`.
 
 ## Operating Rules
 
@@ -17,7 +17,7 @@ Keep the source of truth in `references/panorama-selector-map.md` and the curren
 - Keep the sequence `agent -> wait for rerender -> lot -> deferred date/time`.
 - Do not manually fill dependent fields that Panorama is supposed to derive.
 - Use mutation/retry logic when a field is populated and then cleared by rerender.
-- When a selector fails, capture a fresh sanitized DOM snapshot from a test/training Panorama session and diff it against `references/panorama-selector-map.md`.
+- When a selector fails, capture a fresh sanitized DOM snapshot from a test/training Panorama session and compare it with the selectors in `apps/extension/content.js`.
 
 ## What To Update
 

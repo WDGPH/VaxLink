@@ -110,8 +110,7 @@ Targeted Panorama observations cover agent, lot, funding, date/time, reason, and
 consent. Native controls and visible widgets are inspected separately. A hidden
 native select can still be the control VaxLink writes; visibility alone does not
 make that write invalid. These snapshots are small state observations, not a
-rendered-page reconstruction. Other EMRs report the workflow stages that can be
-observed without claiming Panorama-specific field verification.
+rendered-page reconstruction.
 
 Retry observations report the existing timer and mutation decisions, scheduled
 versus actual local delay, cancellation, and late follow-ups. Recording does not

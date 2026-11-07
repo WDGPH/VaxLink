@@ -1,5 +1,7 @@
 # Browser-only locked scanner proof of concept
 
+This guide records the original proof of concept and its operational constraints. Use the current scanner setup and diagnostics guidance for today’s workflow.
+
 ## Goal
 
 Confirm that a USB CDC scanner paired with VaxLink remains readable after the setup tab is closed and while Windows is locked. Scans captured during the lock must appear exactly once, in order, in the Multiple Inject queue after unlock.
@@ -12,7 +14,7 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 - Zebra DS8178/cradle configured as USB CDC (virtual COM), with HID keyboard output disabled.
 - Chrome is allowed to keep running in the background.
 - Windows power policy keeps the workstation awake during the test. Sleep and hibernation stop browser execution and serial capture.
-- A non-production test chart is open in Panorama or InputHealth before locking.
+- A non-production test chart is open in Panorama before locking.
 
 ## Test procedure
 
@@ -67,9 +69,9 @@ This is not an exactly-once guarantee across worker interruptions.
 The proof of concept passes only if:
 
 - Scanner Setup can be closed before locking.
-- Every locked scan is retained exactly once and in order, including consecutive identical scans.
+- In this controlled test, locked scans appear in order, including consecutive identical scans. Delivery across worker interruptions is not an exactly-once guarantee.
 - No patient identifier or chart URL is copied into the lock-session metadata.
 - Locked scans are queued and are not automatically injected into the chart.
 - The extension reconnects after a temporary USB disconnect without reopening Scanner Setup.
 
-If capture fails, inspect the extension service worker and offscreen document from `chrome://extensions` and record the scanner status/error. A message that Web Serial is unavailable in the scanner worker means the installed Chrome build does not expose Web Serial in that extension worker context; that workstation cannot use this browser-only design and would need a native bridge fallback.
+If capture fails, inspect the extension service worker and offscreen document from `chrome://extensions` and record the scanner status/error. A message that Web Serial is unavailable in the scanner worker means the installed Chrome build does not expose Web Serial in that extension worker context; that workstation cannot use this browser-only design with that Chrome build.

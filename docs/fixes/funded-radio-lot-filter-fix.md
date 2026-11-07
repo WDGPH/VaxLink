@@ -1,5 +1,7 @@
 # Funded Radio Lot Filter Fix
 
+This incident records the historical fix. Current code is the source of truth; an inaccessible PrimeFaces queue remains unknown.
+
 **Branch:** `fix/funded-radio-lot-filter`  
 **Affected component:** Panorama lot selection in `content.js`  
 **Related issues:** #12 (NPF barcode scans as PF), #19 (Recombivax PF 0.5ml scans as NPF)

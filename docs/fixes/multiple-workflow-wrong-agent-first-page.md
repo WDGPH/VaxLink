@@ -1,5 +1,7 @@
 # Bug: Wrong Agent Selected on Multi-Immunization Grid Page
 
+This incident describes historical code. Current behavior and function names are maintained in `apps/extension/content.js`.
+
 **Branch:** `fix/agent-selection-first-page`  
 **Affected workflow:** Multiple immunization mode — historicalfactoryTable grid page
 

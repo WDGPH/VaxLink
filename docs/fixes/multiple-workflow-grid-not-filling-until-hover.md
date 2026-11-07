@@ -1,5 +1,7 @@
 # Bug: Multi-Immunization Grid Not Auto-Filling Until Nurse Hovers
 
+This incident describes historical code and timing. Current behavior is maintained in `apps/extension/content.js`; an inaccessible PrimeFaces queue remains unknown.
+
 **Branch:** `fix/agent-selection-first-page`  
 **Affected workflow:** Multiple immunization mode — historicalfactoryTable grid page
 
@@ -16,7 +18,7 @@ After scanning multiple vaccines and navigating to the multi-immunization entry 
 ### `activeWorkflowMode` starts as `'single'`
 
 ```js
-// content.js line 19
+// Historical code at the time of this incident
 let activeWorkflowMode = 'single';
 ```
 

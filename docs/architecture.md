@@ -1,8 +1,6 @@
 # Architecture
 
-The extension has no build step — files are loaded directly by Chrome. No
-bundler, no transpilation. It has three execution contexts that communicate
-via `chrome.runtime.sendMessage` and `chrome.storage.local`.
+Chrome loads the source directly without transpilation. Packaging selects channel capabilities. The service worker, popup, content script, and offscreen scanner document with its dedicated worker communicate through extension messages and storage.
 
 ## Execution contexts
 
@@ -15,12 +13,14 @@ via `chrome.runtime.sendMessage` and `chrome.storage.local`.
 - Multiple-inject queue append helpers
 - Action icon and badge management
 
-**`content.js`** — injected into Panorama and InputHealth pages. Owns:
+**`content.js`** — injected into supported Panorama pages. Owns:
 
-- Receives Web Serial scans on supported pages
+- Receives scans routed to supported pages
 - HUD overlay on supported pages
-- EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
+- Panorama autofill and workflow automation
 - Workflow mode reading from `chrome.storage.local`
+
+**`scanner/`** — the offscreen document and dedicated worker own Web Serial capture and decoding. Capture, parsing, queues, and inventory can operate without an open chart.
 
 **`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
 
@@ -36,15 +36,27 @@ dropdown option.
 **`queue-record.js`** — shared row normalization for inventory CSV export.
 Keeps the exported column shape stable for downstream tools.
 
+## Chart integration boundary
+
+`autoFillPanorama` requires a supported HTTPS Panorama origin and immunization
+workflow context. The manifest keeps broad paths for the three approved hosts;
+runtime checks establish the narrower page context. A matching DOM on another
+origin is not sufficient. When the tab URL is unavailable, the popup uses a
+read-only content-script handshake before sending a fill payload; it does not
+inject code on an unverified tab. Unsupported or not-ready pages do not receive
+field writes. Capture, queues, and inventory do not require an open chart.
+
 ## Key storage keys
 
-| Key                        | Owner           | Purpose                      |
-| -------------------------- | --------------- | ---------------------------- |
-| `multiple_inject_queue_v1` | popup + content | Active multiple-inject queue |
-| `inventory_scan_batch_v1`  | popup + content | Legacy inventory batch queue |
-| `nvc_bundle_override`      | background      | Cached NVC FHIR bundle       |
-| `vaxlink_workflow_mode_v1` | popup           | Current workflow mode        |
-| `vaxlink_analytics_v1`     | background      | Fill event log               |
+| Key                        | Owner                        | Purpose                      |
+| -------------------------- | ---------------------------- | ---------------------------- |
+| `multiple_inject_queue_v1` | background + popup + content | Active multiple-inject queue |
+| `inventory_scan_batch_v1`  | background + popup + content | Active inventory tray        |
+| `nvc_bundle_override`      | background                   | Cached NVC FHIR bundle       |
+| `vaxlink_workflow_mode_v1` | popup                        | Current workflow mode        |
+| `vaxlink_analytics_v1`     | background                   | Fill event log               |
+
+Existing upgraded profiles may also retain data written by earlier versions.
 
 ## NVC catalogue readiness and refresh
 
@@ -91,12 +103,22 @@ lot selection. Always gate lot writes and deferred date/time behind
 handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 `dateAdministedDate`) — keep those as-is.
 
+Field helpers use native selects first. The visible PrimeFaces fallback searches
+only the control's own menu panel and checks the resulting selection. Typed
+focus-input text alone does not establish a completed selection.
+
 Late date/time, reason, and consent follow-ups keep the same cancellation owner
 as the initial fill. A trusted edit to a managed field, a newer operation, URL
 navigation, or a different owning form cancels the old operation. Controls
 replaced within the same form can still receive a deferred fill. Late writes
 also respect an observable busy PrimeFaces queue. An inaccessible page-world
 queue remains unknown; the isolated content script cannot prove that it is idle.
+
+A Single scan accepted before its form controls are ready stays in the pending
+inbox for that tab. Acceptance stops routing to another chart; it does not remove
+an unprocessed scan. The existing bounded replay attempts use the same
+destination, and an unfinished scan remains pending. An inbox storage failure is
+reported rather than treated as a successful save.
 
 ## Diagnostic channel boundary
 

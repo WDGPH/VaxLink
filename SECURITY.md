@@ -10,6 +10,10 @@ VaxLink is a client-side Chrome extension. It reads vaccine barcode data and wri
 
 VaxLink retains vaccine and product labels, GTIN, lot, serial, raw barcode, expiry, route, dose and related metadata; scan times; Multiple Inject and inventory queues and records; the NVC cache; workflow settings; scanner settings and status; and operational analytics such as parse, lookup and autofill results, workflow, product label and time. This operational data is stored in `chrome.storage.local`. The extension's queue and analytics schemas are for vaccine workflow data, not patient names, health card numbers, chart identifiers or demographics. Staff should review all autofilled vaccine details before saving in the EMR.
 
+These are the current storage writers. Upgraded profiles may retain data from
+older versions, including stores no longer used by the extension. This cleanup
+does not migrate or delete that historical data.
+
 VaxLink adds no application-level encryption to `chrome.storage.local` or `chrome.storage.session`. Protection at rest depends on workstation, browser and operating-system controls.
 
 ## Opted-in Alpha diagnostics

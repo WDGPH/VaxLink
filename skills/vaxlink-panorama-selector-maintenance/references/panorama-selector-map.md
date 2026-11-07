@@ -1,27 +1,15 @@
-# Panorama Selector Map
+# Panorama selector guidance
 
-## Current Panorama targets
+The maintained selectors and fallback order are in `apps/extension/content.js`.
+Generated JSF prefixes can change; preserve supported suffix and label fallbacks.
+Panorama uses the misspelled `dateAdministedDate` ID.
 
-- Agent select: `select[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"]`
-- Agent combobox focus: `input[id*="immsDetailssection_recordImms_agentiterm:selectOneMenu_focus"]`
-- Lot select: `select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]`
-- Lot select alt: `select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]`
-- Lot filter: `input[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_filter"]`
-- Lot filter alt: `input[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_filter"]`
-- Date administered date: `input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]`
-- Date administered time: `input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]`
+Select agent first, then lot after the relevant rerender, then deferred date and
+time. Panorama derives the dependent fields after lot selection. An inaccessible
+PrimeFaces queue is unknown; it is not proof that the page is idle. Preserve
+manual cancellation and form ownership when changing retries.
 
-## Expected sequence
-
-1. Select agent.
-2. Wait for the PrimeFaces rerender to settle.
-3. Select lot.
-4. Let Panorama populate trade, dosage, route, site, and manufacturer.
-5. Fill Date Administered and Time only after the page is stable.
-
-## Failure modes
-
-- Field fills and disappears: the write happened before a rerender completed.
-- Lot select does nothing: agent selection or queue timing is incomplete.
-- Dependent fields remain blank: Panorama likely did not receive the lot change event.
-- Date/Time fail: selector drift or a stale masked input wrapper.
+When a field fails, compare a sanitized structural fragment from a synthetic
+training record with the current selectors. Check whether the control was
+replaced or disabled and whether its options were populated. Never commit a
+live-session DOM capture.

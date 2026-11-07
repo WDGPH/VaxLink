@@ -19,7 +19,7 @@ documentation site.
 - `apps/extension` - Chrome extension (Manifest V3) — the main project
 - `apps/extension-tests` - extension test suite (kept out of the Web Store zip)
 - `scripts` - shell utilities (e.g. `fetch-nvc.sh`, `package-extension.sh`)
-- `skills` - Claude Code skill definitions for common extension workflows
+- `skills` - task guidance for coding agents
 - `docs` - source for the MkDocs documentation site
 
 ## Extension (`apps/extension`)
@@ -31,7 +31,7 @@ documentation site.
 - Selects the Panorama agent and lot, lets Panorama fill dependent vaccine details, and applies configured date/time, reason, and consent fields
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Captures scans through Web Serial, including while the workstation is locked
-- Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
+- Supports Single Inject, the Multiple Inject queue, and an inventory tray with CSV export
 
 InputHealth and generic other-EMR autofill have been removed from this development
 version. Capture, parsing, NVC lookup, queues, and inventory export do not require
@@ -58,22 +58,18 @@ For local development, load the unpacked extension:
 4. Select `apps/extension`
 
 First test VaxLink in the Panorama training environment with synthetic training
-records. Reload supported Panorama tabs after installing or updating the extension.
+records. Reload previously open chart tabs after installing or updating the extension.
+An update does not rewrite code already running in a page. InputHealth is no
+longer injected after a page reload.
 Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
 before moving to production.
 
-### Data update model
+### Catalogue and inventory
 
-- Source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
-- Auto-check every 24h (alarms)
-- Manual refresh from popup
-- Keeps the last-known-good catalogue if refresh fails
-
-### Inventory
-
-- Popup and hands-free inventory capture write to the `chrome.storage.local` queue key `inventory_scan_batch_v1`
-- The full inventory operations page (`inventory-manager.html`) persists normalized items, transactions, and reconciliation snapshots in IndexedDB
-- Detailed extension notes live in `apps/extension/README.md`
+VaxLink checks the official NVC catalogue periodically and keeps its last-known-good
+cache when refresh fails. Inventory scans stay in a local tray for CSV export.
+See [architecture](docs/architecture.md) for the runtime, current storage keys,
+and catalogue contracts.
 
 ### Extension Checks
 
@@ -103,7 +99,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECUR
 
 ## Documentation site
 
-Architecture, the EMR adapter contract, release process, and engineering
+Architecture, diagnostics, the release process, and engineering
 notes are published in the [PHIZ documentation hub](https://docs.phiz.ca/vaxlink/).
 This repository owns the Markdown, navigation, Markdown extensions, and locked
 build dependencies. `WDGPH/docs` owns the shared presentation and publication.

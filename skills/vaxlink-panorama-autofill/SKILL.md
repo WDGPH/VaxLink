@@ -15,7 +15,7 @@ Preserve the core behavior: VaxLink sets Agent and Lot, Panorama derives depende
 1. Confirm Panorama structure before editing selectors.
 2. Keep the fill sequence as `agent -> lot -> date/time`.
 3. Let Panorama auto-populate dependent details after lot selection.
-4. Use deferred retries with PrimeFaces-idle guards for rerender safety.
+4. Use deferred retries and respect observable PrimeFaces activity for rerender safety. An inaccessible queue is unknown.
 5. Validate syntax and run a manual smoke test.
 
 ## Rules to Preserve
@@ -48,4 +48,4 @@ Preserve the core behavior: VaxLink sets Agent and Lot, Panorama derives depende
 
 ## References
 
-- Read `references/panorama-selector-map.md` when selectors drift or specific controls stop responding.
+- Read `../vaxlink-panorama-selector-maintenance/references/panorama-selector-map.md` when selectors drift or controls stop responding.

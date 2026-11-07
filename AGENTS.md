@@ -125,7 +125,7 @@ Production releases run from `main` and prereleases from `alpha` through release
 
 ## Extension Architecture
 
-The extension has three execution contexts that communicate via `chrome.runtime.sendMessage` and `chrome.storage.local`:
+The extension uses a service worker, popup, content script, and an offscreen scanner document with a dedicated worker. They communicate through extension messages and storage:
 
 **`background.js`** — service worker. Owns:
 
@@ -135,12 +135,14 @@ The extension has three execution contexts that communicate via `chrome.runtime.
 - Multiple-inject queue append helpers
 - Action icon and badge management
 
-**`content.js`** — injected into Panorama and InputHealth pages. Owns:
+**`content.js`** — injected into supported Panorama pages. Owns:
 
-- Receives Web Serial scans on supported pages
+- Receives scans routed to supported pages
 - HUD overlay on supported pages
-- EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
+- Panorama autofill and workflow automation
 - Workflow mode reading from `chrome.storage.local`
+
+**`scanner/`** — the offscreen document and worker own Web Serial capture and decoding.
 
 **`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
 
@@ -155,21 +157,21 @@ The extension has three execution contexts that communicate via `chrome.runtime.
 
 ### Key Storage Keys
 
-| Key                        | Owner           | Purpose                      |
-| -------------------------- | --------------- | ---------------------------- |
-| `multiple_inject_queue_v1` | popup + content | Active multiple-inject queue |
-| `inventory_scan_batch_v1`  | popup + content | Legacy inventory batch queue |
-| `nvc_bundle_override`      | background      | Cached NVC FHIR bundle       |
-| `vaxlink_workflow_mode_v1` | popup           | Current workflow mode        |
-| `vaxlink_analytics_v1`     | background      | Fill event log               |
+| Key                        | Owner                        | Purpose                      |
+| -------------------------- | ---------------------------- | ---------------------------- |
+| `multiple_inject_queue_v1` | background + popup + content | Active multiple-inject queue |
+| `inventory_scan_batch_v1`  | background + popup + content | Active inventory tray        |
+| `nvc_bundle_override`      | background                   | Cached NVC FHIR bundle       |
+| `vaxlink_workflow_mode_v1` | popup                        | Current workflow mode        |
+| `vaxlink_analytics_v1`     | background                   | Fill event log               |
+
+### Chart integration boundary
+
+Chart integration supports only HTTPS on `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca`, and `trpanoramadhir.prod.ehealthontario.ca`. Keep the manifest paths broad and enforce the `/recordImms/` runtime context. Similar-looking DOM controls do not establish support. Scanner capture, queues, and inventory work without an open chart.
 
 ### Panorama Autofill Sequence
 
-Fill order must be: `agent → lot → (deferred) date/time`. Panorama auto-populates dependent fields (trade name, route, dose, manufacturer) after lot selection. Write the lot and deferred date/time only when `!isPrimeFacesAjaxBusy()`. Lot matching uses `normalizePanoramaLotToken` to handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g. `dateAdministedDate`) — keep those as-is.
-
-### Adding a New EMR
-
-The ROADMAP describes a planned platform registry refactor. Until that lands, new platforms are added to `content.js` by extending `isHandsFreeSupportedPage()` and `autoFillTelus()`. See `skills/vaxlink-emr-adaptation/SKILL.md` for the adapter contract.
+Fill order must be: `agent → lot → (deferred) date/time`. Panorama auto-populates dependent fields (trade name, route, dose, manufacturer) after lot selection. Gate lot and deferred date/time writes with `!isPrimeFacesAjaxBusy()`; an inaccessible page-world queue remains unknown, not confirmed idle. Lot matching uses `normalizePanoramaLotToken` to handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g. `dateAdministedDate`) — keep those as-is.
 
 ## CI
 
