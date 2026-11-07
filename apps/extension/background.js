@@ -2957,10 +2957,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.target === SCANNER_DAEMON_TARGET) {
     return false;
   }
-  if (
-    request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED ||
-    request?.action === 'scannerDaemon.scanEcho'
-  ) {
+  if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
     return false;
   }
 

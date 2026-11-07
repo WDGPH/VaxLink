@@ -41,7 +41,7 @@ export function createLineFrameDecoder(options = {}) {
   let textBuffer = '';
   let byteBuffer = [];
 
-  const emitFrame = (terminator = '') => {
+  const emitFrame = (terminator = '', completionReason = 'idle') => {
     const terminatorLength = terminator.length;
     const frameText =
       terminatorLength > 0
@@ -57,7 +57,8 @@ export function createLineFrameDecoder(options = {}) {
     if (!trimmed) return null;
     return {
       text: trimmed,
-      rawBytesHex: bytesToHex(frameBytes)
+      rawBytesHex: bytesToHex(frameBytes),
+      completionReason
     };
   };
 
@@ -70,13 +71,13 @@ export function createLineFrameDecoder(options = {}) {
 
         const terminator = findTerminator(textBuffer, delimiters);
         if (terminator) {
-          const frame = emitFrame(terminator);
+          const frame = emitFrame(terminator, 'terminator');
           if (frame) frames.push(frame);
           continue;
         }
 
         if (textBuffer.length > maxFrameLength) {
-          const frame = emitFrame('');
+          const frame = emitFrame('', 'overflow');
           if (frame) frames.push(frame);
         }
       }

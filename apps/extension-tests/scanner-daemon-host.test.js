@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('offscreen daemon starts its worker, forwards connect, and echoes routed scans', async () => {
+test('offscreen daemon starts its worker, forwards connect and routes scans without echoing raw data', async () => {
   const runtimeListeners = [];
   const runtimeMessages = [];
   const workers = [];
@@ -119,7 +119,7 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
     (message) => message.action === 'scannerDaemon.scanEcho'
   );
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
-  assert.equal(echo.response.locked, true);
+  assert.equal(echo, undefined);
 
   delete globalThis.Worker;
   delete globalThis.chrome;

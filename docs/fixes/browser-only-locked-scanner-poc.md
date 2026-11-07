@@ -8,7 +8,7 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 
 ## Prerequisites
 
-- Windows workstation with Chrome 114 or newer and the unpacked VaxLink extension loaded.
+- Windows workstation with Chrome 114 or newer and VaxLink Alpha or unpacked development source loaded.
 - Zebra DS8178/cradle configured as USB CDC (virtual COM), with HID keyboard output disabled.
 - Chrome is allowed to keep running in the background.
 - Windows power policy keeps the workstation awake during the test. Sleep and hibernation stop browser execution and serial capture.
@@ -16,9 +16,9 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 
 ## Test procedure
 
-1. Open VaxLink Scanner Setup and choose the scanner profile.
+1. Select Multiple Inject for this controlled test, then open Scanner Setup and choose the scanner profile. Use a purpose-specific test profile and synthetic records; never clear real clinical queues.
 2. Select **Select Scanner**, grant the serial-port permission, and wait for **Connected in background**.
-3. Scan one test barcode while the setup page is visible. Verify the decoded value, confirm that **Hardware captures since daemon start** increments, and confirm that the keyboard-leakage field remains unchanged. If the field receives characters, the scanner is still acting as an HID keyboard and this test is invalid.
+3. Select **Start scanner test**, wait for the active countdown, and scan one synthetic barcode. Verify bytes, a decoded frame, and parsed GS1 fields. Use the optional keyboard check field with that synthetic barcode. Stop the test and wait for release before continuing. Test input does not increment clinical capture or usage counters.
 4. Close the Scanner Setup tab completely.
 5. Scan one barcode while Windows is unlocked. Verify the normal open-chart behavior.
 6. Record the current Multiple Inject queue count and the Scanner Setup hardware-capture count.

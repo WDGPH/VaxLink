@@ -13,7 +13,6 @@ export const SCANNER_DAEMON_ACTIONS = Object.freeze({
   DISCONNECT: 'scannerDaemon.disconnect',
   ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
   STATUS_CHANGED: 'scannerDaemon.statusChanged',
-  SCAN_ECHO: 'scannerDaemon.scanEcho',
   STATUS_UPDATE: 'scannerDaemon.statusUpdate'
 });
 

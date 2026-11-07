@@ -33,18 +33,21 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
   const decoder = createLineFrameDecoder(profile.decoder || {});
   const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;
+  let paused = false;
   let activeReader = null;
+  let readTask = null;
   let idleFlushTimer = null;
-  let terminalReadError = null;
+  let generation = 0;
+  let captureOwner = 'clinical';
+  let transition = Promise.resolve();
+  const onRead =
+    typeof handlers.onRead === 'function' ? handlers.onRead : () => {};
 
   const clearIdleFlush = () => {
-    if (idleFlushTimer) {
-      clearTimeout(idleFlushTimer);
-      idleFlushTimer = null;
-    }
+    if (idleFlushTimer) clearTimeout(idleFlushTimer);
+    idleFlushTimer = null;
   };
-
-  const emitFrames = (frames) => {
+  const emitFrames = (frames, owner) => {
     for (const frame of frames) {
       const scan = makeScanEvent({
         rawText: frame.text,
@@ -56,20 +59,87 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
           usbInfo: port.getInfo()
         }
       });
-      if (typeof onScan === 'function') {
-        onScan(scan);
-      }
+      if (typeof onScan === 'function')
+        onScan(scan, { owner, completionReason: frame.completionReason });
     }
   };
-
-  const scheduleIdleFlush = () => {
-    clearIdleFlush();
-    if (!idleFlushMs || !decoder.hasBufferedData()) return;
-    idleFlushTimer = setTimeout(() => {
-      idleFlushTimer = null;
-      if (!keepReading || !decoder.hasBufferedData()) return;
-      emitFrames(decoder.flush());
-    }, idleFlushMs);
+  const startReading = () => {
+    const owner = captureOwner;
+    const readGeneration = generation;
+    readTask = (async () => {
+      let terminalReadError = null;
+      while (keepReading && readGeneration === generation && port.readable) {
+        const reader = port.readable.getReader();
+        activeReader = reader;
+        try {
+          while (keepReading && readGeneration === generation) {
+            const { value, done } = await reader.read();
+            if (readGeneration !== generation || !keepReading) break;
+            if (done) break;
+            onRead({
+              owner,
+              byteCount: value?.byteLength || value?.length || 0
+            });
+            emitFrames(decoder.push(value), owner);
+            clearIdleFlush();
+            if (idleFlushMs && decoder.hasBufferedData()) {
+              idleFlushTimer = setTimeout(() => {
+                idleFlushTimer = null;
+                if (
+                  keepReading &&
+                  readGeneration === generation &&
+                  decoder.hasBufferedData()
+                ) {
+                  emitFrames(decoder.flush(), owner);
+                }
+              }, idleFlushMs);
+            }
+          }
+        } catch (error) {
+          if (keepReading && readGeneration === generation) {
+            terminalReadError = error;
+            keepReading = false;
+          }
+        } finally {
+          reader.releaseLock();
+          if (activeReader === reader) activeReader = null;
+        }
+      }
+      if (readGeneration !== generation) return;
+      clearIdleFlush();
+      if (terminalReadError) {
+        if (port.readable || port.writable)
+          await port.close().catch(() => undefined);
+        onError(terminalReadError);
+      } else if (keepReading) {
+        onStatus({ state: 'disconnected', profile, portInfo: port.getInfo() });
+      }
+    })();
+    return readTask;
+  };
+  const setCaptureOwner = (owner) => {
+    const operation = transition
+      .catch(() => undefined)
+      .then(async () => {
+        if (!keepReading || paused) throw new Error('Scanner is not connected');
+        generation += 1;
+        clearIdleFlush();
+        const reader = activeReader;
+        if (reader) await reader.cancel();
+        if (readTask) await readTask;
+        if (!keepReading) throw new Error('Scanner is not connected');
+        decoder.reset();
+        captureOwner = owner;
+        startReading();
+      })
+      .catch((error) => {
+        paused = true;
+        clearIdleFlush();
+        decoder.reset();
+        throw error;
+      });
+    transition = operation;
+    return operation;
   };
 
   await port.open(profile.serialOptions || { baudRate: 9600 });
@@ -78,52 +148,24 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
   }
   onStatus({ state: 'open', profile, portInfo: port.getInfo() });
 
-  const readLoop = (async () => {
-    while (keepReading && port.readable) {
-      activeReader = port.readable.getReader();
-      try {
-        while (keepReading) {
-          const { value, done } = await activeReader.read();
-          if (done) break;
-          const frames = decoder.push(value);
-          emitFrames(frames);
-          scheduleIdleFlush();
-        }
-      } catch (error) {
-        if (keepReading) {
-          terminalReadError = error;
-          keepReading = false;
-        }
-      } finally {
-        activeReader.releaseLock();
-        activeReader = null;
-      }
-    }
-    clearIdleFlush();
-    if (terminalReadError) {
-      if (port.readable || port.writable) {
-        await port.close().catch(() => undefined);
-      }
-      onError(terminalReadError);
-    } else if (keepReading) {
-      onStatus({ state: 'disconnected', profile, portInfo: port.getInfo() });
-    }
-  })();
+  startReading();
 
   return {
     profile,
     port,
+    setCaptureOwner,
     get readable() {
-      return keepReading;
+      return keepReading && !paused;
     },
     async close() {
       keepReading = false;
+      generation += 1;
       clearIdleFlush();
       decoder.reset();
       if (activeReader) {
         await activeReader.cancel().catch(() => undefined);
       }
-      await readLoop.catch(() => undefined);
+      await readTask?.catch(() => undefined);
       if (port.readable || port.writable) {
         await port.close().catch(() => undefined);
       }

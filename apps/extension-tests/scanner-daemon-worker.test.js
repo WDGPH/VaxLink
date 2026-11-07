@@ -133,3 +133,107 @@ test('worker refuses ambiguous identical granted ports without scheduling retrie
     delete globalThis.navigator;
   }
 });
+
+test('failed test transition requires closing the paused reader before reconnect', async () => {
+  const listeners = new Map();
+  const messages = [];
+  let notify;
+  let readResolve;
+  let opens = 0;
+  let closes = 0;
+  let failCancel = true;
+  let signalReader;
+  const readerStarted = new Promise((resolve) => {
+    signalReader = resolve;
+  });
+  const waitFor = (predicate) =>
+    new Promise((resolve) => {
+      notify = (message) => {
+        if (predicate(message)) {
+          notify = null;
+          resolve(message);
+        }
+      };
+    });
+  const port = {
+    readable: {
+      getReader() {
+        return {
+          read: () =>
+            new Promise((resolve) => {
+              readResolve = resolve;
+              signalReader();
+            }),
+          cancel: async () => {
+            if (failCancel) {
+              failCancel = false;
+              throw new Error('cancel failed');
+            }
+            readResolve?.({ done: true });
+          },
+          releaseLock() {}
+        };
+      }
+    },
+    writable: null,
+    getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
+    open: async () => {
+      opens += 1;
+    },
+    setSignals: async () => {},
+    close: async () => {
+      closes += 1;
+    }
+  };
+  globalThis.self = {
+    postMessage(message) {
+      messages.push(message);
+      notify?.(message);
+    },
+    addEventListener: (type, listener) => listeners.set(type, listener)
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { serial: { getPorts: async () => [port] } }
+  });
+  try {
+    await import(
+      `../extension/scanner/scanner-daemon-worker.js?recovery=${Date.now()}`
+    );
+    const connected = waitFor(
+      (message) => message.status?.state === 'connected'
+    );
+    const connect = {
+      type: 'connectGranted',
+      profileId: 'zebra-ds8178-usb-cdc',
+      preferredPortInfo: port.getInfo()
+    };
+    listeners.get('message')({ data: connect });
+    await connected;
+    await readerStarted;
+    // The worker installs the opened connection after the provider returns.
+    await Promise.resolve();
+    const paused = waitFor((message) => message.type === 'testState');
+    listeners.get('message')({
+      data: {
+        type: 'startTest',
+        requestId: 'test',
+        sessionId: '0ca46075-06a3-4b70-9d15-81ea5e9b3cda',
+        expiresAt: Date.now() + 50000
+      }
+    });
+    assert.equal((await paused).state, 'paused');
+    const reconnected = waitFor(
+      (message) => message.status?.state === 'connected' && opens === 2
+    );
+    listeners.get('message')({ data: connect });
+    await reconnected;
+    assert.equal(closes, 1);
+    const disabled = waitFor((message) => message.status?.state === 'disabled');
+    listeners.get('message')({ data: { type: 'disconnect' } });
+    await disabled;
+  } finally {
+    delete globalThis.self;
+    delete globalThis.navigator;
+  }
+});

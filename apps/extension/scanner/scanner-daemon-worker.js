@@ -1,3 +1,4 @@
+import '../capability.js';
 import {
   SCANNER_STATUS_STATES,
   classifyScannerConnectionFailure,
@@ -15,6 +16,16 @@ import {
   getGrantedSerialScannerPorts,
   openSerialScanner
 } from './serial-provider.js';
+
+let testController = null;
+if (globalThis.VaxLinkDiagnostics?.enabled) {
+  const { createScannerTestController } =
+    await import('../diagnostics/scanner-test.js');
+  testController = createScannerTestController({
+    getConnection: () => activeConnection,
+    post: postToHost
+  });
+}
 
 let desiredProfileId = '';
 let preferredPortInfo = null;
@@ -73,6 +84,8 @@ function handleConnectionFailure(
     return;
   }
 
+  const testInterrupted = testController?.connectionLost() || false;
+  if (testInterrupted) desiredConnected = false;
   const classification = classifyScannerConnectionFailure(error, fallbackState);
   const disconnectedAt = new Date().toISOString();
   const portInfo = normalizeScannerPortInfo(
@@ -93,9 +106,10 @@ function handleConnectionFailure(
   });
 
   if (
-    classification.recoverable ||
-    classification.state === SCANNER_STATUS_STATES.WAITING_FOR_DEVICE ||
-    classification.state === SCANNER_STATUS_STATES.BUSY
+    !testInterrupted &&
+    (classification.recoverable ||
+      classification.state === SCANNER_STATUS_STATES.WAITING_FOR_DEVICE ||
+      classification.state === SCANNER_STATUS_STATES.BUSY)
   ) {
     scheduleReconnect();
   }
@@ -105,7 +119,7 @@ async function connectGrantedPort(trigger = 'manual') {
   if (!desiredConnected) {
     return;
   }
-  if (activeConnection && activePort) {
+  if (activeConnection && activePort && activeConnection.readable) {
     updateStatus({
       state: SCANNER_STATUS_STATES.CONNECTED,
       portInfo: normalizeScannerPortInfo(activePort.getInfo()),
@@ -120,6 +134,10 @@ async function connectGrantedPort(trigger = 'manual') {
 
   openingPromise = (async () => {
     clearReconnectTimer();
+    if (activeConnection && !activeConnection.readable) {
+      await closeActiveConnection();
+      if (!desiredConnected) return;
+    }
     if (!(globalThis.navigator && 'serial' in globalThis.navigator)) {
       handleConnectionFailure(
         new Error('Web Serial is not available in the scanner worker.')
@@ -181,8 +199,16 @@ async function connectGrantedPort(trigger = 'manual') {
     preferredPortInfo = normalizeScannerPortInfo(port.getInfo());
 
     try {
-      activeConnection = await openSerialScanner(port, profile, {
-        onScan: (scan) => {
+      const connection = await openSerialScanner(port, profile, {
+        onRead: (observation) => {
+          if (observation.owner !== 'clinical')
+            testController?.onRead(observation);
+        },
+        onScan: (scan, capture) => {
+          if (capture.owner !== 'clinical') {
+            testController?.onScan(scan, capture);
+            return;
+          }
           updateStatus({
             lastCaptureAt: scan.capturedAt || new Date().toISOString(),
             captureCount: currentStatus.captureCount + 1
@@ -191,6 +217,7 @@ async function connectGrantedPort(trigger = 'manual') {
         },
         onStatus: (status) => {
           if (status.state === 'open') {
+            if (!desiredConnected) return;
             recoverAttemptCount = 0;
             updateStatus({
               state: SCANNER_STATUS_STATES.CONNECTED,
@@ -215,6 +242,12 @@ async function connectGrantedPort(trigger = 'manual') {
           handleConnectionFailure(error);
         }
       });
+      if (!desiredConnected) {
+        await connection.close();
+        activePort = null;
+        return;
+      }
+      activeConnection = connection;
     } catch (error) {
       handleConnectionFailure(error);
     }
@@ -226,6 +259,7 @@ async function connectGrantedPort(trigger = 'manual') {
 }
 
 async function disconnectScanner() {
+  testController?.connectionLost();
   desiredConnected = false;
   recoverAttemptCount = 0;
   clearReconnectTimer();
@@ -241,6 +275,7 @@ async function disconnectScanner() {
 
 self.addEventListener('message', (event) => {
   const data = event.data || {};
+  if (testController?.handleMessage(data)) return;
   switch (data.type) {
     case 'connectGranted':
       desiredConnected = true;

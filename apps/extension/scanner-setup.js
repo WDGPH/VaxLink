@@ -1,3 +1,4 @@
+import './capability.js';
 import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
@@ -20,7 +21,6 @@ import {
 } from './scanner/serial-provider.js';
 
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
-let lastLeakageInputAt = 0;
 
 const els = {};
 
@@ -35,12 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
     'deviceProfile',
     'deviceVendor',
     'deviceProduct',
-    'deviceState',
-    'decodedOutput',
-    'rawBytesOutput',
-    'leakageInput',
-    'leakageStatus',
-    'routeStatus'
+    'deviceState'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -48,6 +43,12 @@ document.addEventListener('DOMContentLoaded', () => {
   renderProfiles();
   bindEvents();
   initializePage();
+  if (globalThis.VaxLinkDiagnostics?.enabled) {
+    void import('./diagnostics/scanner-test-ui.js').then(
+      ({ mountScannerTest }) =>
+        mountScannerTest(document.querySelector('.grid'))
+    );
+  }
 });
 
 function bindEvents() {
@@ -68,10 +69,6 @@ function bindEvents() {
   els.disconnectBtn?.addEventListener('click', () => {
     void disconnectActivePort();
   });
-
-  els.leakageInput?.addEventListener('input', () => {
-    lastLeakageInputAt = Date.now();
-  });
 }
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -80,13 +77,6 @@ chrome.runtime.onMessage.addListener((request) => {
     request.status
   ) {
     applyDaemonStatus(request.status);
-  }
-  if (request?.action === SCANNER_DAEMON_ACTIONS.SCAN_ECHO && request.scan) {
-    els.decodedOutput.textContent = request.scan.rawText || '';
-    els.rawBytesOutput.textContent =
-      request.scan.rawBytesHex || 'No raw bytes captured.';
-    checkKeyboardLeakage(request.scan.rawText || '');
-    renderDaemonRouteResult(request.response || {});
   }
   return false;
 });
@@ -132,43 +122,6 @@ function applyDaemonStatus(status) {
   setStatus(els.connectionStatus, message, tone);
   updateDeviceState(connected ? 'Connected in background' : state);
   setButtons({ canConnect: !connected, canDisconnect: connected });
-}
-
-function renderDaemonRouteResult(response) {
-  if (response?.duplicate_ignored) {
-    setStatus(
-      els.routeStatus,
-      'Duplicate scan ignored; no queue row was added.',
-      'warning'
-    );
-    return;
-  }
-
-  if (response?.locked) {
-    const message =
-      response.workflow === 'single'
-        ? `Scan saved while locked to the pending inbox (${response.pendingCount || 0}).`
-        : `Scan saved while locked to the Multiple Inject queue (${response.queueSizeAfter || 0}).`;
-    setStatus(els.routeStatus, message, 'success');
-    return;
-  }
-  if (response?.routed) {
-    renderChartRouteResult(response);
-    return;
-  }
-  if (response?.queuedToWorkflow) {
-    setStatus(
-      els.routeStatus,
-      `Scan saved to the ${response.workflow || 'multiple'} queue (${response.queueSizeAfter || 0}).`,
-      'success'
-    );
-    return;
-  }
-  setStatus(
-    els.routeStatus,
-    response?.error || 'Scan captured by daemon.',
-    response?.success === false ? 'error' : 'info'
-  );
 }
 
 function initializePage() {
@@ -339,82 +292,6 @@ async function disconnectActivePort(options = {}) {
       'Background scanner disconnected.',
       'warning'
     );
-}
-
-function renderChartRouteResult(response) {
-  const chartResult = response?.response || {};
-  if (chartResult.success) {
-    if (chartResult.duplicate_ignored) {
-      setStatus(
-        els.routeStatus,
-        `Duplicate scan ignored by chart tab ${response.tabId}.`,
-        'warning'
-      );
-      return;
-    }
-    setStatus(
-      els.routeStatus,
-      `Scan routed to chart tab ${response.tabId}.`,
-      'success'
-    );
-    return;
-  }
-  if (chartResult.pending) {
-    setStatus(
-      els.routeStatus,
-      `Scan reached chart tab ${response.tabId}. Chart action is required before autofill can finish.`,
-      'warning'
-    );
-    return;
-  }
-  if (chartResult.command_handled) {
-    setStatus(
-      els.routeStatus,
-      `VaxLink scanner command handled by tab ${response.tabId}.`,
-      'success'
-    );
-    return;
-  }
-  const message =
-    chartResult.error ||
-    chartResult.status ||
-    'Chart received the scan, but autofill did not complete.';
-  setStatus(
-    els.routeStatus,
-    `Scan reached chart tab ${response.tabId}, but ${message}`,
-    'error'
-  );
-}
-
-function checkKeyboardLeakage(rawText) {
-  const before = String(els.leakageInput.value || '');
-  const startedAt = Date.now();
-  setTimeout(() => {
-    const after = String(els.leakageInput.value || '');
-    const recentInput = lastLeakageInputAt >= startedAt - 250;
-    const leakedText = normalizeForLeakage(after).includes(
-      normalizeForLeakage(rawText)
-    );
-    if (recentInput || (after !== before && leakedText)) {
-      setStatus(
-        els.leakageStatus,
-        'Scanner is still emitting keyboard input. Reconfigure the scanner/cradle to USB CDC only and disable HID keyboard output.',
-        'error'
-      );
-      return;
-    }
-    setStatus(
-      els.leakageStatus,
-      'No keyboard leakage detected for the latest serial scan.',
-      'success'
-    );
-  }, 350);
-}
-
-function normalizeForLeakage(value) {
-  return String(value || '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
 }
 
 function updateDevicePanel(profile, info = {}) {

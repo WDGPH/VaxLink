@@ -1,3 +1,4 @@
+import './capability.js';
 import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_DAEMON_BACKGROUND_TARGET,
@@ -7,6 +8,24 @@ import {
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
+
+let testBridge = null;
+if (globalThis.VaxLinkDiagnostics?.enabled) {
+  const { createScannerTestHost } =
+    await import('./diagnostics/scanner-test-host.js');
+  testBridge = createScannerTestHost({
+    getWorker: () => daemonWorker,
+    isConnected: () => currentStatus.state === SCANNER_STATUS_STATES.CONNECTED,
+    stopReconnect: () => {
+      desiredConnection = null;
+      clearRestartTimer();
+    },
+    broadcast: (payload) =>
+      chrome.runtime.sendMessage(payload, () => {
+        void chrome.runtime.lastError;
+      })
+  });
+}
 
 let daemonWorker = null;
 let restartTimer = null;
@@ -46,19 +65,6 @@ function postStatusToBackground(status) {
   );
 }
 
-function broadcastScanEcho(scan, response) {
-  chrome.runtime.sendMessage(
-    {
-      action: SCANNER_DAEMON_ACTIONS.SCAN_ECHO,
-      scan,
-      response
-    },
-    () => {
-      void chrome.runtime.lastError;
-    }
-  );
-}
-
 function applyStatus(status) {
   const nextStatus = normalizeScannerStatusSnapshot(status);
   const hasChanged =
@@ -86,7 +92,9 @@ function ensureWorker() {
   );
   daemonWorker.addEventListener('message', (event) => {
     const data = event.data || {};
+    if (testBridge?.onWorkerMessage(data)) return;
     if (data.type === 'status') {
+      if (data.requestId === undefined) testBridge?.onStatus(data.status);
       const pending = pendingStatusRequests.get(data.requestId);
       if (pending) pending(normalizeScannerStatusSnapshot(data.status));
       else if (data.requestId === undefined) applyStatus(data.status);
@@ -97,6 +105,7 @@ function ensureWorker() {
     }
   });
   daemonWorker.addEventListener('error', (event) => {
+    testBridge?.onWorkerError();
     const message = String(event?.message || 'Scanner worker crashed.').trim();
     daemonWorker = null;
     applyStatus({
@@ -133,16 +142,11 @@ async function sendRuntimeMessage(message) {
 }
 
 async function routeScannerScan(scan) {
-  let response = null;
   try {
-    response = await sendRuntimeMessage({
-      action: 'scannerScanCaptured',
-      scan
-    });
-  } catch (error) {
-    response = { success: false, error: error.message || 'Scan route failed.' };
+    await sendRuntimeMessage({ action: 'scannerScanCaptured', scan });
+  } catch (_) {
+    // The scan could not be delivered to the background worker.
   }
-  broadcastScanEcho(scan, response);
 }
 
 function requestConnect(message = {}) {
@@ -172,6 +176,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.target !== SCANNER_DAEMON_TARGET) {
     return false;
   }
+
+  if (testBridge?.handleMessage(request, sender, sendResponse)) return true;
 
   if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
     requestConnect(request);

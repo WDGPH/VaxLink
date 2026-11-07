@@ -219,7 +219,8 @@
           <p class="lead">
             Pair a scanner through Web Serial once. VaxLink keeps the connection
             in a background browser process, including while Windows is locked,
-            and stores locked scans in Multiple Inject.
+            and holds locked Single scans in a pending inbox. Other locked scans
+            are saved in Multiple Inject.
           </p>
         </div>
       </header>
@@ -256,45 +257,6 @@
             <dt>State</dt>
             <dd id="deviceState">Disconnected</dd>
           </dl>
-        </div>
-
-        <div class="card">
-          <h2>Latest Scan</h2>
-          <pre id="decodedOutput">No scan received yet.</pre>
-        </div>
-
-        <div class="card">
-          <h2>Raw Bytes</h2>
-          <pre id="rawBytesOutput">No bytes received yet.</pre>
-        </div>
-
-        <div class="card wide">
-          <h2>Keyboard Leakage Test</h2>
-          <label for="leakageInput"
-            >Focus this field, then scan one barcode</label
-          >
-          <input
-            id="leakageInput"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <p class="hint">
-            A correctly configured serial scanner should produce a Web Serial
-            scan without typing into this field.
-          </p>
-          <div id="leakageStatus" class="status">
-            No leakage test has run yet.
-          </div>
-        </div>
-
-        <div class="card wide">
-          <h2>Routing</h2>
-          <div id="routeStatus" class="status">
-            While unlocked, scans route to the open chart. While Windows is
-            locked, every scan is saved to the Multiple Inject queue for review
-            after unlock.
-          </div>
         </div>
       </section>
     </main>
