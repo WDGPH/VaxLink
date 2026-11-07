@@ -1411,7 +1411,8 @@ function nvcFailure(category) {
     storage: 'Unable to save the NVC catalogue',
     initializing: 'NVC catalogue is still loading. Try the lookup again.',
     unavailable: 'NVC catalogue is unavailable. Barcode details have been kept.',
-    not_found: 'Lot not found in the NVC catalogue'
+    not_found: 'Lot not found in the NVC catalogue',
+    incomplete: 'NVC vaccine details are incomplete for this lot'
   };
   return { success: false, error: messages[category], errorCategory: category,
     usable: hasUsableNVCCatalogue() };
@@ -1434,7 +1435,9 @@ async function lookupVaccineInfo(lot, options = {}) {
     return nvcFailure(nvcRefreshPromise ? 'initializing'
       : nvcCacheInvalid || nvcHealth.lastError === 'invalid' ? 'invalid' : 'unavailable');
   }
-  return lookupVaccineLot(lot, options) || nvcFailure('not_found');
+  const info = lookupVaccineLot(lot, options);
+  if (!info) return nvcFailure('not_found');
+  return hasNVCVaccineIdentity(info) ? info : { ...info, ...nvcFailure('incomplete') };
 }
 
 function validateBundleShape(data) {
@@ -1472,12 +1475,20 @@ function validateBundleShape(data) {
         resource.expansion?.contains?.length > 0));
 }
 
+function hasNVCVaccineIdentity(info) {
+  return [info?.tradename, info?.generic_name, info?.din]
+    .some((value) => typeof value === 'string' && value.trim());
+}
+
 function prepareNVCCatalogue(data) {
   if (!validateBundleShape(data)) throw new Error('Invalid NVC catalogue');
   const indexes = buildNVCIndexes(data);
   if (!Object.keys(indexes.lotByCode).length || !Object.keys(indexes.tradenameByCode).length) {
     throw new Error('NVC catalogue has no usable lots or vaccine names');
   }
+  const canEnrichLot = Object.values(indexes.lotByCode).some((concept) =>
+    hasNVCVaccineIdentity(lookupVaccineLot(extractLotNumber(concept) || concept.code, { indexes })));
+  if (!canEnrichLot) throw new Error('NVC catalogue has no usable vaccine links');
   return indexes;
 }
 
@@ -2277,6 +2288,7 @@ function looksLikeGtinOrNumericId(key) {
 }
 
 function lookupVaccineLot(lotNumber, options = {}) {
+  const indexes = options.indexes || nvcIndexes;
   if (!lotNumber) {
     bgLog('lookupVaccineLot: no lot number provided');
     return null;
@@ -2291,12 +2303,12 @@ function lookupVaccineLot(lotNumber, options = {}) {
     }
     
     // Try to find by lot number first
-    let concept = nvcIndexes.lotByLotNumber[lotKey];
+    let concept = indexes.lotByLotNumber[lotKey];
     
     // If not found, try direct code then prefix map (O(1)).
     // Skip code/prefix for all-numeric keys (GTIN mistaken for lot -> wrong hit).
     if (!concept && !looksLikeGtinOrNumericId(lotKey)) {
-      concept = nvcIndexes.lotByCode[lotKey] || nvcIndexes.lotByCodePrefix[lotKey];
+      concept = indexes.lotByCode[lotKey] || indexes.lotByCodePrefix[lotKey];
     }
     
     if (!concept) {
@@ -2315,8 +2327,8 @@ function lookupVaccineLot(lotNumber, options = {}) {
     const lotMapKey = normalizeLotMapKey(vaccineInfo.lot_number || lotNumber);
     const lotCodeMapKey = normalizeLotMapKey(concept.code || '');
     const lotAgentMappedInfo =
-      nvcIndexes.lotAgentMappingByLot?.[lotMapKey] ||
-      nvcIndexes.lotAgentMappingByLot?.[lotCodeMapKey] ||
+      indexes.lotAgentMappingByLot?.[lotMapKey] ||
+      indexes.lotAgentMappingByLot?.[lotCodeMapKey] ||
       null;
     if (lotAgentMappedInfo) {
       bgLog('Lot-agent mapping matched:', { lotMapKey, lotCodeMapKey, lotAgentMappedInfo });
@@ -2341,7 +2353,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
     let resolvedTradename = null;
     for (const ref of tradenameRefs) {
       if (!ref.code) continue;
-      const info = lookupTradenameByCode(ref.code);
+      const info = lookupTradenameByCode(ref.code, indexes);
       if (info) {
         byCodeCandidates.push({ ref, info });
       }
@@ -2366,7 +2378,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
       for (const ref of tradenameRefs) {
         const label = ref.display || ref.raw || '';
         if (!label) continue;
-        resolvedTradename = lookupTradenameByName(label);
+        resolvedTradename = lookupTradenameByName(label, indexes);
         if (resolvedTradename) {
           bgLog('Tradename resolved from name reference:', label);
           break;
@@ -2377,7 +2389,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
     if (resolvedTradename) {
       mergeDefinedVaccineFields(vaccineInfo, resolvedTradename);
     } else if (vaccineInfo.din) {
-      const tradenameInfo = lookupTradenameByDIN(vaccineInfo.din);
+      const tradenameInfo = lookupTradenameByDIN(vaccineInfo.din, indexes);
       bgLog('Tradename info from DIN:', tradenameInfo);
       if (tradenameInfo) {
         mergeDefinedVaccineFields(vaccineInfo, tradenameInfo);
@@ -2392,9 +2404,9 @@ function lookupVaccineLot(lotNumber, options = {}) {
   }
 }
 
-function lookupTradenameByCode(code) {
+function lookupTradenameByCode(code, indexes = nvcIndexes) {
   const codeKey = normalizeCodeKey(code);
-  const concept = nvcIndexes.tradenameByCode[codeKey];
+  const concept = indexes.tradenameByCode[codeKey];
   if (!concept) return null;
   
   return {
@@ -2410,9 +2422,9 @@ function lookupTradenameByCode(code) {
   };
 }
 
-function lookupTradenameByName(name) {
+function lookupTradenameByName(name, indexes = nvcIndexes) {
   const nameKey = normalizeNameKey(name);
-  const concept = nvcIndexes.tradenameByName[nameKey];
+  const concept = indexes.tradenameByName[nameKey];
   if (!concept) return null;
   return {
     tradename: extractTrademenameDisplay(concept),
@@ -2427,9 +2439,9 @@ function lookupTradenameByName(name) {
   };
 }
 
-function lookupTradenameByDIN(din) {
+function lookupTradenameByDIN(din, indexes = nvcIndexes) {
   const dinKey = normalizeDinKey(din);
-  const concept = nvcIndexes.tradenameByDin[dinKey];
+  const concept = indexes.tradenameByDin[dinKey];
   if (!concept) return null;
   
   return {

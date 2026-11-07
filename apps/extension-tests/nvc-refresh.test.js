@@ -47,14 +47,19 @@ test('invalid data and failed writes preserve accepted catalogue, indexes, and h
   malformed.entry[1].resource.concept[0].extension = [null];
   const noUsableNames = bundle('LOT2');
   noUsableNames.entry[0].resource.compose.include[0].concept[0].code = ' ';
-  for (const scenario of ['empty', 'malformed', 'unusable', 'write']) {
+  const unlinked = bundle('LOT2');
+  delete unlinked.entry[1].resource.concept[0].extension;
+  const unnamed = bundle('LOT2');
+  delete unnamed.entry[0].resource.compose.include[0].concept[0].display;
+  for (const scenario of ['empty', 'malformed', 'unusable', 'unlinked', 'unnamed', 'write']) {
     const previous = bundle('LOT1');
     let lookupDuringWrite;
     let harness;
     harness = createBackgroundHarness(previous, {
       storage: { nvc_bundle_updated_at: '2026-09-22T00:00:00Z' },
       fetch: fetchCatalogue(() => response(scenario === 'empty' ? { resourceType: 'Bundle', entry: [] }
-        : scenario === 'malformed' ? malformed : scenario === 'unusable' ? noUsableNames : bundle('LOT2'))),
+        : scenario === 'malformed' ? malformed : scenario === 'unusable' ? noUsableNames
+        : scenario === 'unlinked' ? unlinked : scenario === 'unnamed' ? unnamed : bundle('LOT2'))),
       failStorageSet: (values) => {
         if (scenario !== 'write' || !Object.hasOwn(values, 'nvc_bundle_override')) return false;
         lookupDuringWrite = lookup(harness);
@@ -150,10 +155,12 @@ test('conditional refresh accepts 304 only with usable cache and keeps download 
 });
 
 test('simultaneous refreshes share results, retain ready lookups, and recover after failure', async () => {
+  const partial = bundle('LOT1');
+  partial.entry[1].resource.concept.push({ code: 'INCOMPLETE', property: [{ code: 'lotNumber', valueString: 'INCOMPLETE' }] });
   const started = deferred();
   const download = deferred();
   let requests = 0;
-  const harness = createBackgroundHarness(bundle('LOT1'), { fetch: fetchCatalogue(() => {
+  const harness = createBackgroundHarness(partial, { fetch: fetchCatalogue(() => {
     requests++;
     if (requests === 1) { started.resolve(); return download.promise; }
     if (requests === 2) return response(bundle('LOT2'));
@@ -165,6 +172,7 @@ test('simultaneous refreshes share results, retain ready lookups, and recover af
   const auto = harness.sendMessage({ action: 'checkNVCBundleUpdates' });
   assert.equal((await status(harness)).state, 'refreshing');
   assert.equal((await lookup(harness)).lot_number, 'LOT1');
+  assert.equal((await lookup(harness, 'INCOMPLETE')).errorCategory, 'incomplete');
   download.resolve(response(null, { status: 503 }));
   const results = await Promise.all([first, second, auto]);
   assert.equal(requests, 1);

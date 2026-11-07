@@ -652,6 +652,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     showVaxlinkToast(parsed);
   } else if (!pending) {
     playAudioCue('error');
+    if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
   vlog('hands-free autofill', autofillResult?.status, { source, parsed });
   return {

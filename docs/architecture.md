@@ -50,14 +50,16 @@ Keeps the exported column shape stable for downstream tools.
 
 The background worker loads a valid saved catalogue before checking the network.
 Startup, alarm, and manual refreshes share one download. A new catalogue must
-pass the checks, build usable lot and vaccine-name indexes, and save successfully
+pass the checks, build usable lot and vaccine-name indexes with at least one reachable vaccine
+identity, and save successfully
 before it replaces the working catalogue. Downloads use only the official HTTPS
 endpoint and reject redirects. SHA-256 identifies local content; it does not
 prove who published it.
 
 Without a usable catalogue, a lookup waits up to five seconds for the existing
 initialization attempt. Downloads stop after fifteen seconds. Lookup errors use
-`errorCategory`: `initializing`, `unavailable`, `invalid`, or `not_found`. Barcode
+`errorCategory`: `initializing`, `unavailable`, `invalid`, `not_found`, or `incomplete`. A matched
+lot without a vaccine name or DIN reports incomplete details. Barcode
 fields and queued scans remain available when vaccine details cannot be added.
 
 `getNVCUpdateStatus` returns `state` (`ready`, `refreshing`, `unavailable`, or

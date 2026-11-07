@@ -128,7 +128,10 @@ export function makeTestNvcBundle(code = 'TESTLOT') {
       include: [{ concept: [{ code: 'trade-1', display: 'Test vaccine' }] }]
     } } },
     { resource: { resourceType: 'CodeSystem', id: 'nvc-vaccine-lot-id', concept: [
-      { code, property: [{ code: 'lotNumber', valueString: code }] }
+      { code, property: [{ code: 'lotNumber', valueString: code }], extension: [{
+        url: 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-tradename-concept',
+        valueCodeableConcept: { coding: [{ code: 'trade-1' }] }
+      }] }
     ] } }
   ] };
 }
