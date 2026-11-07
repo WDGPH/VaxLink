@@ -15,12 +15,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
 
 const MULTIPLE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_KEY = 'inventory_scan_batch_v1';
 
-const EMPTY_BUNDLE = { resourceType: 'Bundle', entry: [] };
+const EMPTY_BUNDLE = makeTestNvcBundle();
 
 function makeRecord(overrides = {}) {
   return {

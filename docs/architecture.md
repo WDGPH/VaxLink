@@ -46,6 +46,33 @@ Keeps the exported column shape stable for downstream tools.
 | `vaxlink_workflow_mode_v1` | popup | Current workflow mode |
 | `vaxlink_analytics_v1` | background | Fill event log |
 
+## NVC catalogue readiness and refresh
+
+The background worker loads a valid saved catalogue before checking the network.
+Startup, alarm, and manual refreshes share one download. A new catalogue must
+pass the checks, build usable lot and vaccine-name indexes with at least one reachable vaccine
+identity, and save successfully
+before it replaces the working catalogue. Downloads use only the official HTTPS
+endpoint and reject redirects. SHA-256 identifies local content; it does not
+prove who published it.
+
+Without a usable catalogue, a lookup waits up to five seconds for the existing
+initialization attempt. Downloads stop after fifteen seconds. Lookup errors use
+`errorCategory`: `initializing`, `unavailable`, `invalid`, `not_found`, or `incomplete`. A matched
+lot without a vaccine name or DIN reports incomplete details. Barcode
+fields and queued scans remain available when vaccine details cannot be added.
+
+`getNVCUpdateStatus` returns `state` (`ready`, `refreshing`, `unavailable`, or
+`invalid`), `usable`, `usingCache`, and `freshnessDegraded`. `updatedAt` is the
+last accepted download date; `lastCheckAt` is the last successful remote check;
+`lastAttemptAt` includes failed attempts. These are local activity dates, not
+catalogue publication dates. `lastError` contains only a controlled category:
+`source`, `network`, `timeout`, `http`, `invalid`, or `storage`. A failed refresh
+keeps the accepted dates, fingerprint, and indexes. The small health record is
+saved alongside the existing cache so the popup can report a failed check after
+the worker restarts. If storage itself fails, the current worker still reports
+the failure, but saving that failure for the next restart may also fail.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama

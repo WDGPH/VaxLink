@@ -10,12 +10,12 @@ process.env.TZ = 'America/Toronto';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
 
 const ANALYTICS_KEY = 'vaxlink_analytics_v1';
 
 test('analytics events bucket by local calendar day, not UTC', async () => {
-  const harness = createBackgroundHarness({ resourceType: 'Bundle', entry: [] });
+  const harness = createBackgroundHarness(makeTestNvcBundle());
 
   // 2026-06-12T01:30Z is 21:30 EDT on 2026-06-11 — an evening-clinic event.
   const response = await harness.sendMessage({
@@ -34,7 +34,7 @@ test('analytics events bucket by local calendar day, not UTC', async () => {
 });
 
 test('a malformed ts falls back to today instead of throwing', async () => {
-  const harness = createBackgroundHarness({ resourceType: 'Bundle', entry: [] });
+  const harness = createBackgroundHarness(makeTestNvcBundle());
   const response = await harness.sendMessage({
     action: 'logAnalyticsEvent',
     eventType: 'scan_captured',
