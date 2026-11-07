@@ -36,9 +36,10 @@ jobs:
 
       - name: Syntax-check extension sources
         run: |
-          for f in apps/extension/*.js; do
-            node --check "$f"
-          done
+          find apps/extension -type f -name '*.js' -print0 |
+            while IFS= read -r -d '' source_file; do
+              node --check "$source_file"
+            done
 
       # Best-effort: the NVC-dependent suites (clinic catalogue/workflow, HB
       # lots) skip gracefully when the bundle is absent, but run with full

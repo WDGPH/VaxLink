@@ -48,6 +48,10 @@ try:
     manifest_path = os.path.join(ext, "manifest.json")
     with open(manifest_path) as f:
         manifest = json.load(f)
+    if channel == "prod":
+        for content_script in manifest.get("content_scripts", []):
+            content_script["js"] = [name for name in content_script.get("js", [])
+                                    if not name.startswith("diagnostics/")]
     with open(os.path.join(root, "package.json")) as f:
         package_version = str(json.load(f).get("version") or manifest["version"])
 

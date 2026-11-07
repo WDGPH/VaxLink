@@ -42,6 +42,10 @@
         "build-identity.js",
         "panorama-agent-rules.js",
         "shared/gs1-parser.js",
+        "diagnostics/collector.js",
+        "diagnostics/producer.js",
+        "diagnostics/content.js",
+        "diagnostics/panorama.js",
         "content.js"
       ],
       "run_at": "document_start"

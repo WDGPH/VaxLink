@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VaxLink Diagnostics</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: 'Segoe UI', sans-serif;
+        color: #102135;
+        background: #eef5f8;
+      }
+      body {
+        margin: 0;
+      }
+      main {
+        max-width: 1050px;
+        margin: auto;
+        padding: 24px 18px 48px;
+      }
+      h1 {
+        color: #0b3d4f;
+        margin: 0;
+        font-size: 26px;
+      }
+      h2 {
+        font-size: 18px;
+        margin-top: 0;
+      }
+      h3 {
+        font-size: 15px;
+      }
+      p,
+      li,
+      dd {
+        line-height: 1.5;
+      }
+      .lead,
+      .muted {
+        color: #4c6172;
+      }
+      .card {
+        background: white;
+        border: 1px solid #d4dce6;
+        border-radius: 8px;
+        padding: 18px;
+        margin-top: 16px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+      }
+      button,
+      a.button {
+        background: #0e7490;
+        color: white;
+        border: 0;
+        border-radius: 6px;
+        padding: 9px 12px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      button.secondary,
+      a.secondary {
+        background: #e7f3f4;
+        color: #14505f;
+        border: 1px solid #bddadd;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      :focus-visible {
+        outline: 3px solid #d67d00;
+        outline-offset: 3px;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: minmax(130px, 220px) 1fr;
+        gap: 6px 14px;
+      }
+      dt {
+        font-weight: 600;
+      }
+      dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .status {
+        padding: 10px;
+        background: #f2f7fb;
+        border-left: 4px solid #5485a3;
+      }
+      .attempt {
+        border-top: 1px solid #d4dce6;
+        padding: 10px 0;
+      }
+      details {
+        margin: 8px 0;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .failure {
+        color: #a12622;
+      }
+      .waiting {
+        color: #805000;
+      }
+      .success {
+        color: #10683e;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 600px) {
+        dl {
+          display: block;
+        }
+        dd {
+          margin-bottom: 10px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>VaxLink Diagnostics</h1>
+      <p class="lead">
+        See what VaxLink observed during a workflow and where evidence is
+        missing.
+      </p>
+      <section class="card" aria-labelledby="health-title">
+        <h2 id="health-title">Current health</h2>
+        <p>
+          These observations are read only and may be cached. Refresh when you
+          need another observation.
+        </p>
+        <button id="refresh" type="button" class="secondary">
+          Refresh health and recording
+        </button>
+        <p id="health-message" class="status" role="status">Checking health…</p>
+        <dl id="health"></dl>
+      </section>
+      <section class="card" aria-labelledby="test-title">
+        <h2 id="test-title">Device-only scanner test</h2>
+        <p>
+          To check serial capture without sending a test scan to a chart or
+          queue, open Scanner Setup and start its scanner-only test. Use a
+          synthetic barcode.
+        </p>
+        <a
+          class="button secondary"
+          href="scanner-setup.html"
+          target="_blank"
+          rel="noopener"
+          >Open Scanner Setup</a
+        >
+      </section>
+      <section class="card" aria-labelledby="record-title">
+        <h2 id="record-title">Real workflow recording</h2>
+        <p>
+          Recording is opt in and follows real workflow activity. It runs for up
+          to 15 minutes, with at most 1,000 events or 1 MiB. Data is retained
+          for up to 30 minutes after recording ends and is lost when the browser
+          restarts, the extension updates, or it reloads. Timing and context may
+          be linkable to other information.
+        </p>
+        <p id="record-status" class="status" role="status">
+          Loading recording…
+        </p>
+        <div class="actions">
+          <button id="start" type="button">Start recording</button
+          ><button id="stop" type="button" class="secondary">Stop</button
+          ><button id="clear" type="button" class="secondary">Clear</button
+          ><button id="preview" type="button" class="secondary">
+            Preview export
+          </button>
+        </div>
+        <p id="coverage" class="muted"></p>
+        <div id="export-preview" hidden>
+          <h3>Export preview</h3>
+          <p id="export-summary"></p>
+          <p>
+            Review the file before sharing. It contains event timing, context,
+            operation links, outcomes, and permitted observations. No upload is
+            performed.
+          </p>
+          <div class="actions">
+            <button id="download" type="button">Download this snapshot</button
+            ><button id="cancel-export" type="button" class="secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </section>
+      <section class="card" aria-labelledby="attempts-title">
+        <h2 id="attempts-title">Recent attempts</h2>
+        <p>
+          Open an attempt, then an event, to inspect its recorded decision and
+          safe details. Related queue uses are linked when the recording
+          contains their parent.
+        </p>
+        <div id="attempts"></div>
+        <h3>Session and page coverage</h3>
+        <div id="coverage-events"></div>
+        <h3>Nearby page observations</h3>
+        <p class="muted">
+          Select an attempt to see observations from the same content context
+          within two seconds of its recorded interval. These observations do not
+          establish cause or server delay; some timing fields may be
+          unavailable.
+        </p>
+        <div id="page-events"></div>
+      </section>
+      <section class="card">
+        <h2>Reading the evidence</h2>
+        <p>
+          <strong>Facts:</strong> the timeline shows only events the recorder
+          received. A delivered scan is not a verified fill, and a verified fill
+          does not prove a saved clinical record.
+        </p>
+        <p>
+          <strong>Hypotheses:</strong> an observed delay or missing stage can
+          guide investigation; it does not identify a slow server or workstation
+          by itself.
+        </p>
+        <p>
+          <strong>Missing evidence:</strong> recording may start late, events
+          can be dropped, contexts can restart, and final events may be absent.
+          Page timing is incomplete and excludes other contexts.
+        </p>
+      </section>
+    </main>
+    <script type="module" src="diagnostics.js"></script>
+  </body>
+</html>

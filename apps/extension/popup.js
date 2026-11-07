@@ -23,6 +23,7 @@ import {
   buildScannerStatusDescriptor,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
+import './capability.js';
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -114,6 +115,36 @@ const MODE_CONFIG = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  if (globalThis.VaxLinkDiagnostics?.enabled) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Open workflow recorder';
+    button.addEventListener('click', () => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (chrome.runtime.lastError) {
+          writeOutput('Could not open the workflow recorder.', 'error');
+          return;
+        }
+        const tabId = tabs?.[0]?.id;
+        const origin = Number.isInteger(tabId) ? `?origin=${tabId}` : '';
+        chrome.tabs.create(
+          {
+            url: chrome.runtime.getURL('diagnostics.html') + origin,
+            active: false
+          },
+          () => {
+            writeOutput(
+              chrome.runtime.lastError
+                ? 'Could not open the workflow recorder.'
+                : 'Workflow recorder opened in a background tab. Recording stays off until you start it.',
+              chrome.runtime.lastError ? 'error' : 'info'
+            );
+          }
+        );
+      });
+    });
+    document.getElementById('scannerSetupBtn')?.parentElement?.append(button);
+  }
   // Channel badge: only the alpha channel shows it. The manifest name is the
   // channel discriminator — "VaxLink Alpha" in git/unpacked and in alpha zips,
   // "VaxLink" stamped by scripts/package-extension.sh for prod uploads.

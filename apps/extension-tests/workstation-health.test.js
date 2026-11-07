@@ -74,3 +74,13 @@ test('same extension ID cannot authorize health controls from a chart or another
     assert.equal((await health(harness, sender)).success, false);
   assert.equal(harness.tabMessages.length, 0);
 });
+
+test('health probes an existing content script when Chrome omits the tab URL', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [{ id: 42, active: true, currentWindow: true }],
+    tabResponse: integration()
+  });
+  const reply = await health(harness);
+  assert.equal(reply.health.integration.state, 'development');
+  assert.equal(harness.tabMessages[0].message.action, 'getIntegrationHealth');
+});

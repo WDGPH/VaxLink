@@ -185,6 +185,8 @@ export function createBackgroundHarness(bundle, options = {}) {
   }
 
   const changedListeners = [];
+  const sessionData = new Map(Object.entries(options.session || {}));
+  const diagnosticWaiters = new Set();
   const messageListeners = [];
   const alarms = [];
   const consoleLines = [];
@@ -213,7 +215,9 @@ export function createBackgroundHarness(bundle, options = {}) {
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
       sendMessage(message, callback) {
-        queueMicrotask(() => callback?.(options.runtimeResponse?.(message)));
+        const reply = Promise.resolve(options.runtimeResponse?.(message));
+        if (callback) void reply.then(callback);
+        else return reply;
       },
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
@@ -240,7 +244,8 @@ export function createBackgroundHarness(bundle, options = {}) {
         if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);
         if (queryInfo?.currentWindow)
           tabs = tabs.filter((tab) => tab.currentWindow !== false);
-        queueMicrotask(() => callback(tabs));
+        if (callback) queueMicrotask(() => callback(tabs));
+        else return Promise.resolve(tabs);
       },
       sendMessage(tabId, message, sendOptions, callback) {
         tabMessages.push({ tabId, message, options: sendOptions });
@@ -250,7 +255,8 @@ export function createBackgroundHarness(bundle, options = {}) {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };
-        Promise.resolve(response).then(callback);
+        if (callback) void Promise.resolve(response).then(callback);
+        else return Promise.resolve(response);
       }
     },
     alarms: {
@@ -266,11 +272,52 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     storage: {
       onChanged: { addListener: (fn) => changedListeners.push(fn) },
+      session: {
+        async get(keys) {
+          const selected =
+            keys == null
+              ? [...sessionData.keys()]
+              : Array.isArray(keys)
+                ? keys
+                : [keys];
+          return Object.fromEntries(
+            selected
+              .filter((key) => sessionData.has(key))
+              .map((key) => [key, structuredClone(sessionData.get(key))])
+          );
+        },
+        async set(values) {
+          if (options.failSessionSet?.(values))
+            throw new Error('session storage write failed');
+          const changes = {};
+          for (const [key, value] of Object.entries(values)) {
+            changes[key] = {
+              oldValue: sessionData.get(key),
+              newValue: structuredClone(value)
+            };
+            sessionData.set(key, changes[key].newValue);
+          }
+          queueMicrotask(() => {
+            for (const fn of changedListeners) fn(changes, 'session');
+            const session = sessionData.get('vaxlink_diagnostic_session_v1');
+            for (const waiter of diagnosticWaiters)
+              if (waiter.predicate(session)) {
+                diagnosticWaiters.delete(waiter);
+                waiter.resolve(session);
+              }
+          });
+        },
+        async remove(keys) {
+          for (const key of Array.isArray(keys) ? keys : [keys])
+            sessionData.delete(key);
+        }
+      },
       local: {
         get(keys, callback) {
           const result = {};
           for (const key of resolveKeys(keys)) {
-            if (storageData.has(key)) result[key] = storageData.get(key);
+            if (storageData.has(key))
+              result[key] = structuredClone(storageData.get(key));
           }
           if (keys && typeof keys === 'object' && !Array.isArray(keys)) {
             for (const [key, fallback] of Object.entries(keys)) {
@@ -294,7 +341,7 @@ export function createBackgroundHarness(bundle, options = {}) {
           const changes = {};
           for (const [key, value] of Object.entries(values)) {
             changes[key] = { oldValue: storageData.get(key), newValue: value };
-            storageData.set(key, value);
+            storageData.set(key, structuredClone(value));
           }
           queueMicrotask(() => {
             for (const fn of changedListeners) fn(changes, 'local');
@@ -329,10 +376,11 @@ export function createBackgroundHarness(bundle, options = {}) {
   };
 
   vm.createContext(sandbox);
+  const backgroundDirectory = options.extensionDirectory || BACKGROUND_DIR;
   sandbox.importScripts = (...scriptPaths) => {
     for (const scriptPath of scriptPaths) {
       const resolvedPath = path.resolve(
-        BACKGROUND_DIR,
+        backgroundDirectory,
         String(scriptPath || '')
       );
       vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, {
@@ -340,9 +388,13 @@ export function createBackgroundHarness(bundle, options = {}) {
       });
     }
   };
-  vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, {
-    filename: 'background.js'
-  });
+  vm.runInContext(
+    readFileSync(path.join(backgroundDirectory, 'background.js'), 'utf8'),
+    sandbox,
+    {
+      filename: 'background.js'
+    }
+  );
 
   function sendMessage(request, sender = { id: 'clinic-sim' }) {
     return new Promise((resolve, reject) => {
@@ -374,6 +426,14 @@ export function createBackgroundHarness(bundle, options = {}) {
   return {
     sendMessage,
     storageData,
+    sessionData,
+    waitForDiagnostic(predicate) {
+      const current = sessionData.get('vaxlink_diagnostic_session_v1');
+      if (predicate(current)) return Promise.resolve(current);
+      return new Promise((resolve) =>
+        diagnosticWaiters.add({ predicate, resolve })
+      );
+    },
     alarms,
     consoleLines,
     offscreenCreations,

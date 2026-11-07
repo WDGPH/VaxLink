@@ -10,6 +10,19 @@ const CONTENT_BUILD_AT_LOAD = Object.freeze({
   version: manifestAtLoad.version_name || manifestAtLoad.version || 'unknown'
 });
 let contentSettingsReady = false;
+let contentDiagnostics = null;
+try {
+  contentDiagnostics = globalThis.VaxLinkContentDiagnostics?.create() || null;
+} catch (_) {
+  /* Optional diagnostics. */
+}
+function diagnosticEvent(data, code, outcome, details) {
+  try {
+    contentDiagnostics?.record(data?._diagnostic, code, outcome, details);
+  } catch (_) {
+    /* Clinical work is independent. */
+  }
+}
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -184,6 +197,11 @@ function setupMessageListener() {
   window.__vaxlinkMessageListenerInitialized = true;
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request?.action === 'diagnostics.session') {
+      if (sender?.id === chrome.runtime.id && !sender.tab)
+        contentDiagnostics?.onSession(request.session);
+      return false;
+    }
     if (request?.action === 'getIntegrationHealth') {
       if (sender?.id !== chrome.runtime.id || window.top !== window.self)
         return false;
@@ -211,7 +229,8 @@ function setupMessageListener() {
       Promise.resolve(
         handleHandsFreeScan(
           request.scan?.rawText || '',
-          request.scan?.source || 'scanner-channel'
+          request.scan?.source || 'scanner-channel',
+          request.scan?.diagnosticLink
         )
       )
         .then((result) => {
@@ -527,7 +546,11 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   }
 }
 
-async function handleHandsFreeScan(scanValue, source = 'unknown') {
+async function handleHandsFreeScan(
+  scanValue,
+  source = 'unknown',
+  captureLink = null
+) {
   if (!isHandsFreeSupportedPage()) {
     return {
       accepted: false,
@@ -538,6 +561,12 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
 
   const trimmed = String(scanValue || '').trim();
+  const diagnostic = { _diagnostic: null };
+  try {
+    diagnostic._diagnostic = contentDiagnostics?.begin(captureLink);
+  } catch (_) {
+    /* Optional diagnostics. */
+  }
   if (!trimmed) {
     return {
       accepted: true,
@@ -548,6 +577,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
 
   if (handleVaxlinkCommand(trimmed)) {
+    diagnosticEvent(diagnostic, 'parse', 'skipped', { reason: 'user' });
     return {
       accepted: true,
       success: true,
@@ -557,14 +587,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
 
   const scanCapturedAt = new Date().toISOString();
-  vlog('hands-free candidate', {
-    source,
-    length: trimmed.length,
-    preview: trimmed.slice(0, 80)
-  });
 
   const now = Date.now();
   if (trimmed === lastHandledScanValue && now - lastHandledScanAt < 1500) {
+    diagnosticEvent(diagnostic, 'parse', 'skipped', { reason: 'duplicate' });
     return {
       accepted: true,
       success: true,
@@ -578,6 +604,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   let parsed;
   try {
     parsed = parseGS1BarcodeFromScanner(trimmed);
+    if (diagnostic._diagnostic) parsed._diagnostic = diagnostic._diagnostic;
+    diagnosticEvent(parsed, 'parse', 'parsed', {
+      metadata: { matches: !!parsed.lot, workflow: activeWorkflowMode }
+    });
     logAnalyticsEvent('parse_success', {
       workflow: activeWorkflowMode,
       source,
@@ -585,6 +615,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       expiryFlag: getExpiryStatus(parsed.expiry).flag
     });
   } catch (error) {
+    diagnosticEvent(diagnostic, 'parse', 'failed', { reason: 'invalid' });
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
     playAudioCue('error');
     logAnalyticsEvent('parse_error', {
@@ -606,7 +637,21 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     let lookupAttempted = false;
     if (parsed.lot) {
       lookupAttempted = true;
+      const lookupStarted = parsed._diagnostic ? performance.now() : 0;
       const lookup = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
+      diagnosticEvent(parsed, 'nvc', lookup?.error ? 'failed' : 'enriched', {
+        reason:
+          lookup?.errorCategory === 'not_found'
+            ? 'not_found'
+            : lookup?.error
+              ? 'unavailable'
+              : 'complete',
+        metadata: {
+          durationMs: parsed._diagnostic
+            ? Math.max(0, performance.now() - lookupStarted)
+            : 0
+        }
+      });
       if (lookup?.error) parsed.lookup_error = lookup.error;
       else vaccineInfo = lookup;
     }
@@ -641,7 +686,8 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       });
     }
   } catch (error) {
-    console.warn('Hands-free lookup error:', error);
+    diagnosticEvent(parsed, 'nvc', 'failed', { reason: 'unavailable' });
+    console.warn('Hands-free lookup failed.');
     logAnalyticsEvent('lookup_error', {
       workflow: activeWorkflowMode,
       source,
@@ -652,7 +698,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (!parsed.lot && !parsed.expiry && !parsed.serial) {
     console.warn(
       'Hands-free scan parsed GTIN only (no AI10 lot / AI17 expiry / AI21 serial). Configure scanner for full GS1 payload.',
-      parsed
+      'Only GTIN was available.'
     );
   }
 
@@ -676,16 +722,23 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   if (queueStorageKey) {
     try {
       const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
+      diagnosticEvent(
+        parsed,
+        'queue',
+        record.duplicate_ignored ? 'skipped' : 'queued',
+        {
+          reason: record.duplicate_ignored ? 'duplicate' : 'complete',
+          metadata: {
+            workflow: activeWorkflowMode,
+            count: record.queueSizeAfter || 0
+          }
+        }
+      );
       const queueKey =
         activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
       if (record.duplicate_ignored) {
         playAudioCue('duplicate');
         showVaxlinkToast({ ...parsed, _duplicateIgnored: true });
-        vlog('duplicate scan ignored', {
-          mode: activeWorkflowMode,
-          source,
-          lot: record.lot
-        });
         logAnalyticsEvent('queue_duplicate_ignored', {
           workflow: activeWorkflowMode,
           queue: queueKey,
@@ -713,13 +766,6 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         playAudioCue('success');
       }
       showVaxlinkToast({ ...parsed, _queuedCount: record.queueSizeAfter || 0 });
-      vlog('workflow scan saved to queue', {
-        mode: activeWorkflowMode,
-        source,
-        id: record.id,
-        lot: record.lot,
-        tradename: record.tradename
-      });
       logAnalyticsEvent('queue_saved', {
         workflow: activeWorkflowMode,
         queue: queueKey,
@@ -795,7 +841,6 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     playAudioCue('error');
     if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
-  vlog('hands-free autofill', autofillResult?.status, { source, parsed });
   return {
     accepted: true,
     success,
@@ -960,11 +1005,7 @@ function initHandsFreeScanner() {
 // Register listener immediately
 setupMessageListener();
 initHandsFreeScanner();
-
-// Also re-register when DOM is ready in case of timing issues
-document.addEventListener('DOMContentLoaded', () => {
-  vlog('DOMContentLoaded');
-});
+contentDiagnostics?.boot();
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -2239,12 +2280,16 @@ function fillPanoramaLotFromPanelItems(lotValue) {
   return false;
 }
 
-function hasFillablePanoramaLotSelect() {
-  return getFields([
+function getPanoramaLotSelectors() {
+  return [
     'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
     'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
     'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).some(canFillPanoramaControl);
+  ];
+}
+
+function hasFillablePanoramaLotSelect() {
+  return getFields(getPanoramaLotSelectors()).some(canFillPanoramaControl);
 }
 
 function tryFillPanoramaLot(lotValue, { panelRescue = false } = {}) {
@@ -2271,11 +2316,9 @@ function tryFillPanoramaLotOrTrade(data, options) {
 function hasPanoramaLotSelection(lotValue) {
   if (!lotValue) return false;
 
-  const selectFields = getFields([
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).filter(canFillPanoramaControl);
+  const selectFields = getFields(getPanoramaLotSelectors()).filter(
+    canFillPanoramaControl
+  );
   if (
     selectFields.some((field) =>
       optionTextContainsLot(getFieldFilledText(field), lotValue)
@@ -2338,7 +2381,7 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
     )
   )
     return;
-  stopPanoramaLotTradeWatcher();
+  stopPanoramaLotTradeWatcher('user');
   stopPanoramaLotTradeWatcher = null;
   vlog('manual field interaction — cancelled pending VaxLink fill retries');
 }
@@ -2359,6 +2402,17 @@ function getPanoramaAutofillForms() {
   ];
 }
 
+function diagnosticPrimeFacesState() {
+  return globalThis.VaxLinkPanoramaDiagnostics?.queueState() || 'unknown';
+}
+function diagnosticPanoramaSnapshot(data, phase) {
+  try {
+    globalThis.VaxLinkPanoramaDiagnostics?.snapshot(data, phase);
+  } catch (_) {
+    /* Optional diagnostics. */
+  }
+}
+
 function schedulePanoramaLotOrTradeSelection(
   data,
   initialDelayMs = 0,
@@ -2366,7 +2420,7 @@ function schedulePanoramaLotOrTradeSelection(
 ) {
   if (!data) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
-    stopPanoramaLotTradeWatcher();
+    stopPanoramaLotTradeWatcher('superseded');
     stopPanoramaLotTradeWatcher = null;
   }
 
@@ -2401,13 +2455,14 @@ function schedulePanoramaLotOrTradeSelection(
     );
   };
   let lastAttemptAt = 0;
+  let skippedGapAttempts = 0;
   let stablePasses = 0;
   let fundedRadioEnsured = !!options.fundedRadioEnsured;
   const preserveFundingFilter = options.preserveFundingFilter === true;
   let sharedFundingMisses = 0;
-  // isPrimeFacesAjaxBusy() cannot see the page's PrimeFaces queue from the
-  // isolated content-script world, so attempts are NOT actually gated while a
-  // radio/checkbox AJAX is refreshing the lot options. Attempts fire in a
+  // The isolated world usually cannot observe the page's PrimeFaces queue.
+  // Missing queue state is unknown; the existing retry policy continues while
+  // field readiness checks handle refreshes. Attempts fire in a
   // sub-second burst (0/120/260/450ms + mutation observer), so counting every
   // failed lookup would hit the 3-miss limit and re-summon the PF/NPF chooser
   // before the refresh lands. Space counted misses out so 3 misses represent
@@ -2454,25 +2509,76 @@ function schedulePanoramaLotOrTradeSelection(
       clearTimeout(timers.pop());
     }
   };
-  const stop = () => {
+  const stop = (reason = 'unknown') => {
     if (stopped) return;
     stopped = true;
     clearScheduledWork();
+    if (data._diagnostic && contentDiagnostics?.active()) {
+      const outcomes = {
+        complete: 'partial',
+        user: 'cancelled',
+        superseded: 'superseded',
+        timeout: 'timed_out',
+        navigation: 'interrupted',
+        replaced: 'interrupted',
+        waiting_user: 'pending'
+      };
+      const reasons = {
+        complete: 'complete',
+        user: 'user',
+        superseded: 'unknown',
+        timeout: 'timeout',
+        navigation: 'navigation',
+        replaced: 'replaced',
+        waiting_user: 'user'
+      };
+      let outcome = outcomes[reason] || 'unknown';
+      if (ownsCurrentForm()) {
+        diagnosticPanoramaSnapshot(data, 'final');
+        try {
+          if (
+            reason === 'complete' &&
+            globalThis.VaxLinkPanoramaDiagnostics?.verified(data)
+          )
+            outcome = 'verified';
+        } catch (_) {
+          /* Unobserved fields remain partial. */
+        }
+      }
+      diagnosticEvent(data, 'fill', outcome, {
+        reason: reasons[reason] || 'unknown'
+      });
+    }
     if (stopPanoramaLotTradeWatcher === stop)
       stopPanoramaLotTradeWatcher = null;
   };
   stopPanoramaLotTradeWatcher = stop;
 
-  const runAttempt = () => {
+  const runAttempt = (cause = 'timer', timing = null) => {
     if (stopped || followingUp) return;
     if (!ownsCurrentForm()) {
-      stop();
+      stop(window.location.href !== initialUrl ? 'navigation' : 'replaced');
       return;
     }
     const now = Date.now();
-    if (now - lastAttemptAt < minAttemptGapMs) return;
+    if (now - lastAttemptAt < minAttemptGapMs) {
+      if (data._diagnostic) skippedGapAttempts += 1;
+      return;
+    }
     lastAttemptAt = now;
     const busy = isPrimeFacesAjaxBusy();
+    if (data._diagnostic && contentDiagnostics?.active()) {
+      if (skippedGapAttempts)
+        diagnosticEvent(data, 'retry', 'skipped', {
+          reason: 'min_gap',
+          metadata: { count: skippedGapAttempts }
+        });
+      skippedGapAttempts = 0;
+      diagnosticEvent(data, 'retry', busy ? 'skipped' : 'observed', {
+        reason: busy ? 'busy' : cause,
+        metadata: { queueState: diagnosticPrimeFacesState(), ...timing }
+      });
+    }
 
     let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
     if (!hasResolvedAgent && !busy) {
@@ -2510,7 +2616,7 @@ function schedulePanoramaLotOrTradeSelection(
               },
               12000
             );
-            stop();
+            stop('waiting_user');
             return;
           }
           if (reapplied === 'clicked') {
@@ -2565,7 +2671,7 @@ function schedulePanoramaLotOrTradeSelection(
               },
               12000
             );
-            stop();
+            stop('waiting_user');
             return;
           }
         }
@@ -2620,6 +2726,8 @@ function schedulePanoramaLotOrTradeSelection(
       stablePasses = 0;
     }
 
+    diagnosticPanoramaSnapshot(data, 'change');
+
     if (stablePasses >= 2) {
       if (finalizeOnResolved) {
         finalizeOnResolved = false;
@@ -2629,16 +2737,41 @@ function schedulePanoramaLotOrTradeSelection(
       // in the same form may be filled; a new form or user edit ends this operation.
       followingUp = true;
       clearScheduledWork();
+      const followupAt = data._diagnostic
+        ? (globalThis.performance?.now?.() ?? Date.now())
+        : 0;
       for (const delay of [1500, 3500]) {
         timers.push(
           setTimeout(() => {
             if (stopped) return;
             if (!ownsCurrentForm()) {
-              stop();
+              stop(
+                window.location.href !== initialUrl ? 'navigation' : 'replaced'
+              );
               return;
             }
-            if (!isPrimeFacesAjaxBusy()) fillPanoramaDeferredDetailFields(data);
-            if (delay === 3500) stop();
+            const lateBusy = isPrimeFacesAjaxBusy();
+            if (data._diagnostic && contentDiagnostics?.active())
+              diagnosticEvent(
+                data,
+                'retry',
+                lateBusy ? 'skipped' : 'observed',
+                {
+                  reason: lateBusy ? 'busy' : 'complete',
+                  metadata: {
+                    scheduledMs: delay,
+                    actualMs: Math.max(
+                      0,
+                      (globalThis.performance?.now?.() ?? Date.now()) -
+                        followupAt
+                    ),
+                    queueState: diagnosticPrimeFacesState()
+                  }
+                }
+              );
+            if (!lateBusy) fillPanoramaDeferredDetailFields(data);
+            diagnosticPanoramaSnapshot(data, 'change');
+            if (delay === 3500) stop('complete');
           }, delay)
         );
       }
@@ -2647,15 +2780,54 @@ function schedulePanoramaLotOrTradeSelection(
 
   const start = () => {
     if (stopped) return;
+    const observeTiming = !!data._diagnostic && contentDiagnostics?.active();
+    const scheduledAt = observeTiming
+      ? (globalThis.performance?.now?.() ?? Date.now())
+      : 0;
     for (const delayMs of attemptDelaysMs) {
-      timers.push(setTimeout(runAttempt, delayMs));
+      diagnosticEvent(data, 'retry', 'pending', {
+        reason: 'timer',
+        metadata: { delayMs }
+      });
+      timers.push(
+        setTimeout(
+          observeTiming
+            ? () => {
+                runAttempt('timer', {
+                  scheduledMs: delayMs,
+                  actualMs: Math.max(
+                    0,
+                    (globalThis.performance?.now?.() ?? Date.now()) -
+                      scheduledAt
+                  )
+                });
+              }
+            : runAttempt,
+          delayMs
+        )
+      );
     }
-    timers.push(setTimeout(stop, maxDurationMs));
-    timers.push(setInterval(runAttempt, 500));
+    timers.push(setTimeout(() => stop('timeout'), maxDurationMs));
+    let previousIntervalAt = scheduledAt;
+    timers.push(
+      setInterval(
+        observeTiming
+          ? () => {
+              const actualAt = globalThis.performance?.now?.() ?? Date.now();
+              runAttempt('timer', {
+                scheduledMs: 500,
+                actualMs: Math.max(0, actualAt - previousIntervalAt)
+              });
+              previousIntervalAt = actualAt;
+            }
+          : runAttempt,
+        500
+      )
+    );
 
     if (typeof MutationObserver === 'function' && document.body) {
       observer = new MutationObserver(() => {
-        runAttempt();
+        runAttempt('mutation');
       });
       observer.observe(document.body, {
         subtree: true,
@@ -3159,9 +3331,39 @@ async function finalizeDeferredPanoramaAutofill(data) {
 }
 
 function autoFillTelus(data) {
+  if (data && contentDiagnostics?.active() && !data._diagnostic) {
+    try {
+      data._diagnostic = contentDiagnostics.begin(
+        null,
+        data._vaxlinkQueueContext?.recordId
+      );
+    } catch (_) {
+      /* Optional diagnostics. */
+    }
+  }
+  diagnosticEvent(data, 'fill', 'accepted', {
+    metadata: { workflow: activeWorkflowMode }
+  });
   try {
     if (isPanoramaImmunizationPage()) {
+      diagnosticPanoramaSnapshot(data, 'before');
       const panoramaResult = fillPanoramaImmunizationFields(data);
+      diagnosticPanoramaSnapshot(data, 'after');
+      diagnosticEvent(
+        data,
+        'fill',
+        isAutofillPending(panoramaResult)
+          ? 'pending'
+          : isAutofillSuccess(panoramaResult)
+            ? 'pending'
+            : 'failed',
+        {
+          reason:
+            panoramaResult?.reason === 'funding_choice_required'
+              ? 'user'
+              : 'unknown'
+        }
+      );
       vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
       lastVaxlinkFillAt = Date.now();
       return panoramaResult;
@@ -3349,6 +3551,10 @@ function autoFillTelus(data) {
     }
 
     vlog('generic auto-fill fields', fillCount);
+    diagnosticEvent(data, 'fill', fillCount > 0 ? 'partial' : 'failed', {
+      reason: fillCount > 0 ? 'unsupported' : 'no_match',
+      metadata: { count: fillCount }
+    });
     return createAutofillResult(fillCount > 0 ? 'success' : 'failed', {
       fillCount
     });
@@ -4748,11 +4954,9 @@ function getPanoramaCurrentTradeSelectionText() {
 }
 
 function getPanoramaCurrentLotSelectionText() {
-  const selectFields = getFields([
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).filter(canFillPanoramaControl);
+  const selectFields = getFields(getPanoramaLotSelectors()).filter(
+    canFillPanoramaControl
+  );
   for (const field of selectFields) {
     const text = normalizeForMatch(getFieldFilledText(field));
     if (text && text !== 'select') {

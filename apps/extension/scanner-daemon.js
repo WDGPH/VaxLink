@@ -9,8 +9,12 @@ import {
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
+let recorderRelay = null;
 let testBridge = null;
 if (globalThis.VaxLinkDiagnostics?.enabled) {
+  const { createDaemonRecorder } =
+    await import('./diagnostics/daemon-recorder.js');
+  recorderRelay = createDaemonRecorder({ getWorker: () => daemonWorker });
   const { createScannerTestHost } =
     await import('./diagnostics/scanner-test-host.js');
   testBridge = createScannerTestHost({
@@ -92,6 +96,7 @@ function ensureWorker() {
   );
   daemonWorker.addEventListener('message', (event) => {
     const data = event.data || {};
+    if (recorderRelay?.onWorkerMessage(data)) return;
     if (testBridge?.onWorkerMessage(data)) return;
     if (data.type === 'status') {
       if (data.requestId === undefined) testBridge?.onStatus(data.status);
@@ -173,6 +178,12 @@ function refreshGrantedPorts(trigger = 'device-event') {
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action === 'diagnostics.session') {
+    if (sender?.id === chrome.runtime.id && !sender.tab)
+      recorderRelay?.onSession();
+    return false;
+  }
+
   if (request?.target !== SCANNER_DAEMON_TARGET) {
     return false;
   }

@@ -13,6 +13,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 function packageProject(t) {
   const source = fileURLToPath(new URL('../..', import.meta.url));
@@ -239,4 +243,107 @@ test('package identity reflects the staged runtime files and cannot change after
   const production = load(buildPackage(root, 'prod', version).identity);
   assert.equal(production.channel, 'prod');
   assert.notEqual(production.id, first.id);
+});
+
+test('actual packaged workers exclude production recording even with forged settings and messages', async (t) => {
+  const root = packageProject(t);
+  const version = '1.1.6';
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  for (const channel of ['alpha', 'prod']) {
+    const { names, manifest } = buildPackage(root, channel, version);
+    const extracted = join(root, channel);
+    execFileSync('python3', [
+      '-c',
+      'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])',
+      join(root, `dist/vaxlink-${channel}-${version}.zip`),
+      extracted
+    ]);
+    const harness = createBackgroundHarness(makeTestNvcBundle(), {
+      extensionDirectory: extracted,
+      manifest,
+      storage: {
+        vaxlink_diagnostics_enabled: true,
+        vaxlink_workflow_mode_v1: 'multiple'
+      }
+    });
+    const start = await harness.sendMessage(
+      { action: 'diagnostics.start', enabled: true, channel: 'alpha' },
+      sender
+    );
+    if (channel === 'prod') {
+      assert.equal(start.success, false);
+      for (const action of ['read', 'export', 'clear', 'stop']) {
+        assert.equal(
+          (
+            await harness.sendMessage(
+              { action: `diagnostics.${action}`, sessionId: 'forged' },
+              sender
+            )
+          ).success,
+          false
+        );
+      }
+      assert.equal(
+        names.some((name) => name.startsWith('diagnostics/')),
+        false
+      );
+      assert.equal(names.includes('diagnostics.html'), false);
+      assert.equal(names.includes('diagnostics.js'), false);
+      assert.equal(
+        manifest.content_scripts
+          .flatMap((entry) => entry.js)
+          .some((name) => name.startsWith('diagnostics/')),
+        false
+      );
+      assert.equal(harness.sessionData.size, 0);
+    } else {
+      assert.equal(start.success, true);
+      assert.equal(names.includes('diagnostics/panorama.js'), true);
+      const recorded = harness.waitForDiagnostic((session) =>
+        session?.events?.some(
+          (event) => event.code === 'queue' && event.outcome === 'queued'
+        )
+      );
+      const capture = await harness.sendMessage({
+        action: 'scannerScanCaptured',
+        scan: { rawText: '10TESTLOT', source: 'web-serial' }
+      });
+      assert.equal(capture.queuedToWorkflow, true);
+      await recorded;
+      const exported = await harness.sendMessage(
+        { action: 'diagnostics.export', sessionId: start.session.id },
+        sender
+      );
+      assert.equal(exported.success, true);
+      const events = exported.data.session.events;
+      assert.equal(
+        new Set(Array.from(events, (event) => event.operationId)).size,
+        1
+      );
+      assert.equal(JSON.stringify(exported).includes('TESTLOT'), false);
+      assert.equal(JSON.stringify(exported).includes('rawText'), false);
+      assert.equal(
+        events.every((event) => Number.isFinite(event.receivedAt)),
+        true
+      );
+      await harness.sendMessage(
+        { action: 'diagnostics.stop', sessionId: start.session.id },
+        sender
+      );
+    }
+    // The same clinical ingress remains usable in both packages.
+    assert.equal(
+      (
+        await harness.sendMessage({
+          action: 'scannerScanCaptured',
+          scan: { rawText: '10ANOTHERLOT', source: 'web-serial' }
+        })
+      ).success,
+      true
+    );
+  }
 });

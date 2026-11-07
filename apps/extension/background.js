@@ -1,6 +1,9 @@
 const VAXLINK_BG_DEBUG = false;
 importScripts('shared/gs1-parser.js');
 importScripts('build-identity.js');
+importScripts('capability.js');
+let diagnosticRecorder = null;
+const diagnosticNow = () => globalThis.performance?.now?.() ?? Date.now();
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-status.js');
 
@@ -608,6 +611,12 @@ function tabAcceptedScannerScan(response) {
 }
 
 function sendScanToTab(tabId, scan) {
+  const metadata = scan.diagnosticLink
+    ? { tabAlias: diagnosticRecorder?.tabAlias(tabId, scan.diagnosticLink) }
+    : undefined;
+  diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'accepted', {
+    metadata
+  });
   return new Promise((resolve, reject) => {
     if (!tabId && tabId !== 0) {
       reject(new Error('Missing tab id'));
@@ -619,13 +628,24 @@ function sendScanToTab(tabId, scan) {
       { frameId: 0 },
       (response) => {
         if (chrome.runtime.lastError) {
+          diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'failed', {
+            reason: 'unavailable',
+            metadata
+          });
           reject(new Error(chrome.runtime.lastError.message));
           return;
         }
         if (!tabAcceptedScannerScan(response)) {
+          diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'failed', {
+            reason: 'unavailable',
+            metadata
+          });
           reject(new Error(response?.error || 'Tab did not accept scan'));
           return;
         }
+        diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'delivered', {
+          metadata
+        });
         resolve(response);
       }
     );
@@ -643,7 +663,10 @@ function normalizeScanEvent(scan) {
     source: scan?.source || 'unknown',
     device: scan?.device || null,
     rawBytesHex: String(scan?.rawBytesHex || ''),
-    capturedAt: scan?.capturedAt || new Date().toISOString()
+    capturedAt: scan?.capturedAt || new Date().toISOString(),
+    ...(diagnosticRecorder?.adopt(scan?.diagnosticLink)
+      ? { diagnosticLink: diagnosticRecorder.adopt(scan.diagnosticLink) }
+      : {})
   };
 }
 
@@ -793,22 +816,62 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     throw new Error('VaxLink GS1 parser is not loaded');
   }
 
-  const parsed = parser.parseGS1Barcode(scan.rawText);
+  let parsed;
+  try {
+    parsed = parser.parseGS1Barcode(scan.rawText);
+    diagnosticRecorder?.record(scan.diagnosticLink, 'parse', 'parsed', {
+      metadata: { matches: !!parsed.lot, workflow: mode }
+    });
+  } catch (error) {
+    diagnosticRecorder?.record(scan.diagnosticLink, 'parse', 'failed', {
+      reason: 'invalid'
+    });
+    throw error;
+  }
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   if (parsed.lot) {
+    const lookupStarted = scan.diagnosticLink ? diagnosticNow() : 0;
     const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
       gtin: parsed.gtin
     });
+    diagnosticRecorder?.record(
+      scan.diagnosticLink,
+      'nvc',
+      vaccineInfo.error ? 'failed' : 'enriched',
+      {
+        reason:
+          vaccineInfo.errorCategory === 'not_found'
+            ? 'not_found'
+            : vaccineInfo.error
+              ? 'unavailable'
+              : 'complete',
+        metadata: { durationMs: Math.max(0, diagnosticNow() - lookupStarted) }
+      }
+    );
     if (!vaccineInfo.error) mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
     else parsed.lookup_error = vaccineInfo.error;
   }
 
+  diagnosticRecorder?.record(scan.diagnosticLink, 'queue', 'pending', {
+    metadata: { workflow: mode }
+  });
   const record = await appendQueueRecord(
     storageKey,
     buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
     { preserveEveryScan: options.preserveEveryScan === true }
   );
+  diagnosticRecorder?.record(
+    scan.diagnosticLink,
+    'queue',
+    record.duplicate_ignored ? 'skipped' : 'queued',
+    {
+      reason: record.duplicate_ignored ? 'duplicate' : 'complete',
+      metadata: { workflow: mode, count: record.queueSizeAfter || 0 }
+    }
+  );
+  if (!record.duplicate_ignored)
+    diagnosticRecorder?.rememberQueue(record.id, scan.diagnosticLink);
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
@@ -870,8 +933,17 @@ async function enqueuePendingScanNow(scan) {
   const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
     ? stored[PENDING_SCAN_INBOX_KEY]
     : [];
-  const nextRows = [...rows, scan];
+  const { diagnosticLink, ...clinicalScan } = scan;
+  const nextRows = [...rows, clinicalScan];
   await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
+  if (diagnosticLink)
+    diagnosticRecorder?.rememberQueue(
+      diagnosticRecorder?.pendingKey(scan.capturedAt),
+      diagnosticLink
+    );
+  diagnosticRecorder?.record(diagnosticLink, 'queue', 'pending', {
+    metadata: { workflow: 'single', count: nextRows.length }
+  });
   return nextRows.length;
 }
 
@@ -892,7 +964,21 @@ async function drainPendingScansToTabNow(tabId) {
   let drained = 0;
   for (const row of rows) {
     try {
-      await sendScanToTab(tabId, normalizeScanEvent(row));
+      const parent = diagnosticRecorder?.parentForQueue(
+        diagnosticRecorder?.pendingKey(row.capturedAt)
+      );
+      const link = diagnosticRecorder?.newOperation(parent || undefined);
+      if (link && !parent)
+        diagnosticRecorder.record(link, 'lifecycle', 'partial', {
+          reason: 'unknown'
+        });
+      await sendScanToTab(
+        tabId,
+        normalizeScanEvent({
+          ...row,
+          ...(link ? { diagnosticLink: link } : {})
+        })
+      );
       drained += 1;
     } catch (_) {
       remaining.push(row);
@@ -905,6 +991,15 @@ async function drainPendingScansToTabNow(tabId) {
 
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = normalizeScanEvent(rawScan);
+  if (!scan.diagnosticLink) {
+    const link = diagnosticRecorder?.newOperation();
+    if (link) {
+      scan.diagnosticLink = link;
+      diagnosticRecorder.record(link, 'lifecycle', 'partial', {
+        reason: 'unknown'
+      });
+    }
+  }
   const idleState = await queryMachineIdleState();
   const storedWorkflow = await getStorage([
     WORKFLOW_MODE_KEY,
@@ -913,6 +1008,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
     LEGACY_HANDS_FREE_KEY
   ]);
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
+  diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'observed', {
+    metadata: { workflow: workflowMode }
+  });
 
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
@@ -977,6 +1075,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
   const activeTabs = await queryTabs({ active: true, currentWindow: true });
   const allTabs = await queryTabs({});
   const candidates = [...activeTabs, ...allTabs].filter(tabMayBeSupportedChart);
+  diagnosticRecorder?.record(scan.diagnosticLink, 'route', 'observed', {
+    metadata: { count: candidates.length }
+  });
 
   for (const tab of candidates) {
     if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
@@ -2843,7 +2944,8 @@ async function inspectPageIntegration(originTabId) {
   const tab = Number.isInteger(originTabId)
     ? tabs.find((item) => item.id === originTabId)
     : tabs[0];
-  if (!tab || !isSupportedChartUrl(tab.url)) return { state: 'unsupported' };
+  if (!tab || (tab.url && !isSupportedChartUrl(tab.url)))
+    return { state: 'unsupported' };
   const reply = await new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), 1000);
     chrome.tabs.sendMessage(
@@ -2936,6 +3038,17 @@ async function getWorkstationHealth(originTabId) {
 
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (
+    request?.action === 'diagnostics.session' ||
+    request?.action === 'diagnostics.test.observation'
+  )
+    return false;
+  const diagnosticHandled = diagnosticRecorder?.handleMessage(
+    request,
+    sender,
+    sendResponse
+  );
+  if (diagnosticHandled !== undefined) return diagnosticHandled;
   if (request?.action === 'getWorkstationHealth') {
     if (!isWorkstationHealthControl(sender)) {
       sendResponse({
@@ -3227,3 +3340,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   });
   return false;
 });
+
+if (globalThis.VaxLinkDiagnostics?.enabled && chrome.storage.session) {
+  try {
+    importScripts(
+      'diagnostics/collector.js',
+      'diagnostics/producer.js',
+      'diagnostics/background.js'
+    );
+    diagnosticRecorder = globalThis.VaxLinkDiagnosticBackground.create({
+      chrome,
+      health: getWorkstationHealth
+    });
+  } catch (_) {
+    console.warn('Local diagnostics could not load.');
+  }
+}

@@ -23,47 +23,29 @@ scanner hardware, or organization-specific access.
 
 ## Main Pieces
 
-- `popup.js` drives popup workflow state, scan parsing, queue management, and inventory page launch.
+- `popup.js` drives popup workflow state, manual scan parsing, and queue management.
 - `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
 - `content.js` handles scan routing, autofill, and workflow automation on supported chart pages.
 - `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
 - `scanner-setup.html` + `scanner/` provide the Web Serial scanner channel and diagnostics.
-- `inventory-manager.html` + `inventory-manager.js` open the full inventory operations page in its own extension tab.
-
-## Inventory Architecture
-
-The inventory page was split out of the old monolithic `inventory-manager.js` into domain modules under `apps/extension/inventory/`.
-
-- `page-controller.js` wires the page, events, exports, and status updates.
-- `repository.js` is the inventory source of truth for the page and persists operational data in IndexedDB.
-- `model.js` defines normalized inventory items, transactions, reconciliation snapshots, FEFO ordering, and legacy row conversion.
-- `receive.js` parses receive input and enriches scans through `lookupVaccineInfo`.
-- `render.js` renders the summary table, FEFO board, reconciliation grid, lot quarantine banner, and ledger.
-- `exports.js` builds CSV/JSON handoff files and preserves stable inventory export columns.
-- `audio.js`, `runtime.js`, `constants.js`, and `utils.js` hold the shared support code.
+- `diagnostics.html` and `diagnostics/` provide opted-in Alpha workflow recordings; production packaging excludes them.
 
 ## Storage Model
 
-Extension data is kept locally in two browser stores:
+Operational queues, catalogue cache, workflow settings, scanner settings/status,
+and usage counters use `chrome.storage.local`. The active Multiple Inject queue
+is `multiple_inject_queue_v1`; the inventory tray uses
+`inventory_scan_batch_v1`; pending Single scans use
+`vaxlink_pending_scan_inbox_v1`.
 
-- `chrome.storage.local`
-  Used by the popup and scanner flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
-- IndexedDB
-  Used by the inventory manager page for normalized inventory items, transactions, incidents, reconciliation sign-offs, and lot quarantine flags.
-
-The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup inventory mode and content-script inventory capture continue to work without a coordinated rewrite.
-
-## Inventory Keys
-
-- Legacy queue key: `inventory_scan_batch_v1`
-- Scanner settings: `inventory_ultrafast_scanner_v1`, `inventory_scanner_beeps_v1`
-- Serial scanner profile: `vaxlink_serial_scanner_profile_v1`
-- Pending dedicated-channel scans: `vaxlink_pending_scan_inbox_v1`
-- IndexedDB database: `vaxlink_inventory_ops_v2`
+The Alpha diagnostic collector and queue-correlation map use
+`chrome.storage.session`. They do not copy operational queue records or usage
+counter labels. Source still loads directly without transpilation; packaging
+selects channel capabilities and stamps the loaded build identity.
 
 ## Dedicated Scanner Channel
 
-Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to grant Web Serial permission once, test the raw framed scan, and confirm the scanner is not also typing into a focused input. The setup tab can then be closed.
+Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to grant Web Serial permission once. Alpha provides a separate scanner-only test that reports bytes, frames, and parsing without routing test input into clinical workflows. Its optional keyboard check is confined to an extension-owned field. The setup tab can then be closed.
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 
@@ -90,3 +72,6 @@ npm test
 ```
 
 Current automated coverage checks: GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+
+See the [diagnostics guide](../../docs/diagnostics.md) for capture levels,
+retention, filtered export, and interpretation limits.

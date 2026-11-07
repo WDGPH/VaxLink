@@ -122,6 +122,11 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
       .catch(() => undefined)
       .then(async () => {
         if (!keepReading || paused) throw new Error('Scanner is not connected');
+        try {
+          handlers.onBoundary?.({ from: captureOwner, to: owner });
+        } catch (_) {
+          /* Optional observations cannot stop capture. */
+        }
         generation += 1;
         clearIdleFlush();
         const reader = activeReader;

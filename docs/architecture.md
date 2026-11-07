@@ -98,6 +98,22 @@ replaced within the same form can still receive a deferred fill. Late writes
 also respect an observable busy PrimeFaces queue. An inaccessible page-world
 queue remains unknown; the isolated content script cannot prove that it is idle.
 
+## Diagnostic channel boundary
+
+The packager stamps a frozen capability facade and build identity. Production
+keeps the ordinary health handshake and inert recorder calls while excluding the
+Alpha recorder, viewer, snapshot, and timing implementations. Alpha producers
+validate a small event allowlist before batching; the background validates
+sender, session, context, and fields again before its serialized session-storage
+collector writes. Offscreen workers relay through runtime messages.
+
+Random attempt IDs travel through the existing scan normalizer and message
+paths. Durable clinical queues keep their existing schemas. Session-local maps
+link known queue records to later operations; ambiguous pending timestamps stay
+unlinked. Field snapshots reuse the real Panorama selectors and decisions in the
+same isolated world. Recording adds no DOM observer or clinical-page bridge.
+See [diagnostics](diagnostics.md) for retention and evidence limits.
+
 ## CI
 
 - `.github/workflows/extension-ci.yml` — checks syntax and runs tests for

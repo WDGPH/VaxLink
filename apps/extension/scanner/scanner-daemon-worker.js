@@ -17,8 +17,12 @@ import {
   openSerialScanner
 } from './serial-provider.js';
 
+let scannerRecorder = null;
 let testController = null;
 if (globalThis.VaxLinkDiagnostics?.enabled) {
+  const { createScannerRecorder } =
+    await import('../diagnostics/scanner-recorder.js');
+  scannerRecorder = createScannerRecorder({ post: postToHost });
   const { createScannerTestController } =
     await import('../diagnostics/scanner-test.js');
   testController = createScannerTestController({
@@ -203,12 +207,16 @@ async function connectGrantedPort(trigger = 'manual') {
         onRead: (observation) => {
           if (observation.owner !== 'clinical')
             testController?.onRead(observation);
+          else scannerRecorder?.onRead(observation);
         },
+        onBoundary: () => scannerRecorder?.boundary('user'),
         onScan: (scan, capture) => {
           if (capture.owner !== 'clinical') {
             testController?.onScan(scan, capture);
             return;
           }
+          const link = scannerRecorder?.onFrame(capture);
+          if (link) scan.diagnosticLink = link;
           updateStatus({
             lastCaptureAt: scan.capturedAt || new Date().toISOString(),
             captureCount: currentStatus.captureCount + 1
@@ -233,12 +241,14 @@ async function connectGrantedPort(trigger = 'manual') {
           }
 
           if (status.state === 'disconnected') {
+            scannerRecorder?.onDisconnect();
             handleConnectionFailure(
               new DOMException('Serial device disconnected.', 'NetworkError')
             );
           }
         },
         onError: (error) => {
+          scannerRecorder?.onDisconnect();
           handleConnectionFailure(error);
         }
       });
@@ -259,6 +269,7 @@ async function connectGrantedPort(trigger = 'manual') {
 }
 
 async function disconnectScanner() {
+  scannerRecorder?.onDisconnect();
   testController?.connectionLost();
   desiredConnected = false;
   recoverAttemptCount = 0;
@@ -277,6 +288,9 @@ self.addEventListener('message', (event) => {
   const data = event.data || {};
   if (testController?.handleMessage(data)) return;
   switch (data.type) {
+    case 'diagnosticSession':
+      scannerRecorder?.setSession(data.session);
+      break;
     case 'connectGranted':
       desiredConnected = true;
       desiredProfileId = String(
@@ -310,3 +324,9 @@ self.addEventListener('message', (event) => {
       break;
   }
 });
+
+if (scannerRecorder)
+  postToHost({
+    type: 'diagnosticContext',
+    contextId: scannerRecorder.contextId
+  });
