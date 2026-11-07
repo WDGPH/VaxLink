@@ -93,6 +93,10 @@ test('scans captured while Windows is locked in Single mode wait for unlock', as
 });
 
 test('pending locked Single scans are replayed to the pinned chart after unlock', async () => {
+  let completed;
+  const replayed = new Promise((resolve) => {
+    completed = resolve;
+  });
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'single' },
@@ -105,7 +109,11 @@ test('pending locked Single scans are replayed to the pinned chart after unlock'
         url: 'https://www.panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml'
       }
     ],
-    tabResponse: { accepted: true, success: true }
+    tabResponse: { accepted: true, success: true },
+    failStorageSet(values) {
+      if (values[PENDING_KEY]?.length === 0) completed();
+      return false;
+    }
   });
 
   await harness.sendMessage({
@@ -113,11 +121,57 @@ test('pending locked Single scans are replayed to the pinned chart after unlock'
     scan: makeScan('2026-07-28T12:06:00.000Z')
   });
   harness.setIdleState('active');
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await replayed;
 
   assert.equal(harness.tabMessages.length, 1);
   assert.equal(harness.tabMessages[0].tabId, 44);
   assert.equal(harness.storageData.get(PENDING_KEY).length, 0);
+});
+
+test('unlock cannot replay a pinned scan after that tab moves to InputHealth', async () => {
+  const tab = {
+    id: 44,
+    active: true,
+    url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail'
+  };
+  let watchReplay = false;
+  let completed;
+  const replayed = new Promise((resolve) => {
+    completed = resolve;
+  });
+  const harness = createBackgroundHarness(EMPTY_BUNDLE, {
+    idleState: 'locked',
+    tabs: [tab],
+    storage: { vaxlink_workflow_mode_v1: 'single' },
+    tabResponse: { accepted: true, success: true },
+    // Retrying the same unavailable target is unnecessary for this boundary check.
+    setTimeout: () => 0,
+    failStorageSet(values) {
+      if (watchReplay && values[PENDING_KEY]) completed();
+      return false;
+    }
+  });
+  await harness.sendMessage({
+    action: 'scannerScanCaptured',
+    scan: makeScan('2026-11-07T12:00:00.000Z')
+  });
+  tab.url = 'https://clinic.inputhealth.com/chart';
+  watchReplay = true;
+  harness.setIdleState('active');
+  await replayed;
+  assert.equal(harness.tabMessages.length, 0);
+  assert.equal(harness.storageData.get(PENDING_KEY).length, 1);
+  const result = await harness.sendMessage(
+    { action: 'drainPendingScannerScans' },
+    {
+      id: 'vaxlink-test',
+      frameId: 0,
+      url: tab.url,
+      tab
+    }
+  );
+  assert.equal(result.success, false);
+  assert.equal(harness.storageData.get(PENDING_KEY).length, 1);
 });
 
 test('an unlocked scan is not mislabeled as a locked queue record', async () => {

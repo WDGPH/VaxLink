@@ -18,29 +18,43 @@ const PANORAMA_HOSTS = [
   TRAINING_HOST
 ];
 
-// Evaluate the actual runtime predicates, not a copy of their matching logic.
-function loadPredicate(file, name, globals = {}) {
-  const source = readFileSync(new URL(file, extension), 'utf8');
-  const definition = source.match(
-    new RegExp(`^function ${name}\\([^]*?^}`, 'm')
-  );
-  assert.ok(definition, `Missing runtime predicate: ${name}`);
-  return vm.runInNewContext(`(${definition[0]})`, { URL, ...globals });
-}
-
-const supportsChart = loadPredicate('background.js', 'isSupportedChartUrl');
-
+// Load the complete content script so checks use the shipped runtime functions.
 function pagePredicates(url, { iframe = false } = {}) {
-  const window = { location: new URL(url) };
+  const location = new URL(url);
+  const window = { location, __vaxlinkHandsFreeInitialized: true };
   window.self = window;
   window.top = iframe ? {} : window;
+  const context = vm.createContext({
+    URL,
+    window,
+    location,
+    console,
+    document: {
+      readyState: 'loading',
+      addEventListener() {},
+      querySelector() {
+        return null;
+      },
+      querySelectorAll() {
+        return [];
+      }
+    },
+    chrome: {
+      runtime: { getManifest: () => ({}), onMessage: { addListener() {} } },
+      storage: { onChanged: { addListener() {} } }
+    },
+    setTimeout() {
+      return 0;
+    },
+    clearTimeout() {}
+  });
+  vm.runInContext(
+    readFileSync(new URL('content.js', extension), 'utf8'),
+    context
+  );
   return {
-    handsFree: loadPredicate('content.js', 'isHandsFreeSupportedPage', {
-      window
-    })(),
-    panoramaHud: loadPredicate('content.js', 'isPanoramaRecordImmsPage', {
-      window
-    })()
+    handsFree: context.isHandsFreeSupportedPage(),
+    panoramaHud: context.isPanoramaRecordImmsPage()
   };
 }
 
@@ -52,6 +66,10 @@ test('manifest keeps the exact HTTPS training match without broader eHealth acce
   assert.deepEqual(
     matches.filter((pattern) => pattern.includes('trpanorama')),
     [`https://${TRAINING_HOST}/*`]
+  );
+  assert.equal(
+    matches.some((pattern) => pattern.includes('inputhealth.com')),
+    false
   );
   const permissions = [
     ...matches,
@@ -72,22 +90,22 @@ test('manifest keeps the exact HTTPS training match without broader eHealth acce
 });
 
 test('runtime gates recognize supported URLs and preserve the hands-free frame boundary', () => {
-  // Expected columns: scanner routing, hands-free, Panorama HUD.
+  // Expected columns: hands-free and Panorama page recognition.
   const cases = [
     ...PANORAMA_HOSTS.map((host) => [
       `https://${host}${RECORD_PATH}`,
-      [true, true, true]
+      [true, true]
     ]),
     [
       `https://${TRAINING_HOST}/training/recordImms/details?tab=1#details`,
-      [true, true, true]
+      [true, true]
     ],
     ...['inputhealth.com', 'clinic.inputhealth.com'].map((host) => [
       `https://${host}/chart`,
-      [true, true, false]
+      [false, false]
     ]),
-    [TRAINING_URL, [true, false, true], true],
-    ['https://clinic.inputhealth.com/chart', [true, false, false], true],
+    [TRAINING_URL, [false, false], true],
+    ['https://clinic.inputhealth.com/chart', [false, false], true],
     ...[
       `https://${TRAINING_HOST}/`,
       `https://${TRAINING_HOST}/login?next=${RECORD_PATH}#${RECORD_PATH}`,
@@ -99,12 +117,12 @@ test('runtime gates recognize supported URLs and preserve the hands-free frame b
       'https://inputhealth.com.example.org/chart',
       ...PANORAMA_HOSTS.map((host) => `http://${host}${RECORD_PATH}`),
       'http://clinic.inputhealth.com/chart'
-    ].map((url) => [url, [false, false, false]])
+    ].map((url) => [url, [false, false]])
   ];
   for (const [url, expected, iframe = false] of cases) {
     const { handsFree, panoramaHud } = pagePredicates(url, { iframe });
     assert.deepEqual(
-      [supportsChart(url), handsFree, panoramaHud],
+      [handsFree, panoramaHud],
       expected,
       `${url} (iframe=${iframe})`
     );
@@ -139,4 +157,38 @@ test('background routes a Single scan to the active training chart', async () =>
   assert.equal(harness.tabMessages[0].tabId, 44);
   assert.equal(harness.tabMessages[0].message.action, 'vaxlinkScanCaptured');
   assert.equal(harness.tabMessages[0].options.frameId, 0);
+});
+
+test('scanner routing keeps scans pending on retired sites and requires a Panorama capability for hidden URLs', async () => {
+  for (const [url, category, routed] of [
+    ['https://clinic.inputhealth.com/chart', 'panorama-immunization', false],
+    ['https://example.org/recordImms/detail', 'panorama-immunization', false],
+    [`https://${TRAINING_HOST}/login`, 'panorama-immunization', false],
+    ['', 'inputhealth', false],
+    ['', 'panorama-immunization', true]
+  ]) {
+    const harness = createBackgroundHarness(makeTestNvcBundle(), {
+      tabs: [{ id: 44, active: true, url }],
+      tabResponse: (_id, message) =>
+        message.action === 'getIntegrationHealth'
+          ? { schemaVersion: 1, category, initialized: { listener: true } }
+          : { accepted: true, success: true }
+    });
+    const result = await harness.sendMessage({
+      action: 'scannerScanCaptured',
+      scan: { rawText: '10SYNTHETIC' }
+    });
+    assert.equal(result.routed, routed);
+    assert.equal(
+      harness.tabMessages.some(
+        ({ message }) => message.action === 'vaxlinkScanCaptured'
+      ),
+      routed
+    );
+    if (!routed)
+      assert.equal(
+        harness.storageData.get('vaxlink_pending_scan_inbox_v1').length,
+        1
+      );
+  }
 });

@@ -145,11 +145,7 @@
         'panorama.prod.ehealthontario.ca',
         'trpanoramadhir.prod.ehealthontario.ca'
       ].includes(host);
-      if (!(
-        (panorama && url.pathname.toLowerCase().includes('/recordimms/')) ||
-        host === 'inputhealth.com' ||
-        host.endsWith('.inputhealth.com')
-      ))
+      if (!(panorama && url.pathname.toLowerCase().includes('/recordimms/')))
         return null;
       return {
         type: 'content',

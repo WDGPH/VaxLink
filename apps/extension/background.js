@@ -584,9 +584,7 @@ function isSupportedChartUrl(urlValue) {
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
-    const isInputHealth =
-      host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
-    return isPanorama || isInputHealth;
+    return isPanorama;
   } catch (_) {
     return false;
   }
@@ -610,7 +608,18 @@ function tabAcceptedScannerScan(response) {
   );
 }
 
-function sendScanToTab(tabId, scan) {
+async function sendScanToTab(tabId, scan) {
+  const tab = (await queryTabs({})).find((item) => item.id === tabId);
+  // A hidden URL is only a candidate. Ask the existing integration before
+  // exposing scan data to it, including during pinned inbox replay.
+  if (
+    !tab ||
+    !(tab.url
+      ? isSupportedChartUrl(tab.url)
+      : isPanoramaIntegration(await readPageIntegration(tabId)))
+  ) {
+    throw new Error('Open a supported Panorama immunization page.');
+  }
   const metadata = scan.diagnosticLink
     ? { tabAlias: diagnosticRecorder?.tabAlias(tabId, scan.diagnosticLink) }
     : undefined;
@@ -2937,6 +2946,29 @@ function isWorkstationHealthControl(sender) {
   }
 }
 
+function readPageIntegration(tabId) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 1000);
+    chrome.tabs.sendMessage(
+      tabId,
+      { action: 'getIntegrationHealth' },
+      { frameId: 0 },
+      (response) => {
+        clearTimeout(timer);
+        resolve(chrome.runtime.lastError ? null : response);
+      }
+    );
+  });
+}
+
+function isPanoramaIntegration(reply) {
+  return (
+    reply?.schemaVersion === 1 &&
+    reply.category === 'panorama-immunization' &&
+    reply.initialized?.listener === true
+  );
+}
+
 async function inspectPageIntegration(originTabId) {
   const tabs = await queryTabs(
     Number.isInteger(originTabId) ? {} : { active: true, currentWindow: true }
@@ -2946,26 +2978,15 @@ async function inspectPageIntegration(originTabId) {
     : tabs[0];
   if (!tab || (tab.url && !isSupportedChartUrl(tab.url)))
     return { state: 'unsupported' };
-  const reply = await new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), 1000);
-    chrome.tabs.sendMessage(
-      tab.id,
-      { action: 'getIntegrationHealth' },
-      { frameId: 0 },
-      (response) => {
-        clearTimeout(timer);
-        resolve(chrome.runtime.lastError ? null : response);
-      }
-    );
-  });
+  const reply = await readPageIntegration(tab.id);
   if (!reply || reply.schemaVersion !== 1) return { state: 'missing' };
   const id = reply.buildAtLoad?.id;
   const version = reply.buildAtLoad?.version;
-  const categories = ['panorama-immunization', 'inputhealth', 'unsupported'];
+  if (reply.category !== 'panorama-immunization')
+    return { state: 'unsupported' };
   if (
     !(id === 'unpacked-source' || /^[a-f0-9]{64}$/.test(id || '')) ||
     !/^\d+\.\d+\.\d+(?:-alpha(?:\.\d+)?)?$/.test(version || '') ||
-    !categories.includes(reply.category) ||
     !['single', 'multiple', 'inventory'].includes(reply.workflow)
   )
     return { state: 'unknown' };
@@ -3261,11 +3282,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabId = sender?.tab?.id;
     if (
       tabId === undefined ||
+      sender.id !== chrome.runtime.id ||
+      sender.frameId !== 0 ||
+      !isSupportedChartUrl(sender.url) ||
       (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))
     ) {
       sendResponse({
         success: false,
-        error: 'Pending scans can only drain to a supported chart tab'
+        error:
+          'Pending scans can only drain to a supported Panorama immunization page'
       });
       return false;
     }

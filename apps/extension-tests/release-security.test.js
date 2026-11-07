@@ -86,6 +86,17 @@ test('alpha and production packaging exclude catalogue snapshots and development
       channel === 'prod' ? 'VaxLink' : 'VaxLink Alpha'
     );
     assert.equal(manifest.action.default_title, manifest.name);
+    assert.deepEqual(
+      manifest.content_scripts.flatMap((script) => script.matches),
+      [
+        'https://www.panorama.prod.ehealthontario.ca/*',
+        'https://panorama.prod.ehealthontario.ca/*',
+        'https://trpanoramadhir.prod.ehealthontario.ca/*'
+      ]
+    );
+    assert.deepEqual(manifest.host_permissions, [
+      'https://nvc-cnv.canada.ca/*'
+    ]);
     assert.ok(names.includes('manifest.json'), channel);
     assert.ok(names.includes('content.js'), channel);
     for (const path of excluded)

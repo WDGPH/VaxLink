@@ -5,9 +5,9 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/WDGPH/VaxLink)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
-them into Ontario immunization EMRs (Panorama, InputHealth), with an
-inventory management workflow for lot/expiry tracking. The extension
+VaxLink scans GS1 vaccine barcodes, looks up NVC vaccine information, and helps
+populate Panorama immunization forms for staff to review before saving. It also
+provides scan queues and an inventory tray for lot/expiry tracking. The extension
 (`apps/extension`) is the main deliverable, supported by a MkDocs
 documentation site.
 
@@ -28,10 +28,14 @@ documentation site.
 
 - Parses GS1 AIs from scanned strings (`01`, `10`, `17`, `21`)
 - Looks up vaccine metadata from the NVC bundle
-- Auto-fills CHR fields (trade name, manufacturer, route, dose, strength, DIN/drug code, lot, expiry) into Panorama and InputHealth
+- Selects the Panorama agent and lot, lets Panorama fill dependent vaccine details, and applies configured date/time, reason, and consent fields
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Captures scans through Web Serial, including while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
+
+InputHealth and generic other-EMR autofill have been removed from this development
+version. Capture, parsing, NVC lookup, queues, and inventory export do not require
+an open Panorama tab. The production listing changes only after reviewed promotion.
 
 ### Installation
 
@@ -78,7 +82,7 @@ cd apps/extension-tests
 npm test
 ```
 
-This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+This covers GS1 barcode parsing, Panorama autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
 
 ### Release channels
 
@@ -91,7 +95,7 @@ separate VaxLink Alpha listing. Store uploads remain manual. See the
 ## Notes
 
 - Public access to NVC API does not automatically grant blanket redistribution rights for bundled terminology data. Keep raw bundle files out of public commits unless you have explicit permission.
-- If CHR DOM changes, update selectors in `apps/extension/content.js`.
+- If Panorama DOM changes, update selectors in `apps/extension/content.js`.
 
 ## Contributing
 

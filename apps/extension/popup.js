@@ -89,7 +89,7 @@ const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const MODE_CONFIG = {
   single: {
     title: 'Single Inject',
-    subtitle: 'One scan fills the current chart immediately.',
+    subtitle: 'One scan helps fill the open Panorama form.',
     helper:
       'Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.',
     inputLabel: 'Scanned Barcode',
@@ -215,7 +215,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     useButtonLabel: 'Use for Chart',
     emptySummary: 'No saved vaccines yet.',
     emptyMessage:
-      'Leave Multiple Inject active, scan several vaccines on the live chart page, then come back and choose one to fill.',
+      'Leave Multiple Inject active and scan vaccines. Open a Panorama immunization form when ready to use one.',
     summaryBuilder: buildMultipleInjectSummary
   });
 
@@ -1664,7 +1664,7 @@ function loadNVCStatus() {
   });
 }
 
-async function sendAutoFillToActiveTab(data, options = {}) {
+export async function sendAutoFillToActiveTab(data, options = {}) {
   const payload = buildAutoFillPayload(data, options.fallbackTimestamp || '');
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -1684,7 +1684,7 @@ async function sendAutoFillToActiveTab(data, options = {}) {
           return;
         }
         reject(new Error(response?.error || 'Could not auto-fill fields'));
-      });
+      }).catch(reject);
     });
   });
 }
@@ -2166,28 +2166,101 @@ async function displayParsedData(data, parseRequestId) {
   }
 }
 
-function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
-  // Target the main frame (frameId 0) to avoid iframe content scripts
-  // responding first with { success: false } and masking the real result.
+function isSupportedPanoramaUrl(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      [
+        'www.panorama.prod.ehealthontario.ca',
+        'panorama.prod.ehealthontario.ca',
+        'trpanoramadhir.prod.ehealthontario.ca'
+      ].includes(url.hostname) &&
+      url.pathname.toLowerCase().includes('/recordimms/')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+async function canFillPanoramaTab(tabId) {
+  const tabs = await new Promise((resolve) => {
+    chrome.tabs.query({}, (items) =>
+      resolve(chrome.runtime.lastError ? [] : items || [])
+    );
+  });
+  const tab = tabs.find((item) => item.id === tabId);
+  if (!tab) return false;
+  if (tab.url) return isSupportedPanoramaUrl(tab.url);
+  // activeTab may omit URL metadata. An existing integration must establish
+  // support before it receives a payload; missing metadata never permits injection.
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000);
+    chrome.tabs.sendMessage(
+      tabId,
+      { action: 'getIntegrationHealth' },
+      { frameId: 0 },
+      (reply) => {
+        clearTimeout(timer);
+        resolve(
+          !chrome.runtime.lastError &&
+            reply?.schemaVersion === 1 &&
+            reply.category === 'panorama-immunization' &&
+            reply.initialized?.listener === true
+        );
+      }
+    );
+  });
+}
+
+async function sendAutoFillMessage(
+  tabId,
+  data,
+  callback = handleAutoFillResponse
+) {
+  const unsupported = () =>
+    callback({
+      success: false,
+      status: 'failed',
+      error: 'Open a supported Panorama immunization page.'
+    });
+  if (!(await canFillPanoramaTab(tabId))) return unsupported();
   chrome.tabs.sendMessage(
     tabId,
     { action: 'autoFill', data },
     { frameId: 0 },
     (response) => {
-      if (chrome.runtime.lastError) {
-        const message = chrome.runtime.lastError.message || '';
-
-        if (message.includes('Receiving end does not exist')) {
+      if (!chrome.runtime.lastError) return callback(response);
+      const message = chrome.runtime.lastError.message || '';
+      if (!message.includes('Receiving end does not exist')) {
+        callback({ success: false, error: `Message send failed: ${message}` });
+        return;
+      }
+      // The tab can navigate after the first send. Recheck before injecting,
+      // and load the selected package's complete integration dependency list.
+      void canFillPanoramaTab(tabId)
+        .then((supported) => {
+          if (!supported) return unsupported();
+          const files = chrome.runtime
+            .getManifest()
+            .content_scripts?.find((script) =>
+              script.js?.includes('content.js')
+            )?.js;
+          if (!files?.length) {
+            callback({
+              success: false,
+              error:
+                'Panorama integration is unavailable. Reload the chart when safe.'
+            });
+            return;
+          }
           chrome.scripting.executeScript(
-            {
-              target: { tabId, frameIds: [0] },
-              files: ['panorama-agent-rules.js', 'content.js']
-            },
+            { target: { tabId, frameIds: [0] }, files },
             () => {
               if (chrome.runtime.lastError) {
                 callback({
                   success: false,
-                  error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}`
+                  error: `Panorama integration could not load: ${chrome.runtime.lastError.message}`
                 });
                 return;
               }
@@ -2195,18 +2268,27 @@ function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
                 tabId,
                 { action: 'autoFill', data },
                 { frameId: 0 },
-                callback
+                (reply) => {
+                  callback(
+                    chrome.runtime.lastError
+                      ? {
+                          success: false,
+                          error:
+                            'Panorama did not receive the fill. Reload the chart when safe.'
+                        }
+                      : reply
+                  );
+                }
               );
             }
           );
-          return;
-        }
-
-        callback({ success: false, error: `Message send failed: ${message}` });
-        return;
-      }
-
-      callback(response);
+        })
+        .catch(() =>
+          callback({
+            success: false,
+            error: 'Panorama integration could not be checked.'
+          })
+        );
     }
   );
 }
@@ -2221,7 +2303,7 @@ function handleAutoFillResponse(response) {
   }
 
   if (response && response.success) {
-    writeOutput('Chart auto-filled', 'success');
+    writeOutput('Panorama fields filled. Review before saving.', 'success');
   } else if (response && response.pending) {
     writeOutput(
       'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.',

@@ -14,7 +14,11 @@ const scan = (index = 0) => ({
 });
 const capture = (harness, index) =>
   harness.sendMessage({ action: 'scannerScanCaptured', scan: scan(index) });
-const sender = { tab: { id: 22, url: 'https://inputhealth.com/chart' } };
+const chart = {
+  id: 22,
+  url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail'
+};
+const sender = { id: 'vaxlink-test', frameId: 0, url: chart.url, tab: chart };
 const drain = (harness) =>
   harness.sendMessage({ action: 'drainPendingScannerScans' }, sender);
 function deferred() {
@@ -45,7 +49,9 @@ test('concurrent Single captures retain every row beyond the old 25-scan limit',
 test('a capture during a drain cannot be overwritten by its final inbox write', async () => {
   const entered = deferred();
   const delivery = deferred();
+  const tabs = [chart];
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs,
     storage: { [PENDING]: [scan(0)] },
     tabResponse: () => {
       entered.resolve();
@@ -54,6 +60,7 @@ test('a capture during a drain cannot be overwritten by its final inbox write', 
   });
   const draining = drain(harness);
   await entered.promise;
+  tabs.length = 0;
   const capturing = capture(harness, 1);
   delivery.resolve({ accepted: true });
   assert.equal((await draining).drained, 1);
@@ -66,13 +73,16 @@ test('a capture during a drain cannot be overwritten by its final inbox write', 
 
 test('failed inbox writes do not poison the serialization chain and concurrent drains cannot replay a row', async () => {
   let fail = true;
+  const tabs = [];
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs,
     failStorageSet: (values) => Object.hasOwn(values, PENDING) && fail,
     tabResponse: { accepted: true }
   });
   assert.equal((await capture(harness, 0)).success, false);
   fail = false;
   assert.equal((await capture(harness, 1)).success, true);
+  tabs.push(chart);
   const results = await Promise.all([drain(harness), drain(harness)]);
   assert.equal(
     results.reduce((sum, reply) => sum + reply.drained, 0),
@@ -112,6 +122,7 @@ test('a suppressed duplicate reports its actual outcome and is not counted as an
 
 test('a failed post-delivery inbox write reports failure and leaves an uncertain replay', async () => {
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [chart],
     storage: { [PENDING]: [scan(0)] },
     tabResponse: { accepted: true },
     failStorageSet: (values) => Object.hasOwn(values, PENDING)

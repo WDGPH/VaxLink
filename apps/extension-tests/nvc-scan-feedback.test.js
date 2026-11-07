@@ -18,7 +18,9 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
     'Lot not found in the NVC catalogue'
   ]) {
     const slot = { innerHTML: '' };
-    const location = new URL('https://inputhealth.com/chart');
+    const location = new URL(
+      'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail'
+    );
     const window = { location, __vaxlinkHandsFreeInitialized: true };
     window.top = window.self = window;
     const context = vm.createContext({
@@ -65,8 +67,8 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
       context
     );
     let fillPayload;
-    const autofill = context.autoFillTelus;
-    context.autoFillTelus = (data) => {
+    const autofill = context.autoFillPanorama;
+    context.autoFillPanorama = (data) => {
       fillPayload = data;
       return autofill(data);
     };

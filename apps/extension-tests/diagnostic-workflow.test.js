@@ -10,10 +10,13 @@ const control = {
 };
 const content = {
   id: 'vaxlink-test',
-  url: 'https://inputhealth.com/chart',
+  url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail',
   frameId: 0,
   documentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
-  tab: { id: 42, url: 'https://inputhealth.com/chart' }
+  tab: {
+    id: 42,
+    url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail'
+  }
 };
 const scan = {
   rawText: '10TESTLOT',
@@ -93,7 +96,9 @@ test('failed session storage never changes a clinical queue save into failure', 
 });
 
 test('pending replay uses partial history when capture timestamps collide and never persists trace links', async () => {
+  const tabs = [];
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs,
     tabResponse: { accepted: true }
   });
   const recording = await start(harness);
@@ -105,6 +110,7 @@ test('pending replay uses partial history when capture timestamps collide and ne
     pending.some((row) => Object.hasOwn(row, 'diagnosticLink')),
     false
   );
+  tabs.push(content.tab);
   assert.equal(
     (await harness.sendMessage({ action: 'drainPendingScannerScans' }, content))
       .drained,

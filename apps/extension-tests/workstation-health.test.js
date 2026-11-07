@@ -12,14 +12,14 @@ const chart = {
   id: 42,
   active: true,
   currentWindow: true,
-  url: 'https://inputhealth.com/chart'
+  url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail'
 };
 const integration = (extra = {}) => ({
   schemaVersion: 1,
   buildAtLoad: { id: 'unpacked-source', version: '1.2.0-alpha' },
   initialized: { listener: true, settings: true },
   workflow: 'single',
-  category: 'inputhealth',
+  category: 'panorama-immunization',
   ...extra
 });
 const health = (harness, sender = control) =>
@@ -37,6 +37,7 @@ test('health uses existing statuses and explicitly labels unpacked or stale page
       'stale'
     ],
     [{ success: false, error: 'old content script' }, 'missing'],
+    [integration({ category: 'inputhealth' }), 'unsupported'],
     [
       integration({
         buildAtLoad: { id: 'patient data', version: '1.2.0-alpha' }

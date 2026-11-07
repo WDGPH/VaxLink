@@ -44,7 +44,7 @@ const viewer = {
 };
 const content = {
   id: 'abc',
-  url: 'https://inputhealth.com/chart',
+  url: 'https://trpanoramadhir.prod.ehealthontario.ca/recordImms/detail',
   frameId: 0,
   tab: { id: 22 },
   documentId: 'doc-1'
@@ -70,6 +70,15 @@ test('controls require an extension-owned page and producers cannot mix contexts
   }
   const started = await send({ action: 'diagnostics.start' }, viewer);
   const sessionId = started.session.id;
+  assert.equal(
+    (
+      await send(
+        { action: 'diagnostics.join', context: 'content', contextId },
+        { ...content, url: 'https://clinic.inputhealth.com/chart' }
+      )
+    ).success,
+    false
+  );
   assert.equal(
     (
       await send(
