@@ -73,6 +73,15 @@ saved alongside the existing cache so the popup can report a failed check after
 the worker restarts. If storage itself fails, the current worker still reports
 the failure, but saving that failure for the next restart may also fail.
 
+The accepted indexes also hold the distinct normalized lot-code count and the
+lot CodeSystem's version and publication date. These are calculated once when
+loading or refreshing the catalogue; opening the popup reads only the compact
+status. The saved catalogue supplies those fields again after a worker restart.
+A matching content fingerprint or accepted HTTP 304 means unchanged data. Zero
+added lot codes alone does not: existing vaccine information may have changed.
+Popup lookups always use the background indexes so automatic and manual updates
+are reflected in subsequent scans.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama
