@@ -1388,11 +1388,7 @@ function setupAutoSyncAlarm() {
 function initializeNVCSync() {
   setupAutoSyncAlarm();
   if (!nvcInitializationPromise) {
-    nvcInitializationPromise = (async () => {
-      const loaded = await loadNVCBundle();
-      return loaded ? maybeAutoRefreshNVCBundle('startup')
-        : refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { trigger: 'startup' });
-    })();
+    nvcInitializationPromise = maybeAutoRefreshNVCBundle('startup');
   }
   return nvcInitializationPromise;
 }
