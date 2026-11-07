@@ -151,13 +151,19 @@ async function connectGrantedPort(trigger = 'manual') {
       const noPortState = desiredProfileId
         ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
         : SCANNER_STATUS_STATES.NEVER_CONFIGURED;
+      const message =
+        selection.reason === 'ambiguous'
+          ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
+          : selection.reason === 'unidentified'
+            ? 'The scanner could not be identified. Select a scanner with identifiable port information.'
+            : selection.reason === 'preferred_missing'
+              ? 'The selected scanner was not found. Reconnect it or select a scanner again.'
+              : 'Scanner not found. Reconnect the cradle or power it on, then select the scanner if needed.';
       handleConnectionFailure(
-        new Error(
-          noPortState === SCANNER_STATUS_STATES.NEVER_CONFIGURED
-            ? 'No previously granted serial port found. Use Select Scanner first.'
-            : 'Scanner not found. Reconnect the cradle or power it on.'
-        ),
-        noPortState
+        new Error(message),
+        selection.reason === 'ambiguous' || selection.reason === 'unidentified'
+          ? SCANNER_STATUS_STATES.ERROR
+          : noPortState
       );
       return;
     }

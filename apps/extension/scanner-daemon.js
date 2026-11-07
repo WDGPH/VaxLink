@@ -164,7 +164,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    ensureWorker().postMessage({ type: 'getStatus' });
     sendResponse({ success: true, status: currentStatus });
     return false;
   }

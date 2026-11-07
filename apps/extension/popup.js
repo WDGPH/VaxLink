@@ -73,6 +73,9 @@ let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
+let scannerStatusSource = 'cached';
+let scannerCaptureSource = 'cached';
+let scannerCaptureError = false;
 let reasonConsentAutofillEnabled = true;
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -511,8 +514,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function handleRuntimeMessage(request) {
   if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
-    applyScannerStatus(request.status);
+    applyScannerStatus(request.status, 'live');
     return false;
+  }
+  if (
+    request?.action === 'scannerDaemon.scanEcho' &&
+    request.response?.success === false
+  ) {
+    scannerCaptureError = true;
+    renderScannerStatusUi();
   }
   return false;
 }
@@ -542,7 +552,12 @@ async function loadScannerStatus() {
       SCANNER_DAEMON_ACTIONS.GET_STATUS
     );
     if (response && response.success && response.status) {
-      applyScannerStatus(response.status);
+      scannerCaptureError = response.captureError === true;
+      applyScannerStatus(
+        response.status,
+        response.source,
+        response.captureSource
+      );
       return;
     }
   } catch (_) {
@@ -570,7 +585,9 @@ function openScannerSetupPage() {
   );
 }
 
-function applyScannerStatus(status) {
+function applyScannerStatus(status, source = 'cached', captureSource = source) {
+  scannerStatusSource = source;
+  scannerCaptureSource = captureSource;
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   renderScannerStatusUi();
 }
@@ -582,14 +599,28 @@ function renderScannerStatusUi() {
   );
 
   if (scannerStatusTitle) {
-    scannerStatusTitle.textContent = descriptor.label;
+    scannerStatusTitle.textContent =
+      scannerStatusSource === 'cached' ? 'Cached status' : descriptor.label;
   }
   if (scannerStatusDetail) {
-    scannerStatusDetail.textContent = descriptor.detail;
+    const sourceNote =
+      scannerStatusSource === 'cached'
+        ? ' Status is cached; connection is unconfirmed.'
+        : '';
+    const captureNote =
+      scannerStatusSnapshot.lastCaptureAt && scannerCaptureSource === 'cached'
+        ? ' Last capture time is cached.'
+        : '';
+    const errorNote = scannerCaptureError
+      ? ' A scan could not be saved or delivered. Check pending scans and rescan if needed.'
+      : '';
+    scannerStatusDetail.textContent =
+      descriptor.detail + sourceNote + captureNote + errorNote;
   }
   if (scannerStatusPill) {
-    scannerStatusPill.textContent = descriptor.label;
-    scannerStatusPill.className = `scanner-status-pill ${descriptor.tone}`;
+    scannerStatusPill.textContent =
+      scannerStatusSource === 'cached' ? 'Unconfirmed' : descriptor.label;
+    scannerStatusPill.className = `scanner-status-pill ${scannerStatusSource === 'cached' ? 'info' : descriptor.tone}`;
   }
   if (scannerReconnectBtn) {
     scannerReconnectBtn.hidden = !descriptor.showReconnect;

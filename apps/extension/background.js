@@ -69,6 +69,8 @@ const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
+let pendingInboxWriteQueue = Promise.resolve();
+let scannerStatusWriteQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
 let iconInitPromise = null;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -78,7 +80,9 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
-const PENDING_SCAN_INBOX_LIMIT = 25;
+const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
+const PENDING_SCAN_INBOX_LIMIT = 250;
+const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
@@ -261,6 +265,8 @@ function createScannerStatusSnapshot(overrides = {}) {
     portInfo: null,
     lastConnectedAt: '',
     lastDisconnectedAt: '',
+    lastCaptureAt: '',
+    captureCount: 0,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -277,6 +283,8 @@ function normalizeScannerStatusSnapshot(snapshot) {
     portInfo: normalizeScannerPortInfo(source.portInfo),
     lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
+    lastCaptureAt: normalizeScannerIsoTimestamp(source.lastCaptureAt),
+    captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(
       0,
@@ -322,20 +330,36 @@ async function getScannerBootstrapState() {
   return { enabled, profileId, portInfo, status };
 }
 
-async function persistScannerStatusSnapshot(snapshot) {
-  const normalized = normalizeScannerStatusSnapshot(snapshot);
-  scannerDaemonStatusCache = normalized;
-  const values = {
-    [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
-  };
-  if (normalized.profileId) {
-    values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
-  }
-  if (normalized.portInfo) {
-    values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
-  }
-  await setStorage(values);
-  return normalized;
+function persistScannerStatusSnapshot(snapshot) {
+  const result = scannerStatusWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const stored = await getStorage([SCANNER_STATUS_SNAPSHOT_KEY]);
+      const previous = normalizeScannerStatusSnapshot(
+        stored[SCANNER_STATUS_SNAPSHOT_KEY]
+      );
+      const normalized = normalizeScannerStatusSnapshot(snapshot);
+      if (
+        !normalized.lastCaptureAt ||
+        previous.lastCaptureAt > normalized.lastCaptureAt
+      ) {
+        normalized.lastCaptureAt = previous.lastCaptureAt;
+      }
+      scannerDaemonStatusCache = normalized;
+      const values = {
+        [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
+      };
+      if (normalized.profileId) {
+        values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
+      }
+      if (normalized.portInfo) {
+        values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
+      }
+      await setStorage(values);
+      return normalized;
+    });
+  scannerStatusWriteQueue = result;
+  return result;
 }
 
 async function broadcastScannerStatus(snapshot) {
@@ -887,34 +911,39 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  await logAnalyticsEvent('scan_captured', {
-    workflow: mode,
-    source: scan.source || 'web-serial',
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      record.gtin ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
-  await logAnalyticsEvent('queue_saved', {
-    workflow: mode,
-    queue: mode === 'inventory' ? 'inventory' : 'multiple',
-    source: scan.source || 'web-serial',
-    count: 1,
-    queueSizeAfter: record.queueSizeAfter || 0,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
+  try {
+    await logAnalyticsEvent('scan_captured', {
+      workflow: mode,
+      source: scan.source || 'web-serial',
+      vaccineLabel:
+        record.tradename ||
+        record.generic_name ||
+        record.name ||
+        record.lot ||
+        record.gtin ||
+        '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag
+    });
+    if (!record.duplicate_ignored)
+      await logAnalyticsEvent('queue_saved', {
+        workflow: mode,
+        queue: mode === 'inventory' ? 'inventory' : 'multiple',
+        source: scan.source || 'web-serial',
+        count: 1,
+        queueSizeAfter: record.queueSizeAfter || 0,
+        vaccineLabel:
+          record.tradename ||
+          record.generic_name ||
+          record.name ||
+          record.lot ||
+          '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag
+      });
+  } catch (_) {
+    console.warn('Scanner scan retained; usage counters could not be updated.');
+  }
 
   return {
     queuedToWorkflow: true,
@@ -924,39 +953,57 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   };
 }
 
-async function enqueuePendingScan(scan) {
-  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-    ? stored[PENDING_SCAN_INBOX_KEY]
-    : [];
-  rows.push(scan);
-  const nextRows = rows.slice(-PENDING_SCAN_INBOX_LIMIT);
-  await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
-  return nextRows.length;
+function mutatePendingInbox(action) {
+  const result = pendingInboxWriteQueue.catch(() => undefined).then(action);
+  pendingInboxWriteQueue = result;
+  return result;
 }
 
-async function drainPendingScansToTab(tabId) {
-  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-    ? stored[PENDING_SCAN_INBOX_KEY]
-    : [];
-  if (!rows.length) {
-    return { drained: 0, remaining: 0 };
-  }
-
-  const remaining = [];
-  let drained = 0;
-  for (const row of rows) {
-    try {
-      await sendScanToTab(tabId, normalizeScanEvent(row));
-      drained += 1;
-    } catch (_) {
-      remaining.push(row);
+function enqueuePendingScan(scan) {
+  return mutatePendingInbox(async () => {
+    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+      ? stored[PENDING_SCAN_INBOX_KEY]
+      : [];
+    const nextRows = [...rows, scan];
+    if (
+      nextRows.length > PENDING_SCAN_INBOX_LIMIT ||
+      new TextEncoder().encode(JSON.stringify(nextRows)).length >
+        PENDING_SCAN_INBOX_MAX_BYTES
+    ) {
+      throw new Error(
+        'Pending scans are full. Open a supported chart and process pending scans before scanning again.'
+      );
     }
-  }
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
+    return nextRows.length;
+  });
+}
 
-  await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
-  return { drained, remaining: remaining.length };
+function drainPendingScansToTab(tabId) {
+  return mutatePendingInbox(async () => {
+    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+      ? stored[PENDING_SCAN_INBOX_KEY]
+      : [];
+    if (!rows.length) {
+      return { drained: 0, remaining: 0 };
+    }
+
+    const remaining = [];
+    let drained = 0;
+    for (const row of rows) {
+      try {
+        await sendScanToTab(tabId, normalizeScanEvent(row));
+        drained += 1;
+      } catch (_) {
+        remaining.push(row);
+      }
+    }
+
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
+    return { drained, remaining: remaining.length };
+  });
 }
 
 async function routeScanToActiveSupportedTab(rawScan) {
@@ -1020,8 +1067,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
     );
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
@@ -1060,8 +1108,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
   if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
@@ -2919,19 +2968,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
     (async () => {
+      const cachedCaptureAt = scannerDaemonStatusCache.lastCaptureAt;
       const bootstrap = await getScannerBootstrapState();
       let status = bootstrap.status;
-      if (bootstrap.enabled && bootstrap.profileId) {
-        await maybeStartScannerDaemon('status_request');
-        const daemonResponse = await sendScannerDaemonMessage({
+      if (cachedCaptureAt > status.lastCaptureAt) {
+        status.lastCaptureAt = cachedCaptureAt;
+        scannerDaemonStatusCache.lastCaptureAt = cachedCaptureAt;
+      }
+      let source = 'cached';
+      let captureSource = 'cached';
+      const captureError =
+        (await getStorage([SCANNER_CAPTURE_ERROR_KEY]))[
+          SCANNER_CAPTURE_ERROR_KEY
+        ] === true;
+      if (await hasScannerDaemonDocument()) {
+        const reply = await sendRuntimeMessage({
+          target: SCANNER_DAEMON_TARGET,
           action: SCANNER_DAEMON_ACTIONS.GET_STATUS
         }).catch(() => null);
-        if (daemonResponse && daemonResponse.success && daemonResponse.status) {
-          status = normalizeScannerStatusSnapshot(daemonResponse.status);
-          await persistScannerStatusSnapshot(status);
+        if (reply?.success && reply.status) {
+          const liveStatus = normalizeScannerStatusSnapshot(reply.status);
+          if (
+            liveStatus.lastCaptureAt &&
+            liveStatus.lastCaptureAt >= status.lastCaptureAt
+          ) {
+            captureSource = 'live';
+          } else {
+            liveStatus.lastCaptureAt = status.lastCaptureAt;
+          }
+          status = liveStatus;
+          source = 'live';
         }
       }
-      sendResponse({ success: true, status });
+      sendResponse({
+        success: true,
+        status,
+        source,
+        captureSource,
+        captureError
+      });
     })().catch((error) => {
       sendResponse({
         success: false,
@@ -3067,12 +3142,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'scannerScanCaptured') {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
-      .catch((error) =>
+      .catch((error) => {
+        void setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: true }).catch(
+          () => undefined
+        );
+        chrome.action.setBadgeText({ text: '!' });
+        chrome.action.setBadgeBackgroundColor({ color: '#b91c1c' });
         sendResponse({
           success: false,
           error: error?.message || 'Scan routing failed'
-        })
-      );
+        });
+      });
     return true;
   }
 
