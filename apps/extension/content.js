@@ -937,6 +937,11 @@ function initHandsFreeScanner() {
     cancelPanoramaFillRetriesForManualEdit,
     true
   );
+  document.addEventListener(
+    'input',
+    cancelPanoramaFillRetriesForManualEdit,
+    true
+  );
 }
 
 // Register listener immediately
@@ -2286,7 +2291,7 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
-// Issue #26: a real user interaction with the agent/lot/tradename widgets means
+// A trusted edit to a field managed by this operation means
 // the nurse is taking over — pending VaxLink fill retries must not overwrite
 // her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
 // and so do VaxLink's own fills, so only trusted events count as manual.
@@ -2305,10 +2310,40 @@ function isPanoramaAgentLotWidgetNode(node) {
 function cancelPanoramaFillRetriesForManualEdit(event) {
   if (!event.isTrusted) return;
   if (typeof stopPanoramaLotTradeWatcher !== 'function') return;
-  if (!isPanoramaAgentLotWidgetNode(event.target)) return;
+  const deferredField =
+    /dateAdministedDate|reasonForImmunizationSelect|consentReadinessReasonSelect|fundedRadio/i.test(
+      String(event.target?.id || '')
+    );
+  const deferredWidget = event.target?.closest?.(
+    '.ui-selectonemenu, .ui-selectonemenu-panel'
+  );
+  if (
+    !isPanoramaAgentLotWidgetNode(event.target) &&
+    !deferredField &&
+    !/reasonForImmunizationSelect|consentReadinessReasonSelect/i.test(
+      String(deferredWidget?.id || '')
+    )
+  )
+    return;
   stopPanoramaLotTradeWatcher();
   stopPanoramaLotTradeWatcher = null;
-  vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
+  vlog('manual field interaction — cancelled pending VaxLink fill retries');
+}
+
+function getPanoramaAutofillForms() {
+  const fields = getFields([
+    ...getPanoramaAgentSelectors(),
+    ...getPanoramaTradeSelectors(),
+    ...getPanoramaReasonForImmunizationSelectors(),
+    ...getPanoramaConsentReasonSelectors(),
+    'input[id*="dateAdministedDate"]',
+    'input[id*="fundedRadio:selectOneRadio"]'
+  ]);
+  return [
+    ...new Set(
+      fields.map((field) => field.form || field.closest?.('form') || null)
+    )
+  ];
 }
 
 function schedulePanoramaLotOrTradeSelection(
@@ -2339,6 +2374,19 @@ function schedulePanoramaLotOrTradeSelection(
   let observer = null;
   const timers = [];
   let stopped = false;
+  let followingUp = false;
+  let ownerForm = getPanoramaAutofillForms().find(Boolean) || null;
+  const initialUrl = window.location.href;
+  const ownsCurrentForm = () => {
+    if (window.location.href !== initialUrl) return false;
+    const forms = getPanoramaAutofillForms();
+    if (!ownerForm) ownerForm = forms.find(Boolean) || null;
+    return (
+      (!ownerForm && !forms.length) ||
+      (ownerForm?.isConnected !== false &&
+        forms.every((form) => form === ownerForm))
+    );
+  };
   let lastAttemptAt = 0;
   let stablePasses = 0;
   let fundedRadioEnsured = !!options.fundedRadioEnsured;
@@ -2384,25 +2432,30 @@ function schedulePanoramaLotOrTradeSelection(
   };
   let finalizeOnResolved = options.finalizeOnResolved === true;
 
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
+  const clearScheduledWork = () => {
     if (observer) {
       observer.disconnect();
       observer = null;
     }
     while (timers.length > 0) {
-      const timer = timers.pop();
-      clearTimeout(timer);
+      clearTimeout(timers.pop());
     }
-    if (stopPanoramaLotTradeWatcher === stop) {
+  };
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    clearScheduledWork();
+    if (stopPanoramaLotTradeWatcher === stop)
       stopPanoramaLotTradeWatcher = null;
-    }
   };
   stopPanoramaLotTradeWatcher = stop;
 
   const runAttempt = () => {
-    if (stopped) return;
+    if (stopped || followingUp) return;
+    if (!ownsCurrentForm()) {
+      stop();
+      return;
+    }
     const now = Date.now();
     if (now - lastAttemptAt < minAttemptGapMs) return;
     lastAttemptAt = now;
@@ -2559,13 +2612,23 @@ function schedulePanoramaLotOrTradeSelection(
         finalizeOnResolved = false;
         void finalizeDeferredPanoramaAutofill(data);
       }
-      // Panorama's dependent refreshes (trade/dose/route after lot selection,
-      // consent re-enabling) can still land after we stop and clear a value we
-      // already set. These late passes re-assert only what changed — every fill
-      // in them is a no-op while the fields still hold the desired values.
-      setTimeout(() => fillPanoramaDeferredDetailFields(data), 1500);
-      setTimeout(() => fillPanoramaDeferredDetailFields(data), 3500);
-      stop();
+      // Keep cancellation ownership through late refreshes. Replaced controls
+      // in the same form may be filled; a new form or user edit ends this operation.
+      followingUp = true;
+      clearScheduledWork();
+      for (const delay of [1500, 3500]) {
+        timers.push(
+          setTimeout(() => {
+            if (stopped) return;
+            if (!ownsCurrentForm()) {
+              stop();
+              return;
+            }
+            if (!isPrimeFacesAjaxBusy()) fillPanoramaDeferredDetailFields(data);
+            if (delay === 3500) stop();
+          }, delay)
+        );
+      }
     }
   };
 

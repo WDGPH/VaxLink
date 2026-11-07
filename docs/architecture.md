@@ -91,6 +91,13 @@ lot selection. Always gate lot writes and deferred date/time behind
 handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 `dateAdministedDate`) — keep those as-is.
 
+Late date/time, reason, and consent follow-ups keep the same cancellation owner
+as the initial fill. A trusted edit to a managed field, a newer operation, URL
+navigation, or a different owning form cancels the old operation. Controls
+replaced within the same form can still receive a deferred fill. Late writes
+also respect an observable busy PrimeFaces queue. An inaccessible page-world
+queue remains unknown; the isolated content script cannot prove that it is idle.
+
 ## CI
 
 - `.github/workflows/extension-ci.yml` — checks syntax and runs tests for
