@@ -54,6 +54,43 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   assert.match(worker.url, /scanner-daemon-worker\.js$/);
   assert.deepEqual(worker.messages[0], { type: 'getStatus' });
 
+  let statusReplied = false;
+  const statusReply = new Promise((resolve) => {
+    assert.equal(
+      runtimeListeners[0](
+        { target: 'scannerDaemon', action: 'scannerDaemon.getStatus' },
+        {},
+        (reply) => {
+          statusReplied = true;
+          resolve(reply);
+        }
+      ),
+      true
+    );
+  });
+  assert.equal(
+    statusReplied,
+    false,
+    'the host must wait for the worker observation'
+  );
+  const observationRequest = worker.messages.at(-1);
+  assert.equal(observationRequest.type, 'getStatus');
+  const messageCount = runtimeMessages.length;
+  worker.emit('message', {
+    type: 'status',
+    requestId: observationRequest.requestId,
+    status: { state: 'connected', captureCount: 2 }
+  });
+  const fresh = await statusReply;
+  assert.equal(fresh.observation.source, 'fresh');
+  assert.equal(fresh.status.captureCount, 2);
+  assert.equal(workers.length, 1);
+  assert.equal(
+    runtimeMessages.length,
+    messageCount,
+    'inspection must not persist or broadcast status'
+  );
+
   const connectRequest = {
     target: 'scannerDaemon',
     action: 'scannerDaemon.connectGranted',

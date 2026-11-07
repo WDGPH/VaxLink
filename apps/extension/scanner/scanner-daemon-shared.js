@@ -35,9 +35,7 @@ export function isScannerConnected(status) {
 }
 
 export function shouldShowScannerWorkflowBanner(mode, status) {
-  const normalizedMode =
-    mode === 'multiple' || mode === 'inventory' ? mode : 'single';
-  return normalizedMode !== 'single' && !isScannerConnected(status);
+  return !isScannerConnected(status);
 }
 
 export function getScannerReconnectDelayMs(attemptCount) {
@@ -70,24 +68,26 @@ export function selectGrantedPort(
     return { port: null, reason: 'none' };
   }
 
-  const preferred = candidates.find((candidate) => {
-    const info =
-      typeof candidate.getInfo === 'function' ? candidate.getInfo() : null;
-    return portInfoMatches(preferredPortInfo, info);
-  });
+  const preferred = normalizeScannerPortInfo(preferredPortInfo);
   if (preferred) {
-    return { port: preferred, reason: 'preferred' };
+    const matches = candidates.filter((candidate) => {
+      const info =
+        typeof candidate.getInfo === 'function' ? candidate.getInfo() : null;
+      return portInfoMatches(preferred, info);
+    });
+    if (matches.length === 1) return { port: matches[0], reason: 'preferred' };
+    return {
+      port: null,
+      reason: matches.length ? 'ambiguous' : 'preferred_missing'
+    };
   }
 
-  const matchesProfile =
+  const matches =
     typeof profileMatcher === 'function'
-      ? candidates.find((candidate) => profileMatcher(candidate, profile))
-      : null;
-  if (matchesProfile) {
-    return { port: matchesProfile, reason: 'profile' };
-  }
-
-  return { port: candidates[0], reason: 'first' };
+      ? candidates.filter((candidate) => profileMatcher(candidate, profile))
+      : [];
+  if (matches.length === 1) return { port: matches[0], reason: 'profile' };
+  return { port: null, reason: matches.length ? 'ambiguous' : 'no_match' };
 }
 
 export function normalizeScannerErrorMessage(error) {
@@ -189,7 +189,11 @@ export function classifyScannerConnectionFailure(
   };
 }
 
-export function buildScannerStatusDescriptor(status, mode = 'single') {
+export function buildScannerStatusDescriptor(
+  status,
+  mode = 'single',
+  observation = null
+) {
   const snapshot = normalizeScannerStatusSnapshot(status);
   const canBanner = shouldShowScannerWorkflowBanner(mode, snapshot);
   const descriptor = {
@@ -282,6 +286,16 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
 
   if (!canBanner) {
     descriptor.bannerText = '';
+  }
+
+  if (observation?.source === 'cached') {
+    const age = Number.isFinite(observation.ageMs)
+      ? `${Math.floor(observation.ageMs / 1000)} seconds old`
+      : 'age unknown';
+    descriptor.label = `Last known: ${descriptor.label}`;
+    descriptor.detail = `Cached scanner status (${age}). ${descriptor.detail}`;
+    if (snapshot.state === SCANNER_STATUS_STATES.CONNECTED)
+      descriptor.tone = 'warning';
   }
 
   return descriptor;

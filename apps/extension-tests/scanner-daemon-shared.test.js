@@ -43,51 +43,52 @@ test('default scanner status reflects setup state from stored config', () => {
   );
 });
 
-test('granted port selection prefers the exact previously used port before profile fallback', () => {
+test('granted port selection requires an unambiguous match', () => {
   const profile = getSerialScannerProfile('zebra-ds8178-usb-cdc');
   const preferred = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0200 });
-  const profileMatch = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0300 });
-  const generic = makePort({ usbVendorId: 0x1234, usbProductId: 0xabcd });
-
-  const exact = selectGrantedPort(
-    [generic, profileMatch, preferred],
-    profile,
-    { usbVendorId: 0x05e0, usbProductId: 0x0200 },
-    portMatchesProfile
+  const identical = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0200 });
+  const other = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0300 });
+  const unrelated = makePort({ usbVendorId: 0x1234 });
+  const info = preferred.getInfo();
+  assert.equal(
+    selectGrantedPort([other, preferred], profile, info, portMatchesProfile)
+      .port,
+    preferred
   );
-  assert.equal(exact.reason, 'preferred');
-  assert.equal(exact.port, preferred);
-
-  const fallback = selectGrantedPort(
-    [generic, profileMatch],
-    profile,
-    { usbVendorId: 0x05e0, usbProductId: 0x0200 },
-    portMatchesProfile
+  assert.equal(
+    selectGrantedPort([preferred, identical], profile, info, portMatchesProfile)
+      .reason,
+    'ambiguous'
   );
-  assert.equal(fallback.reason, 'profile');
-  assert.equal(fallback.port, profileMatch);
+  assert.equal(
+    selectGrantedPort([other], profile, info, portMatchesProfile).reason,
+    'preferred_missing'
+  );
+  assert.equal(
+    selectGrantedPort([other, unrelated], profile, null, portMatchesProfile)
+      .port,
+    other
+  );
+  assert.equal(
+    selectGrantedPort([other, preferred], profile, null, portMatchesProfile)
+      .reason,
+    'ambiguous'
+  );
+  assert.equal(
+    selectGrantedPort([unrelated], profile, null, portMatchesProfile).reason,
+    'no_match'
+  );
 });
 
-test('scanner status descriptor exposes workflow banner only for unattended capture modes', () => {
-  const descriptor = buildScannerStatusDescriptor(
-    {
-      state: SCANNER_STATUS_STATES.RECOVERING,
-      profileId: 'zebra-ds8178-usb-cdc'
-    },
-    'multiple'
-  );
-  assert.equal(descriptor.label, 'Recovering');
-  assert.equal(descriptor.showReconnect, true);
-  assert.match(descriptor.bannerText, /retrying automatically/i);
-
-  const singleModeDescriptor = buildScannerStatusDescriptor(
-    {
-      state: SCANNER_STATUS_STATES.RECOVERING,
-      profileId: 'zebra-ds8178-usb-cdc'
-    },
-    'single'
-  );
-  assert.equal(singleModeDescriptor.bannerText, '');
+test('scanner status warns in Single and unattended modes', () => {
+  for (const mode of ['single', 'multiple', 'inventory']) {
+    const descriptor = buildScannerStatusDescriptor(
+      { state: SCANNER_STATUS_STATES.RECOVERING },
+      mode
+    );
+    assert.equal(descriptor.showReconnect, true);
+    assert.match(descriptor.bannerText, /retrying automatically/i);
+  }
 });
 
 test('scanner reconnect delay backs off and then caps', () => {

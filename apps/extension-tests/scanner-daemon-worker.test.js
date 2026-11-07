@@ -85,3 +85,51 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   delete globalThis.self;
   delete globalThis.navigator;
 });
+
+test('worker refuses ambiguous identical granted ports without scheduling retries', async () => {
+  const messages = [];
+  const listeners = new Map();
+  let opens = 0;
+  const port = () => ({
+    getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
+    open: async () => {
+      opens += 1;
+    }
+  });
+  globalThis.self = {
+    postMessage: (message) => messages.push(message),
+    addEventListener: (type, listener) => listeners.set(type, listener)
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { serial: { getPorts: async () => [port(), port()] } }
+  });
+  try {
+    await import(
+      `../extension/scanner/scanner-daemon-worker.js?ambiguous=${Date.now()}`
+    );
+    const errorStatus = new Promise((resolve) => {
+      const post = globalThis.self.postMessage;
+      globalThis.self.postMessage = (message) => {
+        post(message);
+        if (message.status?.state === 'error') resolve(message.status);
+      };
+    });
+    listeners.get('message')({
+      data: {
+        type: 'connectGranted',
+        profileId: 'zebra-ds8178-usb-cdc',
+        preferredPortInfo: { usbVendorId: 0x05e0, usbProductId: 0x1200 }
+      }
+    });
+    const status = await errorStatus;
+    assert.match(status.lastError, /select the scanner/i);
+    assert.equal(opens, 0);
+    listeners.get('message')({ data: { type: 'refreshPorts' } });
+    await Promise.resolve();
+    assert.equal(messages.at(-1).status.state, 'error');
+  } finally {
+    delete globalThis.self;
+    delete globalThis.navigator;
+  }
+});

@@ -71,6 +71,7 @@
       lastConnectedAt: normalizeIsoTimestamp(source.lastConnectedAt),
       lastDisconnectedAt: normalizeIsoTimestamp(source.lastDisconnectedAt),
       lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
+      observedAt: normalizeIsoTimestamp(source.observedAt),
       captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
       lastError: String(source.lastError || '').trim(),
       recoverAttemptCount: Math.max(

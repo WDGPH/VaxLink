@@ -2816,17 +2816,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       const bootstrap = await getScannerBootstrapState();
       let status = bootstrap.status;
-      if (bootstrap.enabled && bootstrap.profileId) {
-        await maybeStartScannerDaemon('status_request');
-        const daemonResponse = await sendScannerDaemonMessage({
+      let source = 'cached';
+      // Inspect only an existing daemon. Setup and reconnect remain explicit.
+      if (await hasScannerDaemonDocument()) {
+        const reply = await sendRuntimeMessage({
+          target: SCANNER_DAEMON_TARGET,
           action: SCANNER_DAEMON_ACTIONS.GET_STATUS
         }).catch(() => null);
-        if (daemonResponse && daemonResponse.success && daemonResponse.status) {
-          status = normalizeScannerStatusSnapshot(daemonResponse.status);
-          await persistScannerStatusSnapshot(status);
+        if (reply?.success && reply.status) {
+          status = normalizeScannerStatusSnapshot(reply.status);
+          source = reply.observation?.source === 'fresh' ? 'fresh' : 'cached';
         }
       }
-      sendResponse({ success: true, status });
+      const observedAt = status.observedAt || '';
+      sendResponse({
+        success: true,
+        status,
+        observation: {
+          source,
+          observedAt,
+          ageMs: observedAt
+            ? Math.max(0, Date.now() - Date.parse(observedAt))
+            : null
+        }
+      });
     })().catch((error) => {
       sendResponse({
         success: false,
@@ -2858,6 +2871,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const requestedPortInfo = normalizeScannerPortInfo(
         request.preferredPortInfo
       );
+      if (Object.hasOwn(request, 'preferredPortInfo') && !requestedPortInfo) {
+        throw new Error(
+          'The selected scanner cannot be identified safely. Select a scanner with USB metadata; the previous selection was not used.'
+        );
+      }
       if (requestedProfileId) {
         values[SCANNER_PROFILE_STORAGE_KEY] = requestedProfileId;
       }

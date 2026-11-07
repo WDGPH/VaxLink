@@ -73,6 +73,7 @@ let inventoryManager;
 let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
+let scannerStatusObservation = { source: 'cached', ageMs: null };
 let reasonConsentAutofillEnabled = true;
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -542,7 +543,7 @@ async function loadScannerStatus() {
       SCANNER_DAEMON_ACTIONS.GET_STATUS
     );
     if (response && response.success && response.status) {
-      applyScannerStatus(response.status);
+      applyScannerStatus(response.status, response.observation);
       return;
     }
   } catch (_) {
@@ -570,7 +571,8 @@ function openScannerSetupPage() {
   );
 }
 
-function applyScannerStatus(status) {
+function applyScannerStatus(status, observation = null) {
+  scannerStatusObservation = observation;
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   renderScannerStatusUi();
 }
@@ -578,7 +580,8 @@ function applyScannerStatus(status) {
 function renderScannerStatusUi() {
   const descriptor = buildScannerStatusDescriptor(
     scannerStatusSnapshot,
-    activeMode
+    activeMode,
+    scannerStatusObservation
   );
 
   if (scannerStatusTitle) {

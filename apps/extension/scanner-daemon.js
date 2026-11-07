@@ -12,6 +12,26 @@ let daemonWorker = null;
 let restartTimer = null;
 let desiredConnection = null;
 let currentStatus = createScannerStatusSnapshot();
+let statusRequestSequence = 0;
+const pendingStatusRequests = new Map();
+
+function observeStatus() {
+  if (!daemonWorker)
+    return Promise.resolve({ source: 'cached', status: currentStatus });
+  return new Promise((resolve) => {
+    const requestId = ++statusRequestSequence;
+    const timer = setTimeout(() => {
+      pendingStatusRequests.delete(requestId);
+      resolve({ source: 'cached', status: currentStatus });
+    }, 1000);
+    pendingStatusRequests.set(requestId, (status) => {
+      clearTimeout(timer);
+      pendingStatusRequests.delete(requestId);
+      resolve({ source: 'fresh', status });
+    });
+    daemonWorker.postMessage({ type: 'getStatus', requestId });
+  });
+}
 
 function postStatusToBackground(status) {
   chrome.runtime.sendMessage(
@@ -67,7 +87,9 @@ function ensureWorker() {
   daemonWorker.addEventListener('message', (event) => {
     const data = event.data || {};
     if (data.type === 'status') {
-      applyStatus(data.status);
+      const pending = pendingStatusRequests.get(data.requestId);
+      if (pending) pending(normalizeScannerStatusSnapshot(data.status));
+      else if (data.requestId === undefined) applyStatus(data.status);
       return;
     }
     if (data.type === 'scan') {
@@ -164,9 +186,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    ensureWorker().postMessage({ type: 'getStatus' });
-    sendResponse({ success: true, status: currentStatus });
-    return false;
+    void observeStatus().then(({ source, status }) => {
+      sendResponse({ success: true, status, observation: { source } });
+    });
+    return true;
   }
 
   return false;

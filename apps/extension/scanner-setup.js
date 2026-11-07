@@ -2,7 +2,8 @@ import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
   normalizeScannerPortInfo,
-  normalizeScannerStatusSnapshot
+  normalizeScannerStatusSnapshot,
+  selectGrantedPort
 } from './scanner/scanner-daemon-shared.js';
 import {
   SERIAL_SCANNER_PROFILES,
@@ -135,11 +136,11 @@ function applyDaemonStatus(status) {
 
 function renderDaemonRouteResult(response) {
   if (response?.locked) {
-    setStatus(
-      els.routeStatus,
-      `Scan saved while locked to the Multiple Inject queue (${response.queueSizeAfter || 0}).`,
-      'success'
-    );
+    const message =
+      response.workflow === 'single'
+        ? `Scan saved while locked to the pending inbox (${response.pendingCount || 0}).`
+        : `Scan saved while locked to the Multiple Inject queue (${response.queueSizeAfter || 0}).`;
+    setStatus(els.routeStatus, message, 'success');
     return;
   }
   if (response?.routed) {
@@ -273,19 +274,34 @@ async function reconnectGrantedPort() {
   try {
     setButtons({ canConnect: false, canDisconnect: false });
     const ports = await getGrantedSerialScannerPorts();
-    const port =
-      ports.find((candidate) => portMatchesProfile(candidate, profile)) ||
-      ports[0];
-    if (!port) {
+    const stored = await new Promise((resolve, reject) => {
+      chrome.storage.local.get([SCANNER_PORT_INFO_STORAGE_KEY], (values) => {
+        if (chrome.runtime.lastError)
+          reject(new Error(chrome.runtime.lastError.message));
+        else resolve(values);
+      });
+    });
+    const preferredPortInfo = normalizeScannerPortInfo(
+      stored?.[SCANNER_PORT_INFO_STORAGE_KEY]
+    );
+    const selection = selectGrantedPort(
+      ports,
+      profile,
+      preferredPortInfo,
+      portMatchesProfile
+    );
+    if (!selection.port) {
       throw new Error(
-        'No previously granted serial port found. Use Select Scanner first.'
+        'Cannot identify the selected scanner. Use Select Scanner; if identical devices are granted, remove unneeded browser permissions first.'
       );
     }
     const response = await sendScannerDaemonCommand(
       SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
       {
         profileId: profile.id,
-        preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
+        preferredPortInfo:
+          preferredPortInfo ||
+          normalizeScannerPortInfo(selection.port.getInfo()),
         enableAutostart: true,
         trigger: 'setup_reconnect'
       }

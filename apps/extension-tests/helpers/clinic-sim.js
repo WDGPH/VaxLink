@@ -191,7 +191,7 @@ export function createBackgroundHarness(bundle, options = {}) {
   const idleListeners = [];
   const offscreenCreations = [];
   const tabMessages = [];
-  let offscreenExists = false;
+  let offscreenExists = options.offscreenExists === true;
   let idleState = options.idleState || 'active';
   let badgeText = '';
 

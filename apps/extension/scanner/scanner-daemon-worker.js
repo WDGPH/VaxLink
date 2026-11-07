@@ -33,7 +33,8 @@ function postToHost(message) {
 function updateStatus(overrides = {}) {
   currentStatus = normalizeScannerStatusSnapshot({
     ...currentStatus,
-    ...overrides
+    ...overrides,
+    observedAt: new Date().toISOString()
   });
   postToHost({ type: 'status', status: currentStatus });
 }
@@ -148,6 +149,20 @@ async function connectGrantedPort(trigger = 'manual') {
     const port = selection.port;
 
     if (!port) {
+      if (
+        selection.reason === 'ambiguous' ||
+        selection.reason === 'preferred_missing' ||
+        selection.reason === 'no_match'
+      ) {
+        desiredConnected = false;
+        updateStatus({
+          state: SCANNER_STATUS_STATES.ERROR,
+          lastError:
+            'Scanner selection is not unique or the selected scanner is unavailable. Open Setup to select the scanner. If identical devices are granted, remove unneeded browser permissions first.',
+          recoverAttemptCount
+        });
+        return;
+      }
       const noPortState = desiredProfileId
         ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
         : SCANNER_STATUS_STATES.NEVER_CONFIGURED;
@@ -246,7 +261,15 @@ self.addEventListener('message', (event) => {
       }
       break;
     case 'getStatus':
-      postToHost({ type: 'status', status: currentStatus });
+      currentStatus = normalizeScannerStatusSnapshot({
+        ...currentStatus,
+        observedAt: new Date().toISOString()
+      });
+      postToHost({
+        type: 'status',
+        status: currentStatus,
+        requestId: data.requestId
+      });
       break;
     default:
       break;
