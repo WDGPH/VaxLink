@@ -33,7 +33,20 @@ documentation site.
 - Detects hardware barcode scanners (keystroke-timing heuristics), plus a dedicated Web Serial scanner channel for capture while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
 
-### Install (Developer Mode)
+### Installation
+
+Use the approved Chrome Web Store listing for production installation. Chrome
+manages updates for this path.
+
+Manual GitHub deployment is an IT-managed fallback, subject to organizational
+Chrome policies. Partner IT downloads an approved production ZIP from its GitHub
+Release, verifies it, extracts it, and loads the folder through Chrome's **Load
+unpacked** option. Manual deployments do not receive Chrome Web Store updates;
+partner IT must deliberately install subsequent approved versions. See the
+[release instructions](docs/RELEASING.md) for verification and historical
+checksum availability.
+
+For local development, load the unpacked extension:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
@@ -41,7 +54,7 @@ documentation site.
 4. Select `apps/extension`
 
 First test VaxLink in the Panorama training environment with synthetic training
-records. Reload the training page after installing or updating the extension.
+records. Reload supported Panorama tabs after installing or updating the extension.
 Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
 before moving to production.
 
@@ -50,7 +63,7 @@ before moving to production.
 - Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
 - Auto-check every 24h (alarms)
 - Manual refresh from popup
-- Keeps last-known-good bundle if refresh fails
+- Keeps the last-known-good catalogue if refresh fails
 
 ### Inventory
 
@@ -69,10 +82,11 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 ### Release channels
 
-`./scripts/package-extension.sh alpha|prod` packages the extension for the
-Chrome Web Store, stamping the channel name at build time (`dev` → VaxLink
-Alpha, `main` → VaxLink). See `CLAUDE.md` for the full build/release
-reference.
+`./scripts/package-extension.sh alpha|prod` builds the same channel ZIPs used
+for Web Store upload and GitHub Releases, stamping the channel name at build
+time. Production releases run from `main`; prereleases run from `alpha` for the
+separate VaxLink Alpha listing. Store uploads remain manual. See the
+[release process](docs/RELEASING.md).
 
 ## Notes
 
@@ -100,8 +114,8 @@ uv run --locked --group docs python -m mkdocs serve
 
 Open <http://127.0.0.1:8000/docs/vaxlink/latest/>. The local Material theme is
 for source checks; the hub applies its shared theme when publishing.
-The `docs.yml` workflow runs the strict check on pushes and pull requests to
-`main`. It does not publish a separate site or write to `gh-pages`.
+The `docs.yml` workflow runs the strict check on pushes to `main` and `alpha`,
+and on pull requests. It does not publish a separate site or write to `gh-pages`.
 
 ### Hub notifications and versions
 
@@ -128,4 +142,8 @@ merge it. Do not replace historical Markdown with current pages.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The licence permits use, copying, modification and
+redistribution when the copyright and licence notice is retained. It provides
+the software "as is," without warranty, and limits the liability of its authors
+and copyright holders. Separate pilot, MOU and support obligations are distinct
+from the open-source licence.

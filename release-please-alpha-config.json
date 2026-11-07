@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "prerelease": true,
+  "versioning": "prerelease",
+  "prerelease-type": "alpha",
+  "bootstrap-sha": "8b45b6ebec6c74933cbd680491b6ecef2265ef26",
+  "changelog-sections": [
+    {
+      "type": "feat",
+      "section": "Added"
+    },
+    {
+      "type": "fix",
+      "section": "Fixed"
+    },
+    {
+      "type": "perf",
+      "section": "Changed"
+    },
+    {
+      "type": "refactor",
+      "section": "Changed",
+      "hidden": true
+    },
+    {
+      "type": "docs",
+      "section": "Docs",
+      "hidden": true
+    },
+    {
+      "type": "test",
+      "section": "Tests",
+      "hidden": true
+    },
+    {
+      "type": "chore",
+      "section": "Chores",
+      "hidden": true
+    }
+  ],
+  "packages": {
+    ".": {
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "apps/extension/manifest.json",
+          "jsonpath": "$.version_name"
+        }
+      ]
+    }
+  }
+}
