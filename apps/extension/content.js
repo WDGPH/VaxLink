@@ -246,11 +246,11 @@ function lookupVaccineInfoByLot(lot, gtin) {
     chrome.runtime.sendMessage(request, (response) => {
       if (chrome.runtime.lastError) {
         console.warn('Hands-free lot lookup failed:', chrome.runtime.lastError.message);
-        resolve(null);
+        resolve({ error: 'NVC lookup is unavailable', errorCategory: 'unavailable' });
         return;
       }
       if (!response || response.error) {
-        resolve(null);
+        resolve(response || { error: 'NVC lookup is unavailable', errorCategory: 'unavailable' });
         return;
       }
       resolve(response);
@@ -505,7 +505,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     let lookupAttempted = false;
     if (parsed.lot) {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
+      const lookup = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
+      if (lookup?.error) parsed.lookup_error = lookup.error;
+      else vaccineInfo = lookup;
     }
 
     // Do not treat GTIN as a lot lookup key (pilot: wrong agent / e.g. TI vs HB).
@@ -650,6 +652,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     showVaxlinkToast(parsed);
   } else if (!pending) {
     playAudioCue('error');
+    if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
   vlog('hands-free autofill', autofillResult?.status, { source, parsed });
   return {
@@ -663,6 +666,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
 
 function isHandsFreeSupportedPage() {
   try {
+    if (window.location.protocol !== 'https:') return false;
     if (window.top !== window.self) {
       return false;
     }
@@ -678,7 +682,8 @@ function isHandsFreeSupportedPage() {
     const path = String(window.location.pathname || '').toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
-       host === 'panorama.prod.ehealthontario.ca') &&
+       host === 'panorama.prod.ehealthontario.ca' ||
+       host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
     const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
 
@@ -2257,10 +2262,12 @@ function schedulePanoramaLotOrTradeSelection(data, initialDelayMs = 0, options =
 
 function isPanoramaRecordImmsPage() {
   try {
+    if (window.location.protocol !== 'https:') return false;
     const host = String(window.location.hostname || '').toLowerCase();
     const isPanorama =
       host === 'www.panorama.prod.ehealthontario.ca' ||
-      host === 'panorama.prod.ehealthontario.ca';
+      host === 'panorama.prod.ehealthontario.ca' ||
+      host === 'trpanoramadhir.prod.ehealthontario.ca';
     if (!isPanorama) return false;
     return window.location.pathname.toLowerCase().includes('/recordimms/');
   } catch {
@@ -3134,6 +3141,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${queuedNote}
+    ${data.lookup_error ? `<div class="vl-toast-detail">${escapeToastHtml(data.lookup_error)}. Vaccine details are incomplete; verify the chart.</div>` : ''}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
 

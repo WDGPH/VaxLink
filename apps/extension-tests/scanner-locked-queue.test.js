@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createBackgroundHarness } from './helpers/clinic-sim.js';
+import { createBackgroundHarness, makeTestNvcBundle } from './helpers/clinic-sim.js';
 
-const EMPTY_BUNDLE = { resourceType: 'Bundle', entry: [] };
+const EMPTY_BUNDLE = makeTestNvcBundle();
 const MULTIPLE_KEY = 'multiple_inject_queue_v1';
 const PENDING_KEY = 'vaxlink_pending_scan_inbox_v1';
 

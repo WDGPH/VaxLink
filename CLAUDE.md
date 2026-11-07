@@ -33,7 +33,7 @@ Install for manual testing: load `apps/extension/` as an unpacked extension in `
 ./scripts/package-extension.sh prod    # dist/vaxlink-prod-<v>.zip,  name "VaxLink"
 ```
 
-Release channels: `dev` = VaxLink Alpha, `main` = VaxLink (two separate Web Store listings). The extension *name* is stamped by the package script, never edited in `manifest.json` — the manifest must stay identical across branches so `dev → main` merges don't conflict. Only `version` is bumped in git, and it flows through merges.
+Production releases run from `main` and prereleases from `alpha` through release-please, with separate VaxLink and VaxLink Alpha listings. Store uploads remain manual. The extension name is stamped by the package script; release-please owns version changes. See `docs/RELEASING.md`.
 
 ## Extension Architecture
 
@@ -83,8 +83,9 @@ The ROADMAP describes a planned platform registry refactor. Until that lands, ne
 ## CI
 
 GitHub Actions:
-- `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `dev`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and both channel zips uploaded as workflow artifacts. Web Store uploads are manual: download the tested zip from the run.
-- `.github/workflows/docs.yml` — builds the MkDocs documentation site on pushes and PRs to `main`; publishes it to the `gh-pages` branch on pushes to `main`.
+- `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `alpha`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as workflow artifacts (Alpha only for prereleases; both channels for stable versions). Web Store uploads are manual: download the tested zip from the run.
+- `.github/workflows/docs.yml` — runs the locked, strict MkDocs documentation check on pushes to `main`/`alpha` and on PRs; it does not publish.
+- `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `README.md` for token setup and historical release reconciliation.
 
 ## Important Constraints
 

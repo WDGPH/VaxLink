@@ -10,7 +10,6 @@ import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-pa
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,
-  formatNVCRefreshMessage,
   setButtonBusy,
   showOutput
 } from './popup-ui.js';
@@ -296,7 +295,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           manufacturer: parsedData.manufacturer || '',
           expiryFlag: parsedData.expiry_flag || getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry).flag
         });
-        writeOutput('Chart auto-filled', 'success');
+        writeOutput(parsedData.lookup_error
+          ? `Barcode fields filled. ${parsedData.lookup_error}. Verify vaccine details on the chart.`
+          : 'Chart auto-filled', parsedData.lookup_error ? 'warning' : 'success');
       } catch (error) {
         logAnalyticsEvent('autofill_result', {
           workflow: activeMode,
@@ -331,22 +332,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (refreshNvcBtn) {
     refreshNvcBtn.addEventListener('click', () => {
       refreshNvcBtn.disabled = true;
-      writeOutput('Refreshing NVC bundle...', 'info');
+      writeOutput('Refreshing NVC catalogue...', 'info');
+      if (nvcStatusDiv) nvcStatusDiv.textContent = 'NVC is refreshing.';
 
       chrome.runtime.sendMessage({ action: 'refreshNVCBundle' }, (response) => {
         refreshNvcBtn.disabled = false;
+        loadNVCStatus();
         if (chrome.runtime.lastError) {
           writeOutput(`NVC refresh failed: ${chrome.runtime.lastError.message}`, 'error');
           return;
         }
 
         if (!response || !response.success) {
-          writeOutput(`NVC refresh failed: ${response?.error || 'Unknown error'}`, 'error');
+          writeOutput(response?.usable
+            ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
+            : 'Unable to refresh NVC. No usable catalogue is available.', 'error');
           return;
         }
 
-        writeOutput(formatNVCRefreshMessage(response), 'success');
-        loadNVCStatus();
+        writeOutput(response.unchanged ? 'NVC catalogue checked — no changes detected.'
+          : 'NVC catalogue refreshed successfully.', 'success');
       });
     });
   }
@@ -1423,6 +1428,7 @@ function loadNVCStatus() {
       return;
     }
     renderNVCStatus(status, nvcStatusDiv);
+    if (status?.state === 'refreshing') setTimeout(loadNVCStatus, 1000);
   });
 }
 
@@ -1740,7 +1746,9 @@ async function handleUseMultipleInjectRecord(record) {
     const dosesMessage = updatedRemaining !== null && updatedRemaining > 0 && updatedRemaining !== 1
       ? ` ${updatedRemaining} dose(s) remaining in this vial.`
       : '';
-    writeOutput(`${label} auto-filled from Multiple Inject queue.${dosesMessage}`, 'success');
+    writeOutput(record.lookup_error
+      ? `Barcode fields filled. ${record.lookup_error}. Verify vaccine details on the chart.`
+      : `${label} auto-filled from Multiple Inject queue.${dosesMessage}`, record.lookup_error ? 'warning' : 'success');
   } catch (error) {
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
