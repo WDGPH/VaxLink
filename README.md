@@ -60,7 +60,7 @@ before moving to production.
 
 ### Data update model
 
-- Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
+- Source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
 - Auto-check every 24h (alarms)
 - Manual refresh from popup
 - Keeps the last-known-good catalogue if refresh fails

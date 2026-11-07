@@ -1581,18 +1581,34 @@ async function performNVCRefresh(options) {
     const { response, bundle } = await downloadNVCCatalogue(headers);
     const checkedAt = new Date().toISOString();
     const health = { lastAttemptAt: nvcHealth.lastAttemptAt, lastError: null };
-    if (response.status === 304) {
-      if (!hasUsableNVCCatalogue()) throw Object.assign(new Error(), { category: 'invalid' });
+    const firstRefresh = !hasUsableNVCCatalogue();
+    let indexes = nvcIndexes;
+    let computedSha256 = nvcHealth.sha256;
+    let unchanged = response.status === 304;
+    if (unchanged) {
+      if (firstRefresh) throw Object.assign(new Error(), { category: 'invalid' });
+    } else {
+      category = 'invalid';
+      indexes = prepareNVCCatalogue(bundle);
+      computedSha256 = await sha256Hex(JSON.stringify(bundle));
+      const previousSha256 = nvcHealth.sha256 ||
+        (nvcBundle ? await sha256Hex(JSON.stringify(nvcBundle)) : null);
+      unchanged = !firstRefresh && computedSha256 === previousSha256;
+    }
+    const addedLotCount = unchanged ? 0 : Object.keys(indexes.lotByCode)
+      .filter((code) => !Object.hasOwn(nvcIndexes.lotByCode || {}, code)).length;
+    const outcome = { firstRefresh, unchanged, addedLotCount, ...indexes.catalogueInfo };
+    const lastModified = response.headers.get('Last-Modified') ||
+      (response.status === 304 ? nvcHealth.lastModified : null);
+    if (unchanged) {
       category = 'storage';
-      await setStorage({ [STORAGE_KEYS.lastCheckAt]: checkedAt, [STORAGE_KEYS.health]: health });
-      Object.assign(nvcHealth, { lastCheckAt: checkedAt, lastError: null });
-      return { success: true, unchanged: true, sourceUrl: DEFAULT_NVC_SOURCE_URL,
+      await setStorage({ [STORAGE_KEYS.lastCheckAt]: checkedAt,
+        [STORAGE_KEYS.lastModified]: lastModified, [STORAGE_KEYS.bundleSha256]: computedSha256,
+        [STORAGE_KEYS.health]: health });
+      Object.assign(nvcHealth, { lastCheckAt: checkedAt, lastModified, sha256: computedSha256, lastError: null });
+      return { success: true, ...outcome, sourceUrl: DEFAULT_NVC_SOURCE_URL,
         updatedAt: nvcHealth.updatedAt, checkedAt, usable: true };
     }
-    category = 'invalid';
-    const indexes = prepareNVCCatalogue(bundle);
-    const computedSha256 = await sha256Hex(JSON.stringify(bundle));
-    const lastModified = response.headers.get('Last-Modified') || null;
     category = 'storage';
     await setStorage({
       [STORAGE_KEYS.bundle]: bundle,
@@ -1610,7 +1626,7 @@ async function performNVCRefresh(options) {
     Object.assign(nvcHealth, { updatedAt: checkedAt, lastCheckAt: checkedAt,
       sha256: computedSha256, lastModified, lastError: null });
     await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true }).catch(() => undefined);
-    return { success: true, sourceUrl: DEFAULT_NVC_SOURCE_URL, updatedAt: checkedAt,
+    return { success: true, ...outcome, sourceUrl: DEFAULT_NVC_SOURCE_URL, updatedAt: checkedAt,
       checkedAt, entryCount: bundle.entry.length, sha256: computedSha256, usable: true };
   } catch (error) {
     nvcHealth.lastError = error.category || category;
@@ -1650,6 +1666,7 @@ async function getNVCUpdateStatus() {
     lastAttemptAt: nvcHealth.lastAttemptAt || null,
     lastError: nvcHealth.lastError || null,
     sha256: nvcHealth.sha256 || null,
+    ...(nvcIndexes.catalogueInfo || { lotCount: null, releaseVersion: null, releaseDate: null }),
     autoSyncIntervalMinutes: AUTO_SYNC_INTERVAL_MINUTES
   };
 }
@@ -1705,15 +1722,13 @@ function buildNVCIndexes(bundle) {
   const lotByCodePrefix = Object.create(null);
   
   for (const concept of lots) {
-    const code = concept.code;
-    if (normalizeCodeKey(code)) {
-      const codeKey = normalizeCodeKey(code);
-      lotByCode[codeKey] = concept;
-      const underscoreIdx = codeKey.indexOf('_');
-      const prefix = underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
-      if (prefix && !lotByCodePrefix[prefix]) {
-        lotByCodePrefix[prefix] = concept;
-      }
+    const codeKey = normalizeCodeKey(concept.code);
+    if (!codeKey || /[\s\x00-\x1f\x7f]/.test(codeKey)) continue;
+    lotByCode[codeKey] = concept;
+    const underscoreIdx = codeKey.indexOf('_');
+    const prefix = underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
+    if (prefix && !lotByCodePrefix[prefix]) {
+      lotByCodePrefix[prefix] = concept;
     }
     const lotNumber = extractLotNumber(concept);
     if (lotNumber) {
@@ -1726,7 +1741,14 @@ function buildNVCIndexes(bundle) {
   const lotAgentMappingByLot = buildLotAgentMappingIndex(lotAgentRows);
   bgLog('Indexed', Object.keys(lotAgentMappingByLot).length, 'lot-agent mappings by lot key');
   
+  const lotResource = bundle.entry.find(({ resource }) =>
+    resource.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id')?.resource;
   return {
+    catalogueInfo: {
+      lotCount: Object.keys(lotByCode).length,
+      releaseVersion: typeof lotResource?.version === 'string' ? lotResource.version.trim() || null : null,
+      releaseDate: typeof lotResource?.date === 'string' ? lotResource.date.trim() || null : null
+    },
     tradenameByCode,
     tradenameByDin,
     tradenameByName,

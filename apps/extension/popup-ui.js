@@ -16,9 +16,42 @@ export function describeNVCHealth(status) {
   return 'NVC is ready.';
 }
 
+export function formatNVCRefreshMessage(status) {
+  if (!status?.success) return status?.usable
+    ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
+    : 'Unable to refresh NVC. No usable catalogue is available.';
+  const count = Number(status.lotCount || 0).toLocaleString();
+  const codes = status.lotCount === 1 ? 'lot code' : 'lot codes';
+  if (status.firstRefresh) return `NVC catalogue loaded successfully — ${count} distinct ${codes}.`;
+  if (status.unchanged) return 'NVC catalogue checked — no changes detected.';
+  if (status.addedLotCount > 0) {
+    return `NVC catalogue updated — ${status.addedLotCount.toLocaleString()} new lot codes; ${count} total.`;
+  }
+  return 'NVC catalogue updated — no new lot codes.';
+}
+
 export function renderNVCStatus(status, container) {
   if (!container || !status) return;
-  container.textContent = `${describeNVCHealth(status)} Last downloaded: ${formatDateTime(status.updatedAt)} | Last checked: ${formatDateTime(status.lastCheckAt)}`;
+  const publication = status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
+    ? status.releaseDate : 'Unavailable';
+  const rows = [
+    ['Last downloaded', formatDateTime(status.updatedAt)],
+    ['Last checked by VaxLink', formatDateTime(status.lastCheckAt)],
+    ['Last refresh attempt', formatDateTime(status.lastAttemptAt)]
+  ];
+  container.innerHTML = `
+    <div>${escapeHtml(describeNVCHealth(status))}</div>
+    <div class="nvc-status-heading">
+      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `NVC v${status.releaseVersion}` : 'NVC version unavailable')}</span>
+      ${status.lotCount == null ? '' : `<span class="nvc-status-count">${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</span>`}
+    </div>
+    <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
+    <details class="nvc-status-sync">
+      <summary>Refresh details</summary>
+      <dl class="nvc-status-details">${rows.map(([label, value]) =>
+        `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>
+      <div class="nvc-status-footer">Auto-check: every ${Math.round((status.autoSyncIntervalMinutes || 0) / 60)}h</div>
+    </details>`;
 }
 
 export function setButtonBusy(button, busy, busyText) {

@@ -10,6 +10,7 @@ import { getExpiryStatus, outputTypeForExpiry, parseInputData } from './popup-pa
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,
+  formatNVCRefreshMessage,
   setButtonBusy,
   showOutput
 } from './popup-ui.js';
@@ -70,8 +71,6 @@ let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let reasonConsentAutofillEnabled = true;
 
-const lotLookupCache = new Map();
-const LOT_LOOKUP_CACHE_MAX = 64;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
@@ -343,15 +342,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           return;
         }
 
-        if (!response || !response.success) {
-          writeOutput(response?.usable
-            ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
-            : 'Unable to refresh NVC. No usable catalogue is available.', 'error');
-          return;
-        }
-
-        writeOutput(response.unchanged ? 'NVC catalogue checked — no changes detected.'
-          : 'NVC catalogue refreshed successfully.', 'success');
+        writeOutput(formatNVCRefreshMessage(response), response?.success ? 'success' : 'error');
       });
     });
   }
@@ -1413,6 +1404,7 @@ function removeLastPendingScanLine() {
 function loadNVCStatus() {
   chrome.runtime.sendMessage({ action: 'getNVCUpdateStatus' }, (status) => {
     if (chrome.runtime.lastError || !status) {
+      if (nvcStatusDiv) nvcStatusDiv.textContent = 'NVC status could not be checked. Try Refresh NVC Data.';
       return;
     }
     renderNVCStatus(status, nvcStatusDiv);
@@ -1461,36 +1453,16 @@ function sendScannerDaemonCommand(action, payload = {}) {
   return sendRuntimeMessage({ action, ...payload });
 }
 
-function buildLotLookupCacheKey(lot, gtin) {
-  const lotKey = String(lot || '').trim().toLowerCase();
-  const gtinKey = String(gtin || '').replace(/\D/g, '');
-  return `${lotKey}|${gtinKey}`;
-}
-
 async function lookupVaccineInfo(lot, gtin) {
   const lotKey = String(lot || '').trim().toLowerCase();
   if (!lotKey) {
     return { error: 'No lot number provided' };
   }
-  const cacheKey = buildLotLookupCacheKey(lot, gtin);
-  if (lotLookupCache.has(cacheKey)) {
-    return lotLookupCache.get(cacheKey);
-  }
   const message = { action: 'lookupVaccineInfo', lot };
   if (gtin) {
     message.gtin = gtin;
   }
-  const response = await sendRuntimeMessage(message);
-  // Cache successes only: a transient error (cold service worker, bundle not
-  // yet loaded) must not poison this lot for the popup's whole lifetime.
-  if (response && !response.error) {
-    if (lotLookupCache.size >= LOT_LOOKUP_CACHE_MAX) {
-      const oldest = lotLookupCache.keys().next().value;
-      if (oldest !== undefined) lotLookupCache.delete(oldest);
-    }
-    lotLookupCache.set(cacheKey, response);
-  }
-  return response;
+  return sendRuntimeMessage(message);
 }
 
 async function addPreviewScanToInventory() {
