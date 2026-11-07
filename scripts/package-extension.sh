@@ -35,6 +35,16 @@ try:
     shutil.copytree(src, ext, ignore=lambda d, names: [n for n in names
         if n in EXCLUDE or n.endswith((".test.js", ".spec.js"))])
 
+    if channel == "prod":
+        # Keep call sites inert and leave diagnostic implementation out of the ZIP.
+        with open(os.path.join(ext, "capability.js"), "w") as f:
+            f.write("globalThis.VaxLinkDiagnostics = Object.freeze({ enabled: false, record() {} });\n")
+        shutil.rmtree(os.path.join(ext, "diagnostics"), ignore_errors=True)
+        for name in ("diagnostics.html", "diagnostics.js"):
+            path = os.path.join(ext, name)
+            if os.path.exists(path):
+                os.remove(path)
+
     manifest_path = os.path.join(ext, "manifest.json")
     with open(manifest_path) as f:
         manifest = json.load(f)

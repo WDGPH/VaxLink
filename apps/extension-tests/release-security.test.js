@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { runInNewContext } from 'node:vm';
 
 function packageProject(t) {
   const source = fileURLToPath(new URL('../..', import.meta.url));
@@ -141,6 +142,51 @@ test('successive Alpha prereleases have increasing Chrome versions and cannot sh
         }),
       /Production packages require a stable package version/
     );
+  }
+});
+
+test('packaged diagnostics capability is selected by channel', (t) => {
+  const root = packageProject(t);
+  const version = '1.1.5';
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
+  for (const path of [
+    'diagnostics/probe.js',
+    'diagnostics.html',
+    'diagnostics.js'
+  ]) {
+    const target = join(root, 'apps/extension', path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, 'diagnostic asset');
+  }
+  for (const channel of ['alpha', 'prod']) {
+    const { names } = buildPackage(root, channel, version);
+    const source = execFileSync(
+      'python3',
+      [
+        '-c',
+        'import sys,zipfile; print(zipfile.ZipFile(sys.argv[1]).read("capability.js").decode())',
+        `dist/vaxlink-${channel}-${version}.zip`
+      ],
+      { cwd: root, encoding: 'utf8' }
+    );
+    const context = {
+      chrome: { storage: { local: { diagnosticsEnabled: true } } }
+    };
+    runInNewContext(source, context);
+    assert.equal(context.VaxLinkDiagnostics.enabled, channel === 'alpha');
+    assert.equal(Object.isFrozen(context.VaxLinkDiagnostics), true);
+    assert.equal(context.VaxLinkDiagnostics.record(), undefined);
+    for (const path of [
+      'diagnostics/probe.js',
+      'diagnostics.html',
+      'diagnostics.js'
+    ]) {
+      assert.equal(
+        names.includes(path),
+        channel === 'alpha',
+        `${channel}: ${path}`
+      );
+    }
   }
 });
 

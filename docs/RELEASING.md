@@ -34,6 +34,19 @@ higher than the one already uploaded to that listing.
 `version_name` into the packaged manifest. Keep channel identity out of source
 branch differences; runtime channel behaviour derives from the manifest name.
 
+### Diagnostic capabilities
+
+Packaging selects capabilities from the explicit `alpha` or `prod` argument.
+Unpacked source enables the Alpha diagnostic facade for development. Production
+packaging replaces it with a frozen disabled facade and excludes the diagnostic
+implementation and viewer assets. A saved preference or manifest display name
+cannot enable those absent files. Reliability fixes and health checks remain in
+both channels when promoted.
+
+Source files still load directly without transpilation. Packaging chooses files
+and stamps channel identity; it does not introduce a bundler. Developer browser
+captures stay outside `apps/extension/` and never belong in either ZIP.
+
 ### Alpha releases
 
 1. Merge conventional commits into `alpha`. Release-please uses
