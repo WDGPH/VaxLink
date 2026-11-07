@@ -1283,17 +1283,6 @@ function fillPanoramaAgentField(selectors, candidate) {
   return false;
 }
 
-function runPanoramaMappings(entries) {
-  let fillCount = 0;
-  for (const entry of entries) {
-    if (!entry || !entry.value || !entry.selectors) continue;
-    if (fillFirstMatchingField(entry.selectors, entry.value)) {
-      fillCount += 1;
-    }
-  }
-  return fillCount;
-}
-
 function parseAdministeredDateTime(value) {
   if (!value) return null;
   const raw = String(value).trim();
@@ -1605,11 +1594,6 @@ function isPrimeFacesAjaxBusy() {
     return false;
   }
   return false;
-}
-
-function buildPanoramaDeferredDetailMappings(data) {
-  void data;
-  return [];
 }
 
 function fillPanoramaDeferredDetailFields(data) {

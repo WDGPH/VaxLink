@@ -47,7 +47,7 @@ The extension has three execution contexts that communicate via `chrome.runtime.
 - Action icon and badge management
 
 **`content.js`** — injected into Panorama and InputHealth pages. Owns:
-- Hardware barcode scanner detection (keystroke timing heuristics)
+- Receives Web Serial scans on supported pages
 - HUD overlay on supported pages
 - EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
 - Workflow mode reading from `chrome.storage.local`
@@ -83,7 +83,10 @@ The ROADMAP describes a planned platform registry refactor. Until that lands, ne
 ## CI
 
 GitHub Actions:
-- `.github/workflows/extension-ci.yml` — on extension-related pushes/PRs to `alpha`/`main`: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as workflow artifacts (Alpha only for prereleases; both channels for stable versions). Web Store uploads are manual: download the tested zip from the run.
+- `.github/workflows/extension-ci.yml` — checks syntax and runs tests for
+  extension changes in PRs and pushes to `alpha`/`main`. Tests that need the live
+  catalogue skip if it cannot be downloaded. Uploads Alpha ZIPs for prereleases
+  and both channel ZIPs for stable versions. Web Store uploads are manual.
 - `.github/workflows/docs.yml` — runs the locked, strict MkDocs documentation check on pushes to `main`/`alpha` and on PRs; it does not publish.
 - `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `README.md` for token setup and historical release reconciliation.
 

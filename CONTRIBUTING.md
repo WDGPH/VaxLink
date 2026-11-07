@@ -61,7 +61,7 @@ and `docs:` remain valid without forcing a release. See the
 
 ## Pull Requests
 
-- Keep `manifest.json` identical across branches — the extension *name* is stamped by `scripts/package-extension.sh` at package time, never edited directly, so `alpha` → `main` merges don't conflict. Release-please owns version changes.
+- Let `scripts/package-extension.sh` set the extension name for each channel. Release-please manages versions separately on `alpha` and `main`; do not change them by hand.
 - Run `npm test` for extension changes and `uv sync --locked --group docs` followed by `uv run --locked --group docs mkdocs build --strict` for documentation changes before opening a PR.
 
 Documentation ownership and notification setup are described in the

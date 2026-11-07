@@ -624,18 +624,6 @@ function logAnalyticsEvent(eventType, payload = {}) {
   });
 }
 
-function sendAnalyticsMessage(action, payload = {}) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action, ...payload }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve(response);
-    });
-  });
-}
-
 function getLocalStorage(keys) {
   return new Promise((resolve, reject) => {
     chrome.storage.local.get(keys, (result) => {
