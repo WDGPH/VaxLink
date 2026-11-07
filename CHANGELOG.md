@@ -8,6 +8,18 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [1.2.0-alpha](https://github.com/WDGPH/VaxLink/compare/v1.1.5...v1.2.0-alpha) (2026-11-07)
+
+
+### Added
+
+* clarify NVC catalogue details and refresh results ([#70](https://github.com/WDGPH/VaxLink/issues/70)) ([2322130](https://github.com/WDGPH/VaxLink/commit/23221301213492e0aafa1acc0f8a437d67e9b54e))
+
+
+### Fixed
+
+* keep NVC lookups reliable during startup and refresh ([#61](https://github.com/WDGPH/VaxLink/issues/61)) ([6c685a5](https://github.com/WDGPH/VaxLink/commit/6c685a5be99fb451618cebac0578c4a73816bace))
+
 ## [1.1.5](https://github.com/WDGPH/VaxLink/compare/v1.1.4...v1.1.5) (2026-11-06)
 
 
