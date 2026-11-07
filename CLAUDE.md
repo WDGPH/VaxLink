@@ -83,7 +83,7 @@ The ROADMAP describes a planned platform registry refactor. Until that lands, ne
 ## CI
 
 GitHub Actions:
-- `.github/workflows/extension-ci.yml` — on extension-related pushes to `alpha`/`main` and pull requests: syntax checks, full test suite (NVC suites skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as workflow artifacts (Alpha only for prereleases; both channels for stable versions). Web Store uploads are manual: download the tested zip from the run.
+- `.github/workflows/extension-ci.yml` — on extension-related pushes to `alpha`/`main` and pull requests: syntax checks, full test suite (live-catalogue suites skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as workflow artifacts (Alpha only for prereleases; both channels for stable versions). Web Store uploads are manual: download the tested zip from the run.
 - `.github/workflows/docs.yml` — runs the locked, strict MkDocs documentation check on pushes to `main`/`alpha` and on PRs; it does not publish.
 - `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `README.md` for token setup and historical release reconciliation.
 
