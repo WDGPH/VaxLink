@@ -37,6 +37,7 @@ nav:
   - Home: index.md
   - Architecture: architecture.md
   - Diagnostics: diagnostics.md
+  - Synthetic Browser Capture: browser-capture.md
   - Adding a New EMR: adding-an-emr.md
   - Release Process: RELEASING.md
   - Roadmap: roadmap.md

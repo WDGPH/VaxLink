@@ -17,3 +17,6 @@ site/
 
 # Node development dependencies
 node_modules/
+
+# Local synthetic browser investigation artifacts
+.local-captures/

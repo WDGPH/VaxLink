@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VaxLink synthetic chart</title>
+  </head>
+  <body>
+    <form>
+      <p>Synthetic chart for local VaxLink testing. VAXLINK-SYNTHETIC-MARKER</p>
+      <label
+        >Agent
+        <select
+          id="immsDetailssection_recordImms_agentiterm:selectOneMenu_input"
+        >
+          <option value="">Select</option>
+          <option value="tdap">Tdap</option>
+        </select></label
+      >
+      <label
+        >Lot
+        <select
+          id="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"
+        >
+          <option value="">Select</option>
+        </select></label
+      >
+      <label
+        >Date <input id="immsDetailssection_dateAdministedDate:dateInput_input"
+      /></label>
+      <label
+        >Time
+        <input id="immsDetailssection_dateAdministedDate:timeInput:timeInput"
+      /></label>
+      <label
+        >Reason
+        <select
+          id="immsDetailssection_reasonForImmunizationSelect:iTermSelectOneMenu_input"
+        >
+          <option value="">Select</option>
+          <option value="routine">Routine</option>
+        </select></label
+      >
+      <label
+        >Consent
+        <select
+          id="immsDetailssection_consentReadinessReasonSelect:iTermSelectOneMenu_input"
+        >
+          <option value="">Select</option>
+          <option value="consent">Consent obtained</option>
+        </select></label
+      >
+    </form>
+    <script>
+      document
+        .getElementById(
+          'immsDetailssection_recordImms_agentiterm:selectOneMenu_input'
+        )
+        .addEventListener('change', () => {
+          fetch('/synthetic-resource');
+          setTimeout(() => {
+            const old = document.getElementById(
+              'immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input'
+            );
+            const replacement = old.cloneNode(false);
+            for (const [value, label] of [
+              ['', 'Select'],
+              ['lot', 'TESTLOT']
+            ])
+              replacement.add(new Option(label, value));
+            old.replaceWith(replacement);
+          }, 450);
+        });
+    </script>
+  </body>
+</html>

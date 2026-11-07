@@ -151,3 +151,29 @@ failure. A training hostname alone does not prove that its records are synthetic
 Local code, package, and synthetic browser checks do not establish physical
 scanner behavior, institutional access, live Panorama behavior, or Store
 publication. Keep those acceptance checks separate.
+
+Use the [synthetic browser runner](browser-capture.md) for a local reproduction
+with optional HAR, Playwright, and Chrome performance artifacts. These captures
+use a separate disposable profile and have a different privacy boundary from
+the filtered workflow recorder.
+
+## Acceptance checks with synthetic data
+
+Use a dedicated synthetic chart and barcode. Change catalogue or page fixtures
+only in a disposable developer profile. Never clear real queues to run a check.
+
+| Scenario                                                 | Check                                                                                                                   |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Normal success, recording off and on                     | Same intended fields; recording distinguishes delivery from final field verification.                                   |
+| Scanner test with no input or an incomplete frame        | No-data or incomplete evidence; no clinical queue or counter changes.                                                   |
+| Catalogue unavailable or lot unmatched                   | Existing typed lookup failure; no claim of successful enrichment.                                                       |
+| Missing integration, then an old packaged content script | Health reports missing or stale; inspection does not reload or reinject.                                                |
+| Delayed options and a replaced control                   | Retry timing and node replacement appear; the final observation refers to the owning form.                              |
+| Staff edits a field while retries are pending            | Late writes stop; cancellation is visible.                                                                              |
+| Navigate or replace the owning form during a fill        | The old operation stops and cannot write to the next chart.                                                             |
+| Background worker stops during recording                 | Later event-driven delivery rejoins; interruption or missing history remains visible. Check again with DevTools closed. |
+| Stop, expiry, clear, and browser restart                 | No further recording after Stop; expired previews cannot download; session data does not survive restart.               |
+
+For a hardware comparison, repeat idle/reconnect and scanner cross-swap checks
+on both workstations. A browser automation connection can change worker lifetime;
+it cannot establish normal idle behavior by itself.
