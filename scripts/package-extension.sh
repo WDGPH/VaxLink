@@ -56,6 +56,7 @@ try:
         package_version = str(json.load(f).get("version") or manifest["version"])
 
     manifest["name"] = "VaxLink" if channel == "prod" else "VaxLink Alpha"
+    manifest["action"]["default_title"] = manifest["name"]
     # Keep the prerelease sequence in Chrome's numeric version so successive
     # Alpha uploads can update the same listing. The initial -alpha is sequence 0.
     match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-alpha(?:\.(\d+))?)?", package_version)

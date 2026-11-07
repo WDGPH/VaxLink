@@ -85,6 +85,7 @@ test('alpha and production packaging exclude catalogue snapshots and development
       manifest.name,
       channel === 'prod' ? 'VaxLink' : 'VaxLink Alpha'
     );
+    assert.equal(manifest.action.default_title, manifest.name);
     assert.ok(names.includes('manifest.json'), channel);
     assert.ok(names.includes('content.js'), channel);
     for (const path of excluded)
