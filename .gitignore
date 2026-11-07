@@ -14,3 +14,6 @@ docs/pilot/
 # mkdocs docs site (built by `uv run mkdocs build`)
 site/
 .venv/
+
+# Node development dependencies
+node_modules/

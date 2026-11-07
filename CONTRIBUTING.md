@@ -31,6 +31,31 @@ See `apps/extension/README.md` for the module breakdown and storage model.
 - Sanitize to the minimal structural fragment you actually need (e.g. the specific `<select>`/`<input>` elements and their field IDs), not the full page.
 - See `apps/extension-tests/panorama-reason-consent.test.js` for the pattern: inline HTML fragments embedded directly in the test, no fixture files on disk.
 
+## Formatting
+
+Install the formatter and enable the hooks once per clone:
+
+```bash
+npm ci
+npm run setup:hooks
+```
+
+Format the files you changed, review them, then stage and commit:
+
+```bash
+npm run format -- apps/extension/popup.js
+git add apps/extension/popup.js
+git commit -m "fix: describe the change"
+```
+
+The pre-commit hook checks what you staged, including partially staged files.
+Stage or restore changes to formatter settings before committing. Actions uses
+the same rules to check files changed by a PR or push. Generated changelogs and
+local catalogue snapshots are excluded.
+
+If you already use a custom hooks path, setup leaves it alone. Add
+`.githooks/pre-commit` and `.githooks/commit-msg` to your existing setup.
+
 ## Commit and pull request titles
 
 Use Conventional Commit titles for local commits and pull requests. With squash
@@ -61,7 +86,7 @@ and `docs:` remain valid without forcing a release. See the
 
 ## Pull Requests
 
-- Keep `manifest.json` identical across branches — the extension *name* is stamped by `scripts/package-extension.sh` at package time, never edited directly, so `alpha` → `main` merges don't conflict. Release-please owns version changes.
+- Let `scripts/package-extension.sh` set the extension name for each channel. Release-please manages versions separately on `alpha` and `main`; do not change them by hand.
 - Run `npm test` for extension changes and `uv sync --locked --group docs` followed by `uv run --locked --group docs mkdocs build --strict` for documentation changes before opening a PR.
 
 Documentation ownership and notification setup are described in the

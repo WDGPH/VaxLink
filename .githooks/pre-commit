@@ -1,0 +1,6 @@
+#!/bin/sh
+if [ ! -f node_modules/prettier/package.json ]; then
+  echo 'Formatting check requires dependencies. Run npm ci first.' >&2
+  exit 1
+fi
+exec npm run --silent format:check

@@ -6,6 +6,11 @@
   "scripts": {
     "test": "npm run test:commit-titles && npm --prefix apps/extension-tests test",
     "test:commit-titles": "node --test scripts/check-commit-title.test.js",
-    "setup:hooks": "git config --local core.hooksPath .githooks"
+    "setup:hooks": "sh .githooks/install",
+    "format": "prettier --write",
+    "format:check": "node scripts/check-format.js"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
   }
 }
