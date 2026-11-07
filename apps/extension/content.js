@@ -1041,7 +1041,13 @@ function extractBracketAgentCode(optionText) {
 }
 
 function fillField(field, value) {
-  if (!field || value === undefined || value === null || value === '') {
+  if (
+    !field ||
+    field.disabled ||
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
     return false;
   }
 
@@ -1049,24 +1055,15 @@ function fillField(field, value) {
     return fillSelectField(field, value);
   }
 
-  const role = (field.getAttribute && field.getAttribute('role')) || '';
-  const ariaAuto =
-    (field.getAttribute && field.getAttribute('aria-autocomplete')) || '';
-  const ariaHasPopup =
-    (field.getAttribute && field.getAttribute('aria-haspopup')) || '';
-  const classHint = (field.className || '').toLowerCase();
-  const idHint = (field.id || '').toLowerCase();
-  if (
-    role === 'combobox' ||
-    ariaAuto ||
-    ariaHasPopup === 'listbox' ||
-    classHint.includes('select') ||
-    classHint.includes('combo') ||
-    idHint.includes('selectbox') ||
-    hasExtComboTrigger(field)
-  ) {
-    return fillComboTextField(field, value);
+  if (String(field.id || '').endsWith('_focus')) {
+    return fillPanoramaMenu(field, value);
   }
+  if (
+    (field.tagName !== 'INPUT' && field.tagName !== 'TEXTAREA') ||
+    field.getAttribute?.('role') === 'combobox' ||
+    field.getAttribute?.('aria-haspopup') === 'listbox'
+  )
+    return false;
 
   let nextValue = String(value);
   if (field.type === 'date') {
@@ -1100,33 +1097,6 @@ function normalizeForMatch(value) {
     .replace(/\bvalue\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function getValueAliases(rawValue, contextField) {
-  const aliases = [];
-  const normalized = normalizeForMatch(rawValue);
-  if (!normalized) return aliases;
-
-  aliases.push(rawValue);
-  aliases.push(normalized);
-
-  const unitAliases = {
-    ml: ['millilitre(s)', 'millilitres', 'milliliter(s)', 'milliliters'],
-    mg: ['milligram(s)', 'milligrams'],
-    g: ['gram(s)', 'grams'],
-    mcg: ['microgram(s)', 'micrograms'],
-    ug: ['microgram(s)', 'micrograms'],
-    l: ['litre(s)', 'litres', 'liter(s)', 'liters'],
-    iu: ['international unit(s)', 'iu'],
-    units: ['unit(s)', 'units']
-  };
-
-  const compact = normalized.replace(/\s+/g, '');
-  if (unitAliases[compact]) {
-    aliases.push(...unitAliases[compact]);
-  }
-
-  return [...new Set(aliases.map((v) => normalizeForMatch(v)).filter(Boolean))];
 }
 
 function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
@@ -1168,9 +1138,9 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
 function fillSelectField(field, value) {
   const rawValue = String(value).trim();
   if (!rawValue) return false;
-  const candidates = getValueAliases(rawValue, field);
+  const desired = normalizeForMatch(rawValue);
   const options = Array.from(field.options || []).filter(
-    (opt) => opt && opt.value !== ''
+    (opt) => opt && opt.value !== '' && !opt.disabled
   );
   if (!options.length) return false;
   const agentStrict = isPanoramaAgentControl(field);
@@ -1178,135 +1148,124 @@ function fillSelectField(field, value) {
   let matched = options.find(
     (opt) => opt.value === rawValue || opt.text.trim() === rawValue
   );
-  if (!matched) {
-    matched = options.find((opt) =>
-      candidates.includes(normalizeForMatch(opt.text))
-    );
+  if (!matched && desired) {
+    matched = options.find((opt) => normalizeForMatch(opt.text) === desired);
   }
-  if (!matched && agentStrict && candidates.length > 0) {
+  if (!matched && agentStrict && desired) {
     matched = options.find((opt) => {
       const bracket = extractBracketAgentCode(opt.text);
-      return bracket && candidates.includes(bracket);
+      return bracket && bracket === desired;
     });
   }
-  if (!matched && !agentStrict && candidates.length > 0) {
+  if (!matched && !agentStrict && desired) {
     matched = options.find((opt) => {
       const optNorm = normalizeForMatch(opt.text);
-      return candidates.some((desired) =>
-        isLooseSelectTextMatch(optNorm, desired)
-      );
+      return isLooseSelectTextMatch(optNorm, desired);
     });
   }
   if (!matched) return false;
+  if (agentStrict && !isAgentTextAccepted(rawValue, matched.text)) return false;
 
   field.focus();
   field.value = matched.value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  const selected = field.options?.[field.selectedIndex];
+  if (
+    field.isConnected === false ||
+    field.disabled ||
+    !selected ||
+    String(field.value) !== String(matched.value) ||
+    (agentStrict && !isAgentTextAccepted(rawValue, selected.text))
+  ) {
+    field.blur();
+    return false;
+  }
   if (field.id && field.id.endsWith('_input')) {
     const labelId = `${field.id.slice(0, -6)}_label`;
     const label = document.getElementById(labelId);
     if (label) {
-      label.textContent = matched.text;
-      label.setAttribute('title', matched.text);
+      label.textContent = selected.text;
+      label.setAttribute('title', selected.text);
     }
   }
   field.blur();
   return true;
 }
 
-function fillComboTextField(field, value) {
+function fillPanoramaMenu(field, value) {
   const rawValue = String(value).trim();
-  if (!rawValue) return false;
-  const candidates = getValueAliases(rawValue, field);
-  if (!candidates.length) return false;
+  const desired = normalizeForMatch(rawValue);
+  const widgetId = String(field.id || '').replace(/_focus$/, '');
+  const widget = document.getElementById(widgetId);
+  if (
+    !desired ||
+    !widget?.classList.contains('ui-selectonemenu') ||
+    field.disabled ||
+    widget.classList.contains('ui-state-disabled')
+  )
+    return false;
+
+  const native = document.getElementById(`${widgetId}_input`);
+  if (native?.disabled) return false;
+  if (native?.tagName === 'SELECT' && fillSelectField(native, rawValue))
+    return true;
+  if (native?.isConnected === false) return false;
+
+  // PrimeFaces can append overlays outside the form. Resolve this menu's panel
+  // by its full JSF ID so a matching option in another control is never clicked.
+  let panel = document.getElementById(`${widgetId}_panel`);
+  if (!isVisible(panel)) {
+    const trigger = widget.querySelector('.ui-selectonemenu-trigger');
+    if (!trigger) return false;
+    trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    trigger.click();
+    panel = document.getElementById(`${widgetId}_panel`);
+  }
+  if (!isVisible(panel)) return false;
+
   const agentStrict = isPanoramaAgentControl(field);
-
-  const unitTextAliases = {
-    ml: 'Millilitre(s)',
-    mg: 'Milligram(s)',
-    mcg: 'Microgram(s)',
-    ug: 'Microgram(s)',
-    g: 'Gram(s)',
-    l: 'Litre(s)',
-    iu: 'International Unit(s)',
-    units: 'Unit(s)'
-  };
-  const compactRaw = normalizeForMatch(rawValue).replace(/\s+/g, '');
-  const preferredTypedValue = unitTextAliases[compactRaw] || rawValue;
-
-  field.focus();
-  if ('value' in field) {
-    field.value = preferredTypedValue;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    field.dispatchEvent(
-      new KeyboardEvent('keyup', { key: 'a', bubbles: true })
-    );
-  }
-  field.click();
-  field.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
-  );
-
-  // Best-effort pick for custom dropdown implementations (ng-select/react-select).
-  const optionSelectors = [
-    '[role="option"]',
-    'li[role="option"]',
-    '.ng-option',
-    '.mat-option',
-    '.x-combo-list-item',
-    '.x-boundlist-item',
-    '.ui-selectonemenu-item',
-    '.select-option',
-    '.dropdown-item',
-    '.ui-menu-item',
-    '.p-dropdown-item'
-  ];
-  for (const selector of optionSelectors) {
-    const options = Array.from(document.querySelectorAll(selector));
-    const hit = options.find((opt) => {
-      const text = opt.textContent || '';
-      const optNorm = normalizeForMatch(text);
-      if (agentStrict) {
-        if (candidates.includes(optNorm)) return true;
-        const bracket = extractBracketAgentCode(text);
-        return !!(bracket && candidates.includes(bracket));
-      }
-      return candidates.some((desired) =>
-        isLooseSelectTextMatch(optNorm, desired)
-      );
-    });
-    if (hit) {
-      hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      hit.click();
-      field.dispatchEvent(new Event('change', { bubbles: true }));
-      field.blur();
-      return true;
-    }
-  }
-
-  // Keyboard fallback for autocomplete controls.
-  field.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
-  );
-  field.dispatchEvent(new Event('change', { bubbles: true }));
+  const option = Array.from(
+    panel.querySelectorAll('.ui-selectonemenu-item')
+  ).find((item) => {
+    if (
+      !isVisible(item) ||
+      item.classList.contains('ui-state-disabled') ||
+      item.getAttribute('aria-disabled') === 'true'
+    )
+      return false;
+    const text = item.getAttribute('data-label') || item.textContent || '';
+    const normalized = normalizeForMatch(text);
+    return agentStrict
+      ? normalized === desired || extractBracketAgentCode(text) === desired
+      : isLooseSelectTextMatch(normalized, desired);
+  });
+  if (!option) return false;
+  option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  option.click();
   field.blur();
-  return String(field.value || '').trim().length > 0;
+  const current = document.getElementById(`${widgetId}_input`);
+  const label = document.getElementById(`${widgetId}_label`);
+  const selectedText =
+    current?.tagName === 'SELECT'
+      ? current.options?.[current.selectedIndex]?.text
+      : label?.textContent;
+  if (
+    !selectedText ||
+    current?.disabled ||
+    current?.isConnected === false ||
+    (current?.tagName === 'SELECT' && !current.value)
+  )
+    return false;
+  return agentStrict
+    ? isAgentTextAccepted(rawValue, selectedText)
+    : filledAgentTextMatchesCandidate(selectedText, rawValue);
 }
 
 function isVisible(el) {
   if (!el) return false;
   const rect = el.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
-}
-
-function hasExtComboTrigger(field) {
-  if (!field || field.tagName !== 'INPUT') return false;
-  const container =
-    field.closest('.x-form-trigger-wrap, .x-form-field-wrap') ||
-    field.parentElement;
-  if (!container) return false;
-  return !!container.querySelector('.x-form-trigger, .x-form-arrow-trigger');
 }
 
 function normalizeLabelText(value) {
@@ -2968,44 +2927,20 @@ function fillPanoramaImmunizationFields(data) {
     return createAutofillResult('success', { fillCount });
   }
 
-  const fallbackMapping = [
-    {
-      value:
-        getPanoramaAgentCandidates(data)[0] ||
-        data.name ||
-        data.generic_name ||
-        data.tradename ||
-        data.din,
-      labels: ['Agent'],
-      preferLast: false
-    }
-  ];
-
-  let fallbackCount = 0;
-  const usedFields = new Set();
-  for (const entry of fallbackMapping) {
-    if (!entry.value) continue;
-    const field = findFieldByLabelText(entry.labels, {
-      preferLast: entry.preferLast
-    });
-    if (!field || usedFields.has(field)) continue;
-    if (!fillField(field, entry.value)) {
-      continue;
-    }
-    if (
-      entry.labels &&
-      entry.labels.includes('Agent') &&
-      !isAgentCandidateAccepted(entry.value, field)
-    ) {
-      continue;
-    }
-    {
-      usedFields.add(field);
-      fallbackCount += 1;
-    }
-  }
-  return createAutofillResult(fallbackCount > 0 ? 'success' : 'failed', {
-    fillCount: fallbackCount
+  const candidate =
+    getPanoramaAgentCandidates(data)[0] ||
+    data.name ||
+    data.generic_name ||
+    data.tradename ||
+    data.din;
+  const field = candidate ? findFieldByLabelText(['Agent']) : null;
+  const filled = !!(
+    field &&
+    fillField(field, candidate) &&
+    isAgentCandidateAccepted(candidate, field)
+  );
+  return createAutofillResult(filled ? 'success' : 'failed', {
+    fillCount: filled ? 1 : 0
   });
 }
 

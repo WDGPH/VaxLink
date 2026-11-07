@@ -327,3 +327,217 @@ test('supported Panorama form without controls reports not ready and makes no ch
   assert.equal(response.status, 'failed');
   assert.match(response.error, /not ready/i);
 });
+
+function menuFixture({
+  nativeOptions = [],
+  ownItems = [],
+  otherItems = [],
+  clickChanges = true
+} = {}) {
+  const run = setup(TRAINING_URL);
+  const { context } = run;
+  context.Event = class {
+    constructor(type) {
+      this.type = type;
+    }
+  };
+  context.MouseEvent = context.Event;
+  const base = 'recordImmsForm:agentiterm:selectOneMenu';
+  const label = { textContent: '', setAttribute() {} };
+  const classes = (...names) => ({ contains: (name) => names.includes(name) });
+  const rect = () => ({ width: 10, height: 10 });
+  const focus = {
+    id: `${base}_focus`,
+    tagName: 'INPUT',
+    value: 'HB',
+    disabled: false,
+    focus() {},
+    blur() {}
+  };
+  const native = {
+    id: `${base}_input`,
+    tagName: 'SELECT',
+    disabled: false,
+    options: nativeOptions.map((text, index) => ({
+      text,
+      value: String(index + 1),
+      disabled: false
+    })),
+    selectedIndex: -1,
+    focus() {},
+    blur() {},
+    dispatchEvent() {},
+    set value(value) {
+      this.selectedIndex = this.options.findIndex(
+        (option) => option.value === value
+      );
+    },
+    get value() {
+      return this.options[this.selectedIndex]?.value || '';
+    }
+  };
+  const clicks = { own: 0, other: 0 };
+  const item = (text, which) => ({
+    textContent: text,
+    classList: classes(),
+    getBoundingClientRect: rect,
+    getAttribute(name) {
+      return name === 'data-label' ? text : null;
+    },
+    dispatchEvent() {},
+    click() {
+      clicks[which]++;
+      if (clickChanges) {
+        label.textContent = text;
+        let index = native.options.findIndex((option) => option.text === text);
+        if (index < 0) {
+          native.options.push({
+            text,
+            value: `panel-${text}`,
+            disabled: false
+          });
+          index = native.options.length - 1;
+        }
+        native.selectedIndex = index;
+      }
+    }
+  });
+  const panel = {
+    getBoundingClientRect: rect,
+    querySelectorAll: () => ownItems.map((text) => item(text, 'own'))
+  };
+  const otherPanel = {
+    querySelectorAll: () => otherItems.map((text) => item(text, 'other'))
+  };
+  const widget = {
+    classList: classes('ui-selectonemenu'),
+    querySelector: () => null
+  };
+  const elements = new Map([
+    [base, widget],
+    [`${base}_input`, native],
+    [`${base}_panel`, panel],
+    [`${base}_label`, label],
+    ['other_panel', otherPanel]
+  ]);
+  context.document.getElementById = (id) => elements.get(id) || null;
+  context.document.querySelectorAll = () => {
+    throw new Error('Unscoped document option search');
+  };
+  return { context, focus, native, label, clicks, elements, base };
+}
+
+test('focus control uses its enabled native select first and rejects a disabled select', () => {
+  const menu = menuFixture({ nativeOptions: ['HB'], ownItems: ['HB'] });
+  assert.equal(menu.context.fillField(menu.focus, 'HB'), true);
+  assert.equal(menu.native.value, '1');
+  assert.equal(menu.label.textContent, 'HB');
+  assert.equal(menu.clicks.own, 0);
+  menu.native.disabled = true;
+  assert.equal(menu.context.fillField(menu.focus, 'HB'), false);
+  assert.equal(menu.clicks.own, 0);
+});
+
+test('visible menu searches only its associated panel and requires a matching selection', () => {
+  const menu = menuFixture({ ownItems: ['MMR'], otherItems: ['HB'] });
+  assert.equal(menu.context.fillField(menu.focus, 'HB'), false);
+  assert.equal(menu.clicks.other, 0);
+  assert.equal(menu.clicks.own, 0);
+  const matching = menuFixture({ ownItems: ['HB'], otherItems: ['HB'] });
+  assert.equal(matching.context.fillField(matching.focus, 'HB'), true);
+  assert.equal(matching.clicks.own, 1);
+  assert.equal(matching.clicks.other, 0);
+  const unknownWidget = {
+    ...matching.focus,
+    id: 'other-widget',
+    tagName: 'DIV'
+  };
+  assert.equal(matching.context.fillField(unknownWidget, 'HB'), false);
+  assert.equal(unknownWidget.value, 'HB');
+  const unknownInput = {
+    ...unknownWidget,
+    tagName: 'INPUT',
+    getAttribute: () => 'combobox'
+  };
+  assert.equal(matching.context.fillField(unknownInput, 'HB'), false);
+});
+
+test('agent selection never treats HB-pediatric as HB', () => {
+  const menu = menuFixture({
+    nativeOptions: ['HB-pediatric'],
+    ownItems: ['HB-pediatric'],
+    otherItems: ['HB']
+  });
+  assert.equal(menu.context.fillField(menu.focus, 'HB'), false);
+  assert.equal(menu.native.selectedIndex, -1);
+  assert.equal(menu.clicks.own, 0);
+  assert.equal(menu.clicks.other, 0);
+});
+
+test('single-agent label fallback fills and verifies a native select', () => {
+  const run = setup(TRAINING_URL);
+  const { context } = run;
+  context.Event = class {
+    constructor(type) {
+      this.type = type;
+    }
+  };
+  const select = {
+    id: 'legacyAgent',
+    tagName: 'SELECT',
+    disabled: false,
+    options: [{ value: 'hb', text: 'HB' }],
+    selectedIndex: -1,
+    focus() {},
+    blur() {},
+    dispatchEvent() {},
+    getBoundingClientRect: () => ({ width: 10, height: 10 }),
+    set value(value) {
+      this.selectedIndex = this.options.findIndex(
+        (option) => option.value === value
+      );
+    },
+    get value() {
+      return this.options[this.selectedIndex]?.value || '';
+    }
+  };
+  const label = {
+    tagName: 'LABEL',
+    textContent: 'Agent',
+    getAttribute: (name) => (name === 'for' ? select.id : null)
+  };
+  context.document.getElementById = (id) => (id === select.id ? select : null);
+  context.document.querySelectorAll = (selector) =>
+    selector === 'label, span, div, td, th, strong' ? [label] : [];
+  const result = context.fillPanoramaImmunizationFields({ name: 'HB' });
+  assert.equal(result.status, 'success');
+  assert.equal(select.value, 'hb');
+});
+
+test('focus text and an inert panel click do not confirm a selection', () => {
+  const menu = menuFixture({ ownItems: ['HB'], clickChanges: false });
+  menu.elements.delete(`${menu.base}_input`);
+  menu.elements.delete(`${menu.base}_label`);
+  assert.equal(menu.focus.value, 'HB');
+  assert.equal(menu.context.fillField(menu.focus, 'HB'), false);
+  assert.equal(menu.clicks.own, 1);
+});
+
+test('a synchronous native reset is not reported or reflected as a selection', () => {
+  const menu = menuFixture({ nativeOptions: ['HB'] });
+  menu.label.textContent = 'Select';
+  menu.native.dispatchEvent = (event) => {
+    if (event.type === 'change') menu.native.selectedIndex = -1;
+  };
+  assert.equal(menu.context.fillSelectField(menu.native, 'HB'), false);
+  assert.equal(menu.native.selectedIndex, -1);
+  assert.equal(menu.label.textContent, 'Select');
+});
+
+test('agent option value cannot override a conflicting clinical label', () => {
+  const menu = menuFixture({ nativeOptions: ['HB-pediatric'] });
+  menu.native.options[0].value = 'HB';
+  assert.equal(menu.context.fillSelectField(menu.native, 'HB'), false);
+  assert.equal(menu.native.selectedIndex, -1);
+  assert.equal(menu.label.textContent, '');
+});
