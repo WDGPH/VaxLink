@@ -17,7 +17,7 @@ via `chrome.runtime.sendMessage` and `chrome.storage.local`.
 
 **`content.js`** — injected into Panorama and InputHealth pages. Owns:
 
-- Routes scans from the dedicated Web Serial scanner channel on supported pages
+- Receives Web Serial scans on supported pages
 - HUD overlay on supported pages
 - EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
 - Workflow mode reading from `chrome.storage.local`
@@ -93,11 +93,10 @@ handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 
 ## CI
 
-- `.github/workflows/extension-ci.yml` — on extension-related pushes to
-  `alpha`/`main` and pull requests: syntax checks, full test suite (live-catalogue suites
-  skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as
-  workflow artifacts (Alpha only for prereleases; both channels for stable
-  versions). Web Store uploads are manual: download the tested zip from the run.
+- `.github/workflows/extension-ci.yml` — checks syntax and runs tests for
+  extension changes in PRs and pushes to `alpha`/`main`. Tests that need the live
+  catalogue skip if it cannot be downloaded. Uploads Alpha ZIPs for prereleases
+  and both channel ZIPs for stable versions. Web Store uploads are manual.
 - `.github/workflows/docs.yml` — runs the locked, strict MkDocs check on
   pushes to `alpha`/`main` and pull requests.
 - `.github/workflows/docs-hub-notify.yml` — opt-in notifications for `main` and

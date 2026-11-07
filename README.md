@@ -30,7 +30,7 @@ documentation site.
 - Looks up vaccine metadata from the NVC bundle
 - Auto-fills CHR fields (trade name, manufacturer, route, dose, strength, DIN/drug code, lot, expiry) into Panorama and InputHealth
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
-- Supports a dedicated Web Serial scanner channel, including capture while the workstation is locked
+- Captures scans through Web Serial, including while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
 
 ### Installation

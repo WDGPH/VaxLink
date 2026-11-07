@@ -67,7 +67,7 @@ Scanner capture uses a Chrome offscreen document and dedicated worker instead of
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 
-When Chrome reports that Windows is locked, the daemon keeps reading the paired scanner and saves every scan to the Multiple Inject queue. It does not inject into the chart while locked. The computer must remain awake; browser code cannot capture scans while Windows is sleeping or hibernating.
+While Windows is locked, Single Inject scans are held for replay after unlock. Scans in other modes are saved to the Multiple Inject queue. VaxLink does not fill the chart while locked. The computer must stay awake; scans cannot be captured while it is sleeping or hibernating.
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 
