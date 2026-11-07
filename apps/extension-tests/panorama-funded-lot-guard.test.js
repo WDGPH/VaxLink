@@ -29,18 +29,20 @@ function normalizeForMatch(value) {
 }
 
 function buildPanoramaFundingSourceText(data) {
-  return normalizeForMatch([
-    data?.name,
-    data?.tradename,
-    data?.generic_name
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [data?.name, data?.tradename, data?.generic_name].filter(Boolean).join(' ')
+  );
 }
 
 function getPanoramaSharedFundingLotProductLabel(data) {
   const source = buildPanoramaFundingSourceText(data);
   if (!source) return '';
   for (const product of PANORAMA_SHARED_FUNDING_LOT_PRODUCTS) {
-    if ((product.terms || []).some((term) => source.includes(normalizeForMatch(term)))) {
+    if (
+      (product.terms || []).some((term) =>
+        source.includes(normalizeForMatch(term))
+      )
+    ) {
       return product.label;
     }
   }
@@ -102,8 +104,8 @@ function setFundedRadio(radio, widgetBound) {
   const ajaxFired = [];
   if (radio.checked) return { result: 'already', ajaxFired };
   if (radio.box && widgetBound) {
-    radio.checked = true;      // widget toggles the input...
-    ajaxFired.push('widget');  // ...and fires its own AJAX
+    radio.checked = true; // widget toggles the input...
+    ajaxFired.push('widget'); // ...and fires its own AJAX
   }
   if (radio.checked) return { result: 'clicked', ajaxFired };
   radio.checked = true;
@@ -113,20 +115,20 @@ function setFundedRadio(radio, widgetBound) {
 
 test('setting the funded radio fires exactly one AJAX, like a manual click', () => {
   // widget bound (normal Panorama page): widget click only, no synthetic change
-  assert.deepEqual(
-    setFundedRadio({ checked: false, box: {} }, true),
-    { result: 'clicked', ajaxFired: ['widget'] }
-  );
+  assert.deepEqual(setFundedRadio({ checked: false, box: {} }, true), {
+    result: 'clicked',
+    ajaxFired: ['widget']
+  });
   // widget not bound: the synthetic fallback still applies the choice, once
-  assert.deepEqual(
-    setFundedRadio({ checked: false, box: {} }, false),
-    { result: 'clicked', ajaxFired: ['synthetic-change'] }
-  );
+  assert.deepEqual(setFundedRadio({ checked: false, box: {} }, false), {
+    result: 'clicked',
+    ajaxFired: ['synthetic-change']
+  });
   // already selected: no AJAX at all
-  assert.deepEqual(
-    setFundedRadio({ checked: true, box: {} }, true),
-    { result: 'already', ajaxFired: [] }
-  );
+  assert.deepEqual(setFundedRadio({ checked: true, box: {} }, true), {
+    result: 'already',
+    ajaxFired: []
+  });
 });
 
 // Mirrors the shared-funding miss pacing in schedulePanoramaLotOrTradeSelection.
@@ -148,7 +150,7 @@ function createSharedFundingMissWindow() {
     },
     // returns true when the third counted miss is reached (chooser re-summoned)
     recordMiss(now) {
-      if ((now - lastMissAt) < SHARED_FUNDING_MISS_GAP_MS) return false;
+      if (now - lastMissAt < SHARED_FUNDING_MISS_GAP_MS) return false;
       lastMissAt = now;
       misses += 1;
       return misses >= 3;
@@ -168,20 +170,20 @@ test('a sub-second burst of failed lot lookups does not re-summon the chooser', 
 test('sustained genuine failure still re-summons the chooser after ~3 spaced misses', () => {
   const window_ = createSharedFundingMissWindow();
   window_.restart(1000);
-  assert.equal(window_.recordMiss(2250), false);  // miss 1
-  assert.equal(window_.recordMiss(2900), false);  // within gap -> not counted
-  assert.equal(window_.recordMiss(3500), false);  // miss 2
-  assert.equal(window_.recordMiss(4800), true);   // miss 3 -> chooser
+  assert.equal(window_.recordMiss(2250), false); // miss 1
+  assert.equal(window_.recordMiss(2900), false); // within gap -> not counted
+  assert.equal(window_.recordMiss(3500), false); // miss 2
+  assert.equal(window_.recordMiss(4800), true); // miss 3 -> chooser
 });
 
 test('a refresh triggered by VaxLink restarts the miss window', () => {
   const window_ = createSharedFundingMissWindow();
   window_.restart(0);
-  assert.equal(window_.recordMiss(1200), false);  // miss 1
-  assert.equal(window_.recordMiss(2400), false);  // miss 2
+  assert.equal(window_.recordMiss(1200), false); // miss 1
+  assert.equal(window_.recordMiss(2400), false); // miss 2
   // expired-lots checkbox clicked -> options are about to change
   window_.restart(2600);
-  assert.equal(window_.recordMiss(3800), false);  // miss 1 again, not 3
-  assert.equal(window_.recordMiss(5000), false);  // miss 2
-  assert.equal(window_.recordMiss(6200), true);   // miss 3 -> chooser
+  assert.equal(window_.recordMiss(3800), false); // miss 1 again, not 3
+  assert.equal(window_.recordMiss(5000), false); // miss 2
+  assert.equal(window_.recordMiss(6200), true); // miss 3 -> chooser
 });

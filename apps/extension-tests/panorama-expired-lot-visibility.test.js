@@ -13,24 +13,37 @@ function parseDateToLocal(value) {
   if (!raw) return null;
   const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!isoMatch) return null;
-  return new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  return new Date(
+    Number(isoMatch[1]),
+    Number(isoMatch[2]) - 1,
+    Number(isoMatch[3])
+  );
 }
 
 function getExpiryStatus(value) {
   const expiry = parseDateToLocal(value);
   if (!expiry) return { flag: 'unknown', daysRemaining: null };
   const today = new Date();
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayMidnight = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
   const msPerDay = 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / msPerDay);
+  const daysRemaining = Math.floor(
+    (expiry.getTime() - todayMidnight.getTime()) / msPerDay
+  );
   if (daysRemaining < 0) return { flag: 'expired', daysRemaining };
   if (daysRemaining <= 30) return { flag: 'expiring_soon', daysRemaining };
   return { flag: 'valid', daysRemaining };
 }
 
 function isExpiredPanoramaScan(data) {
-  const flag = data?.expiry_flag
-    || getExpiryStatus(data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry).flag;
+  const flag =
+    data?.expiry_flag ||
+    getExpiryStatus(
+      data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry
+    ).flag;
   return flag === 'expired';
 }
 
@@ -48,7 +61,10 @@ test('expired scans are detected from the explicit flag or any expiry date field
   assert.equal(isExpiredPanoramaScan({ inventory_expiry: '2020-01-01' }), true);
   assert.equal(isExpiredPanoramaScan({ nvc_lot_expiry: '2020-01-01' }), true);
   assert.equal(isExpiredPanoramaScan({ expiry: '2099-01-01' }), false);
-  assert.equal(isExpiredPanoramaScan({ expiry_flag: 'valid', expiry: '2020-01-01' }), false);
+  assert.equal(
+    isExpiredPanoramaScan({ expiry_flag: 'valid', expiry: '2020-01-01' }),
+    false
+  );
   assert.equal(isExpiredPanoramaScan({}), false);
 });
 
@@ -68,7 +84,11 @@ test('the visibility checkbox is only clicked when present and unchecked', () =>
 // refreshing, and the select path lands the lot in ONE action on the pass
 // right after the options arrive. The visible dropdown (open, filter, click)
 // is reserved for layouts without a fillable select and for a late rescue.
-function lotFillAction({ optionsContainLot, fillableSelectExists, panelRescue }) {
+function lotFillAction({
+  optionsContainLot,
+  fillableSelectExists,
+  panelRescue
+}) {
   if (optionsContainLot) return 'select-silently';
   if (fillableSelectExists && !panelRescue) return 'wait';
   return 'drive-visible-dropdown';
@@ -77,22 +97,38 @@ function lotFillAction({ optionsContainLot, fillableSelectExists, panelRescue })
 test('lot filling waits silently while the select options refresh, then selects once', () => {
   // options not refreshed yet: no visible interaction, just wait for the AJAX
   assert.equal(
-    lotFillAction({ optionsContainLot: false, fillableSelectExists: true, panelRescue: false }),
+    lotFillAction({
+      optionsContainLot: false,
+      fillableSelectExists: true,
+      panelRescue: false
+    }),
     'wait'
   );
   // options arrived: one silent select action
   assert.equal(
-    lotFillAction({ optionsContainLot: true, fillableSelectExists: true, panelRescue: false }),
+    lotFillAction({
+      optionsContainLot: true,
+      fillableSelectExists: true,
+      panelRescue: false
+    }),
     'select-silently'
   );
   // no native select (autocomplete layout): the dropdown is the only path
   assert.equal(
-    lotFillAction({ optionsContainLot: false, fillableSelectExists: false, panelRescue: false }),
+    lotFillAction({
+      optionsContainLot: false,
+      fillableSelectExists: false,
+      panelRescue: false
+    }),
     'drive-visible-dropdown'
   );
   // still unresolved after the rescue window: fall back to the dropdown
   assert.equal(
-    lotFillAction({ optionsContainLot: false, fillableSelectExists: true, panelRescue: true }),
+    lotFillAction({
+      optionsContainLot: false,
+      fillableSelectExists: true,
+      panelRescue: true
+    }),
     'drive-visible-dropdown'
   );
 });
@@ -127,7 +163,7 @@ function createVisibilityClickGate() {
   let lastClickAt = 0;
   return {
     shouldAttempt(now) {
-      return (now - lastClickAt) >= EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS;
+      return now - lastClickAt >= EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS;
     },
     recordClick(now) {
       lastClickAt = now;

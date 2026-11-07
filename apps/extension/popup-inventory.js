@@ -124,7 +124,10 @@ export class ScanQueueManager {
     this.useButtonLabel = useButtonLabel;
     this.emptySummary = emptySummary;
     this.emptyMessage = emptyMessage;
-    this.summaryBuilder = typeof summaryBuilder === 'function' ? summaryBuilder : defaultSummaryBuilder;
+    this.summaryBuilder =
+      typeof summaryBuilder === 'function'
+        ? summaryBuilder
+        : defaultSummaryBuilder;
     this.exportFilenamePrefix = exportFilenamePrefix;
     this.rows = [];
     this.activeUseId = '';
@@ -134,7 +137,10 @@ export class ScanQueueManager {
 
   async load() {
     const stored = await getLocalStorage([this.storageKey]);
-    const rows = stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [];
+    const rows =
+      stored && Array.isArray(stored[this.storageKey])
+        ? stored[this.storageKey]
+        : [];
     this.rows = rows.filter((row) => row && typeof row === 'object');
     this.render();
   }
@@ -144,10 +150,15 @@ export class ScanQueueManager {
   // computed from a stale in-memory copy would silently clobber them.
   async mutateRows(mutator) {
     const stored = await getLocalStorage([this.storageKey]);
-    const current = (stored && Array.isArray(stored[this.storageKey]) ? stored[this.storageKey] : [])
-      .filter((row) => row && typeof row === 'object');
+    const current = (
+      stored && Array.isArray(stored[this.storageKey])
+        ? stored[this.storageKey]
+        : []
+    ).filter((row) => row && typeof row === 'object');
     const next = mutator(current);
-    this.rows = Array.isArray(next) ? next.filter((row) => row && typeof row === 'object') : [];
+    this.rows = Array.isArray(next)
+      ? next.filter((row) => row && typeof row === 'object')
+      : [];
     await this.persist();
     this.render();
   }
@@ -173,7 +184,9 @@ export class ScanQueueManager {
   }
 
   async replaceRows(rows) {
-    const sanitized = Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+    const sanitized = Array.isArray(rows)
+      ? rows.filter((row) => row && typeof row === 'object')
+      : [];
     await this.mutateRows(() => sanitized);
   }
 
@@ -183,11 +196,13 @@ export class ScanQueueManager {
       return null;
     }
     let updated = null;
-    await this.mutateRows((rows) => rows.map((row) => {
-      if (!row || row.id !== targetId) return row;
-      updated = { ...row, ...patch };
-      return updated;
-    }));
+    await this.mutateRows((rows) =>
+      rows.map((row) => {
+        if (!row || row.id !== targetId) return row;
+        updated = { ...row, ...patch };
+        return updated;
+      })
+    );
     return updated;
   }
 
@@ -281,15 +296,19 @@ export class ScanQueueManager {
 
     const csvRows = [
       CSV_COLUMNS.join(','),
-      ...this.rows.map((row, index) => CSV_COLUMNS.map((column) => {
-        if (column === 'scan_index') {
-          return csvEscape(index + 1);
-        }
-        return csvEscape(row[column]);
-      }).join(','))
+      ...this.rows.map((row, index) =>
+        CSV_COLUMNS.map((column) => {
+          if (column === 'scan_index') {
+            return csvEscape(index + 1);
+          }
+          return csvEscape(row[column]);
+        }).join(',')
+      )
     ];
 
-    const blob = new Blob([csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const blob = new Blob([csvRows.join('\r\n')], {
+      type: 'text/csv;charset=utf-8'
+    });
     const url = URL.createObjectURL(blob);
     const filename = `${this.exportFilenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
     const link = document.createElement('a');
@@ -315,11 +334,13 @@ export class ScanQueueManager {
     this.summaryEl.textContent = this.summaryBuilder(this.rows);
 
     this.listEl.innerHTML = this.rows
-      .map((row, index) => buildQueueItemMarkup(row, index, {
-        isActive: row.id && row.id === this.activeUseId,
-        showUseAction: this.showUseAction,
-        useButtonLabel: this.useButtonLabel
-      }))
+      .map((row, index) =>
+        buildQueueItemMarkup(row, index, {
+          isActive: row.id && row.id === this.activeUseId,
+          showUseAction: this.showUseAction,
+          useButtonLabel: this.useButtonLabel
+        })
+      )
       .join('');
 
     this.listEl.querySelectorAll('[data-remove-id]').forEach((button) => {
@@ -349,7 +370,12 @@ export class ScanQueueManager {
         if (!row) {
           return;
         }
-        const promptLabel = row.tradename || row.generic_name || row.name || row.lot || 'this vial';
+        const promptLabel =
+          row.tradename ||
+          row.generic_name ||
+          row.name ||
+          row.lot ||
+          'this vial';
         const currentValue = getRemainingDoseCount(row, 1);
         const nextValue = window.prompt(
           `Set remaining doses for ${promptLabel}.`,
@@ -393,7 +419,10 @@ export class ScanQueueManager {
       ? changes[this.storageKey].newValue
       : [];
     this.rows = nextRows.filter((row) => row && typeof row === 'object');
-    if (this.activeUseId && !this.rows.some((row) => row.id === this.activeUseId)) {
+    if (
+      this.activeUseId &&
+      !this.rows.some((row) => row.id === this.activeUseId)
+    ) {
       this.activeUseId = '';
     }
     this.render();
@@ -401,22 +430,30 @@ export class ScanQueueManager {
 }
 
 export function buildQueueRecord(data, rawBarcode) {
-  return buildLegacyQueueRecord({
-    ...data,
-    total_doses: normalizeDoseCount(data.total_doses, null),
-    remaining_doses:
-      normalizeDoseCount(
+  return buildLegacyQueueRecord(
+    {
+      ...data,
+      total_doses: normalizeDoseCount(data.total_doses, null),
+      remaining_doses: normalizeDoseCount(
         data.remaining_doses,
         normalizeDoseCount(data.total_doses, null)
       )
-  }, rawBarcode);
+    },
+    rawBarcode
+  );
 }
 
 export function buildMultipleInjectSummary(rows) {
   const count = rows.length;
-  const lockedCount = rows.filter((row) => row.captured_while_locked === true).length;
-  const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
-  const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  const lockedCount = rows.filter(
+    (row) => row.captured_while_locked === true
+  ).length;
+  const expiredCount = rows.filter(
+    (row) => row.expiry_flag === 'expired'
+  ).length;
+  const expiringCount = rows.filter(
+    (row) => row.expiry_flag === 'expiring_soon'
+  ).length;
   const doseTotal = rows.reduce((total, row) => {
     const remaining = getRemainingDoseCount(row, 0);
     return total + (Number.isFinite(remaining) ? remaining : 0);
@@ -436,8 +473,12 @@ export function buildMultipleInjectSummary(rows) {
 
 export function buildInventorySummary(rows) {
   const count = rows.length;
-  const expiredCount = rows.filter((row) => row.expiry_flag === 'expired').length;
-  const expiringCount = rows.filter((row) => row.expiry_flag === 'expiring_soon').length;
+  const expiredCount = rows.filter(
+    (row) => row.expiry_flag === 'expired'
+  ).length;
+  const expiringCount = rows.filter(
+    (row) => row.expiry_flag === 'expiring_soon'
+  ).length;
   const doseTotal = rows.reduce((total, row) => {
     const remaining = getRemainingDoseCount(row, 0);
     return total + (Number.isFinite(remaining) ? remaining : 0);
@@ -453,9 +494,17 @@ export function buildInventorySummary(rows) {
 }
 
 function buildQueueItemMarkup(row, index, options) {
-  const title = escapeHtml(row.tradename || row.generic_name || row.name || row.lot || `Scan ${index + 1}`);
+  const title = escapeHtml(
+    row.tradename ||
+      row.generic_name ||
+      row.name ||
+      row.lot ||
+      `Scan ${index + 1}`
+  );
   const lot = escapeHtml(row.lot || 'N/A');
-  const expiry = escapeHtml(row.inventory_expiry || row.barcode_expiry || 'N/A');
+  const expiry = escapeHtml(
+    row.inventory_expiry || row.barcode_expiry || 'N/A'
+  );
   const manufacturer = escapeHtml(row.manufacturer || 'N/A');
   const status = escapeHtml(formatInventoryStatus(row));
   const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
@@ -513,8 +562,9 @@ function csvEscape(value) {
   // Neutralize spreadsheet formula injection: Excel/Sheets evaluate cells
   // starting with = + - @ even when quote-wrapped. Plain numbers (e.g. a
   // negative expiry_days_remaining) are exempt so they stay numeric.
-  const guarded = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
-    ? `'${text}`
-    : text;
+  const guarded =
+    /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
+      ? `'${text}`
+      : text;
   return `"${guarded.replace(/"/g, '""')}"`;
 }

@@ -6,7 +6,10 @@ import test from 'node:test';
 // so the suite needs no DOM/jsdom, matching the rest of these tests.
 
 function normalizeForMatch(value) {
-  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getPanoramaReasonForImmunizationValue(data) {
@@ -28,7 +31,10 @@ function hasDesiredSelection(fields, desiredText) {
   const desiredNorm = normalizeForMatch(desiredText);
   if (!desiredNorm) return true;
   return fields.some((field) => {
-    const opt = field.options && field.selectedIndex >= 0 ? field.options[field.selectedIndex] : null;
+    const opt =
+      field.options && field.selectedIndex >= 0
+        ? field.options[field.selectedIndex]
+        : null;
     return !!opt && normalizeForMatch(opt.text) === desiredNorm;
   });
 }
@@ -41,9 +47,17 @@ function autofillSatisfied(fields, desiredText) {
 
 test('reason defaults to Routine and consent to "Consent obtained"', () => {
   assert.equal(getPanoramaReasonForImmunizationValue({}), 'Routine');
-  assert.equal(getPanoramaReasonForImmunizationValue({ reason_for_immunization: 'Travel' }), 'Travel');
+  assert.equal(
+    getPanoramaReasonForImmunizationValue({
+      reason_for_immunization: 'Travel'
+    }),
+    'Travel'
+  );
   assert.equal(getPanoramaConsentReasonValue({}), 'Consent obtained');
-  assert.equal(getPanoramaConsentReasonValue({ consent_reason: 'Consent refused' }), 'Consent refused');
+  assert.equal(
+    getPanoramaConsentReasonValue({ consent_reason: 'Consent refused' }),
+    'Consent refused'
+  );
 });
 
 test('a control is "satisfied" when absent, still disabled, or already set', () => {
@@ -53,11 +67,29 @@ test('a control is "satisfied" when absent, still disabled, or already set', () 
   // absent -> nothing to do
   assert.equal(autofillSatisfied([], 'Routine'), true);
   // present but disabled (consent before the lot is chosen) -> leave to Panorama
-  assert.equal(autofillSatisfied([{ options: empty, selectedIndex: 0, disabled: true }], 'Routine'), true);
+  assert.equal(
+    autofillSatisfied(
+      [{ options: empty, selectedIndex: 0, disabled: true }],
+      'Routine'
+    ),
+    true
+  );
   // enabled and unset -> scheduler should keep retrying
-  assert.equal(autofillSatisfied([{ options: empty, selectedIndex: 0, disabled: false }], 'Routine'), false);
+  assert.equal(
+    autofillSatisfied(
+      [{ options: empty, selectedIndex: 0, disabled: false }],
+      'Routine'
+    ),
+    false
+  );
   // enabled and already showing the desired option -> done
-  assert.equal(autofillSatisfied([{ options: empty, selectedIndex: 1, disabled: false }], 'Routine'), true);
+  assert.equal(
+    autofillSatisfied(
+      [{ options: empty, selectedIndex: 1, disabled: false }],
+      'Routine'
+    ),
+    true
+  );
 });
 
 // Mirrors the spaced stable-pass gate in schedulePanoramaLotOrTradeSelection.
@@ -76,7 +108,7 @@ function createStablePassGate(gapMs = 700) {
         passes = 0;
         return false;
       }
-      if ((now - lastAt) >= gapMs) {
+      if (now - lastAt >= gapMs) {
         lastAt = now;
         passes += 1;
       }
@@ -105,12 +137,16 @@ test('a transient disabled-consent window cannot stop the fill scheduler', () =>
 // PF/NPF chooser answer re-runs the whole fill, which is where this bites.
 function administeredDateTimeWrites(administered, dateField, timeField) {
   const writes = [];
-  if (administered.date
-      && String(dateField?.value || '').trim() !== administered.date) {
+  if (
+    administered.date &&
+    String(dateField?.value || '').trim() !== administered.date
+  ) {
     writes.push('date');
   }
-  if (administered.time
-      && String(timeField?.value || '').trim() !== administered.time) {
+  if (
+    administered.time &&
+    String(timeField?.value || '').trim() !== administered.time
+  ) {
     writes.push('time');
   }
   return writes;
@@ -128,13 +164,21 @@ test('a re-fill pass leaves an already-correct Date Administered untouched', () 
   // PF/NPF answer re-fill: values already correct -> zero writes, so the
   // date change AJAX never fires and consent stays selected.
   assert.deepEqual(
-    administeredDateTimeWrites(administered, { value: '2026/07/15' }, { value: '10:30' }),
+    administeredDateTimeWrites(
+      administered,
+      { value: '2026/07/15' },
+      { value: '10:30' }
+    ),
     []
   );
 
   // A genuinely different value is still corrected.
   assert.deepEqual(
-    administeredDateTimeWrites(administered, { value: '2026/07/14' }, { value: '10:30' }),
+    administeredDateTimeWrites(
+      administered,
+      { value: '2026/07/14' },
+      { value: '10:30' }
+    ),
     ['date']
   );
 });
@@ -159,22 +203,42 @@ const CONSENT_SELECT_POST_LOT =
 
 const FIXTURES = {
   'pre-lot (consent select disabled)': REASON_SELECT + CONSENT_SELECT_PRE_LOT,
-  'post-lot (consent select enabled)': REASON_SELECT + CONSENT_SELECT_POST_LOT,
+  'post-lot (consent select enabled)': REASON_SELECT + CONSENT_SELECT_POST_LOT
 };
 
 for (const [stateName, html] of Object.entries(FIXTURES)) {
   test(`default targets resolve to exactly one option in the ${stateName} state`, () => {
     const optionsFor = (idFrag) => {
-      const m = html.match(new RegExp('id="[^"]*' + idFrag + ':iTermSelectOneMenu_input"[^>]*>(.*?)</select>'));
+      const m = html.match(
+        new RegExp(
+          'id="[^"]*' +
+            idFrag +
+            ':iTermSelectOneMenu_input"[^>]*>(.*?)</select>'
+        )
+      );
       if (!m) return [];
-      return [...m[1].matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)]
+      return [
+        ...m[1].matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)
+      ]
         .map((o) => ({ value: o[1], text: o[2] }))
         .filter((o) => o.value !== '');
     };
 
-    const matches = (options, desired) => options.filter((o) => o.text.trim() === desired);
+    const matches = (options, desired) =>
+      options.filter((o) => o.text.trim() === desired);
 
-    assert.deepEqual(matches(optionsFor('reasonForImmunizationSelect'), 'Routine').map((o) => o.value), ['1327349']);
-    assert.deepEqual(matches(optionsFor('consentReadinessReasonSelect'), 'Consent obtained').map((o) => o.value), ['1328318']);
+    assert.deepEqual(
+      matches(optionsFor('reasonForImmunizationSelect'), 'Routine').map(
+        (o) => o.value
+      ),
+      ['1327349']
+    );
+    assert.deepEqual(
+      matches(
+        optionsFor('consentReadinessReasonSelect'),
+        'Consent obtained'
+      ).map((o) => o.value),
+      ['1328318']
+    );
   });
 }

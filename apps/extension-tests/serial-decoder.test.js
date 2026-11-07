@@ -1,17 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { bytesToHex, createLineFrameDecoder } from '../extension/scanner/serial-decoder.js';
+import {
+  bytesToHex,
+  createLineFrameDecoder
+} from '../extension/scanner/serial-decoder.js';
 
 test('line decoder emits CRLF-terminated ASCII frames', () => {
   const decoder = createLineFrameDecoder();
-  const frames = decoder.push(new Uint8Array([
-    ...Buffer.from('010001234567890510LOT17260101\r\n')
-  ]));
+  const frames = decoder.push(
+    new Uint8Array([...Buffer.from('010001234567890510LOT17260101\r\n')])
+  );
 
   assert.equal(frames.length, 1);
   assert.equal(frames[0].text, '010001234567890510LOT17260101');
-  assert.equal(frames[0].rawBytesHex, bytesToHex(Buffer.from('010001234567890510LOT17260101')));
+  assert.equal(
+    frames[0].rawBytesHex,
+    bytesToHex(Buffer.from('010001234567890510LOT17260101'))
+  );
 });
 
 test('line decoder keeps partial chunks until terminator arrives', () => {

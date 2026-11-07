@@ -50,16 +50,22 @@ if (!bundle) {
   // Shared sweep results, populated by the first test and asserted on by the
   // rest (node:test runs tests in this file sequentially).
   const sweep = {
-    parsedExact: [],     // { lot, parsed, barcode }
-    parsedSplit: [],     // { lot, parsed } — lot text misread as lot+serial
-    parseErrors: [],     // { lot, error }
-    lookupOk: [],        // { lot, info }
-    lookupFailures: []   // { lot, response, reason }
+    parsedExact: [], // { lot, parsed, barcode }
+    parsedSplit: [], // { lot, parsed } — lot text misread as lot+serial
+    parseErrors: [], // { lot, error }
+    lookupOk: [], // { lot, info }
+    lookupFailures: [] // { lot, response, reason }
   };
 
   test(`catalogue sweep: bundle exposes the full lot catalogue (${uniqueLots.length} unique lots)`, () => {
-    assert.ok(allLots.length > 3000, `Expected >3000 catalogue lots, found ${allLots.length}`);
-    assert.ok(uniqueLots.length > 3000, `Expected >3000 unique lot numbers, found ${uniqueLots.length}`);
+    assert.ok(
+      allLots.length > 3000,
+      `Expected >3000 catalogue lots, found ${allLots.length}`
+    );
+    assert.ok(
+      uniqueLots.length > 3000,
+      `Expected >3000 unique lot numbers, found ${uniqueLots.length}`
+    );
   });
 
   test('catalogue sweep: every final lot parses exactly, including AI-lookalike text', () => {
@@ -85,24 +91,47 @@ if (!bundle) {
       }
     }
 
-    console.log(`\n  Parse sweep: ${sweep.parsedExact.length} exact, ` +
-      `${sweep.parsedSplit.length} split into lot+serial, ${sweep.parseErrors.length} errors`);
+    console.log(
+      `\n  Parse sweep: ${sweep.parsedExact.length} exact, ` +
+        `${sweep.parsedSplit.length} split into lot+serial, ${sweep.parseErrors.length} errors`
+    );
 
-    assert.equal(sweep.parseErrors.length, 0,
+    assert.equal(
+      sweep.parseErrors.length,
+      0,
       `Parser threw on ${sweep.parseErrors.length} lot(s): ` +
-      sweep.parseErrors.slice(0, 5).map((f) => `${f.lot.lotNumber}: ${f.error}`).join('; '));
+        sweep.parseErrors
+          .slice(0, 5)
+          .map((f) => `${f.lot.lotNumber}: ${f.error}`)
+          .join('; ')
+    );
 
-    assert.equal(sweep.parsedSplit.length, 0,
+    assert.equal(
+      sweep.parsedSplit.length,
+      0,
       'Lot text must not be split into other fields: ' +
-      sweep.parsedSplit.slice(0, 10).map((f) => f.lot.lotNumber).join(', '));
+        sweep.parsedSplit
+          .slice(0, 10)
+          .map((f) => f.lot.lotNumber)
+          .join(', ')
+    );
     for (const { lot, parsed } of sweep.parsedExact) {
-      assert.equal(parsed.serial, null, `${lot.lotNumber}: no serial was encoded`);
+      assert.equal(
+        parsed.serial,
+        null,
+        `${lot.lotNumber}: no serial was encoded`
+      );
     }
   });
 
   test('catalogue sweep: AI-lookalike lots retain a real separator-delimited serial', () => {
-    const lotsWithAILikeText = uniqueLots.filter((lot) => hasAILikeText(lot.lotNumber));
-    assert.ok(lotsWithAILikeText.length > 0, 'Expected catalogue lots containing AI-like text');
+    const lotsWithAILikeText = uniqueLots.filter((lot) =>
+      hasAILikeText(lot.lotNumber)
+    );
+    assert.ok(
+      lotsWithAILikeText.length > 0,
+      'Expected catalogue lots containing AI-like text'
+    );
     for (const lot of lotsWithAILikeText) {
       const withSerial = buildVialBarcode({
         gtin: makeSyntheticGtin14(7),
@@ -111,8 +140,11 @@ if (!bundle) {
         serial: 'S0001'
       });
       const parsed = parseInputData(withSerial);
-      assert.equal(parsed.lot, lot.lotNumber,
-        `${lot.lotNumber}: must parse exactly when GS+serial terminates the lot field`);
+      assert.equal(
+        parsed.lot,
+        lot.lotNumber,
+        `${lot.lotNumber}: must parse exactly when GS+serial terminates the lot field`
+      );
       assert.equal(parsed.serial, 'S0001');
     }
   });
@@ -126,40 +158,67 @@ if (!bundle) {
       });
 
       if (!response || response.error) {
-        sweep.lookupFailures.push({ lot, response, reason: response?.error || 'empty response' });
+        sweep.lookupFailures.push({
+          lot,
+          response,
+          reason: response?.error || 'empty response'
+        });
         continue;
       }
-      if (String(response.lot_number || '').toLowerCase() !== lot.lotNumber.toLowerCase()) {
-        sweep.lookupFailures.push({ lot, response, reason: `lot_number mismatch: ${response.lot_number}` });
+      if (
+        String(response.lot_number || '').toLowerCase() !==
+        lot.lotNumber.toLowerCase()
+      ) {
+        sweep.lookupFailures.push({
+          lot,
+          response,
+          reason: `lot_number mismatch: ${response.lot_number}`
+        });
         continue;
       }
       if (lot.expiryIso && response.lot_expiry !== lot.expiryIso) {
-        sweep.lookupFailures.push({ lot, response, reason: `expiry mismatch: ${response.lot_expiry} != ${lot.expiryIso}` });
+        sweep.lookupFailures.push({
+          lot,
+          response,
+          reason: `expiry mismatch: ${response.lot_expiry} != ${lot.expiryIso}`
+        });
         continue;
       }
       sweep.lookupOk.push({ lot, info: response });
     }
 
-    console.log(`\n  Lookup sweep: ${sweep.lookupOk.length} resolved, ${sweep.lookupFailures.length} failed`);
+    console.log(
+      `\n  Lookup sweep: ${sweep.lookupOk.length} resolved, ${sweep.lookupFailures.length} failed`
+    );
     if (sweep.lookupFailures.length) {
       for (const f of sweep.lookupFailures.slice(0, 10)) {
         console.log(`    ${f.lot.lotNumber}: ${f.reason}`);
       }
     }
-    assert.equal(sweep.lookupFailures.length, 0,
-      `${sweep.lookupFailures.length} lot(s) failed NVC lookup after an exact parse`);
+    assert.equal(
+      sweep.lookupFailures.length,
+      0,
+      `${sweep.lookupFailures.length} lot(s) failed NVC lookup after an exact parse`
+    );
   });
 
   test('catalogue sweep: every resolved lot carries a usable tradename for charting', () => {
-    const missingTradename = sweep.lookupOk.filter(({ info }) => !String(info.tradename || '').trim());
+    const missingTradename = sweep.lookupOk.filter(
+      ({ info }) => !String(info.tradename || '').trim()
+    );
     if (missingTradename.length) {
       console.log('\n  Lots without tradename:');
       for (const { lot } of missingTradename.slice(0, 10)) {
-        console.log(`    ${lot.lotNumber} (refs: ${lot.tradenameRefs.map((r) => r.display).join(' | ')})`);
+        console.log(
+          `    ${lot.lotNumber} (refs: ${lot.tradenameRefs.map((r) => r.display).join(' | ')})`
+        );
       }
     }
-    assert.equal(missingTradename.length, 0,
-      `${missingTradename.length} resolved lot(s) have no tradename`);
+    assert.equal(
+      missingTradename.length,
+      0,
+      `${missingTradename.length} resolved lot(s) have no tradename`
+    );
   });
 
   test('catalogue sweep: Panorama agent classification coverage across the catalogue', () => {
@@ -171,24 +230,31 @@ if (!bundle) {
       if (outputs.size > 0) {
         classified += 1;
       } else {
-        const label = info.tradename || lot.tradenameRefs[0]?.display || lot.lotNumber;
+        const label =
+          info.tradename || lot.tradenameRefs[0]?.display || lot.lotNumber;
         unmatchedByProduct.set(label, (unmatchedByProduct.get(label) || 0) + 1);
       }
     }
 
     const rate = classified / Math.max(sweep.lookupOk.length, 1);
-    console.log(`\n  Agent classification: ${classified}/${sweep.lookupOk.length} ` +
-      `(${(rate * 100).toFixed(1)}%) lots map to at least one Panorama agent`);
+    console.log(
+      `\n  Agent classification: ${classified}/${sweep.lookupOk.length} ` +
+        `(${(rate * 100).toFixed(1)}%) lots map to at least one Panorama agent`
+    );
     if (unmatchedByProduct.size) {
       console.log('  Products with no agent rule match:');
-      const sorted = [...unmatchedByProduct.entries()].sort((a, b) => b[1] - a[1]);
+      const sorted = [...unmatchedByProduct.entries()].sort(
+        (a, b) => b[1] - a[1]
+      );
       for (const [label, count] of sorted.slice(0, 25)) {
         console.log(`    ${count} lot(s): ${label}`);
       }
     }
 
-    assert.ok(rate >= 0.75,
-      `Only ${(rate * 100).toFixed(1)}% of resolved lots map to a Panorama agent (floor 75%)`);
+    assert.ok(
+      rate >= 0.75,
+      `Only ${(rate * 100).toFixed(1)}% of resolved lots map to a Panorama agent (floor 75%)`
+    );
   });
 
   test('catalogue sweep: core clinic vaccine families always classify to an agent', () => {
@@ -207,7 +273,11 @@ if (!bundle) {
       const family = FAMILY_PATTERNS.find(([pattern]) => pattern.test(label));
       if (!family) continue;
       if (getAgentOutputs(info).size === 0) {
-        failures.push({ lot: lot.lotNumber, family: family[1], tradename: info.tradename });
+        failures.push({
+          lot: lot.lotNumber,
+          family: family[1],
+          tradename: info.tradename
+        });
       }
     }
 
@@ -217,8 +287,11 @@ if (!bundle) {
         console.log(`    ${f.lot}: [${f.family}] ${f.tradename}`);
       }
     }
-    assert.equal(failures.length, 0,
-      `${failures.length} core-family lot(s) failed Panorama agent classification`);
+    assert.equal(
+      failures.length,
+      0,
+      `${failures.length} core-family lot(s) failed Panorama agent classification`
+    );
   });
 
   test('catalogue sweep: no standalone Hep B lot fires both HB and HB-pediatric (ped/adult never cross-fire)', () => {
@@ -227,20 +300,34 @@ if (!bundle) {
     for (const { lot, info } of sweep.lookupOk) {
       if (!STANDALONE_HB.test(info.tradename || '')) continue;
       const outputs = getAgentOutputs(info);
-      const hb = ['HB', 'HB-pediatric', 'HB-dialysis'].filter((o) => outputs.has(o));
+      const hb = ['HB', 'HB-pediatric', 'HB-dialysis'].filter((o) =>
+        outputs.has(o)
+      );
       // A standalone Hep B vial must resolve to exactly ONE of adult/ped/dialysis.
       if (hb.length !== 1) {
-        crossFires.push({ lot: lot.lotNumber, tradename: info.tradename, strength: info.strength, hb });
+        crossFires.push({
+          lot: lot.lotNumber,
+          tradename: info.tradename,
+          strength: info.strength,
+          hb
+        });
       }
     }
     if (crossFires.length) {
-      console.log('\n  Standalone HB lots with ambiguous ped/adult/dialysis classification:');
+      console.log(
+        '\n  Standalone HB lots with ambiguous ped/adult/dialysis classification:'
+      );
       for (const f of crossFires.slice(0, 15)) {
-        console.log(`    ${f.lot}: ${f.tradename} (strength ${f.strength}) → ${f.hb.join('+')}`);
+        console.log(
+          `    ${f.lot}: ${f.tradename} (strength ${f.strength}) → ${f.hb.join('+')}`
+        );
       }
     }
-    assert.equal(crossFires.length, 0,
-      `${crossFires.length} standalone Hep B lot(s) did not resolve to exactly one HB agent`);
+    assert.equal(
+      crossFires.length,
+      0,
+      `${crossFires.length} standalone Hep B lot(s) did not resolve to exactly one HB agent`
+    );
   });
 
   test('catalogue sweep: combo HB-containing products only emit HB-pediatric as a NON-leading fallback', () => {
@@ -266,21 +353,32 @@ if (!bundle) {
 
     // Every over-matching product must be a known pediatric combo.
     for (const tradename of offenders.keys()) {
-      assert.ok(KNOWN_COMBO_OVERMATCH.some((p) => p.test(tradename)),
+      assert.ok(
+        KNOWN_COMBO_OVERMATCH.some((p) => p.test(tradename)),
         `Unexpected product emits an HB* agent: "${tradename}". ` +
-        `If this is a new combo product, add it to KNOWN_COMBO_OVERMATCH; ` +
-        `if it is a wrong-agent bug, tighten the HB rules in panorama-agent-rules.js.`);
+          `If this is a new combo product, add it to KNOWN_COMBO_OVERMATCH; ` +
+          `if it is a wrong-agent bug, tighten the HB rules in panorama-agent-rules.js.`
+      );
     }
 
     // And HB-pediatric must never lead the candidate list for them.
     for (const [tradename, firstOutput] of offenders) {
-      assert.notEqual(firstOutput, 'HB-pediatric',
-        `${tradename}: HB-pediatric must not be the first agent candidate (got "${firstOutput}")`);
-      assert.ok(!/^HB/.test(firstOutput),
-        `${tradename}: a standalone HB* agent must not lead (got "${firstOutput}")`);
+      assert.notEqual(
+        firstOutput,
+        'HB-pediatric',
+        `${tradename}: HB-pediatric must not be the first agent candidate (got "${firstOutput}")`
+      );
+      assert.ok(
+        !/^HB/.test(firstOutput),
+        `${tradename}: a standalone HB* agent must not lead (got "${firstOutput}")`
+      );
     }
 
-    console.log(`\n  Combo HB over-match (benign, dropdown-disambiguated): ` +
-      [...offenders.entries()].map(([t, o]) => `${t} → leads with ${o}`).join('; '));
+    console.log(
+      `\n  Combo HB over-match (benign, dropdown-disambiguated): ` +
+        [...offenders.entries()]
+          .map(([t, o]) => `${t} → leads with ${o}`)
+          .join('; ')
+    );
   });
 }

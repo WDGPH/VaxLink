@@ -46,13 +46,18 @@ export function parseManualTestInput(input) {
       generic_name: obj.generic_name || null
     };
     if (!data.name && !data.lot && !data.tradename) {
-      throw new Error('Manual JSON must include at least one of: name/agent, tradename, lot');
+      throw new Error(
+        'Manual JSON must include at least one of: name/agent, tradename, lot'
+      );
     }
     return data;
   }
 
   if (/[=]/.test(normalized)) {
-    const pairs = normalized.split(/[;\n]+/).map((part) => part.trim()).filter(Boolean);
+    const pairs = normalized
+      .split(/[;\n]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
     const map = {};
     for (const pair of pairs) {
       const eqIdx = pair.indexOf('=');
@@ -68,12 +73,15 @@ export function parseManualTestInput(input) {
         expiry: map.expiry || null,
         lot: map.lot || map.lot_number || null,
         serial: map.serial || null,
-        name: map.name || map.agent || map.generic_name || map.tradename || null,
+        name:
+          map.name || map.agent || map.generic_name || map.tradename || null,
         tradename: map.tradename || null,
         generic_name: map.generic_name || null
       };
       if (!data.name && !data.lot && !data.tradename) {
-        throw new Error('Manual key-value input must include name/agent, tradename, or lot');
+        throw new Error(
+          'Manual key-value input must include name/agent, tradename, or lot'
+        );
       }
       return data;
     }
@@ -120,9 +128,15 @@ export function getExpiryStatus(dateValue) {
   }
 
   const today = new Date();
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const todayMidnight = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
   const msPerDay = 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / msPerDay);
+  const daysRemaining = Math.floor(
+    (expiry.getTime() - todayMidnight.getTime()) / msPerDay
+  );
 
   if (daysRemaining < 0) {
     return {

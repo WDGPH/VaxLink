@@ -7,7 +7,7 @@ updates:
     groups:
       actions-maintenance:
         applies-to: version-updates
-        patterns: ["*"]
+        patterns: ['*']
   - package-ecosystem: uv
     directory: /
     schedule:
@@ -15,4 +15,4 @@ updates:
     groups:
       docs-maintenance:
         applies-to: version-updates
-        patterns: ["*"]
+        patterns: ['*']

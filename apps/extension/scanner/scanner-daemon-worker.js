@@ -7,8 +7,14 @@ import {
   normalizeScannerStatusSnapshot,
   selectGrantedPort
 } from './scanner-daemon-shared.js';
-import { getSerialScannerProfile, portMatchesProfile } from './serial-profiles.js';
-import { getGrantedSerialScannerPorts, openSerialScanner } from './serial-provider.js';
+import {
+  getSerialScannerProfile,
+  portMatchesProfile
+} from './serial-profiles.js';
+import {
+  getGrantedSerialScannerPorts,
+  openSerialScanner
+} from './serial-provider.js';
 
 let desiredProfileId = '';
 let preferredPortInfo = null;
@@ -58,16 +64,21 @@ function scheduleReconnect() {
   }, delayMs);
 }
 
-function handleConnectionFailure(error, fallbackState = SCANNER_STATUS_STATES.ERROR) {
+function handleConnectionFailure(
+  error,
+  fallbackState = SCANNER_STATUS_STATES.ERROR
+) {
   if (!desiredConnected) {
     return;
   }
 
   const classification = classifyScannerConnectionFailure(error, fallbackState);
   const disconnectedAt = new Date().toISOString();
-  const portInfo = normalizeScannerPortInfo(activePort && typeof activePort.getInfo === 'function'
-    ? activePort.getInfo()
-    : preferredPortInfo);
+  const portInfo = normalizeScannerPortInfo(
+    activePort && typeof activePort.getInfo === 'function'
+      ? activePort.getInfo()
+      : preferredPortInfo
+  );
 
   activeConnection = null;
   activePort = null;
@@ -109,12 +120,17 @@ async function connectGrantedPort(trigger = 'manual') {
   openingPromise = (async () => {
     clearReconnectTimer();
     if (!(globalThis.navigator && 'serial' in globalThis.navigator)) {
-      handleConnectionFailure(new Error('Web Serial is not available in the scanner worker.'));
+      handleConnectionFailure(
+        new Error('Web Serial is not available in the scanner worker.')
+      );
       return;
     }
 
     updateStatus({
-      state: recoverAttemptCount > 0 ? SCANNER_STATUS_STATES.RECOVERING : SCANNER_STATUS_STATES.STARTING,
+      state:
+        recoverAttemptCount > 0
+          ? SCANNER_STATUS_STATES.RECOVERING
+          : SCANNER_STATUS_STATES.STARTING,
       profileId: desiredProfileId,
       portInfo: preferredPortInfo,
       lastError: '',
@@ -123,7 +139,12 @@ async function connectGrantedPort(trigger = 'manual') {
 
     const profile = getSerialScannerProfile(desiredProfileId);
     const ports = await getGrantedSerialScannerPorts();
-    const selection = selectGrantedPort(ports, profile, preferredPortInfo, portMatchesProfile);
+    const selection = selectGrantedPort(
+      ports,
+      profile,
+      preferredPortInfo,
+      portMatchesProfile
+    );
     const port = selection.port;
 
     if (!port) {
@@ -131,9 +152,11 @@ async function connectGrantedPort(trigger = 'manual') {
         ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
         : SCANNER_STATUS_STATES.NEVER_CONFIGURED;
       handleConnectionFailure(
-        new Error(noPortState === SCANNER_STATUS_STATES.NEVER_CONFIGURED
-          ? 'No previously granted serial port found. Use Select Scanner first.'
-          : 'Scanner not found. Reconnect the cradle or power it on.'),
+        new Error(
+          noPortState === SCANNER_STATUS_STATES.NEVER_CONFIGURED
+            ? 'No previously granted serial port found. Use Select Scanner first.'
+            : 'Scanner not found. Reconnect the cradle or power it on.'
+        ),
         noPortState
       );
       return;
@@ -157,7 +180,9 @@ async function connectGrantedPort(trigger = 'manual') {
             updateStatus({
               state: SCANNER_STATUS_STATES.CONNECTED,
               profileId: profile.id,
-              portInfo: normalizeScannerPortInfo(status.portInfo || port.getInfo()),
+              portInfo: normalizeScannerPortInfo(
+                status.portInfo || port.getInfo()
+              ),
               lastConnectedAt: new Date().toISOString(),
               lastError: '',
               recoverAttemptCount: 0
@@ -166,7 +191,9 @@ async function connectGrantedPort(trigger = 'manual') {
           }
 
           if (status.state === 'disconnected') {
-            handleConnectionFailure(new DOMException('Serial device disconnected.', 'NetworkError'));
+            handleConnectionFailure(
+              new DOMException('Serial device disconnected.', 'NetworkError')
+            );
           }
         },
         onError: (error) => {
@@ -202,8 +229,12 @@ self.addEventListener('message', (event) => {
   switch (data.type) {
     case 'connectGranted':
       desiredConnected = true;
-      desiredProfileId = String(data.profileId || desiredProfileId || '').trim();
-      preferredPortInfo = normalizeScannerPortInfo(data.preferredPortInfo || preferredPortInfo);
+      desiredProfileId = String(
+        data.profileId || desiredProfileId || ''
+      ).trim();
+      preferredPortInfo = normalizeScannerPortInfo(
+        data.preferredPortInfo || preferredPortInfo
+      );
       void connectGrantedPort(data.trigger || 'manual');
       break;
     case 'disconnect':

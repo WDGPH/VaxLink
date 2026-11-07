@@ -78,7 +78,9 @@ function resetPanoramaFundedRadioToShowAll() {
   );
   if (!radio) return 'not_found';
   if (radio.checked) return 'already';
-  const box = radio.closest('.ui-radiobutton')?.querySelector('.ui-radiobutton-box');
+  const box = radio
+    .closest('.ui-radiobutton')
+    ?.querySelector('.ui-radiobutton-box');
   if (box) box.click();
   radio.checked = true;
   radio.dispatchEvent(new Event('change', { bubbles: true }));
@@ -88,11 +90,11 @@ function resetPanoramaFundedRadioToShowAll() {
 
 Return values:
 
-| Value | Meaning |
-|---|---|
+| Value         | Meaning                                                                            |
+| ------------- | ---------------------------------------------------------------------------------- |
 | `'not_found'` | Radio not present — page is not at the lot selection step yet, or selector changed |
-| `'already'` | Already on Show All — no action needed, proceed to lot fill |
-| `'clicked'` | Just clicked — AJAX is now in flight, must wait before filling |
+| `'already'`   | Already on Show All — no action needed, proceed to lot fill                        |
+| `'clicked'`   | Just clicked — AJAX is now in flight, must wait before filling                     |
 
 ### Integration into `schedulePanoramaLotOrTradeSelection()` — `content.js`
 
@@ -110,7 +112,8 @@ if (!resolved && hasResolvedAgent && !busy) {
     fundedRadioEnsured = true;
     if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
   }
-  resolved = tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
+  resolved =
+    tryFillPanoramaLotOrTrade(data) || hasPanoramaLotOrTradeSelection(data);
 }
 ```
 

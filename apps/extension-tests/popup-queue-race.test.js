@@ -66,7 +66,11 @@ test('a background append during a popup remove is not clobbered', async () => {
   await manager.remove('a');
 
   const stored = store.get(QUEUE_KEY).map((r) => r.id);
-  assert.deepEqual(stored, ['b', 'scan-c'], 'remove must keep the concurrently appended scan');
+  assert.deepEqual(
+    stored,
+    ['b', 'scan-c'],
+    'remove must keep the concurrently appended scan'
+  );
 });
 
 test('a popup add does not resurrect rows removed elsewhere', async () => {
@@ -80,7 +84,11 @@ test('a popup add does not resurrect rows removed elsewhere', async () => {
   await manager.add(row('popup-d'));
 
   const stored = store.get(QUEUE_KEY).map((r) => r.id);
-  assert.deepEqual(stored, ['a', 'popup-d'], 'add must not bring back the deleted row');
+  assert.deepEqual(
+    stored,
+    ['a', 'popup-d'],
+    'add must not bring back the deleted row'
+  );
 });
 
 test('updateById patches the freshest copy of the row', async () => {
@@ -92,7 +100,11 @@ test('updateById patches the freshest copy of the row', async () => {
   store.set(QUEUE_KEY, [row('a', { total_doses: 5, remaining_doses: 4 })]);
 
   const updated = await manager.updateById('a', { dose_tracking: 'manual' });
-  assert.equal(updated.remaining_doses, 4, 'patch must apply on the stored row, not the stale copy');
+  assert.equal(
+    updated.remaining_doses,
+    4,
+    'patch must apply on the stored row, not the stale copy'
+  );
 });
 
 test('consumeById decrements doses without losing concurrent appends', async () => {
@@ -100,7 +112,10 @@ test('consumeById decrements doses without losing concurrent appends', async () 
   const manager = makeManager();
   await manager.load();
 
-  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 }), row('scan-e')]);
+  store.set(QUEUE_KEY, [
+    row('vial', { total_doses: 10, remaining_doses: 10 }),
+    row('scan-e')
+  ]);
 
   const consumed = await manager.consumeById('vial');
   assert.equal(consumed.remaining_doses, 9);
@@ -117,7 +132,11 @@ test('consumeById decrements from the FRESH remaining count, not the stale copy'
   store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 9 })]);
 
   const consumed = await manager.consumeById('vial');
-  assert.equal(consumed.remaining_doses, 8, 'must decrement the stored count, not resurrect the stale one');
+  assert.equal(
+    consumed.remaining_doses,
+    8,
+    'must decrement the stored count, not resurrect the stale one'
+  );
   assert.equal(store.get(QUEUE_KEY)[0].remaining_doses, 8);
 });
 

@@ -50,11 +50,11 @@ const GTIN_TRADENAME_CODE_OVERRIDES = Object.freeze({
 // barcode format. Add new lots here as they are discovered.
 const LOT_TRADENAME_CODE_OVERRIDES = Object.freeze({
   // RECOMBIVAX HB adult — NVC incorrectly links to pediatric tradename
-  'Y016312': '6951000087100',
-  'Y020519': '6951000087100',
+  Y016312: '6951000087100',
+  Y020519: '6951000087100',
   // VAQTA (HA) adult — NVC lists this lot's pediatric tradename link before
   // the adult one, so the default first-match resolution picks pediatric.
-  'Y018089': '6901000087101'
+  Y018089: '6901000087101'
 });
 const STORAGE_KEYS = {
   bundle: 'nvc_bundle_override',
@@ -204,18 +204,23 @@ function initQueueBadge() {
 }
 
 function getStorage(keys) {
-  return new Promise((resolve, reject) => chrome.storage.local.get(keys, (stored) => {
-    if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-    else resolve(stored);
-  }));
+  return new Promise((resolve, reject) =>
+    chrome.storage.local.get(keys, (stored) => {
+      if (chrome.runtime.lastError)
+        reject(new Error(chrome.runtime.lastError.message));
+      else resolve(stored);
+    })
+  );
 }
 
 function setStorage(values) {
-  return new Promise((resolve, reject) => chrome.storage.local.set(values, () => {
-    const error = chrome.runtime.lastError;
-    if (error) reject(new Error(error.message));
-    else resolve();
-  }));
+  return new Promise((resolve, reject) =>
+    chrome.storage.local.set(values, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    })
+  );
 }
 
 function normalizeScannerIsoTimestamp(value) {
@@ -227,11 +232,19 @@ function normalizeScannerIsoTimestamp(value) {
 function normalizeScannerPortInfo(info) {
   if (!info || typeof info !== 'object') return null;
   const normalized = {};
-  if (info.usbVendorId !== undefined && info.usbVendorId !== null && info.usbVendorId !== '') {
+  if (
+    info.usbVendorId !== undefined &&
+    info.usbVendorId !== null &&
+    info.usbVendorId !== ''
+  ) {
     const vendorId = Number(info.usbVendorId);
     if (Number.isFinite(vendorId)) normalized.usbVendorId = vendorId;
   }
-  if (info.usbProductId !== undefined && info.usbProductId !== null && info.usbProductId !== '') {
+  if (
+    info.usbProductId !== undefined &&
+    info.usbProductId !== null &&
+    info.usbProductId !== ''
+  ) {
     const productId = Number(info.usbProductId);
     if (Number.isFinite(productId)) normalized.usbProductId = productId;
   }
@@ -265,17 +278,26 @@ function normalizeScannerStatusSnapshot(snapshot) {
     lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
     lastError: String(source.lastError || '').trim(),
-    recoverAttemptCount: Math.max(0, Number.parseInt(source.recoverAttemptCount, 10) || 0)
+    recoverAttemptCount: Math.max(
+      0,
+      Number.parseInt(source.recoverAttemptCount, 10) || 0
+    )
   };
 }
 
-function buildDefaultScannerStatus({ enabled = false, profileId = '', portInfo = null } = {}) {
+function buildDefaultScannerStatus({
+  enabled = false,
+  profileId = '',
+  portInfo = null
+} = {}) {
   const normalizedProfileId = String(profileId || '').trim();
   if (!normalizedProfileId) {
     return createScannerStatusSnapshot();
   }
   return createScannerStatusSnapshot({
-    state: enabled ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE : SCANNER_STATUS_STATES.DISABLED,
+    state: enabled
+      ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
+      : SCANNER_STATUS_STATES.DISABLED,
     profileId: normalizedProfileId,
     portInfo: normalizeScannerPortInfo(portInfo)
   });
@@ -290,7 +312,9 @@ async function getScannerBootstrapState() {
   ]);
   const enabled = stored[SCANNER_DAEMON_ENABLED_KEY] === true;
   const profileId = String(stored[SCANNER_PROFILE_STORAGE_KEY] || '').trim();
-  const portInfo = normalizeScannerPortInfo(stored[SCANNER_PORT_INFO_STORAGE_KEY]);
+  const portInfo = normalizeScannerPortInfo(
+    stored[SCANNER_PORT_INFO_STORAGE_KEY]
+  );
   const status = stored[SCANNER_STATUS_SNAPSHOT_KEY]
     ? normalizeScannerStatusSnapshot(stored[SCANNER_STATUS_SNAPSHOT_KEY])
     : buildDefaultScannerStatus({ enabled, profileId, portInfo });
@@ -316,13 +340,16 @@ async function persistScannerStatusSnapshot(snapshot) {
 
 async function broadcastScannerStatus(snapshot) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({
-      action: SCANNER_DAEMON_ACTIONS.STATUS_CHANGED,
-      status: snapshot
-    }, () => {
-      void chrome.runtime.lastError;
-      resolve();
-    });
+    chrome.runtime.sendMessage(
+      {
+        action: SCANNER_DAEMON_ACTIONS.STATUS_CHANGED,
+        status: snapshot
+      },
+      () => {
+        void chrome.runtime.lastError;
+        resolve();
+      }
+    );
   });
 }
 
@@ -336,7 +363,10 @@ async function hasScannerDaemonDocument() {
     return contexts.length > 0;
   }
 
-  if (typeof clients === 'undefined' || typeof clients.matchAll !== 'function') {
+  if (
+    typeof clients === 'undefined' ||
+    typeof clients.matchAll !== 'function'
+  ) {
     return false;
   }
   const matchedClients = await clients.matchAll();
@@ -344,8 +374,13 @@ async function hasScannerDaemonDocument() {
 }
 
 async function ensureScannerDaemon() {
-  if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
-    throw new Error('The Offscreen API is not available in this browser context.');
+  if (
+    !chrome.offscreen ||
+    typeof chrome.offscreen.createDocument !== 'function'
+  ) {
+    throw new Error(
+      'The Offscreen API is not available in this browser context.'
+    );
   }
 
   if (await hasScannerDaemonDocument()) {
@@ -353,13 +388,16 @@ async function ensureScannerDaemon() {
   }
 
   if (!scannerDaemonCreatePromise) {
-    scannerDaemonCreatePromise = chrome.offscreen.createDocument({
-      url: SCANNER_DAEMON_OFFSCREEN_PATH,
-      reasons: ['WORKERS'],
-      justification: 'Keep a previously granted scanner connection active without a visible tab.'
-    }).finally(() => {
-      scannerDaemonCreatePromise = null;
-    });
+    scannerDaemonCreatePromise = chrome.offscreen
+      .createDocument({
+        url: SCANNER_DAEMON_OFFSCREEN_PATH,
+        reasons: ['WORKERS'],
+        justification:
+          'Keep a previously granted scanner connection active without a visible tab.'
+      })
+      .finally(() => {
+        scannerDaemonCreatePromise = null;
+      });
   }
 
   await scannerDaemonCreatePromise;
@@ -412,7 +450,9 @@ function scanIdentityKey(record) {
   const raw = String(record.raw_barcode || '').trim();
   if (raw) return `raw:${raw}`;
   const gtin = String(record.gtin || '').trim();
-  const lot = String(record.lot || '').trim().toUpperCase();
+  const lot = String(record.lot || '')
+    .trim()
+    .toUpperCase();
   const serial = String(record.serial || '').trim();
   if (!gtin && !lot) return '';
   return `ids:${gtin}|${lot}|${serial}`;
@@ -439,11 +479,17 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
     throw new Error('Missing queue record');
   }
   const stored = await getStorage([storageKey]);
-  const rows = stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  const rows =
+    stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
 
-  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY && options.preserveEveryScan !== true) {
+  if (
+    storageKey === MULTIPLE_INJECT_QUEUE_KEY &&
+    options.preserveEveryScan !== true
+  ) {
     const recordScannedAt = Date.parse(record.scanned_at);
-    const nowMs = Number.isFinite(recordScannedAt) ? recordScannedAt : Date.now();
+    const nowMs = Number.isFinite(recordScannedAt)
+      ? recordScannedAt
+      : Date.now();
     const duplicate = findRecentDuplicateQueueRow(rows, record, nowMs);
     if (duplicate) {
       return {
@@ -483,13 +529,13 @@ function queryTabs(queryInfo) {
 }
 
 function queryMachineIdleState() {
-  if (!chrome.idle || typeof chrome.idle.queryState !== "function") {
-    return Promise.resolve("active");
+  if (!chrome.idle || typeof chrome.idle.queryState !== 'function') {
+    return Promise.resolve('active');
   }
   return new Promise((resolve) => {
     chrome.idle.queryState(15, (state) => {
       if (chrome.runtime.lastError) {
-        resolve("active");
+        resolve('active');
         return;
       }
       resolve(normalizeMachineIdleState(state));
@@ -511,7 +557,7 @@ async function beginLockedScannerSession() {
       const activeChartTab = activeTabs.find(tabMayBeSupportedChart) || null;
       const session = createLockedScannerSession({ activeTab: activeChartTab });
       await setStorage({
-        [SCANNER_LOCK_STATE_KEY]: "locked",
+        [SCANNER_LOCK_STATE_KEY]: 'locked',
         [SCANNER_LOCK_SESSION_KEY]: session
       });
       return session;
@@ -524,7 +570,7 @@ async function beginLockedScannerSession() {
 
 async function updateScannerLockState(state) {
   const normalized = normalizeMachineIdleState(state);
-  if (normalized === "locked") {
+  if (normalized === 'locked') {
     return beginLockedScannerSession();
   }
   const existing = await getLockedScannerSession();
@@ -547,27 +593,34 @@ async function drainPendingScansAfterUnlock(lockSession, attempt = 0) {
     tabId = activeTabs.find(tabMayBeSupportedChart)?.id ?? null;
   }
   if (tabId === null) return { drained: 0, remaining: null };
-  return drainPendingScansToTab(tabId).then((result) => {
-    if (result.remaining > 0 && attempt < 2) {
-      setTimeout(() => {
-        void drainPendingScansAfterUnlock(lockSession, attempt + 1);
-      }, 1000 * (attempt + 1));
-    }
-    return result;
-  }).catch(() => ({ drained: 0, remaining: null }));
+  return drainPendingScansToTab(tabId)
+    .then((result) => {
+      if (result.remaining > 0 && attempt < 2) {
+        setTimeout(
+          () => {
+            void drainPendingScansAfterUnlock(lockSession, attempt + 1);
+          },
+          1000 * (attempt + 1)
+        );
+      }
+      return result;
+    })
+    .catch(() => ({ drained: 0, remaining: null }));
 }
 
 function initializeScannerLockMonitoring() {
   if (chrome.idle?.onStateChanged) {
     chrome.idle.onStateChanged.addListener((state) => {
       void updateScannerLockState(state).catch((error) => {
-        console.warn("Could not update scanner lock state:", error);
+        console.warn('Could not update scanner lock state:', error);
       });
     });
   }
   void queryMachineIdleState()
     .then(updateScannerLockState)
-    .catch((error) => console.warn("Could not initialize scanner lock state:", error));
+    .catch((error) =>
+      console.warn('Could not initialize scanner lock state:', error)
+    );
 }
 
 function isSupportedChartUrl(urlValue) {
@@ -578,10 +631,11 @@ function isSupportedChartUrl(urlValue) {
     const path = url.pathname.toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
-       host === 'panorama.prod.ehealthontario.ca' ||
-       host === 'trpanoramadhir.prod.ehealthontario.ca') &&
+        host === 'panorama.prod.ehealthontario.ca' ||
+        host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
-    const isInputHealth = host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
+    const isInputHealth =
+      host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
     return isPanorama || isInputHealth;
   } catch (_) {
     return false;
@@ -612,17 +666,22 @@ function sendScanToTab(tabId, scan) {
       reject(new Error('Missing tab id'));
       return;
     }
-    chrome.tabs.sendMessage(tabId, { action: 'vaxlinkScanCaptured', scan }, { frameId: 0 }, (response) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
+    chrome.tabs.sendMessage(
+      tabId,
+      { action: 'vaxlinkScanCaptured', scan },
+      { frameId: 0 },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!tabAcceptedScannerScan(response)) {
+          reject(new Error(response?.error || 'Tab did not accept scan'));
+          return;
+        }
+        resolve(response);
       }
-      if (!tabAcceptedScannerScan(response)) {
-        reject(new Error(response?.error || 'Tab did not accept scan'));
-        return;
-      }
-      resolve(response);
-    });
+    );
   });
 }
 
@@ -688,8 +747,14 @@ function getExpiryStatus(value) {
   }
 
   const today = new Date();
-  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const daysRemaining = Math.floor((expiry.getTime() - todayMidnight.getTime()) / (24 * 60 * 60 * 1000));
+  const todayMidnight = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate()
+  );
+  const daysRemaining = Math.floor(
+    (expiry.getTime() - todayMidnight.getTime()) / (24 * 60 * 60 * 1000)
+  );
   if (daysRemaining < 0) return { flag: 'expired', daysRemaining };
   if (daysRemaining <= 30) return { flag: 'expiring_soon', daysRemaining };
   return { flag: 'valid', daysRemaining };
@@ -716,7 +781,8 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   parsed.dose_unit = vaccineInfo.dose_unit;
   parsed.drug_code = vaccineInfo.din;
   parsed.nvc_override = vaccineInfo.nvc_override || null;
-  parsed.name = vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
+  parsed.name =
+    vaccineInfo.generic_name || vaccineInfo.tradename || vaccineInfo.din;
 
   if (!parsed.lot && vaccineInfo.lot_number) {
     parsed.lot = vaccineInfo.lot_number;
@@ -729,11 +795,14 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
 function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
   const totalDoses = getPositiveInt(data.total_doses, null);
   const fallbackDose = getPositiveInt(totalDoses, null);
-  const inventoryExpiry = data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
+  const inventoryExpiry =
+    data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
   const expirySource = data.expiry
     ? 'barcode'
-    : (data.nvc_lot_expiry ? 'nvc' : (data.expiry_source || 'none'));
+    : data.nvc_lot_expiry
+      ? 'nvc'
+      : data.expiry_source || 'none';
 
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -781,7 +850,9 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   if (parsed.lot) {
-    const vaccineInfo = await lookupVaccineInfo(parsed.lot, { gtin: parsed.gtin });
+    const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
+      gtin: parsed.gtin
+    });
     if (!vaccineInfo.error) mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
     else parsed.lookup_error = vaccineInfo.error;
   }
@@ -791,11 +862,19 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
     { preserveEveryScan: options.preserveEveryScan === true }
   );
-  const expiryFlag = record.expiry_flag || getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
+  const expiryFlag =
+    record.expiry_flag ||
+    getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
   await logAnalyticsEvent('scan_captured', {
     workflow: mode,
     source: scan.source || 'web-serial',
-    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || record.gtin || '',
+    vaccineLabel:
+      record.tradename ||
+      record.generic_name ||
+      record.name ||
+      record.lot ||
+      record.gtin ||
+      '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -805,7 +884,12 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     source: scan.source || 'web-serial',
     count: 1,
     queueSizeAfter: record.queueSizeAfter || 0,
-    vaccineLabel: record.tradename || record.generic_name || record.name || record.lot || '',
+    vaccineLabel:
+      record.tradename ||
+      record.generic_name ||
+      record.name ||
+      record.lot ||
+      '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -866,10 +950,10 @@ async function routeScanToActiveSupportedTab(rawScan) {
 
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
-    if (workflowMode === "single") {
+    if (workflowMode === 'single') {
       const pendingCount = await enqueuePendingScan({
         ...scan,
-        pending_workflow: "single",
+        pending_workflow: 'single',
         ...buildLockedScanQueueContext(lockSession)
       });
       return {
@@ -879,14 +963,18 @@ async function routeScanToActiveSupportedTab(rawScan) {
         locked: true,
         lockSessionId: lockSession.id,
         pinnedTabId: lockSession.tabId,
-        workflow: "single",
+        workflow: 'single',
         pendingCount
       };
     }
-    const lockedQueueResult = await saveScannerScanToWorkflowQueue(scan, "multiple", {
-      context: buildLockedScanQueueContext(lockSession),
-      preserveEveryScan: true
-    });
+    const lockedQueueResult = await saveScannerScanToWorkflowQueue(
+      scan,
+      'multiple',
+      {
+        context: buildLockedScanQueueContext(lockSession),
+        preserveEveryScan: true
+      }
+    );
     return {
       routed: false,
       queued: true,
@@ -894,7 +982,7 @@ async function routeScanToActiveSupportedTab(rawScan) {
       locked: true,
       lockSessionId: lockSession.id,
       pinnedTabId: lockSession.tabId,
-      workflow: "multiple",
+      workflow: 'multiple',
       storageKey: lockedQueueResult.storageKey,
       queueSizeAfter: lockedQueueResult.record?.queueSizeAfter || 0
     };
@@ -903,8 +991,11 @@ async function routeScanToActiveSupportedTab(rawScan) {
   // scans through a chart first: the chart content script may still have a
   // stale mode during popup/storage synchronization, which previously made a
   // Multiple scan behave like Single or disappear into a failed chart fill.
-  if (workflowMode === "multiple" || workflowMode === "inventory") {
-    const workflowQueueResult = await saveScannerScanToWorkflowQueue(scan, workflowMode);
+  if (workflowMode === 'multiple' || workflowMode === 'inventory') {
+    const workflowQueueResult = await saveScannerScanToWorkflowQueue(
+      scan,
+      workflowMode
+    );
     return {
       routed: false,
       queued: true,
@@ -936,7 +1027,10 @@ async function routeScanToActiveSupportedTab(rawScan) {
     }
   }
 
-  const workflowQueueResult = await saveScannerScanToWorkflowQueue(scan, workflowMode).catch((error) => ({
+  const workflowQueueResult = await saveScannerScanToWorkflowQueue(
+    scan,
+    workflowMode
+  ).catch((error) => ({
     queuedToWorkflow: false,
     workflow: workflowMode,
     error: error?.message || 'Workflow queue save failed'
@@ -1099,7 +1193,9 @@ function normalizeExpiryKey(value) {
 }
 
 function trimAnalyticsLabel(value, maxLength = 80) {
-  return String(value || '').trim().slice(0, maxLength);
+  return String(value || '')
+    .trim()
+    .slice(0, maxLength);
 }
 
 function applyTopCounter(map, rawKey, amount = 1) {
@@ -1172,10 +1268,16 @@ function applyAnalyticsEvent(day, event) {
       const queue = normalizeQueueKey(event.queue);
       if (queue === 'multiple') {
         day.queues.multipleSaved += count;
-        day.queues.maxMultipleDepth = Math.max(day.queues.maxMultipleDepth, Number(event.queueSizeAfter) || 0);
+        day.queues.maxMultipleDepth = Math.max(
+          day.queues.maxMultipleDepth,
+          Number(event.queueSizeAfter) || 0
+        );
       } else {
         day.queues.inventorySaved += count;
-        day.queues.maxInventoryDepth = Math.max(day.queues.maxInventoryDepth, Number(event.queueSizeAfter) || 0);
+        day.queues.maxInventoryDepth = Math.max(
+          day.queues.maxInventoryDepth,
+          Number(event.queueSizeAfter) || 0
+        );
       }
       day.workflows[queue].queueSaved += count;
       break;
@@ -1296,17 +1398,31 @@ function aggregateAnalyticsDays(days) {
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });
-    ['multipleSaved', 'multipleUsed', 'multipleCleared', 'inventorySaved', 'inventoryCleared'].forEach((key) => {
+    [
+      'multipleSaved',
+      'multipleUsed',
+      'multipleCleared',
+      'inventorySaved',
+      'inventoryCleared'
+    ].forEach((key) => {
       rollup.queues[key] += day.queues?.[key] || 0;
     });
-    rollup.queues.maxMultipleDepth = Math.max(rollup.queues.maxMultipleDepth, day.queues?.maxMultipleDepth || 0);
-    rollup.queues.maxInventoryDepth = Math.max(rollup.queues.maxInventoryDepth, day.queues?.maxInventoryDepth || 0);
+    rollup.queues.maxMultipleDepth = Math.max(
+      rollup.queues.maxMultipleDepth,
+      day.queues?.maxMultipleDepth || 0
+    );
+    rollup.queues.maxInventoryDepth = Math.max(
+      rollup.queues.maxInventoryDepth,
+      day.queues?.maxInventoryDepth || 0
+    );
     ['inventoryCount', 'inventoryRows'].forEach((key) => {
       rollup.exports[key] += day.exports?.[key] || 0;
     });
-    ['manualSuccess', 'manualFailure', 'autoSuccess', 'autoFailure'].forEach((key) => {
-      rollup.nvc[key] += day.nvc?.[key] || 0;
-    });
+    ['manualSuccess', 'manualFailure', 'autoSuccess', 'autoFailure'].forEach(
+      (key) => {
+        rollup.nvc[key] += day.nvc?.[key] || 0;
+      }
+    );
     ['expired', 'expiringSoon', 'valid', 'unknown'].forEach((key) => {
       rollup.expiry[key] += day.expiry?.[key] || 0;
     });
@@ -1340,10 +1456,11 @@ async function getAnalyticsExport(scope = 'pilot') {
   const store = await getAnalyticsStore();
   const dayKeys = Object.keys(store.days).sort();
   const todayKey = analyticsDayKey();
-  const selectedKeys = scope === 'today'
-    ? dayKeys.filter((key) => key === todayKey)
-    : dayKeys;
-  const selectedDays = Object.fromEntries(selectedKeys.map((key) => [key, store.days[key]]));
+  const selectedKeys =
+    scope === 'today' ? dayKeys.filter((key) => key === todayKey) : dayKeys;
+  const selectedDays = Object.fromEntries(
+    selectedKeys.map((key) => [key, store.days[key]])
+  );
   return {
     exportedAt: new Date().toISOString(),
     scope,
@@ -1378,11 +1495,15 @@ async function resetAnalyticsStore() {
 async function sha256Hex(text) {
   const encoded = new TextEncoder().encode(text);
   const hash = await crypto.subtle.digest('SHA-256', encoded);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function setupAutoSyncAlarm() {
-  chrome.alarms.create(AUTO_SYNC_ALARM_NAME, { periodInMinutes: AUTO_SYNC_INTERVAL_MINUTES });
+  chrome.alarms.create(AUTO_SYNC_ALARM_NAME, {
+    periodInMinutes: AUTO_SYNC_INTERVAL_MINUTES
+  });
 }
 
 function initializeNVCSync() {
@@ -1406,12 +1527,17 @@ function nvcFailure(category) {
     invalid: 'The NVC catalogue could not support vaccine lookups',
     storage: 'Unable to save the NVC catalogue',
     initializing: 'NVC catalogue is still loading. Try the lookup again.',
-    unavailable: 'NVC catalogue is unavailable. Barcode details have been kept.',
+    unavailable:
+      'NVC catalogue is unavailable. Barcode details have been kept.',
     not_found: 'Lot not found in the NVC catalogue',
     incomplete: 'NVC vaccine details are incomplete for this lot'
   };
-  return { success: false, error: messages[category], errorCategory: category,
-    usable: hasUsableNVCCatalogue() };
+  return {
+    success: false,
+    error: messages[category],
+    errorCategory: category,
+    usable: hasUsableNVCCatalogue()
+  };
 }
 
 async function lookupVaccineInfo(lot, options = {}) {
@@ -1421,70 +1547,136 @@ async function lookupVaccineInfo(lot, options = {}) {
     try {
       await Promise.race([
         nvcRefreshPromise || initializeNVCSync(),
-        new Promise((resolve) => { timer = setTimeout(resolve, NVC_LOOKUP_WAIT_MS); })
+        new Promise((resolve) => {
+          timer = setTimeout(resolve, NVC_LOOKUP_WAIT_MS);
+        })
       ]);
     } finally {
       clearTimeout(timer);
     }
   }
   if (!hasUsableNVCCatalogue()) {
-    return nvcFailure(nvcRefreshPromise ? 'initializing'
-      : nvcCacheInvalid || nvcHealth.lastError === 'invalid' ? 'invalid' : 'unavailable');
+    return nvcFailure(
+      nvcRefreshPromise
+        ? 'initializing'
+        : nvcCacheInvalid || nvcHealth.lastError === 'invalid'
+          ? 'invalid'
+          : 'unavailable'
+    );
   }
   const info = lookupVaccineLot(lot, options);
   if (!info) return nvcFailure('not_found');
-  return hasNVCVaccineIdentity(info) ? info : { ...info, ...nvcFailure('incomplete') };
+  return hasNVCVaccineIdentity(info)
+    ? info
+    : { ...info, ...nvcFailure('incomplete') };
 }
 
 function validateBundleShape(data) {
-  if (!data || data.resourceType !== 'Bundle' || data.type !== 'collection' ||
-      !Array.isArray(data.entry) || data.entry.length < 2) return false;
-  const isObject = (value) => value && typeof value === 'object' && !Array.isArray(value);
-  const validObjectArray = (value) => value === undefined ||
-    (Array.isArray(value) && value.every(isObject));
-  const validCoding = (value) => value === undefined ||
-    (isObject(value) && validObjectArray(value.coding));
-  const validConceptField = (item) => validCoding(item.valueCodeableConcept) &&
+  if (
+    !data ||
+    data.resourceType !== 'Bundle' ||
+    data.type !== 'collection' ||
+    !Array.isArray(data.entry) ||
+    data.entry.length < 2
+  )
+    return false;
+  const isObject = (value) =>
+    value && typeof value === 'object' && !Array.isArray(value);
+  const validObjectArray = (value) =>
+    value === undefined || (Array.isArray(value) && value.every(isObject));
+  const validCoding = (value) =>
+    value === undefined || (isObject(value) && validObjectArray(value.coding));
+  const validConceptField = (item) =>
+    validCoding(item.valueCodeableConcept) &&
     (item.valueCoding === undefined || isObject(item.valueCoding));
-  if (!data.entry.every((entry) => entry && isObject(entry.resource) &&
-      typeof entry.resource.resourceType === 'string')) return false;
+  if (
+    !data.entry.every(
+      (entry) =>
+        entry &&
+        isObject(entry.resource) &&
+        typeof entry.resource.resourceType === 'string'
+    )
+  )
+    return false;
   const resources = data.entry.map((entry) => entry.resource);
-  const validConcepts = (concepts) => !concepts || (Array.isArray(concepts) &&
-    concepts.every((concept) => isObject(concept) && typeof concept.code === 'string' &&
-      validObjectArray(concept.extension) && validObjectArray(concept.property) &&
-      validObjectArray(concept.designation) &&
-      (concept.extension || []).every(validConceptField) &&
-      (concept.property || []).every(validConceptField)));
-  const usedResources = resources.filter((resource) =>
-    resource.id === 'Tradename' || resource.id === 'nvc-vaccine-lot-id' ||
-    /tradename|lotagentmapping/i.test([resource.id, resource.name, resource.title, resource.url].join(' ')));
-  if (!usedResources.every((resource) => validConcepts(resource.concept) &&
-      (!resource.compose?.include || (Array.isArray(resource.compose.include) &&
-        resource.compose.include.every((item) => item && validConcepts(item.concept)))) &&
-      validConcepts(resource.expansion?.contains))) return false;
-  return resources.some((resource) => resource.resourceType === 'CodeSystem' &&
-    resource.id === 'nvc-vaccine-lot-id' && Array.isArray(resource.concept) &&
-    resource.concept.some((concept) => typeof concept?.code === 'string' && concept.code)) &&
-    resources.some((resource) => resource.resourceType === 'ValueSet' &&
-      resource.id === 'Tradename' && (resource.compose?.include?.some((item) =>
-        Array.isArray(item.concept) && item.concept.length > 0) ||
-        resource.expansion?.contains?.length > 0));
+  const validConcepts = (concepts) =>
+    !concepts ||
+    (Array.isArray(concepts) &&
+      concepts.every(
+        (concept) =>
+          isObject(concept) &&
+          typeof concept.code === 'string' &&
+          validObjectArray(concept.extension) &&
+          validObjectArray(concept.property) &&
+          validObjectArray(concept.designation) &&
+          (concept.extension || []).every(validConceptField) &&
+          (concept.property || []).every(validConceptField)
+      ));
+  const usedResources = resources.filter(
+    (resource) =>
+      resource.id === 'Tradename' ||
+      resource.id === 'nvc-vaccine-lot-id' ||
+      /tradename|lotagentmapping/i.test(
+        [resource.id, resource.name, resource.title, resource.url].join(' ')
+      )
+  );
+  if (
+    !usedResources.every(
+      (resource) =>
+        validConcepts(resource.concept) &&
+        (!resource.compose?.include ||
+          (Array.isArray(resource.compose.include) &&
+            resource.compose.include.every(
+              (item) => item && validConcepts(item.concept)
+            ))) &&
+        validConcepts(resource.expansion?.contains)
+    )
+  )
+    return false;
+  return (
+    resources.some(
+      (resource) =>
+        resource.resourceType === 'CodeSystem' &&
+        resource.id === 'nvc-vaccine-lot-id' &&
+        Array.isArray(resource.concept) &&
+        resource.concept.some(
+          (concept) => typeof concept?.code === 'string' && concept.code
+        )
+    ) &&
+    resources.some(
+      (resource) =>
+        resource.resourceType === 'ValueSet' &&
+        resource.id === 'Tradename' &&
+        (resource.compose?.include?.some(
+          (item) => Array.isArray(item.concept) && item.concept.length > 0
+        ) ||
+          resource.expansion?.contains?.length > 0)
+    )
+  );
 }
 
 function hasNVCVaccineIdentity(info) {
-  return [info?.tradename, info?.generic_name, info?.din]
-    .some((value) => typeof value === 'string' && value.trim());
+  return [info?.tradename, info?.generic_name, info?.din].some(
+    (value) => typeof value === 'string' && value.trim()
+  );
 }
 
 function prepareNVCCatalogue(data) {
   if (!validateBundleShape(data)) throw new Error('Invalid NVC catalogue');
   const indexes = buildNVCIndexes(data);
-  if (!Object.keys(indexes.lotByCode).length || !Object.keys(indexes.tradenameByCode).length) {
+  if (
+    !Object.keys(indexes.lotByCode).length ||
+    !Object.keys(indexes.tradenameByCode).length
+  ) {
     throw new Error('NVC catalogue has no usable lots or vaccine names');
   }
   const canEnrichLot = Object.values(indexes.lotByCode).some((concept) =>
-    hasNVCVaccineIdentity(lookupVaccineLot(extractLotNumber(concept) || concept.code, { indexes })));
-  if (!canEnrichLot) throw new Error('NVC catalogue has no usable vaccine links');
+    hasNVCVaccineIdentity(
+      lookupVaccineLot(extractLotNumber(concept) || concept.code, { indexes })
+    )
+  );
+  if (!canEnrichLot)
+    throw new Error('NVC catalogue has no usable vaccine links');
   return indexes;
 }
 
@@ -1494,7 +1686,14 @@ function loadNVCBundle() {
     try {
       const stored = await getStorage(Object.values(STORAGE_KEYS));
       const health = stored[STORAGE_KEYS.health];
-      const errors = ['source', 'network', 'timeout', 'http', 'invalid', 'storage'];
+      const errors = [
+        'source',
+        'network',
+        'timeout',
+        'http',
+        'invalid',
+        'storage'
+      ];
       nvcHealth = {
         updatedAt: stored[STORAGE_KEYS.updatedAt] || null,
         lastCheckAt: stored[STORAGE_KEYS.lastCheckAt] || null,
@@ -1529,7 +1728,9 @@ function refreshNVCBundleFromUrl(sourceUrl, options = {}) {
   }
   // All callers share this download and its result, including manual refreshes.
   if (nvcRefreshPromise) return nvcRefreshPromise;
-  nvcRefreshPromise = performNVCRefresh(options).finally(() => { nvcRefreshPromise = null; });
+  nvcRefreshPromise = performNVCRefresh(options).finally(() => {
+    nvcRefreshPromise = null;
+  });
   return nvcRefreshPromise;
 }
 
@@ -1539,13 +1740,18 @@ async function downloadNVCCatalogue(headers) {
   try {
     return await Promise.race([
       (async () => {
-        const response = await fetch(DEFAULT_NVC_SOURCE_URL,
-          { cache: 'no-store', redirect: 'error', headers, signal: controller.signal });
+        const response = await fetch(DEFAULT_NVC_SOURCE_URL, {
+          cache: 'no-store',
+          redirect: 'error',
+          headers,
+          signal: controller.signal
+        });
         if (response.redirected || response.url !== DEFAULT_NVC_SOURCE_URL) {
           throw Object.assign(new Error(), { category: 'source' });
         }
         if (response.status === 304) return { response };
-        if (!response.ok) throw Object.assign(new Error(), { category: 'http' });
+        if (!response.ok)
+          throw Object.assign(new Error(), { category: 'http' });
         try {
           return { response, bundle: await response.json() };
         } catch {
@@ -1570,9 +1776,12 @@ async function performNVCRefresh(options) {
   nvcHealth.lastAttemptAt = new Date().toISOString();
   let category = 'storage';
   try {
-    await setStorage({ [STORAGE_KEYS.health]: {
-      lastAttemptAt: nvcHealth.lastAttemptAt, lastError: nvcHealth.lastError
-    } });
+    await setStorage({
+      [STORAGE_KEYS.health]: {
+        lastAttemptAt: nvcHealth.lastAttemptAt,
+        lastError: nvcHealth.lastError
+      }
+    });
     const headers = { ...NVC_FETCH_HEADERS };
     if (nvcHealth.lastModified && hasUsableNVCCatalogue()) {
       headers['If-Modified-Since'] = nvcHealth.lastModified;
@@ -1586,28 +1795,53 @@ async function performNVCRefresh(options) {
     let computedSha256 = nvcHealth.sha256;
     let unchanged = response.status === 304;
     if (unchanged) {
-      if (firstRefresh) throw Object.assign(new Error(), { category: 'invalid' });
+      if (firstRefresh)
+        throw Object.assign(new Error(), { category: 'invalid' });
     } else {
       category = 'invalid';
       indexes = prepareNVCCatalogue(bundle);
       computedSha256 = await sha256Hex(JSON.stringify(bundle));
-      const previousSha256 = nvcHealth.sha256 ||
+      const previousSha256 =
+        nvcHealth.sha256 ||
         (nvcBundle ? await sha256Hex(JSON.stringify(nvcBundle)) : null);
       unchanged = !firstRefresh && computedSha256 === previousSha256;
     }
-    const addedLotCount = unchanged ? 0 : Object.keys(indexes.lotByCode)
-      .filter((code) => !Object.hasOwn(nvcIndexes.lotByCode || {}, code)).length;
-    const outcome = { firstRefresh, unchanged, addedLotCount, ...indexes.catalogueInfo };
-    const lastModified = response.headers.get('Last-Modified') ||
+    const addedLotCount = unchanged
+      ? 0
+      : Object.keys(indexes.lotByCode).filter(
+          (code) => !Object.hasOwn(nvcIndexes.lotByCode || {}, code)
+        ).length;
+    const outcome = {
+      firstRefresh,
+      unchanged,
+      addedLotCount,
+      ...indexes.catalogueInfo
+    };
+    const lastModified =
+      response.headers.get('Last-Modified') ||
       (response.status === 304 ? nvcHealth.lastModified : null);
     if (unchanged) {
       category = 'storage';
-      await setStorage({ [STORAGE_KEYS.lastCheckAt]: checkedAt,
-        [STORAGE_KEYS.lastModified]: lastModified, [STORAGE_KEYS.bundleSha256]: computedSha256,
-        [STORAGE_KEYS.health]: health });
-      Object.assign(nvcHealth, { lastCheckAt: checkedAt, lastModified, sha256: computedSha256, lastError: null });
-      return { success: true, ...outcome, sourceUrl: DEFAULT_NVC_SOURCE_URL,
-        updatedAt: nvcHealth.updatedAt, checkedAt, usable: true };
+      await setStorage({
+        [STORAGE_KEYS.lastCheckAt]: checkedAt,
+        [STORAGE_KEYS.lastModified]: lastModified,
+        [STORAGE_KEYS.bundleSha256]: computedSha256,
+        [STORAGE_KEYS.health]: health
+      });
+      Object.assign(nvcHealth, {
+        lastCheckAt: checkedAt,
+        lastModified,
+        sha256: computedSha256,
+        lastError: null
+      });
+      return {
+        success: true,
+        ...outcome,
+        sourceUrl: DEFAULT_NVC_SOURCE_URL,
+        updatedAt: nvcHealth.updatedAt,
+        checkedAt,
+        usable: true
+      };
     }
     category = 'storage';
     await setStorage({
@@ -1623,19 +1857,40 @@ async function performNVCRefresh(options) {
     nvcIndexes = indexes;
     nvcUsingCache = false;
     nvcCacheInvalid = false;
-    Object.assign(nvcHealth, { updatedAt: checkedAt, lastCheckAt: checkedAt,
-      sha256: computedSha256, lastModified, lastError: null });
-    await logAnalyticsEvent('nvc_refresh_result', { trigger, success: true }).catch(() => undefined);
-    return { success: true, ...outcome, sourceUrl: DEFAULT_NVC_SOURCE_URL, updatedAt: checkedAt,
-      checkedAt, entryCount: bundle.entry.length, sha256: computedSha256, usable: true };
+    Object.assign(nvcHealth, {
+      updatedAt: checkedAt,
+      lastCheckAt: checkedAt,
+      sha256: computedSha256,
+      lastModified,
+      lastError: null
+    });
+    await logAnalyticsEvent('nvc_refresh_result', {
+      trigger,
+      success: true
+    }).catch(() => undefined);
+    return {
+      success: true,
+      ...outcome,
+      sourceUrl: DEFAULT_NVC_SOURCE_URL,
+      updatedAt: checkedAt,
+      checkedAt,
+      entryCount: bundle.entry.length,
+      sha256: computedSha256,
+      usable: true
+    };
   } catch (error) {
     nvcHealth.lastError = error.category || category;
     if (hasUsableNVCCatalogue()) nvcUsingCache = true;
-    await setStorage({ [STORAGE_KEYS.health]: {
-      lastAttemptAt: nvcHealth.lastAttemptAt, lastError: nvcHealth.lastError
-    } }).catch(() => undefined);
+    await setStorage({
+      [STORAGE_KEYS.health]: {
+        lastAttemptAt: nvcHealth.lastAttemptAt,
+        lastError: nvcHealth.lastError
+      }
+    }).catch(() => undefined);
     await logAnalyticsEvent('nvc_refresh_result', {
-      trigger, success: false, note: nvcHealth.lastError
+      trigger,
+      success: false,
+      note: nvcHealth.lastError
     }).catch(() => undefined);
     return nvcFailure(nvcHealth.lastError);
   }
@@ -1645,7 +1900,10 @@ async function maybeAutoRefreshNVCBundle(trigger) {
   await loadNVCBundle();
   if (nvcRefreshPromise) return nvcRefreshPromise;
   const last = Date.parse(nvcHealth.lastCheckAt || '');
-  if (hasUsableNVCCatalogue() && Date.now() - last < AUTO_SYNC_INTERVAL_MINUTES * 60000) {
+  if (
+    hasUsableNVCCatalogue() &&
+    Date.now() - last < AUTO_SYNC_INTERVAL_MINUTES * 60000
+  ) {
     return { success: true, skipped: true, reason: 'interval_not_elapsed' };
   }
   return refreshNVCBundleFromUrl(DEFAULT_NVC_SOURCE_URL, { trigger });
@@ -1656,8 +1914,13 @@ async function getNVCUpdateStatus() {
   const usable = hasUsableNVCCatalogue();
   return {
     sourceUrl: DEFAULT_NVC_SOURCE_URL,
-    state: nvcRefreshPromise ? 'refreshing' : usable ? 'ready'
-      : nvcCacheInvalid || nvcHealth.lastError === 'invalid' ? 'invalid' : 'unavailable',
+    state: nvcRefreshPromise
+      ? 'refreshing'
+      : usable
+        ? 'ready'
+        : nvcCacheInvalid || nvcHealth.lastError === 'invalid'
+          ? 'invalid'
+          : 'unavailable',
     usable,
     usingCache: usable && nvcUsingCache,
     freshnessDegraded: usable && !!nvcHealth.lastError,
@@ -1666,7 +1929,11 @@ async function getNVCUpdateStatus() {
     lastAttemptAt: nvcHealth.lastAttemptAt || null,
     lastError: nvcHealth.lastError || null,
     sha256: nvcHealth.sha256 || null,
-    ...(nvcIndexes.catalogueInfo || { lotCount: null, releaseVersion: null, releaseDate: null }),
+    ...(nvcIndexes.catalogueInfo || {
+      lotCount: null,
+      releaseVersion: null,
+      releaseDate: null
+    }),
     autoSyncIntervalMinutes: AUTO_SYNC_INTERVAL_MINUTES
   };
 }
@@ -1677,27 +1944,30 @@ function buildNVCIndexes(bundle) {
     console.error('bundle not loaded or no entries');
     return;
   }
-  
+
   bgLog('bundle has', bundle.entry.length, 'entries');
-  
+
   const tradenames = collectTradenameConceptsFromBundle(bundle);
   const lots = collectLotConceptsFromBundle(bundle);
   const lotAgentRows = collectLotAgentMappingRowsFromBundle(bundle);
-  
+
   bgLog('Collected', tradenames.length, 'tradename concepts');
   bgLog('Collected', lots.length, 'lot concepts');
   bgLog('Collected', lotAgentRows.length, 'lot-agent mapping rows');
-  
+
   // Index tradenames by code and by DIN
   const tradenameByCode = Object.create(null);
   const tradenameByDin = Object.create(null);
   const tradenameByName = Object.create(null);
-  
+
   for (const concept of tradenames) {
     const codeKey = normalizeCodeKey(concept.code);
     if (codeKey) {
       const existingByCode = tradenameByCode[codeKey];
-      if (!existingByCode || conceptRichness(concept) >= conceptRichness(existingByCode)) {
+      if (
+        !existingByCode ||
+        conceptRichness(concept) >= conceptRichness(existingByCode)
+      ) {
         tradenameByCode[codeKey] = concept;
       }
     }
@@ -1705,28 +1975,32 @@ function buildNVCIndexes(bundle) {
     const dinKey = normalizeDinKey(din);
     if (dinKey) {
       const existingByDin = tradenameByDin[dinKey];
-      if (!existingByDin || conceptRichness(concept) >= conceptRichness(existingByDin)) {
+      if (
+        !existingByDin ||
+        conceptRichness(concept) >= conceptRichness(existingByDin)
+      ) {
         tradenameByDin[dinKey] = concept;
       }
     }
     indexTradenameNames(tradenameByName, concept);
   }
-  
+
   bgLog('Indexed', Object.keys(tradenameByCode).length, 'tradenames by code');
   bgLog('Indexed', Object.keys(tradenameByDin).length, 'tradenames by DIN');
   bgLog('Indexed', Object.keys(tradenameByName).length, 'tradenames by name');
-  
+
   // Index lots by lot number and by code
   const lotByLotNumber = Object.create(null);
   const lotByCode = Object.create(null);
   const lotByCodePrefix = Object.create(null);
-  
+
   for (const concept of lots) {
     const codeKey = normalizeCodeKey(concept.code);
     if (!codeKey || /[\s\x00-\x1f\x7f]/.test(codeKey)) continue;
     lotByCode[codeKey] = concept;
     const underscoreIdx = codeKey.indexOf('_');
-    const prefix = underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
+    const prefix =
+      underscoreIdx > 0 ? codeKey.substring(0, underscoreIdx) : codeKey;
     if (prefix && !lotByCodePrefix[prefix]) {
       lotByCodePrefix[prefix] = concept;
     }
@@ -1735,19 +2009,32 @@ function buildNVCIndexes(bundle) {
       lotByLotNumber[normalizeCodeKey(lotNumber)] = concept;
     }
   }
-  
+
   bgLog('Indexed', Object.keys(lotByLotNumber).length, 'lots by lot number');
   bgLog('Indexed', Object.keys(lotByCode).length, 'lots by code');
   const lotAgentMappingByLot = buildLotAgentMappingIndex(lotAgentRows);
-  bgLog('Indexed', Object.keys(lotAgentMappingByLot).length, 'lot-agent mappings by lot key');
-  
-  const lotResource = bundle.entry.find(({ resource }) =>
-    resource.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id')?.resource;
+  bgLog(
+    'Indexed',
+    Object.keys(lotAgentMappingByLot).length,
+    'lot-agent mappings by lot key'
+  );
+
+  const lotResource = bundle.entry.find(
+    ({ resource }) =>
+      resource.resourceType === 'CodeSystem' &&
+      resource.id === 'nvc-vaccine-lot-id'
+  )?.resource;
   return {
     catalogueInfo: {
       lotCount: Object.keys(lotByCode).length,
-      releaseVersion: typeof lotResource?.version === 'string' ? lotResource.version.trim() || null : null,
-      releaseDate: typeof lotResource?.date === 'string' ? lotResource.date.trim() || null : null
+      releaseVersion:
+        typeof lotResource?.version === 'string'
+          ? lotResource.version.trim() || null
+          : null,
+      releaseDate:
+        typeof lotResource?.date === 'string'
+          ? lotResource.date.trim() || null
+          : null
     },
     tradenameByCode,
     tradenameByDin,
@@ -1763,7 +2050,7 @@ function buildNVCIndexes(bundle) {
 function collectTradenameConceptsFromBundle(bundle) {
   const concepts = [];
   if (!bundle.entry) return concepts;
-  
+
   for (const entry of bundle.entry) {
     const resource = entry.resource;
     if (!resource || !resource.resourceType) continue;
@@ -1795,10 +2082,13 @@ function collectTradenameConceptsFromBundle(bundle) {
 function collectLotConceptsFromBundle(bundle) {
   const concepts = [];
   if (!bundle.entry) return concepts;
-  
+
   for (const entry of bundle.entry) {
     const resource = entry.resource;
-    if (resource.resourceType === 'CodeSystem' && resource.id === 'nvc-vaccine-lot-id') {
+    if (
+      resource.resourceType === 'CodeSystem' &&
+      resource.id === 'nvc-vaccine-lot-id'
+    ) {
       concepts.push(...(resource.concept || []));
     }
   }
@@ -1812,12 +2102,11 @@ function collectLotAgentMappingRowsFromBundle(bundle) {
   for (const entry of bundle.entry) {
     const resource = entry.resource;
     if (!resource || !resource.resourceType) continue;
-    const identity = normalizeCodeKey([
-      resource.id,
-      resource.name,
-      resource.title,
-      resource.url
-    ].filter(Boolean).join(' '));
+    const identity = normalizeCodeKey(
+      [resource.id, resource.name, resource.title, resource.url]
+        .filter(Boolean)
+        .join(' ')
+    );
     if (!identity.includes('lotagentmapping')) {
       continue;
     }
@@ -1858,8 +2147,10 @@ function readPropertyScalar(prop) {
   if (prop.valueInteger !== undefined) return String(prop.valueInteger);
   if (prop.valueDecimal !== undefined) return String(prop.valueDecimal);
   if (prop.valueBoolean !== undefined) return String(prop.valueBoolean);
-  if (prop.valueCoding) return prop.valueCoding.display || prop.valueCoding.code || '';
-  if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept) || '';
+  if (prop.valueCoding)
+    return prop.valueCoding.display || prop.valueCoding.code || '';
+  if (prop.valueCodeableConcept)
+    return extractCodeableConceptDisplay(prop.valueCodeableConcept) || '';
   return '';
 }
 
@@ -1902,21 +2193,31 @@ function parseLotAgentMappingConcept(concept) {
     const value = readPropertyScalar(prop);
     if (!key || !value) continue;
 
-    if ((key.includes('source') || key.includes('lot')) && key.includes('lot')) {
+    if (
+      (key.includes('source') || key.includes('lot')) &&
+      key.includes('lot')
+    ) {
       addLotKey(value);
     }
 
-    if (key.includes('target') && key.includes('tradename')) mapped.tradename = value;
-    else if (key.includes('tradename') && !mapped.tradename) mapped.tradename = value;
+    if (key.includes('target') && key.includes('tradename'))
+      mapped.tradename = value;
+    else if (key.includes('tradename') && !mapped.tradename)
+      mapped.tradename = value;
     else if (key.includes('generic')) mapped.generic_name = value;
     else if (key.includes('disease')) mapped.disease = value;
     else if (key.includes('antigen')) mapped.antigen = value;
     else if (key.includes('manufacturer')) mapped.manufacturer = value;
     else if (key.includes('route')) mapped.route = value;
     else if (key.includes('strength')) mapped.strength = value;
-    else if (key.includes('dose') && (key.includes('unit') || key.includes('uom'))) mapped.dose_unit = value;
+    else if (
+      key.includes('dose') &&
+      (key.includes('unit') || key.includes('uom'))
+    )
+      mapped.dose_unit = value;
     else if (key.includes('dose')) mapped.dose_value = value;
-    else if (key === 'din' || key.includes('drugidentificationnumber')) mapped.din = value;
+    else if (key === 'din' || key.includes('drugidentificationnumber'))
+      mapped.din = value;
   }
 
   if (!lotKeys.length) {
@@ -1962,7 +2263,8 @@ function extractLotDIN(concept) {
         return valueCoding.code || valueCoding.display || null;
       }
       if (prop.valueString) return prop.valueString;
-      if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept);
+      if (prop.valueCodeableConcept)
+        return extractCodeableConceptDisplay(prop.valueCodeableConcept);
     }
   }
   return null;
@@ -1980,7 +2282,10 @@ function extractLotExpiry(concept) {
 function extractLotManufacturer(concept) {
   // First try extensions (market authorization holder)
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-to-market-authorization-holder') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-to-market-authorization-holder'
+    ) {
       return extractCodeableConceptDisplay(ext.valueCodeableConcept);
     }
   }
@@ -2000,7 +2305,10 @@ function getLotTradenameReferences(concept) {
   const refs = [];
   for (const ext of concept.extension || []) {
     const url = normalizeCodeKey(ext.url);
-    if (!url.includes('linked-tradename-concept') && !url.endsWith('/tradename')) {
+    if (
+      !url.includes('linked-tradename-concept') &&
+      !url.endsWith('/tradename')
+    ) {
       continue;
     }
     const cc = ext.valueCodeableConcept || null;
@@ -2014,10 +2322,15 @@ function getLotTradenameReferences(concept) {
 
   for (const prop of concept.property || []) {
     const code = normalizeCodeKey(prop.code);
-    if (code !== 'tradename' && code !== 'trade name' && code !== 'tradenamecode') {
+    if (
+      code !== 'tradename' &&
+      code !== 'trade name' &&
+      code !== 'tradenamecode'
+    ) {
       continue;
     }
-    const coding = prop.valueCoding || prop.valueCodeableConcept?.coding?.[0] || null;
+    const coding =
+      prop.valueCoding || prop.valueCodeableConcept?.coding?.[0] || null;
     refs.push({
       code: coding?.code || '',
       display: coding?.display || prop.valueCodeableConcept?.text || '',
@@ -2027,7 +2340,11 @@ function getLotTradenameReferences(concept) {
 
   const seen = new Set();
   return refs.filter((ref) => {
-    const key = [normalizeCodeKey(ref.code), normalizeNameKey(ref.display), normalizeNameKey(ref.raw)].join('|');
+    const key = [
+      normalizeCodeKey(ref.code),
+      normalizeNameKey(ref.display),
+      normalizeNameKey(ref.raw)
+    ].join('|');
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -2036,7 +2353,10 @@ function getLotTradenameReferences(concept) {
 
 function extractTradenameDIN(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-din') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-din'
+    ) {
       const cc = ext.valueCodeableConcept;
       if (cc && cc.coding && cc.coding[0]) {
         return cc.coding[0].code || cc.coding[0].display;
@@ -2046,25 +2366,35 @@ function extractTradenameDIN(concept) {
   for (const prop of concept.property || []) {
     const code = normalizeCodeKey(prop.code);
     if (code === 'drugidentificationnumber' || code === 'din') {
-      if (prop.valueCoding) return prop.valueCoding.code || prop.valueCoding.display || null;
+      if (prop.valueCoding)
+        return prop.valueCoding.code || prop.valueCoding.display || null;
       if (prop.valueString) return prop.valueString;
-      if (prop.valueCodeableConcept) return extractCodeableConceptDisplay(prop.valueCodeableConcept);
+      if (prop.valueCodeableConcept)
+        return extractCodeableConceptDisplay(prop.valueCodeableConcept);
     }
   }
   return null;
 }
 
 function normalizeCodeKey(value) {
-  return String(value || '').trim().toLowerCase();
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function conceptRichness(concept) {
   if (!concept || typeof concept !== 'object') return 0;
-  const extCount = Array.isArray(concept.extension) ? concept.extension.length : 0;
-  const propCount = Array.isArray(concept.property) ? concept.property.length : 0;
-  const desigCount = Array.isArray(concept.designation) ? concept.designation.length : 0;
+  const extCount = Array.isArray(concept.extension)
+    ? concept.extension.length
+    : 0;
+  const propCount = Array.isArray(concept.property)
+    ? concept.property.length
+    : 0;
+  const desigCount = Array.isArray(concept.designation)
+    ? concept.designation.length
+    : 0;
   const hasDisplay = concept.display ? 1 : 0;
-  return (extCount * 4) + (propCount * 3) + (desigCount * 2) + hasDisplay;
+  return extCount * 4 + propCount * 3 + desigCount * 2 + hasDisplay;
 }
 
 function normalizeDinKey(value) {
@@ -2125,7 +2455,17 @@ function indexTradenameNames(map, concept) {
 
 function mergeDefinedVaccineFields(target, source) {
   if (!source || typeof source !== 'object') return;
-  const keys = ['tradename', 'generic_name', 'disease', 'antigen', 'manufacturer', 'route', 'strength', 'dose_value', 'dose_unit'];
+  const keys = [
+    'tradename',
+    'generic_name',
+    'disease',
+    'antigen',
+    'manufacturer',
+    'route',
+    'strength',
+    'dose_value',
+    'dose_unit'
+  ];
   for (const key of keys) {
     const value = source[key];
     if (value === undefined || value === null) continue;
@@ -2161,7 +2501,10 @@ function extractTrademenameDisplay(concept) {
 
 function extractTradenameGeneric(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-generic-concept') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-generic-concept'
+    ) {
       const cc = ext.valueCodeableConcept;
       if (cc && cc.coding && cc.coding[0]) {
         return cc.coding[0].display || cc.coding[0].code;
@@ -2174,7 +2517,10 @@ function extractTradenameGeneric(concept) {
 function extractTradenameDisease(concept) {
   const diseases = [];
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-protects-against-disease') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-protects-against-disease'
+    ) {
       const cc = ext.valueCodeableConcept;
       if (cc && cc.coding && cc.coding[0]) {
         const display = cc.coding[0].display || cc.coding[0].code;
@@ -2190,7 +2536,10 @@ function extractTradenameDisease(concept) {
 function extractTradenameAntigen(concept) {
   const values = [];
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-contains-antigen') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-contains-antigen'
+    ) {
       const display = extractCodeableConceptDisplay(ext.valueCodeableConcept);
       if (display) {
         values.push(display);
@@ -2204,7 +2553,10 @@ function extractTradenameAntigen(concept) {
 
 function extractTradenameManufacturer(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-to-market-authorization-holder') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-linked-to-market-authorization-holder'
+    ) {
       return extractCodeableConceptDisplay(ext.valueCodeableConcept);
     }
   }
@@ -2213,7 +2565,10 @@ function extractTradenameManufacturer(concept) {
 
 function extractTradenameRoute(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-route-of-admin') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-route-of-admin'
+    ) {
       return extractCodeableConceptDisplay(ext.valueCodeableConcept);
     }
   }
@@ -2236,7 +2591,9 @@ function collectTradenameStringValues(concept, extensionUrl) {
 function extractStrengthFromTradenameDisplay(concept) {
   const display = String(concept?.display || '').trim();
   if (!display) return null;
-  const match = display.match(/(\d+(?:\.\d+)?)\s*(?:microgram|micrograms|mcg)\b/i);
+  const match = display.match(
+    /(\d+(?:\.\d+)?)\s*(?:microgram|micrograms|mcg)\b/i
+  );
   return match ? match[1] : null;
 }
 
@@ -2266,7 +2623,10 @@ function extractTradenameStrength(concept) {
 
 function extractTradenameDoseValue(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-typical-dose-size') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-typical-dose-size'
+    ) {
       return ext.valueString || null;
     }
   }
@@ -2275,7 +2635,10 @@ function extractTradenameDoseValue(concept) {
 
 function extractTradenameDoseUnit(concept) {
   for (const ext of concept.extension || []) {
-    if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-typical-dose-size-uom') {
+    if (
+      ext.url ===
+      'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-typical-dose-size-uom'
+    ) {
       return ext.valueString || null;
     }
   }
@@ -2305,29 +2668,29 @@ function lookupVaccineLot(lotNumber, options = {}) {
     bgLog('lookupVaccineLot: no lot number provided');
     return null;
   }
-  
+
   bgLog('lookupVaccineLot: Looking up lot:', lotNumber);
-  
+
   try {
     const lotKey = String(lotNumber).trim().toLowerCase();
     if (!lotKey) {
       return null;
     }
-    
+
     // Try to find by lot number first
     let concept = indexes.lotByLotNumber[lotKey];
-    
+
     // If not found, try direct code then prefix map (O(1)).
     // Skip code/prefix for all-numeric keys (GTIN mistaken for lot -> wrong hit).
     if (!concept && !looksLikeGtinOrNumericId(lotKey)) {
       concept = indexes.lotByCode[lotKey] || indexes.lotByCodePrefix[lotKey];
     }
-    
+
     if (!concept) {
       bgLog('No matching lot found for:', lotNumber);
       return null;
     }
-    
+
     // Extract vaccine info from lot concept
     const vaccineInfo = {
       lot_number: extractLotNumber(concept) || lotNumber,
@@ -2343,17 +2706,24 @@ function lookupVaccineLot(lotNumber, options = {}) {
       indexes.lotAgentMappingByLot?.[lotCodeMapKey] ||
       null;
     if (lotAgentMappedInfo) {
-      bgLog('Lot-agent mapping matched:', { lotMapKey, lotCodeMapKey, lotAgentMappedInfo });
+      bgLog('Lot-agent mapping matched:', {
+        lotMapKey,
+        lotCodeMapKey,
+        lotAgentMappedInfo
+      });
       mergeDefinedVaccineFields(vaccineInfo, lotAgentMappedInfo);
       if (!vaccineInfo.din && lotAgentMappedInfo.din) {
         vaccineInfo.din = lotAgentMappedInfo.din;
       }
     }
 
-    mergeDefinedVaccineFields(vaccineInfo, extractLotDirectVaccineInfo(concept));
-    
+    mergeDefinedVaccineFields(
+      vaccineInfo,
+      extractLotDirectVaccineInfo(concept)
+    );
+
     bgLog('Extracted from lot concept:', vaccineInfo);
-    
+
     // Get tradename info
     const tradenameRefs = getLotTradenameReferences(concept);
     bgLog('Lot tradename references:', tradenameRefs);
@@ -2372,18 +2742,30 @@ function lookupVaccineLot(lotNumber, options = {}) {
     }
 
     if (effectiveOverrideCode && byCodeCandidates.length > 0) {
-      const overrideMatch = byCodeCandidates.find(({ ref }) => normalizeCodeKey(ref.code) === effectiveOverrideCode);
+      const overrideMatch = byCodeCandidates.find(
+        ({ ref }) => normalizeCodeKey(ref.code) === effectiveOverrideCode
+      );
       if (overrideMatch) {
         resolvedTradename = overrideMatch.info;
-        const overrideSource = gtinOverrideCode ? `GTIN ${options.gtin}` : `lot ${lotNumber}`;
-        bgLog('Tradename resolved from override (', overrideSource, '):', overrideMatch.ref.code);
+        const overrideSource = gtinOverrideCode
+          ? `GTIN ${options.gtin}`
+          : `lot ${lotNumber}`;
+        bgLog(
+          'Tradename resolved from override (',
+          overrideSource,
+          '):',
+          overrideMatch.ref.code
+        );
         vaccineInfo.nvc_override = gtinOverrideCode ? 'gtin' : 'lot';
       }
     }
 
     if (!resolvedTradename && byCodeCandidates.length > 0) {
       resolvedTradename = byCodeCandidates[0].info;
-      bgLog('Tradename resolved from first code reference:', byCodeCandidates[0].ref.code);
+      bgLog(
+        'Tradename resolved from first code reference:',
+        byCodeCandidates[0].ref.code
+      );
     }
 
     if (!resolvedTradename) {
@@ -2407,7 +2789,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
         mergeDefinedVaccineFields(vaccineInfo, tradenameInfo);
       }
     }
-    
+
     bgLog('Final vaccine info:', vaccineInfo);
     return vaccineInfo;
   } catch (e) {
@@ -2420,7 +2802,7 @@ function lookupTradenameByCode(code, indexes = nvcIndexes) {
   const codeKey = normalizeCodeKey(code);
   const concept = indexes.tradenameByCode[codeKey];
   if (!concept) return null;
-  
+
   return {
     tradename: extractTrademenameDisplay(concept),
     generic_name: extractTradenameGeneric(concept),
@@ -2455,7 +2837,7 @@ function lookupTradenameByDIN(din, indexes = nvcIndexes) {
   const dinKey = normalizeDinKey(din);
   const concept = indexes.tradenameByDin[dinKey];
   if (!concept) return null;
-  
+
   return {
     tradename: extractTrademenameDisplay(concept),
     generic_name: extractTradenameGeneric(concept),
@@ -2475,23 +2857,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.target === SCANNER_DAEMON_TARGET) {
     return false;
   }
-  if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED || request?.action === 'scannerDaemon.scanEcho') {
+  if (
+    request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED ||
+    request?.action === 'scannerDaemon.scanEcho'
+  ) {
     return false;
   }
 
-  if (request?.target === SCANNER_DAEMON_BACKGROUND_TARGET && request.action === SCANNER_DAEMON_ACTIONS.STATUS_UPDATE) {
+  if (
+    request?.target === SCANNER_DAEMON_BACKGROUND_TARGET &&
+    request.action === SCANNER_DAEMON_ACTIONS.STATUS_UPDATE
+  ) {
     persistScannerStatusSnapshot(request.status || null)
       .then((status) => broadcastScannerStatus(status).then(() => status))
       .then((status) => sendResponse({ success: true, status }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner status update failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Scanner status update failed'
+        })
+      );
     return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.ENSURE) {
     ensureScannerDaemon()
       .then(() => getScannerBootstrapState())
-      .then((bootstrap) => sendResponse({ success: true, status: bootstrap.status }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner daemon ensure failed' }));
+      .then((bootstrap) =>
+        sendResponse({ success: true, status: bootstrap.status })
+      )
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Scanner daemon ensure failed'
+        })
+      );
     return true;
   }
 
@@ -2501,7 +2901,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       let status = bootstrap.status;
       if (bootstrap.enabled && bootstrap.profileId) {
         await maybeStartScannerDaemon('status_request');
-        const daemonResponse = await sendScannerDaemonMessage({ action: SCANNER_DAEMON_ACTIONS.GET_STATUS }).catch(() => null);
+        const daemonResponse = await sendScannerDaemonMessage({
+          action: SCANNER_DAEMON_ACTIONS.GET_STATUS
+        }).catch(() => null);
         if (daemonResponse && daemonResponse.success && daemonResponse.status) {
           status = normalizeScannerStatusSnapshot(daemonResponse.status);
           await persistScannerStatusSnapshot(status);
@@ -2509,7 +2911,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       sendResponse({ success: true, status });
     })().catch((error) => {
-      sendResponse({ success: false, error: error?.message || 'Could not load scanner status' });
+      sendResponse({
+        success: false,
+        error: error?.message || 'Could not load scanner status'
+      });
     });
     return true;
   }
@@ -2517,8 +2922,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === SCANNER_DAEMON_ACTIONS.ENABLE_AUTOSTART) {
     setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true })
       .then(() => getScannerBootstrapState())
-      .then((bootstrap) => sendResponse({ success: true, status: bootstrap.status }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Could not enable scanner autostart' }));
+      .then((bootstrap) =>
+        sendResponse({ success: true, status: bootstrap.status })
+      )
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Could not enable scanner autostart'
+        })
+      );
     return true;
   }
 
@@ -2526,7 +2938,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     (async () => {
       const values = {};
       const requestedProfileId = String(request.profileId || '').trim();
-      const requestedPortInfo = normalizeScannerPortInfo(request.preferredPortInfo);
+      const requestedPortInfo = normalizeScannerPortInfo(
+        request.preferredPortInfo
+      );
       if (requestedProfileId) {
         values[SCANNER_PROFILE_STORAGE_KEY] = requestedProfileId;
       }
@@ -2551,25 +2965,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       sendResponse({ success: true, accepted: true, status: bootstrap.status });
     })().catch((error) => {
-      sendResponse({ success: false, error: error?.message || 'Scanner reconnect failed' });
+      sendResponse({
+        success: false,
+        error: error?.message || 'Scanner reconnect failed'
+      });
     });
     return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
     setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
-      .then(() => sendScannerDaemonMessage({
-        action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
-        trigger: request.trigger || 'manual'
-      }))
-      .then((response) => sendResponse({ success: true, accepted: true, response }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scanner disconnect failed' }));
+      .then(() =>
+        sendScannerDaemonMessage({
+          action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
+          trigger: request.trigger || 'manual'
+        })
+      )
+      .then((response) =>
+        sendResponse({ success: true, accepted: true, response })
+      )
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Scanner disconnect failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'refreshNVCBundle') {
-    refreshNVCBundleFromUrl(request.sourceUrl || DEFAULT_NVC_SOURCE_URL,
-      { trigger: 'manual' }).then(sendResponse);
+    refreshNVCBundleFromUrl(request.sourceUrl || DEFAULT_NVC_SOURCE_URL, {
+      trigger: 'manual'
+    }).then(sendResponse);
     return true;
   }
 
@@ -2585,7 +3012,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'lookupVaccineInfo') {
     lookupVaccineInfo(request.lot, { gtin: request.gtin })
-      .catch(() => nvcFailure('unavailable')).then(sendResponse);
+      .catch(() => nvcFailure('unavailable'))
+      .then(sendResponse);
 
     return true;
   }
@@ -2593,47 +3021,87 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'logAnalyticsEvent') {
     logAnalyticsEvent(request.eventType, request.payload || {})
       .then(() => sendResponse({ success: true }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics log failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Analytics log failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'appendQueueRecord') {
     appendQueueRecord(request.storageKey || '', request.record || null)
       .then((record) => sendResponse({ success: true, record }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Queue append failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Queue append failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'scannerScanCaptured') {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Scan routing failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Scan routing failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'drainPendingScannerScans') {
     const tabId = sender?.tab?.id;
-    if (tabId === undefined || (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))) {
-      sendResponse({ success: false, error: 'Pending scans can only drain to a supported chart tab' });
+    if (
+      tabId === undefined ||
+      (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Pending scans can only drain to a supported chart tab'
+      });
       return false;
     }
     drainPendingScansToTab(tabId)
       .then((result) => sendResponse({ success: true, ...result }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Pending scan drain failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Pending scan drain failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'getAnalyticsSummary') {
     getAnalyticsSummary()
       .then((summary) => sendResponse({ success: true, summary }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics summary failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Analytics summary failed'
+        })
+      );
     return true;
   }
 
   if (request.action === 'getAnalyticsExport') {
     getAnalyticsExport(request.scope === 'today' ? 'today' : 'pilot')
-      .then((data) => markAnalyticsExported().then(() => sendResponse({ success: true, data })))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics export failed' }));
+      .then((data) =>
+        markAnalyticsExported().then(() =>
+          sendResponse({ success: true, data })
+        )
+      )
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Analytics export failed'
+        })
+      );
     return true;
   }
 
@@ -2641,7 +3109,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     setAnalyticsDeviceLabel(request.label || '')
       .then(() => getAnalyticsSummary())
       .then((summary) => sendResponse({ success: true, summary }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics label update failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Analytics label update failed'
+        })
+      );
     return true;
   }
 
@@ -2649,10 +3122,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     resetAnalyticsStore()
       .then(() => getAnalyticsSummary())
       .then((summary) => sendResponse({ success: true, summary }))
-      .catch((error) => sendResponse({ success: false, error: error?.message || 'Analytics reset failed' }));
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Analytics reset failed'
+        })
+      );
     return true;
   }
 
-  sendResponse({ success: false, error: `Unknown background action: ${request?.action || 'missing'}` });
+  sendResponse({
+    success: false,
+    error: `Unknown background action: ${request?.action || 'missing'}`
+  });
   return false;
 });

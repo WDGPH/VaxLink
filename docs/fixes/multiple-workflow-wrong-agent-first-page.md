@@ -37,7 +37,7 @@ The `historicalfactoryTable` grid page has an "Immunizations" section heading an
 
 ```js
 function isImmunizationFormEmpty() {
-  const agentSelectors = getPanoramaAgentSelectors();  // single-page selectors only
+  const agentSelectors = getPanoramaAgentSelectors(); // single-page selectors only
   const fields = getFields(agentSelectors).filter(canFillPanoramaControl);
   // On the grid page, these selectors match nothing → fields = [] → returns true
   return true;
@@ -96,10 +96,12 @@ historicalfactoryTable:dataTable:0:immsAgentMenu:selectOneMenu_input
 The check:
 
 ```js
-return hint.includes('agentiterm')       // → false (no agentiterm in ID)
-  || hint.includes('recordimms_agent')   // → false
-  || /\bagent\b/.test(hint);             // → false: 'immsagentmenu' has no
-                                         //   word boundary around 'agent'
+return (
+  hint.includes('agentiterm') || // → false (no agentiterm in ID)
+  hint.includes('recordimms_agent') || // → false
+  /\bagent\b/.test(hint)
+); // → false: 'immsagentmenu' has no
+//   word boundary around 'agent'
 ```
 
 `immsAgentMenu` lowercases to `immsagentmenu`. The characters surrounding `agent` are `s` (before) and `m` (after) — both word characters — so `\b` does not match. The grid's agent fields are treated as non-strict controls.
@@ -111,10 +113,12 @@ Add `agentmenu` as a substring check:
 ```js
 function isPanoramaAgentControl(field) {
   const hint = `${field?.id || ''} ${field?.name || ''}`.toLowerCase();
-  return hint.includes('agentiterm')
-    || hint.includes('recordimms_agent')
-    || hint.includes('agentmenu')   // ← added: matches immsAgentMenu grid fields
-    || /\bagent\b/.test(hint);
+  return (
+    hint.includes('agentiterm') ||
+    hint.includes('recordimms_agent') ||
+    hint.includes('agentmenu') || // ← added: matches immsAgentMenu grid fields
+    /\bagent\b/.test(hint)
+  );
 }
 ```
 
@@ -122,10 +126,10 @@ function isPanoramaAgentControl(field) {
 
 ## Key architectural rules to carry forward
 
-| Rule | Detail |
-|---|---|
-| `maybeAutoFillPanoramaMultipleGrid` reads queue **by index** (non-destructive) | Never mix with `applyNextQueueItem` (destructive shift) on the same page |
-| `isImmunizationFormEmpty()` is **not grid-aware** | Uses only single-page agentiterm selectors; always returns `true` on the grid page |
-| `isPanoramaImmunizationPage()` **matches the grid page** via generic fallback | Cannot be used alone as a "not on grid page" guard |
-| Panorama dropdown option format is `[AgentCode] TradeName` | `extractBracketAgentCode` is the precise match path; only fires when `isPanoramaAgentControl` returns `true` |
-| `\bagent\b` does NOT match camelCase `immsAgentMenu` | Explicit substring checks are needed for field IDs with embedded camelCase substrings |
+| Rule                                                                           | Detail                                                                                                       |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `maybeAutoFillPanoramaMultipleGrid` reads queue **by index** (non-destructive) | Never mix with `applyNextQueueItem` (destructive shift) on the same page                                     |
+| `isImmunizationFormEmpty()` is **not grid-aware**                              | Uses only single-page agentiterm selectors; always returns `true` on the grid page                           |
+| `isPanoramaImmunizationPage()` **matches the grid page** via generic fallback  | Cannot be used alone as a "not on grid page" guard                                                           |
+| Panorama dropdown option format is `[AgentCode] TradeName`                     | `extractBracketAgentCode` is the precise match path; only fires when `isPanoramaAgentControl` returns `true` |
+| `\bagent\b` does NOT match camelCase `immsAgentMenu`                           | Explicit substring checks are needed for field IDs with embedded camelCase substrings                        |

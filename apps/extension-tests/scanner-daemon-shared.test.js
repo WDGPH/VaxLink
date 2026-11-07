@@ -9,7 +9,10 @@ import {
   getScannerReconnectDelayMs,
   selectGrantedPort
 } from '../extension/scanner/scanner-daemon-shared.js';
-import { getSerialScannerProfile, portMatchesProfile } from '../extension/scanner/serial-profiles.js';
+import {
+  getSerialScannerProfile,
+  portMatchesProfile
+} from '../extension/scanner/serial-profiles.js';
 
 function makePort(info) {
   return {
@@ -20,13 +23,22 @@ function makePort(info) {
 }
 
 test('default scanner status reflects setup state from stored config', () => {
-  assert.equal(buildDefaultScannerStatus({}).state, SCANNER_STATUS_STATES.NEVER_CONFIGURED);
   assert.equal(
-    buildDefaultScannerStatus({ enabled: false, profileId: 'zebra-ds8178-usb-cdc' }).state,
+    buildDefaultScannerStatus({}).state,
+    SCANNER_STATUS_STATES.NEVER_CONFIGURED
+  );
+  assert.equal(
+    buildDefaultScannerStatus({
+      enabled: false,
+      profileId: 'zebra-ds8178-usb-cdc'
+    }).state,
     SCANNER_STATUS_STATES.DISABLED
   );
   assert.equal(
-    buildDefaultScannerStatus({ enabled: true, profileId: 'zebra-ds8178-usb-cdc' }).state,
+    buildDefaultScannerStatus({
+      enabled: true,
+      profileId: 'zebra-ds8178-usb-cdc'
+    }).state,
     SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
   );
 });
@@ -86,11 +98,15 @@ test('scanner reconnect delay backs off and then caps', () => {
 });
 
 test('serial failure classification distinguishes recoverable disconnects from busy ports', () => {
-  const recovering = classifyScannerConnectionFailure(new DOMException('Serial device disconnected.', 'NetworkError'));
+  const recovering = classifyScannerConnectionFailure(
+    new DOMException('Serial device disconnected.', 'NetworkError')
+  );
   assert.equal(recovering.state, SCANNER_STATUS_STATES.RECOVERING);
   assert.equal(recovering.recoverable, true);
 
-  const busy = classifyScannerConnectionFailure(new Error('Failed to open serial port: Access denied'));
+  const busy = classifyScannerConnectionFailure(
+    new Error('Failed to open serial port: Access denied')
+  );
   assert.equal(busy.state, SCANNER_STATUS_STATES.BUSY);
   assert.equal(busy.recoverable, false);
 });

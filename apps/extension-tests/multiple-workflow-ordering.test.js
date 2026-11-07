@@ -36,21 +36,26 @@ function buildAutofillPayloadFromQueueRecord(record) {
     strength: record.strength || '',
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
-    name: record.name || record.generic_name || record.tradename || record.din || ''
+    name:
+      record.name || record.generic_name || record.tradename || record.din || ''
   };
 }
 
 function buildPanoramaAgentSourceText(data) {
-  return normalizeForMatch([
-    data?.name,
-    data?.generic_name,
-    data?.tradename,
-    data?.disease,
-    data?.antigen,
-    data?.manufacturer,
-    data?.route,
-    data?.strength
-  ].filter(Boolean).join(' '));
+  return normalizeForMatch(
+    [
+      data?.name,
+      data?.generic_name,
+      data?.tradename,
+      data?.disease,
+      data?.antigen,
+      data?.manufacturer,
+      data?.route,
+      data?.strength
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
 }
 
 function getNormalizedSourceTokens(sourceText) {
@@ -79,28 +84,48 @@ function panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term) {
     return true;
   }
 
-  return termTokens.every((token) => (
+  return termTokens.every((token) =>
     token.length <= 3
       ? sourceTokens.includes(token)
-      : (sourceTokens.includes(token) || sourceText.includes(token))
-  ));
+      : sourceTokens.includes(token) || sourceText.includes(token)
+  );
 }
 
 function panoramaSourceHasAny(sourceText, sourceTokens, terms) {
-  return terms.some((term) => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.some((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaSourceHasAll(sourceText, sourceTokens, terms) {
-  return terms.every((term) => panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term));
+  return terms.every((term) =>
+    panoramaSourceHasNormalizedTerm(sourceText, sourceTokens, term)
+  );
 }
 
 function panoramaAgentRuleMatches(sourceText, rule) {
   return (rule.clauses || []).some((clause) => {
     const sourceTokens = getNormalizedSourceTokens(sourceText);
-    if (clause.any && !panoramaSourceHasAny(sourceText, sourceTokens, clause.any)) return false;
-    if (clause.all && !panoramaSourceHasAll(sourceText, sourceTokens, clause.all)) return false;
-    if (clause.notAny && panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)) return false;
-    if (clause.notAll && panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)) return false;
+    if (
+      clause.any &&
+      !panoramaSourceHasAny(sourceText, sourceTokens, clause.any)
+    )
+      return false;
+    if (
+      clause.all &&
+      !panoramaSourceHasAll(sourceText, sourceTokens, clause.all)
+    )
+      return false;
+    if (
+      clause.notAny &&
+      panoramaSourceHasAny(sourceText, sourceTokens, clause.notAny)
+    )
+      return false;
+    if (
+      clause.notAll &&
+      panoramaSourceHasAll(sourceText, sourceTokens, clause.notAll)
+    )
+      return false;
     return true;
   });
 }
@@ -147,11 +172,23 @@ function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   if (filledNorm === candidateNorm) return true;
 
   const candidateRaw = String(candidate || '').trim();
-  if (candidateRaw && filledRaw.trim().toLowerCase().startsWith(candidateRaw.toLowerCase() + '-')) return false;
+  if (
+    candidateRaw &&
+    filledRaw
+      .trim()
+      .toLowerCase()
+      .startsWith(candidateRaw.toLowerCase() + '-')
+  )
+    return false;
   if (filledNorm.includes(candidateNorm)) return true;
 
-  const candidateTokens = candidateNorm.split(' ').filter((token) => token.length >= 3);
-  return candidateTokens.length > 0 && candidateTokens.every((token) => filledNorm.includes(token));
+  const candidateTokens = candidateNorm
+    .split(' ')
+    .filter((token) => token.length >= 3);
+  return (
+    candidateTokens.length > 0 &&
+    candidateTokens.every((token) => filledNorm.includes(token))
+  );
 }
 
 function isAgentTextAccepted(candidate, filledRawValue) {
@@ -165,18 +202,28 @@ function isAgentTextAccepted(candidate, filledRawValue) {
     const filledCompact = filledNorm.replace(/[^a-z0-9]/g, '');
     if (filledCompact === token) return true;
     const bracketMatch = filledNorm.match(/\[([^\]]+)\]/);
-    return !!(bracketMatch && normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token);
+    return !!(
+      bracketMatch &&
+      normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token
+    );
   }
 
-  const candidateTokens = candidateNorm.split(' ').filter((token) => token.length >= 3);
-  return candidateTokens.length > 0 && candidateTokens.every((token) => filledNorm.includes(token));
+  const candidateTokens = candidateNorm
+    .split(' ')
+    .filter((token) => token.length >= 3);
+  return (
+    candidateTokens.length > 0 &&
+    candidateTokens.every((token) => filledNorm.includes(token))
+  );
 }
 
 function queueRecordMatchesPanoramaAgentText(record, agentText) {
   const payload = buildAutofillPayloadFromQueueRecord(record);
   if (!payload) return false;
   const candidates = getPanoramaAgentCandidates(payload);
-  return candidates.some((candidate) => isAgentTextAccepted(candidate, agentText));
+  return candidates.some((candidate) =>
+    isAgentTextAccepted(candidate, agentText)
+  );
 }
 
 function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
@@ -187,24 +234,40 @@ function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
 
 test('multi-step matching picks the queued record whose agent matches the current Panorama step', () => {
   const rows = [
-    { tradename: 'Priorix', generic_name: '[MMR] Measles mumps rubella vaccine', disease: 'Measles, Mumps, Rubella' },
+    {
+      tradename: 'Priorix',
+      generic_name: '[MMR] Measles mumps rubella vaccine',
+      disease: 'Measles, Mumps, Rubella'
+    },
     {
       tradename: '[Inf] FLUZONE Quadrivalent',
       generic_name: '[Inf] Influenza quadrivalent vaccine',
       disease: 'Influenza',
       antigen: 'Influenza A virus subtype H1N1 antigen, Influenza virus antigen'
     },
-    { tradename: 'Engerix B', generic_name: '[HB] Hepatitis B regular strength vaccine', disease: 'Hepatitis B', strength: '20' }
+    {
+      tradename: 'Engerix B',
+      generic_name: '[HB] Hepatitis B regular strength vaccine',
+      disease: 'Hepatitis B',
+      strength: '20'
+    }
   ];
 
   assert.equal(findMatchingQueueRecordIndexForPanoramaAgent(rows, 'HB'), 2);
-  assert.equal(findMatchingQueueRecordIndexForPanoramaAgent(rows, 'Inf (QIV)'), 1);
+  assert.equal(
+    findMatchingQueueRecordIndexForPanoramaAgent(rows, 'Inf (QIV)'),
+    1
+  );
   assert.equal(findMatchingQueueRecordIndexForPanoramaAgent(rows, 'MMR'), 0);
 });
 
 test('multi-step matching uses Panorama agent outputs, not tradename scan order', () => {
   const rows = [
-    { tradename: 'Boostrix', generic_name: '[Tdap] Tetanus diphtheria acellular pertussis vaccine', disease: 'Diphtheria, Tetanus, Pertussis' },
+    {
+      tradename: 'Boostrix',
+      generic_name: '[Tdap] Tetanus diphtheria acellular pertussis vaccine',
+      disease: 'Diphtheria, Tetanus, Pertussis'
+    },
     {
       tradename: '[Inf] FLUZONE High-Dose Quadrivalent',
       generic_name: '[Inf] Influenza quadrivalent vaccine',
@@ -213,13 +276,25 @@ test('multi-step matching uses Panorama agent outputs, not tradename scan order'
     }
   ];
 
-  assert.equal(findMatchingQueueRecordIndexForPanoramaAgent(rows, 'Inf High Dose (QIV)'), 1);
+  assert.equal(
+    findMatchingQueueRecordIndexForPanoramaAgent(rows, 'Inf High Dose (QIV)'),
+    1
+  );
 });
 
 test('multi-step matching leaves the queue untouched when the current Panorama step has no queued match', () => {
   const rows = [
-    { tradename: 'Priorix', generic_name: '[MMR] Measles mumps rubella vaccine', disease: 'Measles, Mumps, Rubella' },
-    { tradename: 'Engerix B', generic_name: '[HB] Hepatitis B regular strength vaccine', disease: 'Hepatitis B', strength: '20' }
+    {
+      tradename: 'Priorix',
+      generic_name: '[MMR] Measles mumps rubella vaccine',
+      disease: 'Measles, Mumps, Rubella'
+    },
+    {
+      tradename: 'Engerix B',
+      generic_name: '[HB] Hepatitis B regular strength vaccine',
+      disease: 'Hepatitis B',
+      strength: '20'
+    }
   ];
 
   assert.equal(findMatchingQueueRecordIndexForPanoramaAgent(rows, 'Var'), -1);

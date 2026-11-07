@@ -3,7 +3,9 @@ function toByteArray(chunk) {
   if (Array.isArray(chunk)) return chunk;
   if (chunk instanceof Uint8Array) return Array.from(chunk);
   if (ArrayBuffer.isView(chunk)) {
-    return Array.from(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+    return Array.from(
+      new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+    );
   }
   if (chunk instanceof ArrayBuffer) return Array.from(new Uint8Array(chunk));
   return [];
@@ -24,26 +26,31 @@ function byteToText(byte, encoding) {
 
 function findTerminator(text, delimiters) {
   const ordered = [...delimiters].sort((a, b) => b.length - a.length);
-  return ordered.find((delimiter) => delimiter && text.endsWith(delimiter)) || '';
+  return (
+    ordered.find((delimiter) => delimiter && text.endsWith(delimiter)) || ''
+  );
 }
 
 export function createLineFrameDecoder(options = {}) {
   const encoding = options.encoding || 'ascii';
-  const delimiters = Array.isArray(options.delimiters) && options.delimiters.length > 0
-    ? options.delimiters
-    : ['\r\n', '\n', '\r'];
+  const delimiters =
+    Array.isArray(options.delimiters) && options.delimiters.length > 0
+      ? options.delimiters
+      : ['\r\n', '\n', '\r'];
   const maxFrameLength = Number(options.maxFrameLength || 512);
   let textBuffer = '';
   let byteBuffer = [];
 
   const emitFrame = (terminator = '') => {
     const terminatorLength = terminator.length;
-    const frameText = terminatorLength > 0
-      ? textBuffer.slice(0, -terminatorLength)
-      : textBuffer;
-    const frameBytes = terminatorLength > 0
-      ? byteBuffer.slice(0, -terminatorLength)
-      : byteBuffer.slice();
+    const frameText =
+      terminatorLength > 0
+        ? textBuffer.slice(0, -terminatorLength)
+        : textBuffer;
+    const frameBytes =
+      terminatorLength > 0
+        ? byteBuffer.slice(0, -terminatorLength)
+        : byteBuffer.slice();
     textBuffer = '';
     byteBuffer = [];
     const trimmed = frameText.trim();

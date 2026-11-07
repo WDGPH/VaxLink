@@ -40,7 +40,7 @@ The bottom of `content.js`:
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
 } else {
-  initClickReductionFeatures();  // ← runs RIGHT NOW, synchronously
+  initClickReductionFeatures(); // ← runs RIGHT NOW, synchronously
 }
 ```
 
@@ -50,9 +50,9 @@ if (document.readyState === 'loading') {
 
 ```js
 function initClickReductionFeatures() {
-  initPanoramaMultipleGridWatcher();  // sets up observer, calls checkGrid() once
+  initPanoramaMultipleGridWatcher(); // sets up observer, calls checkGrid() once
   if (activeWorkflowMode === 'multiple') {
-    setTimeout(() => tryAutoDrain(), 1200);  // ← skipped: mode is 'single'
+    setTimeout(() => tryAutoDrain(), 1200); // ← skipped: mode is 'single'
   }
 }
 ```
@@ -138,7 +138,7 @@ The 250 ms gap lets PrimeFaces settle. `maybeAutoFillPanoramaMultipleGrid` guard
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
 } else {
-  setTimeout(initClickReductionFeatures, 0);  // was: initClickReductionFeatures()
+  setTimeout(initClickReductionFeatures, 0); // was: initClickReductionFeatures()
 }
 ```
 
@@ -148,10 +148,10 @@ Yields one task tick so the storage IPC has a better chance to fire and set the 
 
 ## Key architectural rules to carry forward
 
-| Rule | Detail |
-|---|---|
+| Rule                                                                    | Detail                                                                                                                                       |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `activeWorkflowMode` is **not synchronously available** at script start | Always treat it as async-resolved; never write mode-dependent logic that assumes the value is correct during top-level synchronous execution |
-| `chrome.storage.onChanged` fires on mode **changes only** | Does not help on page loads where mode was already `'multiple'` when the page navigated |
-| The MutationObserver is already set up when storage resolves | The fix does not need to re-initialize the observer — it just needs to call `checkGrid()` (or equivalent) once with the correct mode set |
-| On **full page loads** (readyState = 'loading') there is no race | DOMContentLoaded fires hundreds of ms after the fast storage read; this path was always correct |
-| On **SPA navigations** (readyState = 'complete') the race is real | The `else` branch runs synchronously, before the storage callback |
+| `chrome.storage.onChanged` fires on mode **changes only**               | Does not help on page loads where mode was already `'multiple'` when the page navigated                                                      |
+| The MutationObserver is already set up when storage resolves            | The fix does not need to re-initialize the observer — it just needs to call `checkGrid()` (or equivalent) once with the correct mode set     |
+| On **full page loads** (readyState = 'loading') there is no race        | DOMContentLoaded fires hundreds of ms after the fast storage read; this path was always correct                                              |
+| On **SPA navigations** (readyState = 'complete') the race is real       | The `else` branch runs synchronously, before the storage callback                                                                            |

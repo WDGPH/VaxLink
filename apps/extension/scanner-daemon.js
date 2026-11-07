@@ -14,28 +14,35 @@ let desiredConnection = null;
 let currentStatus = createScannerStatusSnapshot();
 
 function postStatusToBackground(status) {
-  chrome.runtime.sendMessage({
-    target: SCANNER_DAEMON_BACKGROUND_TARGET,
-    action: SCANNER_DAEMON_ACTIONS.STATUS_UPDATE,
-    status
-  }, () => {
-    void chrome.runtime.lastError;
-  });
+  chrome.runtime.sendMessage(
+    {
+      target: SCANNER_DAEMON_BACKGROUND_TARGET,
+      action: SCANNER_DAEMON_ACTIONS.STATUS_UPDATE,
+      status
+    },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
 }
 
 function broadcastScanEcho(scan, response) {
-  chrome.runtime.sendMessage({
-    action: SCANNER_DAEMON_ACTIONS.SCAN_ECHO,
-    scan,
-    response
-  }, () => {
-    void chrome.runtime.lastError;
-  });
+  chrome.runtime.sendMessage(
+    {
+      action: SCANNER_DAEMON_ACTIONS.SCAN_ECHO,
+      scan,
+      response
+    },
+    () => {
+      void chrome.runtime.lastError;
+    }
+  );
 }
 
 function applyStatus(status) {
   const nextStatus = normalizeScannerStatusSnapshot(status);
-  const hasChanged = JSON.stringify(nextStatus) !== JSON.stringify(currentStatus);
+  const hasChanged =
+    JSON.stringify(nextStatus) !== JSON.stringify(currentStatus);
   currentStatus = nextStatus;
   if (hasChanged) {
     postStatusToBackground(currentStatus);
@@ -53,7 +60,10 @@ function ensureWorker() {
   if (daemonWorker) return daemonWorker;
 
   clearRestartTimer();
-  daemonWorker = new Worker(chrome.runtime.getURL('scanner/scanner-daemon-worker.js'), { type: 'module' });
+  daemonWorker = new Worker(
+    chrome.runtime.getURL('scanner/scanner-daemon-worker.js'),
+    { type: 'module' }
+  );
   daemonWorker.addEventListener('message', (event) => {
     const data = event.data || {};
     if (data.type === 'status') {
@@ -103,7 +113,10 @@ async function sendRuntimeMessage(message) {
 async function routeScannerScan(scan) {
   let response = null;
   try {
-    response = await sendRuntimeMessage({ action: 'scannerScanCaptured', scan });
+    response = await sendRuntimeMessage({
+      action: 'scannerScanCaptured',
+      scan
+    });
   } catch (error) {
     response = { success: false, error: error.message || 'Scan route failed.' };
   }
@@ -112,8 +125,12 @@ async function routeScannerScan(scan) {
 
 function requestConnect(message = {}) {
   desiredConnection = {
-    profileId: String(message.profileId || currentStatus.profileId || '').trim(),
-    preferredPortInfo: normalizeScannerPortInfo(message.preferredPortInfo || currentStatus.portInfo),
+    profileId: String(
+      message.profileId || currentStatus.profileId || ''
+    ).trim(),
+    preferredPortInfo: normalizeScannerPortInfo(
+      message.preferredPortInfo || currentStatus.portInfo
+    ),
     trigger: message.trigger || 'manual'
   };
   ensureWorker().postMessage({ type: 'connectGranted', ...desiredConnection });
@@ -155,7 +172,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
-if (globalThis.navigator && globalThis.navigator.serial && typeof globalThis.navigator.serial.addEventListener === 'function') {
+if (
+  globalThis.navigator &&
+  globalThis.navigator.serial &&
+  typeof globalThis.navigator.serial.addEventListener === 'function'
+) {
   globalThis.navigator.serial.addEventListener('connect', () => {
     refreshGrantedPorts('serial-connect');
   });

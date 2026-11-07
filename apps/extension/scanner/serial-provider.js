@@ -26,8 +26,10 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
 
   const profile = getSerialScannerProfile(profileConfig?.id || profileConfig);
   const onScan = typeof handlers === 'function' ? handlers : handlers.onScan;
-  const onStatus = typeof handlers.onStatus === 'function' ? handlers.onStatus : () => {};
-  const onError = typeof handlers.onError === 'function' ? handlers.onError : () => {};
+  const onStatus =
+    typeof handlers.onStatus === 'function' ? handlers.onStatus : () => {};
+  const onError =
+    typeof handlers.onError === 'function' ? handlers.onError : () => {};
   const decoder = createLineFrameDecoder(profile.decoder || {});
   const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;

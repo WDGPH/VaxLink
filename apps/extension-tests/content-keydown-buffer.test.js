@@ -46,28 +46,43 @@ function typedState(text, msPerChar) {
 
 test('nurse typing a short dose value then Enter is NOT intercepted', () => {
   const s = typedState('0.5', 300);
-  assert.equal(shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt), false);
+  assert.equal(
+    shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt),
+    false
+  );
 });
 
 test('nurse typing a word at human speed then Tab is NOT intercepted', () => {
   // 9 chars at ~400ms/char — fast typist territory, still far from a scanner.
   const s = typedState('FLUCELVAX', 400);
-  assert.equal(shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt), false);
+  assert.equal(
+    shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt),
+    false
+  );
 });
 
 test('short fast input below SCAN_MIN_LENGTH is NOT intercepted', () => {
   const s = typedState('FLU', 50);
-  assert.equal(shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt), false);
+  assert.equal(
+    shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt),
+    false
+  );
 });
 
 test('scanner burst (GTIN segment at machine speed) IS intercepted', () => {
   const s = typedState('0100628451000020', 20);
-  assert.equal(shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt), true);
+  assert.equal(
+    shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt),
+    true
+  );
 });
 
 test('lot-only scan at machine speed IS intercepted', () => {
   const s = typedState('10Y016312', 30);
-  assert.equal(shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt), true);
+  assert.equal(
+    shouldInterceptSeparatorKey(s.buffer, s.startedAt, s.lastAt),
+    true
+  );
 });
 
 test('empty buffer never intercepts via this branch', () => {

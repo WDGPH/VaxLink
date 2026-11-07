@@ -38,13 +38,13 @@ Keeps the exported column shape stable for downstream tools.
 
 ## Key storage keys
 
-| Key | Owner | Purpose |
-|---|---|---|
+| Key                        | Owner           | Purpose                      |
+| -------------------------- | --------------- | ---------------------------- |
 | `multiple_inject_queue_v1` | popup + content | Active multiple-inject queue |
-| `inventory_scan_batch_v1` | popup + content | Legacy inventory batch queue |
-| `nvc_bundle_override` | background | Cached NVC FHIR bundle |
-| `vaxlink_workflow_mode_v1` | popup | Current workflow mode |
-| `vaxlink_analytics_v1` | background | Fill event log |
+| `inventory_scan_batch_v1`  | popup + content | Legacy inventory batch queue |
+| `nvc_bundle_override`      | background      | Cached NVC FHIR bundle       |
+| `vaxlink_workflow_mode_v1` | popup           | Current workflow mode        |
+| `vaxlink_analytics_v1`     | background      | Fill event log               |
 
 ## NVC catalogue readiness and refresh
 

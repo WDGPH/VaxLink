@@ -1,6 +1,12 @@
 export const SCAN_EVENT_TYPE = 'vaxlink.scan';
 
-export function makeScanEvent({ rawText, source, device, rawBytesHex = '', capturedAt = null } = {}) {
+export function makeScanEvent({
+  rawText,
+  source,
+  device,
+  rawBytesHex = '',
+  capturedAt = null
+} = {}) {
   return {
     type: SCAN_EVENT_TYPE,
     rawText: String(rawText || ''),

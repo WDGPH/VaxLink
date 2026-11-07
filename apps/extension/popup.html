@@ -1,1135 +1,1318 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    :root {
-      --bg: #f2f7fb;
-      --panel: #ffffff;
-      --ink: #102135;
-      --subtle: #5d6b7a;
-      --line: #d4dce6;
-      --accent: #0f8b8d;
-      --ring: rgba(15, 139, 141, 0.22);
-    }
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #f2f7fb;
+        --panel: #ffffff;
+        --ink: #102135;
+        --subtle: #5d6b7a;
+        --line: #d4dce6;
+        --accent: #0f8b8d;
+        --ring: rgba(15, 139, 141, 0.22);
+      }
 
-    * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+      }
 
-    html, body {
-      margin: 0;
-      padding: 0;
-      width: 440px;
-      min-height: 100%;
-      color: var(--ink);
-      font-family: "Segoe UI", "Trebuchet MS", sans-serif;
-      background:
-        radial-gradient(circle at 10% -20%, #d8eef7 0%, transparent 46%),
-        radial-gradient(circle at 95% 0%, #dff4ec 0%, transparent 40%),
-        var(--bg);
-    }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 440px;
+        min-height: 100%;
+        color: var(--ink);
+        font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
+        background:
+          radial-gradient(circle at 10% -20%, #d8eef7 0%, transparent 46%),
+          radial-gradient(circle at 95% 0%, #dff4ec 0%, transparent 40%),
+          var(--bg);
+      }
 
-    .shell { padding: 8px; }
+      .shell {
+        padding: 8px;
+      }
 
-    .panel {
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      background: var(--panel);
-      box-shadow: 0 10px 26px rgba(16, 33, 53, 0.12);
-      overflow: hidden;
-    }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        box-shadow: 0 10px 26px rgba(16, 33, 53, 0.12);
+        overflow: hidden;
+      }
 
-    .brand {
-      padding: 14px 16px 10px;
-      border-bottom: 1px solid var(--line);
-      background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
-    }
+      .brand {
+        padding: 14px 16px 10px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
+      }
 
-    .brand-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
+      .brand-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
 
-    .brand-copy {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-    }
+      .brand-copy {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
 
-    .brand-logo {
-      width: 38px;
-      height: 38px;
-      border-radius: 12px;
-      flex: 0 0 auto;
-      box-shadow: 0 4px 10px rgba(16, 33, 53, 0.14);
-    }
+      .brand-logo {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        flex: 0 0 auto;
+        box-shadow: 0 4px 10px rgba(16, 33, 53, 0.14);
+      }
 
-    .title {
-      margin: 0;
-      font-size: 24px;
-      letter-spacing: 0.2px;
-      color: #0b3d4f;
-    }
+      .title {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0.2px;
+        color: #0b3d4f;
+      }
 
-    .tagline {
-      margin: 4px 0 0;
-      font-size: 12px;
-      color: var(--subtle);
-    }
+      .tagline {
+        margin: 4px 0 0;
+        font-size: 12px;
+        color: var(--subtle);
+      }
 
-    .alpha-badge {
-      display: inline-block;
-      margin-left: 8px;
-      padding: 2px 7px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.6px;
-      text-transform: uppercase;
-      color: #7c3a00;
-      background: #ffe5b4;
-      border: 1px solid #f5a623;
-      border-radius: 6px;
-      vertical-align: middle;
-      line-height: 1.4;
-    }
+      .alpha-badge {
+        display: inline-block;
+        margin-left: 8px;
+        padding: 2px 7px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: #7c3a00;
+        background: #ffe5b4;
+        border: 1px solid #f5a623;
+        border-radius: 6px;
+        vertical-align: middle;
+        line-height: 1.4;
+      }
 
-    /* The class's display rule outranks the UA's [hidden] rule — without this,
+      /* The class's display rule outranks the UA's [hidden] rule — without this,
        the badge renders on the prod channel despite the hidden attribute. */
-    .alpha-badge[hidden] {
-      display: none;
-    }
-
-    .header-icon-btn {
-      width: 36px;
-      height: 36px;
-      flex: 0 0 auto;
-      display: grid;
-      place-items: center;
-      padding: 0;
-      border-radius: 12px;
-      border: 1px solid #cfe0eb;
-      background: rgba(255, 255, 255, 0.78);
-      color: #14505f;
-      box-shadow: 0 6px 14px rgba(16, 33, 53, 0.08);
-    }
-
-    .header-icon-btn:hover {
-      filter: none;
-      background: #ffffff;
-    }
-
-    .header-icon-btn[aria-expanded="true"] {
-      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
-      border-color: transparent;
-      color: #ffffff;
-    }
-
-    .content { padding: 12px 14px 14px; }
-
-    .mode-switch {
-      margin: 0 0 12px;
-      padding: 4px;
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4px;
-      border: 1px solid #d5e2ec;
-      border-radius: 16px;
-      background: #f4f9fc;
-    }
-
-    .mode-tab {
-      border-radius: 12px;
-      padding: 9px 8px;
-      background: transparent;
-      color: #4d6375;
-      border: 0;
-      font-size: 12px;
-    }
-
-    .mode-tab.active {
-      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
-      color: #fff;
-      box-shadow: 0 8px 18px rgba(14, 116, 144, 0.18);
-    }
-
-    .mode-panel[hidden],
-    .scanner-input[hidden] {
-      display: none !important;
-    }
-
-    .scan-state {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-      padding: 12px 13px;
-      border-radius: 18px;
-      border: 1px solid #cfe0eb;
-      background: linear-gradient(145deg, #f7fcff 0%, #eef8f8 100%);
-    }
-
-    .scan-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 14px;
-      display: grid;
-      place-items: center;
-      font-size: 20px;
-      background: rgba(255, 255, 255, 0.9);
-      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
-      flex: 0 0 auto;
-    }
-
-    .scan-copy { min-width: 0; }
-
-    .scan-title {
-      font-weight: 800;
-      font-size: 14px;
-      color: #10384a;
-    }
-
-    .scan-subtitle {
-      margin-top: 2px;
-      font-size: 12px;
-      line-height: 1.4;
-      color: #597081;
-    }
-
-    label {
-      display: block;
-      margin: 0 0 6px;
-      font-weight: 700;
-      font-size: 12px;
-      letter-spacing: 0.28px;
-      text-transform: uppercase;
-      color: #174d5f;
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 88px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 10px 11px;
-      resize: vertical;
-      font-family: "Consolas", "Courier New", monospace;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #0e2b41;
-      background: #fbfdff;
-      transition: border-color 120ms ease, box-shadow 120ms ease;
-    }
-
-    textarea:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--ring);
-    }
-
-    input[type="text"] {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 9px 10px;
-      font-size: 12px;
-      color: #0e2b41;
-      background: #fbfdff;
-    }
-
-    input[type="text"]:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--ring);
-    }
-
-    select {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 9px 10px;
-      font-size: 12px;
-      color: #0e2b41;
-      background: #fbfdff;
-    }
-
-    select:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--ring);
-    }
-
-    .scan-helper {
-      margin: 8px 2px 0;
-      font-size: 11px;
-      line-height: 1.45;
-      color: #5f7283;
-    }
-
-    .workflow-note {
-      margin-top: 10px;
-      padding: 10px 11px;
-      border-radius: 14px;
-      border: 1px solid #d9e7ef;
-      background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
-      font-size: 12px;
-      line-height: 1.5;
-      color: #486071;
-    }
-
-    .scanner-banner[hidden] {
-      display: none !important;
-    }
-
-    .scanner-banner {
-      margin-top: 10px;
-      padding: 10px 11px;
-      border-radius: 14px;
-      border: 1px solid #f2d3a6;
-      background: #fff7ed;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #9a3412;
-    }
-
-    .scanner-banner.error {
-      border-color: #efc2c4;
-      background: #fff4f4;
-      color: #97272c;
-    }
-
-    .actions {
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .action-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-    }
-
-    button {
-      width: 100%;
-      border: 0;
-      border-radius: 14px;
-      padding: 10px 12px;
-      font-weight: 700;
-      font-size: 13px;
-      cursor: pointer;
-      transition: transform 100ms ease, filter 120ms ease;
-    }
-
-    button:hover { filter: brightness(1.03); }
-    button:active { transform: translateY(1px); }
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.62;
-      filter: none;
-      transform: none;
-    }
-
-    #autoFillBtn {
-      background: #0e7490;
-      color: #fff;
-    }
-
-    #clearMultipleBtn,
-    #addCurrentBtn {
-      background: #0f8b8d;
-      color: #fff;
-    }
-
-    #addBatchBtn {
-      background: #d9f0ef;
-      border: 1px solid #b6dcda;
-      color: #114b53;
-    }
-
-    #exportCsvBtn {
-      background: #164e63;
-      color: #fff;
-    }
-
-    #clearInventoryBtn {
-      background: #fff7ed;
-      border: 1px solid #f4cda5;
-      color: #9a3412;
-    }
-
-    #refreshNvcBtn {
-      background: #e7f3f4;
-      border: 1px solid #bddadd;
-      color: #14505f;
-    }
-
-    #nvcStatus {
-      margin: 10px 0 16px;
-      padding: 0 0 12px;
-      border-bottom: 1px solid var(--line);
-      font-size: 11px;
-      line-height: 1.5;
-      color: #486071;
-    }
-
-    .nvc-status-heading {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 4px 12px;
-    }
-
-    .nvc-status-version { font-size: 12px; font-weight: 600; color: #1f3d58; }
-
-    .nvc-status-count {
-      color: var(--subtle);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .nvc-status-release { margin: 3px 0 0; color: var(--subtle); }
-    .nvc-status-release > div { display: flex; gap: 5px; }
-    .nvc-status-release dd { margin: 0; }
-    .nvc-status-sync { margin-top: 5px; }
-    .nvc-status-sync summary { width: fit-content; cursor: pointer; color: #486071; }
-    .nvc-status-sync summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-    .nvc-status-details { margin: 8px 0 0; }
-    .nvc-status-details > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 3px 0; }
-    .nvc-status-details dd { margin: 0; text-align: right; color: #1f3d58; overflow-wrap: anywhere; }
-    .nvc-status-footer { margin-top: 5px; color: var(--subtle); }
-
-    .output {
-      margin-top: 10px;
-      padding: 10px 11px;
-      border-radius: 14px;
-      border: 1px solid #c8d9e8;
-      background: #f7fbff;
-      font-size: 12px;
-      line-height: 1.5;
-      color: #1f3d58;
-    }
-
-    .output.success {
-      border-color: #b8e3cf;
-      background: #eefbf4;
-      color: #10683e;
-    }
-
-    .output.error {
-      border-color: #efc2c4;
-      background: #fff4f4;
-      color: #97272c;
-    }
-
-    .output.warning {
-      border-color: #f2d3a6;
-      background: #fff7ed;
-      color: #9a3412;
-    }
-
-    .result-section + .result-section {
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid rgba(148, 163, 184, 0.2);
-    }
-
-    .result-heading {
-      margin: 0 0 8px;
-      font-size: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.3px;
-      color: #0f4c5c;
-    }
-
-    .result-row {
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 5px 0;
-      border-bottom: 1px dashed rgba(148, 163, 184, 0.16);
-    }
-
-    .result-row:last-child {
-      border-bottom: 0;
-      padding-bottom: 0;
-    }
-
-    .result-label {
-      flex: 0 0 108px;
-      font-weight: 700;
-      color: #476173;
-    }
-
-    .result-value {
-      min-width: 0;
-      text-align: right;
-      color: #17344d;
-      word-break: break-word;
-    }
-
-    .result-value .muted { color: #64748b; }
-    .result-value .status { font-weight: 800; }
-
-    .lookup-loading {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      color: #475569;
-      font-style: italic;
-    }
-
-    .inline-spinner {
-      width: 12px;
-      height: 12px;
-      border: 2px solid #cbd5e1;
-      border-top-color: #0f8b8d;
-      border-radius: 50%;
-      animation: spin 0.85s linear infinite;
-      flex: 0 0 auto;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .expiry-banner {
-      margin: 0 0 8px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      border: 1px solid transparent;
-    }
-
-    .expiry-banner.expired {
-      background: #fee2e2;
-      color: #991b1b;
-      border-color: #fecaca;
-    }
-
-    .expiry-banner.expiring {
-      background: #fff7ed;
-      color: #9a3412;
-      border-color: #fed7aa;
-    }
-
-    .inventory {
-      margin-top: 12px;
-      padding: 10px 11px;
-      border-radius: 16px;
-      border: 1px solid #c8d9e8;
-      background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
-    }
-
-    .inventory-summary {
-      font-size: 12px;
-      line-height: 1.45;
-      color: #4a6275;
-    }
-
-    .inventory-list {
-      margin-top: 10px;
-      display: grid;
-      gap: 8px;
-      max-height: 220px;
-      overflow-y: auto;
-      padding-right: 2px;
-    }
-
-    .inventory-empty {
-      padding: 10px 2px 2px;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #64748b;
-    }
-
-    .inventory-item {
-      border: 1px solid #dbe7f0;
-      border-radius: 14px;
-      padding: 10px;
-      background: #ffffff;
-      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
-    }
-
-    .inventory-item.active {
-      border-color: #8fd3d1;
-      box-shadow: 0 0 0 3px rgba(15, 139, 141, 0.12);
-      background: linear-gradient(180deg, #ffffff 0%, #f1fbfa 100%);
-    }
-
-    .inventory-item-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      align-items: flex-start;
-    }
-
-    .inventory-item-actions {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      flex: 0 0 auto;
-    }
-
-    .inventory-item-title {
-      font-size: 13px;
-      font-weight: 800;
-      color: #12364a;
-    }
-
-    .inventory-item-meta {
-      margin-top: 3px;
-      font-size: 11px;
-      color: #64748b;
-    }
-
-    .inventory-use {
-      width: auto;
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: #0f8b8d;
-      color: #fff;
-      font-size: 11px;
-    }
-
-    .inventory-dose-set {
-      width: auto;
-      padding: 6px 9px;
-      border-radius: 999px;
-      background: #fde68a;
-      border: 1px solid #fcd34d;
-      color: #78350f;
-      font-size: 11px;
-    }
-
-    .inventory-item-grid {
-      margin-top: 9px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .inventory-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #eef6fb;
-      color: #345067;
-      font-size: 11px;
-      font-weight: 700;
-    }
-
-    .inventory-remove {
-      width: auto;
-      padding: 6px 9px;
-      border-radius: 999px;
-      background: #f8fafc;
-      border: 1px solid #d7e3ed;
-      color: #52667a;
-      font-size: 11px;
-    }
-
-    /* ── Test Mode (manual barcode add in Multiple Inject) ── */
-    .test-mode-panel {
-      margin-top: 10px;
-      border-radius: 14px;
-      border: 1px dashed #b6d4e0;
-      background: #f4fafc;
-      overflow: hidden;
-    }
-
-    .test-mode-panel > summary {
-      list-style: none;
-      padding: 9px 12px;
-      font-size: 12px;
-      font-weight: 700;
-      color: #0e6e88;
-      cursor: pointer;
-      user-select: none;
-    }
-
-    .test-mode-panel > summary::-webkit-details-marker { display: none; }
-    .test-mode-panel > summary::before {
-      content: '▶ ';
-      font-size: 10px;
-    }
-    .test-mode-panel[open] > summary::before { content: '▼ '; }
-
-    .test-mode-body {
-      padding: 0 12px 12px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .test-mode-body label {
-      font-size: 11px;
-      font-weight: 700;
-      color: #476173;
-    }
-
-    .test-mode-body textarea {
-      width: 100%;
-      min-height: 56px;
-      box-sizing: border-box;
-      resize: vertical;
-    }
-
-    #testModeAddBtn {
-      background: #0e7490;
-      color: #fff;
-    }
-
-    .settings-panel[hidden] {
-      display: none !important;
-    }
-
-    .settings-panel {
-      margin: 0 0 12px;
-      display: grid;
-      gap: 12px;
-    }
-
-    .settings-card {
-      padding: 10px 11px;
-      border-radius: 16px;
-      border: 1px solid #c8d9e8;
-      background: linear-gradient(180deg, #f8fcff 0%, #f2f8fb 100%);
-    }
-
-    .analytics {
-      padding: 12px;
-      border-radius: 18px;
-      border: 1px solid #c9dbea;
-      background:
-        radial-gradient(circle at top right, rgba(15, 139, 141, 0.12) 0%, transparent 36%),
-        linear-gradient(180deg, #f8fcff 0%, #eef7fb 100%);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-    }
-
-    .analytics-summary {
-      display: grid;
-      gap: 10px;
-    }
-
-    .analytics-hero {
-      padding: 12px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
-      color: #ffffff;
-      box-shadow: 0 10px 22px rgba(14, 116, 144, 0.2);
-    }
-
-    .analytics-hero-label {
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
-      color: rgba(255, 255, 255, 0.82);
-    }
-
-    .analytics-hero-value {
-      margin-top: 4px;
-      font-size: 28px;
-      line-height: 1;
-      font-weight: 800;
-      letter-spacing: -0.4px;
-    }
-
-    .analytics-hero-subtitle {
-      margin-top: 6px;
-      font-size: 12px;
-      line-height: 1.45;
-      color: rgba(255, 255, 255, 0.9);
-    }
-
-    .analytics-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .analytics-card {
-      padding: 11px;
-      border-radius: 14px;
-      border: 1px solid #d7e5ef;
-      background: rgba(255, 255, 255, 0.92);
-      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
-    }
-
-    .analytics-card.device {
-      grid-column: 1 / -1;
-      background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
-    }
-
-    .analytics-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .analytics-card-title {
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
-      color: #0f4c5c;
-    }
-
-    .analytics-chip {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #e5f4f5;
-      color: #14505f;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.2px;
-      text-transform: uppercase;
-    }
-
-    .analytics-metrics {
-      display: grid;
-      gap: 7px;
-    }
-
-    .analytics-metric {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      padding-top: 7px;
-      border-top: 1px solid rgba(148, 163, 184, 0.18);
-    }
-
-    .analytics-metric:first-child {
-      padding-top: 0;
-      border-top: 0;
-    }
-
-    .analytics-metric-label {
-      min-width: 0;
-      font-size: 11px;
-      line-height: 1.35;
-      color: #5a7082;
-    }
-
-    .analytics-metric-value {
-      flex: 0 0 auto;
-      font-size: 16px;
-      font-weight: 800;
-      color: #11364a;
-      text-align: right;
-    }
-
-    .analytics-device-name {
-      font-size: 14px;
-      font-weight: 800;
-      color: #12364a;
-      word-break: break-word;
-    }
-
-    .analytics-device-meta {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .analytics-device-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #eef6fb;
-      color: #345067;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.2px;
-      text-transform: uppercase;
-    }
-
-    .analytics-field {
-      margin-top: 10px;
-    }
-
-    .settings-check {
-      margin-top: 10px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0;
-      text-transform: none;
-      color: #174d5f;
-      cursor: pointer;
-    }
-
-    .settings-check input[type="checkbox"] {
-      width: auto;
-      margin: 0;
-      accent-color: #0e7490;
-      transform: translateY(1px);
-    }
-
-    .settings-hint {
-      margin: 6px 0 0;
-      font-size: 11px;
-      line-height: 1.45;
-      color: #5f7283;
-    }
-
-    .scanner-status-card {
-      margin-top: 10px;
-      padding: 10px 11px;
-      border-radius: 14px;
-      border: 1px solid #d7e5ef;
-      background: rgba(255, 255, 255, 0.92);
-      box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
-    }
-
-    .scanner-status-top {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .scanner-status-label {
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.3px;
-      text-transform: uppercase;
-      color: #0f4c5c;
-    }
-
-    .scanner-status-title {
-      margin-top: 4px;
-      font-size: 14px;
-      font-weight: 800;
-      color: #12364a;
-    }
-
-    .scanner-status-detail {
-      margin-top: 8px;
-      font-size: 12px;
-      line-height: 1.45;
-      color: #5a7082;
-    }
-
-    .scanner-status-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #eef6fb;
-      color: #345067;
-      font-size: 10px;
-      font-weight: 800;
-      letter-spacing: 0.2px;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-
-    .scanner-status-pill.success {
-      background: #e9f9ef;
-      color: #10683e;
-    }
-
-    .scanner-status-pill.warning {
-      background: #fff7ed;
-      color: #9a3412;
-    }
-
-    .scanner-status-pill.error {
-      background: #fff4f4;
-      color: #97272c;
-    }
-
-    #scannerReconnectBtn {
-      background: #d9f0ef;
-      border: 1px solid #b6dcda;
-      color: #114b53;
-    }
-
-    #saveAnalyticsLabelBtn {
-      background: #d9f0ef;
-      border: 1px solid #b6dcda;
-      color: #114b53;
-    }
-
-    #exportTodayAnalyticsBtn,
-    #exportPilotAnalyticsBtn {
-      background: #0e7490;
-      color: #fff;
-    }
-
-    #exportAnalyticsCsvBtn {
-      background: #164e63;
-      color: #fff;
-    }
-
-    #resetAnalyticsBtn {
-      background: #fff7ed;
-      border: 1px solid #f4cda5;
-      color: #9a3412;
-    }
-  </style>
-</head>
-<body>
-  <div class="shell">
-    <div class="panel">
-      <div class="brand">
-        <div class="brand-row">
-          <div class="brand-copy">
-            <img class="brand-logo" src="assets/vaxlink-icon.svg" alt="VaxLink logo">
-            <div>
-              <!-- Channel badge: hidden by default; popup.js reveals it when the
+      .alpha-badge[hidden] {
+        display: none;
+      }
+
+      .header-icon-btn {
+        width: 36px;
+        height: 36px;
+        flex: 0 0 auto;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border-radius: 12px;
+        border: 1px solid #cfe0eb;
+        background: rgba(255, 255, 255, 0.78);
+        color: #14505f;
+        box-shadow: 0 6px 14px rgba(16, 33, 53, 0.08);
+      }
+
+      .header-icon-btn:hover {
+        filter: none;
+        background: #ffffff;
+      }
+
+      .header-icon-btn[aria-expanded='true'] {
+        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+        border-color: transparent;
+        color: #ffffff;
+      }
+
+      .content {
+        padding: 12px 14px 14px;
+      }
+
+      .mode-switch {
+        margin: 0 0 12px;
+        padding: 4px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 4px;
+        border: 1px solid #d5e2ec;
+        border-radius: 16px;
+        background: #f4f9fc;
+      }
+
+      .mode-tab {
+        border-radius: 12px;
+        padding: 9px 8px;
+        background: transparent;
+        color: #4d6375;
+        border: 0;
+        font-size: 12px;
+      }
+
+      .mode-tab.active {
+        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+        color: #fff;
+        box-shadow: 0 8px 18px rgba(14, 116, 144, 0.18);
+      }
+
+      .mode-panel[hidden],
+      .scanner-input[hidden] {
+        display: none !important;
+      }
+
+      .scan-state {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+        padding: 12px 13px;
+        border-radius: 18px;
+        border: 1px solid #cfe0eb;
+        background: linear-gradient(145deg, #f7fcff 0%, #eef8f8 100%);
+      }
+
+      .scan-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        font-size: 20px;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
+        flex: 0 0 auto;
+      }
+
+      .scan-copy {
+        min-width: 0;
+      }
+
+      .scan-title {
+        font-weight: 800;
+        font-size: 14px;
+        color: #10384a;
+      }
+
+      .scan-subtitle {
+        margin-top: 2px;
+        font-size: 12px;
+        line-height: 1.4;
+        color: #597081;
+      }
+
+      label {
+        display: block;
+        margin: 0 0 6px;
+        font-weight: 700;
+        font-size: 12px;
+        letter-spacing: 0.28px;
+        text-transform: uppercase;
+        color: #174d5f;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 88px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px 11px;
+        resize: vertical;
+        font-family: 'Consolas', 'Courier New', monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #0e2b41;
+        background: #fbfdff;
+        transition:
+          border-color 120ms ease,
+          box-shadow 120ms ease;
+      }
+
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      input[type='text'] {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 9px 10px;
+        font-size: 12px;
+        color: #0e2b41;
+        background: #fbfdff;
+      }
+
+      input[type='text']:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 9px 10px;
+        font-size: 12px;
+        color: #0e2b41;
+        background: #fbfdff;
+      }
+
+      select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--ring);
+      }
+
+      .scan-helper {
+        margin: 8px 2px 0;
+        font-size: 11px;
+        line-height: 1.45;
+        color: #5f7283;
+      }
+
+      .workflow-note {
+        margin-top: 10px;
+        padding: 10px 11px;
+        border-radius: 14px;
+        border: 1px solid #d9e7ef;
+        background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
+        font-size: 12px;
+        line-height: 1.5;
+        color: #486071;
+      }
+
+      .scanner-banner[hidden] {
+        display: none !important;
+      }
+
+      .scanner-banner {
+        margin-top: 10px;
+        padding: 10px 11px;
+        border-radius: 14px;
+        border: 1px solid #f2d3a6;
+        background: #fff7ed;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #9a3412;
+      }
+
+      .scanner-banner.error {
+        border-color: #efc2c4;
+        background: #fff4f4;
+        color: #97272c;
+      }
+
+      .actions {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .action-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      button {
+        width: 100%;
+        border: 0;
+        border-radius: 14px;
+        padding: 10px 12px;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+        transition:
+          transform 100ms ease,
+          filter 120ms ease;
+      }
+
+      button:hover {
+        filter: brightness(1.03);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.62;
+        filter: none;
+        transform: none;
+      }
+
+      #autoFillBtn {
+        background: #0e7490;
+        color: #fff;
+      }
+
+      #clearMultipleBtn,
+      #addCurrentBtn {
+        background: #0f8b8d;
+        color: #fff;
+      }
+
+      #addBatchBtn {
+        background: #d9f0ef;
+        border: 1px solid #b6dcda;
+        color: #114b53;
+      }
+
+      #exportCsvBtn {
+        background: #164e63;
+        color: #fff;
+      }
+
+      #clearInventoryBtn {
+        background: #fff7ed;
+        border: 1px solid #f4cda5;
+        color: #9a3412;
+      }
+
+      #refreshNvcBtn {
+        background: #e7f3f4;
+        border: 1px solid #bddadd;
+        color: #14505f;
+      }
+
+      #nvcStatus {
+        margin: 10px 0 16px;
+        padding: 0 0 12px;
+        border-bottom: 1px solid var(--line);
+        font-size: 11px;
+        line-height: 1.5;
+        color: #486071;
+      }
+
+      .nvc-status-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+      }
+
+      .nvc-status-version {
+        font-size: 12px;
+        font-weight: 600;
+        color: #1f3d58;
+      }
+
+      .nvc-status-count {
+        color: var(--subtle);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .nvc-status-release {
+        margin: 3px 0 0;
+        color: var(--subtle);
+      }
+      .nvc-status-release > div {
+        display: flex;
+        gap: 5px;
+      }
+      .nvc-status-release dd {
+        margin: 0;
+      }
+      .nvc-status-sync {
+        margin-top: 5px;
+      }
+      .nvc-status-sync summary {
+        width: fit-content;
+        cursor: pointer;
+        color: #486071;
+      }
+      .nvc-status-sync summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 3px;
+      }
+      .nvc-status-details {
+        margin: 8px 0 0;
+      }
+      .nvc-status-details > div {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+        padding: 3px 0;
+      }
+      .nvc-status-details dd {
+        margin: 0;
+        text-align: right;
+        color: #1f3d58;
+        overflow-wrap: anywhere;
+      }
+      .nvc-status-footer {
+        margin-top: 5px;
+        color: var(--subtle);
+      }
+
+      .output {
+        margin-top: 10px;
+        padding: 10px 11px;
+        border-radius: 14px;
+        border: 1px solid #c8d9e8;
+        background: #f7fbff;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #1f3d58;
+      }
+
+      .output.success {
+        border-color: #b8e3cf;
+        background: #eefbf4;
+        color: #10683e;
+      }
+
+      .output.error {
+        border-color: #efc2c4;
+        background: #fff4f4;
+        color: #97272c;
+      }
+
+      .output.warning {
+        border-color: #f2d3a6;
+        background: #fff7ed;
+        color: #9a3412;
+      }
+
+      .result-section + .result-section {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(148, 163, 184, 0.2);
+      }
+
+      .result-heading {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        color: #0f4c5c;
+      }
+
+      .result-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 5px 0;
+        border-bottom: 1px dashed rgba(148, 163, 184, 0.16);
+      }
+
+      .result-row:last-child {
+        border-bottom: 0;
+        padding-bottom: 0;
+      }
+
+      .result-label {
+        flex: 0 0 108px;
+        font-weight: 700;
+        color: #476173;
+      }
+
+      .result-value {
+        min-width: 0;
+        text-align: right;
+        color: #17344d;
+        word-break: break-word;
+      }
+
+      .result-value .muted {
+        color: #64748b;
+      }
+      .result-value .status {
+        font-weight: 800;
+      }
+
+      .lookup-loading {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: #475569;
+        font-style: italic;
+      }
+
+      .inline-spinner {
+        width: 12px;
+        height: 12px;
+        border: 2px solid #cbd5e1;
+        border-top-color: #0f8b8d;
+        border-radius: 50%;
+        animation: spin 0.85s linear infinite;
+        flex: 0 0 auto;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .expiry-banner {
+        margin: 0 0 8px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        border: 1px solid transparent;
+      }
+
+      .expiry-banner.expired {
+        background: #fee2e2;
+        color: #991b1b;
+        border-color: #fecaca;
+      }
+
+      .expiry-banner.expiring {
+        background: #fff7ed;
+        color: #9a3412;
+        border-color: #fed7aa;
+      }
+
+      .inventory {
+        margin-top: 12px;
+        padding: 10px 11px;
+        border-radius: 16px;
+        border: 1px solid #c8d9e8;
+        background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
+      }
+
+      .inventory-summary {
+        font-size: 12px;
+        line-height: 1.45;
+        color: #4a6275;
+      }
+
+      .inventory-list {
+        margin-top: 10px;
+        display: grid;
+        gap: 8px;
+        max-height: 220px;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
+
+      .inventory-empty {
+        padding: 10px 2px 2px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #64748b;
+      }
+
+      .inventory-item {
+        border: 1px solid #dbe7f0;
+        border-radius: 14px;
+        padding: 10px;
+        background: #ffffff;
+        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+      }
+
+      .inventory-item.active {
+        border-color: #8fd3d1;
+        box-shadow: 0 0 0 3px rgba(15, 139, 141, 0.12);
+        background: linear-gradient(180deg, #ffffff 0%, #f1fbfa 100%);
+      }
+
+      .inventory-item-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: flex-start;
+      }
+
+      .inventory-item-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex: 0 0 auto;
+      }
+
+      .inventory-item-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: #12364a;
+      }
+
+      .inventory-item-meta {
+        margin-top: 3px;
+        font-size: 11px;
+        color: #64748b;
+      }
+
+      .inventory-use {
+        width: auto;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: #0f8b8d;
+        color: #fff;
+        font-size: 11px;
+      }
+
+      .inventory-dose-set {
+        width: auto;
+        padding: 6px 9px;
+        border-radius: 999px;
+        background: #fde68a;
+        border: 1px solid #fcd34d;
+        color: #78350f;
+        font-size: 11px;
+      }
+
+      .inventory-item-grid {
+        margin-top: 9px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .inventory-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #eef6fb;
+        color: #345067;
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .inventory-remove {
+        width: auto;
+        padding: 6px 9px;
+        border-radius: 999px;
+        background: #f8fafc;
+        border: 1px solid #d7e3ed;
+        color: #52667a;
+        font-size: 11px;
+      }
+
+      /* ── Test Mode (manual barcode add in Multiple Inject) ── */
+      .test-mode-panel {
+        margin-top: 10px;
+        border-radius: 14px;
+        border: 1px dashed #b6d4e0;
+        background: #f4fafc;
+        overflow: hidden;
+      }
+
+      .test-mode-panel > summary {
+        list-style: none;
+        padding: 9px 12px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #0e6e88;
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .test-mode-panel > summary::-webkit-details-marker {
+        display: none;
+      }
+      .test-mode-panel > summary::before {
+        content: '▶ ';
+        font-size: 10px;
+      }
+      .test-mode-panel[open] > summary::before {
+        content: '▼ ';
+      }
+
+      .test-mode-body {
+        padding: 0 12px 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .test-mode-body label {
+        font-size: 11px;
+        font-weight: 700;
+        color: #476173;
+      }
+
+      .test-mode-body textarea {
+        width: 100%;
+        min-height: 56px;
+        box-sizing: border-box;
+        resize: vertical;
+      }
+
+      #testModeAddBtn {
+        background: #0e7490;
+        color: #fff;
+      }
+
+      .settings-panel[hidden] {
+        display: none !important;
+      }
+
+      .settings-panel {
+        margin: 0 0 12px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .settings-card {
+        padding: 10px 11px;
+        border-radius: 16px;
+        border: 1px solid #c8d9e8;
+        background: linear-gradient(180deg, #f8fcff 0%, #f2f8fb 100%);
+      }
+
+      .analytics {
+        padding: 12px;
+        border-radius: 18px;
+        border: 1px solid #c9dbea;
+        background:
+          radial-gradient(
+            circle at top right,
+            rgba(15, 139, 141, 0.12) 0%,
+            transparent 36%
+          ),
+          linear-gradient(180deg, #f8fcff 0%, #eef7fb 100%);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      }
+
+      .analytics-summary {
+        display: grid;
+        gap: 10px;
+      }
+
+      .analytics-hero {
+        padding: 12px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+        color: #ffffff;
+        box-shadow: 0 10px 22px rgba(14, 116, 144, 0.2);
+      }
+
+      .analytics-hero-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.82);
+      }
+
+      .analytics-hero-value {
+        margin-top: 4px;
+        font-size: 28px;
+        line-height: 1;
+        font-weight: 800;
+        letter-spacing: -0.4px;
+      }
+
+      .analytics-hero-subtitle {
+        margin-top: 6px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .analytics-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .analytics-card {
+        padding: 11px;
+        border-radius: 14px;
+        border: 1px solid #d7e5ef;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+      }
+
+      .analytics-card.device {
+        grid-column: 1 / -1;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
+      }
+
+      .analytics-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .analytics-card-title {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        color: #0f4c5c;
+      }
+
+      .analytics-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #e5f4f5;
+        color: #14505f;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+      }
+
+      .analytics-metrics {
+        display: grid;
+        gap: 7px;
+      }
+
+      .analytics-metric {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        padding-top: 7px;
+        border-top: 1px solid rgba(148, 163, 184, 0.18);
+      }
+
+      .analytics-metric:first-child {
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .analytics-metric-label {
+        min-width: 0;
+        font-size: 11px;
+        line-height: 1.35;
+        color: #5a7082;
+      }
+
+      .analytics-metric-value {
+        flex: 0 0 auto;
+        font-size: 16px;
+        font-weight: 800;
+        color: #11364a;
+        text-align: right;
+      }
+
+      .analytics-device-name {
+        font-size: 14px;
+        font-weight: 800;
+        color: #12364a;
+        word-break: break-word;
+      }
+
+      .analytics-device-meta {
+        margin-top: 6px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .analytics-device-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #eef6fb;
+        color: #345067;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+      }
+
+      .analytics-field {
+        margin-top: 10px;
+      }
+
+      .settings-check {
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: none;
+        color: #174d5f;
+        cursor: pointer;
+      }
+
+      .settings-check input[type='checkbox'] {
+        width: auto;
+        margin: 0;
+        accent-color: #0e7490;
+        transform: translateY(1px);
+      }
+
+      .settings-hint {
+        margin: 6px 0 0;
+        font-size: 11px;
+        line-height: 1.45;
+        color: #5f7283;
+      }
+
+      .scanner-status-card {
+        margin-top: 10px;
+        padding: 10px 11px;
+        border-radius: 14px;
+        border: 1px solid #d7e5ef;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+      }
+
+      .scanner-status-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .scanner-status-label {
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        color: #0f4c5c;
+      }
+
+      .scanner-status-title {
+        margin-top: 4px;
+        font-size: 14px;
+        font-weight: 800;
+        color: #12364a;
+      }
+
+      .scanner-status-detail {
+        margin-top: 8px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #5a7082;
+      }
+
+      .scanner-status-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #eef6fb;
+        color: #345067;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.2px;
+        text-transform: uppercase;
+        white-space: nowrap;
+      }
+
+      .scanner-status-pill.success {
+        background: #e9f9ef;
+        color: #10683e;
+      }
+
+      .scanner-status-pill.warning {
+        background: #fff7ed;
+        color: #9a3412;
+      }
+
+      .scanner-status-pill.error {
+        background: #fff4f4;
+        color: #97272c;
+      }
+
+      #scannerReconnectBtn {
+        background: #d9f0ef;
+        border: 1px solid #b6dcda;
+        color: #114b53;
+      }
+
+      #saveAnalyticsLabelBtn {
+        background: #d9f0ef;
+        border: 1px solid #b6dcda;
+        color: #114b53;
+      }
+
+      #exportTodayAnalyticsBtn,
+      #exportPilotAnalyticsBtn {
+        background: #0e7490;
+        color: #fff;
+      }
+
+      #exportAnalyticsCsvBtn {
+        background: #164e63;
+        color: #fff;
+      }
+
+      #resetAnalyticsBtn {
+        background: #fff7ed;
+        border: 1px solid #f4cda5;
+        color: #9a3412;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="panel">
+        <div class="brand">
+          <div class="brand-row">
+            <div class="brand-copy">
+              <img
+                class="brand-logo"
+                src="assets/vaxlink-icon.svg"
+                alt="VaxLink logo"
+              />
+              <div>
+                <!-- Channel badge: hidden by default; popup.js reveals it when the
                    manifest name (stamped by scripts/package-extension.sh) says Alpha. -->
-              <h2 class="title">VaxLink <span id="alphaBadge" class="alpha-badge" hidden>Alpha</span></h2>
-              <p class="tagline">Scan once. Parse automatically. Chart faster.</p>
-            </div>
-          </div>
-          <button id="settingsToggleBtn" class="header-icon-btn" type="button" aria-label="Open settings and analytics" aria-expanded="false" aria-controls="settingsPanel">&#9881;</button>
-        </div>
-      </div>
-      <div class="content">
-        <div id="settingsPanel" class="settings-panel" hidden>
-          <div class="settings-card">
-            <div class="result-heading">Data Tools</div>
-            <div class="actions">
-              <button id="refreshNvcBtn">Refresh NVC Data</button>
-            </div>
-            <div id="nvcStatus" role="status" aria-label="NVC catalogue status"></div>
-            <label class="settings-check" for="adminDateTimeAutofillToggle">
-              <input id="adminDateTimeAutofillToggle" type="checkbox">
-              <span>Auto-fill Date Administered from scan time</span>
-            </label>
-            <p class="settings-hint">When enabled, VaxLink fills Panorama Date Administered date and time using the scan timestamp.</p>
-            <p class="settings-hint">Pair a USB CDC scanner once. Background Web Serial capture continues when the setup tab is closed and queues scans while Windows is locked.</p>
-            <div class="actions">
-              <button id="scannerSetupBtn" type="button">Open Scanner Setup</button>
-            </div>
-            <div id="scannerStatusCard" class="scanner-status-card">
-              <div class="scanner-status-top">
-                <div>
-                  <div class="scanner-status-label">Station Scanner</div>
-                  <div id="scannerStatusTitle" class="scanner-status-title">Needs Setup</div>
-                </div>
-                <div id="scannerStatusPill" class="scanner-status-pill">Offline</div>
+                <h2 class="title">
+                  VaxLink
+                  <span id="alphaBadge" class="alpha-badge" hidden>Alpha</span>
+                </h2>
+                <p class="tagline">
+                  Scan once. Parse automatically. Chart faster.
+                </p>
               </div>
-              <div id="scannerStatusDetail" class="scanner-status-detail">Open Scanner Setup once to pair a Web Serial scanner for this workstation.</div>
+            </div>
+            <button
+              id="settingsToggleBtn"
+              class="header-icon-btn"
+              type="button"
+              aria-label="Open settings and analytics"
+              aria-expanded="false"
+              aria-controls="settingsPanel"
+            >
+              &#9881;
+            </button>
+          </div>
+        </div>
+        <div class="content">
+          <div id="settingsPanel" class="settings-panel" hidden>
+            <div class="settings-card">
+              <div class="result-heading">Data Tools</div>
               <div class="actions">
-                <button id="scannerReconnectBtn" type="button" hidden>Open Setup</button>
+                <button id="refreshNvcBtn">Refresh NVC Data</button>
+              </div>
+              <div
+                id="nvcStatus"
+                role="status"
+                aria-label="NVC catalogue status"
+              ></div>
+              <label class="settings-check" for="adminDateTimeAutofillToggle">
+                <input id="adminDateTimeAutofillToggle" type="checkbox" />
+                <span>Auto-fill Date Administered from scan time</span>
+              </label>
+              <p class="settings-hint">
+                When enabled, VaxLink fills Panorama Date Administered date and
+                time using the scan timestamp.
+              </p>
+              <p class="settings-hint">
+                Pair a USB CDC scanner once. Background Web Serial capture
+                continues when the setup tab is closed and queues scans while
+                Windows is locked.
+              </p>
+              <div class="actions">
+                <button id="scannerSetupBtn" type="button">
+                  Open Scanner Setup
+                </button>
+              </div>
+              <div id="scannerStatusCard" class="scanner-status-card">
+                <div class="scanner-status-top">
+                  <div>
+                    <div class="scanner-status-label">Station Scanner</div>
+                    <div id="scannerStatusTitle" class="scanner-status-title">
+                      Needs Setup
+                    </div>
+                  </div>
+                  <div id="scannerStatusPill" class="scanner-status-pill">
+                    Offline
+                  </div>
+                </div>
+                <div id="scannerStatusDetail" class="scanner-status-detail">
+                  Open Scanner Setup once to pair a Web Serial scanner for this
+                  workstation.
+                </div>
+                <div class="actions">
+                  <button id="scannerReconnectBtn" type="button" hidden>
+                    Open Setup
+                  </button>
+                </div>
+              </div>
+              <label class="settings-check" for="reasonConsentAutofillToggle">
+                <input id="reasonConsentAutofillToggle" type="checkbox" />
+                <span>Auto-fill Reason for Immunization and Consent</span>
+              </label>
+              <p class="settings-hint">
+                When enabled, VaxLink sets Reason for Immunization to "Routine"
+                and Consent for Service to "Consent obtained" on the Panorama
+                immunization form.
+              </p>
+            </div>
+            <div class="analytics">
+              <div class="result-heading">Local Analytics</div>
+              <div id="analyticsSummary" class="analytics-summary">
+                Loading analytics...
+              </div>
+              <div class="analytics-field">
+                <label for="analyticsLabelInput"
+                  >Workstation / Nurse Label</label
+                >
+                <input
+                  id="analyticsLabelInput"
+                  type="text"
+                  placeholder="Example: Clinic 2 - Nurse A"
+                />
+              </div>
+              <div class="actions">
+                <button id="saveAnalyticsLabelBtn">Save Label</button>
+                <div class="action-row">
+                  <button id="exportTodayAnalyticsBtn">
+                    Export Today JSON
+                  </button>
+                  <button id="exportPilotAnalyticsBtn">
+                    Export Pilot JSON
+                  </button>
+                </div>
+                <div class="action-row">
+                  <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
+                  <button id="resetAnalyticsBtn">Reset Analytics</button>
+                </div>
               </div>
             </div>
-            <label class="settings-check" for="reasonConsentAutofillToggle">
-              <input id="reasonConsentAutofillToggle" type="checkbox">
-              <span>Auto-fill Reason for Immunization and Consent</span>
-            </label>
-            <p class="settings-hint">When enabled, VaxLink sets Reason for Immunization to "Routine" and Consent for Service to "Consent obtained" on the Panorama immunization form.</p>
           </div>
-          <div class="analytics">
-            <div class="result-heading">Local Analytics</div>
-            <div id="analyticsSummary" class="analytics-summary">Loading analytics...</div>
-            <div class="analytics-field">
-              <label for="analyticsLabelInput">Workstation / Nurse Label</label>
-              <input id="analyticsLabelInput" type="text" placeholder="Example: Clinic 2 - Nurse A">
-            </div>
-            <div class="actions">
-              <button id="saveAnalyticsLabelBtn">Save Label</button>
-              <div class="action-row">
-                <button id="exportTodayAnalyticsBtn">Export Today JSON</button>
-                <button id="exportPilotAnalyticsBtn">Export Pilot JSON</button>
-              </div>
-              <div class="action-row">
-                <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
-                <button id="resetAnalyticsBtn">Reset Analytics</button>
+          <div id="mainWorkflowPanel">
+            <div id="scanState" class="scan-state" aria-live="polite">
+              <div id="scanStateIcon" class="scan-icon">&#128137;</div>
+              <div class="scan-copy">
+                <div id="scanStateTitle" class="scan-title">Single Inject</div>
+                <div id="scanStateSubtitle" class="scan-subtitle">
+                  One scan fills the current chart immediately.
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-        <div id="mainWorkflowPanel">
-        <div id="scanState" class="scan-state" aria-live="polite">
-          <div id="scanStateIcon" class="scan-icon">&#128137;</div>
-          <div class="scan-copy">
-            <div id="scanStateTitle" class="scan-title">Single Inject</div>
-            <div id="scanStateSubtitle" class="scan-subtitle">One scan fills the current chart immediately.</div>
-          </div>
-        </div>
 
-        <div class="mode-switch" role="tablist" aria-label="VaxLink workflow mode">
-          <button id="singleModeBtn" class="mode-tab active" type="button" role="tab" aria-selected="true">Single Inject</button>
-          <button id="multipleModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false">Multiple Inject</button>
-          <button id="inventoryModeBtn" class="mode-tab" type="button" role="tab" aria-selected="false">Inventory</button>
-        </div>
-
-        <div id="scannerInputSection" class="scanner-input">
-          <label id="scannedInputLabel" for="scannedData">Scanned Barcode</label>
-          <textarea id="scannedData" placeholder="Paste barcode text here..."></textarea>
-        </div>
-
-        <p id="modeHelper" class="scan-helper">Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.</p>
-        <div id="scannerWorkflowBanner" class="scanner-banner" hidden></div>
-
-        <div id="singleModeSection" class="mode-panel">
-          <div class="workflow-note">Web Serial scanner capture fills the open chart in Single Inject and saves scans automatically in Multiple Inject or Inventory.</div>
-          <div class="actions">
-            <button id="autoFillBtn">Auto-fill CHR</button>
-          </div>
-        </div>
-
-        <div id="multipleModeSection" class="mode-panel" hidden>
-          <div class="workflow-note">With a Web Serial scanner connected, scans are stored in a station session vault and can be consumed for multiple patients by setting remaining doses.</div>
-          <div class="actions">
-            <button id="clearMultipleBtn">Clear Queue</button>
-          </div>
-
-          <details id="testModePanel" class="test-mode-panel" hidden>
-            <summary>🧪 Manual Add (no scanner)</summary>
-            <div class="test-mode-body">
-              <label for="testModeBarcode">Paste a GS1 barcode to add directly to the queue:</label>
-              <textarea id="testModeBarcode" rows="2" placeholder="e.g. ]d2010305718580811211609302110HN1234"></textarea>
-              <button id="testModeAddBtn" type="button">Add to Queue</button>
+            <div
+              class="mode-switch"
+              role="tablist"
+              aria-label="VaxLink workflow mode"
+            >
+              <button
+                id="singleModeBtn"
+                class="mode-tab active"
+                type="button"
+                role="tab"
+                aria-selected="true"
+              >
+                Single Inject
+              </button>
+              <button
+                id="multipleModeBtn"
+                class="mode-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+              >
+                Multiple Inject
+              </button>
+              <button
+                id="inventoryModeBtn"
+                class="mode-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+              >
+                Inventory
+              </button>
             </div>
-          </details>
 
-          <div class="inventory">
-            <div class="result-heading">Multiple Inject Queue</div>
-            <div id="multipleQueueSummary" class="inventory-summary">No saved vaccines yet.</div>
-            <div id="multipleQueueList" class="inventory-list"></div>
-          </div>
-        </div>
-
-        <div id="inventoryModeSection" class="mode-panel" hidden>
-          <div class="actions">
-            <div class="action-row">
-              <button id="addCurrentBtn">Add Current Scan</button>
-              <button id="addBatchBtn">Add All Lines</button>
+            <div id="scannerInputSection" class="scanner-input">
+              <label id="scannedInputLabel" for="scannedData"
+                >Scanned Barcode</label
+              >
+              <textarea
+                id="scannedData"
+                placeholder="Paste barcode text here..."
+              ></textarea>
             </div>
-            <div class="action-row">
-              <button id="exportCsvBtn">Export CSV</button>
-              <button id="clearInventoryBtn">Clear Inventory</button>
+
+            <p id="modeHelper" class="scan-helper">
+              Use this when one vaccine is being charted now. Paste barcode text
+              below to preview, or connect a Web Serial scanner for hands-free
+              auto-fill.
+            </p>
+            <div id="scannerWorkflowBanner" class="scanner-banner" hidden></div>
+
+            <div id="singleModeSection" class="mode-panel">
+              <div class="workflow-note">
+                Web Serial scanner capture fills the open chart in Single Inject
+                and saves scans automatically in Multiple Inject or Inventory.
+              </div>
+              <div class="actions">
+                <button id="autoFillBtn">Auto-fill CHR</button>
+              </div>
+            </div>
+
+            <div id="multipleModeSection" class="mode-panel" hidden>
+              <div class="workflow-note">
+                With a Web Serial scanner connected, scans are stored in a
+                station session vault and can be consumed for multiple patients
+                by setting remaining doses.
+              </div>
+              <div class="actions">
+                <button id="clearMultipleBtn">Clear Queue</button>
+              </div>
+
+              <details id="testModePanel" class="test-mode-panel" hidden>
+                <summary>🧪 Manual Add (no scanner)</summary>
+                <div class="test-mode-body">
+                  <label for="testModeBarcode"
+                    >Paste a GS1 barcode to add directly to the queue:</label
+                  >
+                  <textarea
+                    id="testModeBarcode"
+                    rows="2"
+                    placeholder="e.g. ]d2010305718580811211609302110HN1234"
+                  ></textarea>
+                  <button id="testModeAddBtn" type="button">
+                    Add to Queue
+                  </button>
+                </div>
+              </details>
+
+              <div class="inventory">
+                <div class="result-heading">Multiple Inject Queue</div>
+                <div id="multipleQueueSummary" class="inventory-summary">
+                  No saved vaccines yet.
+                </div>
+                <div id="multipleQueueList" class="inventory-list"></div>
+              </div>
+            </div>
+
+            <div id="inventoryModeSection" class="mode-panel" hidden>
+              <div class="actions">
+                <div class="action-row">
+                  <button id="addCurrentBtn">Add Current Scan</button>
+                  <button id="addBatchBtn">Add All Lines</button>
+                </div>
+                <div class="action-row">
+                  <button id="exportCsvBtn">Export CSV</button>
+                  <button id="clearInventoryBtn">Clear Inventory</button>
+                </div>
+              </div>
+              <div class="inventory">
+                <div class="result-heading">Inventory Tray</div>
+                <div id="inventorySummary" class="inventory-summary">
+                  No inventory scans yet.
+                </div>
+                <div id="inventoryList" class="inventory-list"></div>
+              </div>
             </div>
           </div>
-          <div class="inventory">
-            <div class="result-heading">Inventory Tray</div>
-            <div id="inventorySummary" class="inventory-summary">No inventory scans yet.</div>
-            <div id="inventoryList" class="inventory-list"></div>
-          </div>
-        </div>
-        </div>
 
-        <div id="output" class="output" style="display:none;"></div>
+          <div id="output" class="output" style="display: none"></div>
+        </div>
       </div>
     </div>
-  </div>
-  <script type="module" src="popup.js"></script>
-</body>
+    <script type="module" src="popup.js"></script>
+  </body>
 </html>

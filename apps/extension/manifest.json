@@ -13,9 +13,7 @@
     "idle"
   ],
   "minimum_chrome_version": "114",
-  "host_permissions": [
-    "https://nvc-cnv.canada.ca/*"
-  ],
+  "host_permissions": ["https://nvc-cnv.canada.ca/*"],
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
@@ -40,11 +38,7 @@
         "https://*.inputhealth.com/*",
         "https://trpanoramadhir.prod.ehealthontario.ca/*"
       ],
-      "js": [
-        "panorama-agent-rules.js",
-        "shared/gs1-parser.js",
-        "content.js"
-      ],
+      "js": ["panorama-agent-rules.js", "shared/gs1-parser.js", "content.js"],
       "run_at": "document_start"
     }
   ],
