@@ -1,0 +1,33 @@
+name: Formatting
+
+on:
+  pull_request:
+  push:
+    branches: [alpha, main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Check changed files
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          base="${PR_BASE:-$PUSH_BASE}"
+          if [[ "$base" =~ ^0+$ ]]; then
+            base=$(git hash-object -t tree /dev/null)
+          elif ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            git fetch --no-tags origin "$base"
+          fi
+          npm run format:check -- --base "$base"

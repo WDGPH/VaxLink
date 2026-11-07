@@ -1,0 +1,8 @@
+#!/bin/sh
+hooks_path=$(git config --get core.hooksPath || true)
+if [ -n "$hooks_path" ] && [ "$hooks_path" != '.githooks' ]; then
+  printf '%s\n' "Existing hooks path: $hooks_path" \
+    'Add the pre-commit and commit-msg hooks there instead of replacing it.' >&2
+  exit 1
+fi
+git config --local core.hooksPath .githooks

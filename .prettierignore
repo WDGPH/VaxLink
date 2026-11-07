@@ -1,0 +1,7 @@
+# Release-please writes this file.
+CHANGELOG.md
+apps/extension/nvc_bundle.json
+node_modules/
+dist/
+site/
+.venv/
