@@ -2,13 +2,16 @@ name: Extension CI
 
 on:
   push:
-    branches: [dev, main]
+    branches: [alpha, main]
     paths:
       - "apps/extension/**"
       - "apps/extension-tests/**"
       - "scripts/package-extension.sh"
       - "package.json"
       - ".github/workflows/extension-ci.yml"
+      - ".github/workflows/release-please.yml"
+      - "release-please*-config.json"
+      - ".release-please-manifest.json"
   pull_request:
     paths:
       - "apps/extension/**"
@@ -16,6 +19,9 @@ on:
       - "scripts/package-extension.sh"
       - "package.json"
       - ".github/workflows/extension-ci.yml"
+      - ".github/workflows/release-please.yml"
+      - "release-please*-config.json"
+      - ".release-please-manifest.json"
   workflow_dispatch:
 
 jobs:
@@ -44,10 +50,13 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Package alpha and prod zips
+      - name: Package channel ZIPs
         run: |
           ./scripts/package-extension.sh alpha
-          ./scripts/package-extension.sh prod
+          # Prereleases belong to the Alpha listing only.
+          if [[ "$(node -p "require('./package.json').version")" != *-* ]]; then
+            ./scripts/package-extension.sh prod
+          fi
 
       - name: Upload packaged extension zips
         uses: actions/upload-artifact@v6

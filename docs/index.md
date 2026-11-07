@@ -4,14 +4,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WDGPH/VaxLink/blob/main/LICENSE)
 
 A Chrome extension that parses GS1 vaccine barcodes and auto-fills them into
-Ontario immunization EMRs (Panorama, InputHealth), plus a Next.js marketing
-site (`apps/web-next`). Built by Wellington-Dufferin-Guelph Public Health.
+Ontario immunization EMRs (Panorama, InputHealth). Built by
+Wellington-Dufferin-Guelph Public Health.
 
 !!! info "Client-side by design"
-    Scanned barcode data is parsed locally in the browser and never sent to a
-    server VaxLink controls. The only outbound call is fetching the public NVC
-    vaccine metadata bundle. See the [Security Policy](security.md) for the
-    full data-handling model.
+    Scanned barcode data is parsed locally in the browser and is not uploaded
+    to any server. The default catalogue source is the public NVC vaccine
+    bundle. See the [Security Policy](security.md) for the full data-handling
+    model.
 
 ## What it does
 
@@ -25,6 +25,11 @@ site (`apps/web-next`). Built by Wellington-Dufferin-Guelph Public Health.
 - Supports single, multiple, and inventory scan workflows with CSV export
 
 ## Get started
+
+First test VaxLink in the Panorama training environment using synthetic training
+records. After installing or updating the extension, reload the training page
+and open an immunization record. Check Single Inject, Multiple Inject, Inventory, and lock-screen
+capture/replay before moving to production.
 
 <div class="grid cards" markdown>
 
@@ -79,7 +84,6 @@ site (`apps/web-next`). Built by Wellington-Dufferin-Guelph Public Health.
 ```text
 apps/extension/         Chrome extension (Manifest V3), no build step
 apps/extension-tests/   Extension test suite (kept out of the packaged zip)
-apps/web-next/          Next.js marketing site, deployed to GitHub Pages
 scripts/                Shell utilities (packaging, NVC bundle fetch)
 skills/                 Claude Code skill definitions for extension workflows
 docs/                   This documentation site

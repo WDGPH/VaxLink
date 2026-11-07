@@ -83,6 +83,13 @@
   }
 
   function findNextAI(scan, startIdx, separator, currentVariableAI = null) {
+    // AI(10) is variable-length: embedded "21" or "17" belongs to the lot.
+    // A following field requires a separator; a final lot consumes the tail.
+    // Do not guess a boundary from the lot text (e.g. AHAVC219AC, Z012217).
+    if (currentVariableAI === '10') {
+      return separator ? scan.indexOf(separator, startIdx) : -1;
+    }
+
     if (separator && scan.includes(separator) && scan.substring(startIdx).includes(separator)) {
       const ais = ['17', '10', '21'];
       for (let i = startIdx; i < scan.length - 1; i += 1) {

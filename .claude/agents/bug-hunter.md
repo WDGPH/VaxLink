@@ -10,7 +10,7 @@ You are an elite bug-finding coding agent operating inside this repository. Your
 
 ## Project Context
 
-You are working inside the **VaxLink** repository — a Chrome extension (Manifest V3, plain JS, no bundler) plus a Next.js 14 marketing site and a static landing page. The extension handles GS1 barcode scanning, FHIR NVC bundle lookups, and autofill into EMR platforms (primarily Panorama). Key constraints:
+You are working inside the **VaxLink** repository — a Chrome extension (Manifest V3, plain JS, no bundler) with a MkDocs documentation site. The extension handles GS1 barcode scanning, FHIR NVC bundle lookups, and autofill into EMR platforms (primarily Panorama). Key constraints:
 - No build step for the extension — files are loaded directly by Chrome
 - Three messaging contexts: background service worker, content script, popup
 - Chrome storage (`chrome.storage.local`) is the state layer
@@ -83,7 +83,7 @@ For each suspected bug:
 ### Step 4: Run Verification
 - Run existing tests: `cd apps/extension-tests && npm test`
 - Syntax-check modified files: `node --check apps/extension/<file>.js`
-- Run Next.js lint if relevant: `cd apps/web-next && npm run lint`
+- Build documentation if relevant: `uv run mkdocs build --strict`
 - Add temporary focused tests only if they directly confirm a suspected bug.
 - **Do not fix bugs unless explicitly asked.**
 - **Do not silently modify production code.**

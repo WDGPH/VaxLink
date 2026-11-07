@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - dev
+      - alpha
   workflow_dispatch:
     inputs:
       release_lane:
@@ -16,7 +16,7 @@ on:
           - alpha
         default: stable
       existing_tag:
-        description: 'Existing stable tag to package/upload (optional repair path)'
+        description: 'Existing stable tag for exceptional asset replacement (prefer a new version)'
         required: false
         type: string
 
@@ -41,6 +41,26 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+  notify-documentation-release:
+    needs: stable-release
+    if: github.repository == 'WDGPH/VaxLink' && needs.stable-release.outputs.release_created == 'true' && vars.DOCS_HUB_NOTIFY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Request documentation release reconciliation
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_HUB_TRIGGER_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo '::error::DOCS_HUB_NOTIFY_ENABLED requires DOCS_HUB_TRIGGER_TOKEN with Actions: write on WDGPH/docs.'
+            exit 1
+          fi
+          gh api --method POST repos/WDGPH/docs/actions/workflows/refresh-releases.yml/dispatches \
+            -f ref=main -f 'inputs[source_repo]=WDGPH/VaxLink'
+
   publish-stable-assets:
     needs: stable-release
     if: needs.stable-release.outputs.release_created == 'true'
@@ -58,8 +78,10 @@ jobs:
           fetch-depth: 0
       - name: Build stable extension package
         run: ./scripts/package-extension.sh prod
+      - name: Checksum exact release ZIP
+        run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach stable package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS
 
   repair-stable-assets:
     if: github.event_name == 'workflow_dispatch' && inputs.release_lane == 'stable' && inputs.existing_tag != ''
@@ -76,11 +98,14 @@ jobs:
           fetch-depth: 0
       - name: Build stable extension package
         run: ./scripts/package-extension.sh prod
+      - name: Checksum exact repaired ZIP
+        run: cd dist && sha256sum vaxlink-prod-*.zip > SHA256SUMS
       - name: Attach repaired stable package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip --clobber
+        # Exceptional administrative repair: this can replace previously distributed bytes.
+        run: gh release upload "$TAG" dist/vaxlink-prod-*.zip dist/SHA256SUMS --clobber
 
   alpha-release:
-    if: github.ref == 'refs/heads/dev' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
+    if: github.ref == 'refs/heads/alpha' && (github.event_name == 'push' || inputs.release_lane == 'alpha')
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -90,8 +115,8 @@ jobs:
         id: release
         uses: googleapis/release-please-action@v4
         with:
-          target-branch: dev
-          config-file: release-please-dev-config.json
+          target-branch: alpha
+          config-file: release-please-alpha-config.json
           manifest-file: .release-please-manifest.json
 
   publish-alpha-assets:
@@ -111,5 +136,7 @@ jobs:
           fetch-depth: 0
       - name: Build alpha extension package
         run: ./scripts/package-extension.sh alpha
+      - name: Checksum exact release ZIP
+        run: cd dist && sha256sum vaxlink-alpha-*.zip > SHA256SUMS
       - name: Attach alpha package to the GitHub Release
-        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip --clobber
+        run: gh release upload "$TAG" dist/vaxlink-alpha-*.zip dist/SHA256SUMS

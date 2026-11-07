@@ -1,24 +1,23 @@
 # VaxLink
 
 [![CI](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml/badge.svg)](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml)
-[![Docs](https://img.shields.io/badge/docs-wdgph.github.io%2FVaxLink-blue)](https://wdgph.github.io/VaxLink/)
+[![Docs](https://img.shields.io/badge/docs-PHIZ-blue)](https://docs.phiz.ca/vaxlink/)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/WDGPH/VaxLink)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
 them into Ontario immunization EMRs (Panorama, InputHealth), with an
-inventory management workflow for lot/expiry tracking. The repo also has a
-small Next.js marketing site and a MkDocs documentation site, but the
-extension (`apps/extension`) is the main deliverable.
+inventory management workflow for lot/expiry tracking. The extension
+(`apps/extension`) is the main deliverable, supported by a MkDocs
+documentation site.
 
-- 📚 **Documentation:** <https://wdgph.github.io/VaxLink/>
+- 📚 **Documentation:** <https://docs.phiz.ca/vaxlink/>
 - 🧩 **Extension:** `apps/extension`
 
 ## Repository Layout
 
 - `apps/extension` - Chrome extension (Manifest V3) — the main project
 - `apps/extension-tests` - extension test suite (kept out of the Web Store zip)
-- `apps/web-next` - Next.js marketing site (Pages deploy currently superseded by the docs site, see below)
 - `scripts` - shell utilities (e.g. `fetch-nvc.sh`, `package-extension.sh`)
 - `skills` - Claude Code skill definitions for common extension workflows
 - `docs` - source for the MkDocs documentation site
@@ -34,19 +33,37 @@ extension (`apps/extension`) is the main deliverable.
 - Detects hardware barcode scanners (keystroke-timing heuristics), plus a dedicated Web Serial scanner channel for capture while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
 
-### Install (Developer Mode)
+### Installation
+
+Use the approved Chrome Web Store listing for production installation. Chrome
+manages updates for this path.
+
+Manual GitHub deployment is an IT-managed fallback, subject to organizational
+Chrome policies. Partner IT downloads an approved production ZIP from its GitHub
+Release, verifies it, extracts it, and loads the folder through Chrome's **Load
+unpacked** option. Manual deployments do not receive Chrome Web Store updates;
+partner IT must deliberately install subsequent approved versions. See the
+[release instructions](docs/RELEASING.md) for verification and historical
+checksum availability.
+
+For local development, load the unpacked extension:
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked**
 4. Select `apps/extension`
 
+First test VaxLink in the Panorama training environment with synthetic training
+records. Reload supported Panorama tabs after installing or updating the extension.
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+before moving to production.
+
 ### Data update model
 
 - Default source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
 - Auto-check every 24h (alarms)
 - Manual refresh from popup
-- Keeps last-known-good bundle if refresh fails
+- Keeps the last-known-good catalogue if refresh fails
 
 ### Inventory
 
@@ -65,24 +82,11 @@ This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-i
 
 ### Release channels
 
-`./scripts/package-extension.sh alpha|prod` packages the extension for the
-Chrome Web Store, stamping the channel name at build time (`dev` → VaxLink
-Alpha, `main` → VaxLink). See `CLAUDE.md` for the full build/release
-reference.
-
-## Marketing site (`apps/web-next`)
-
-A small Next.js landing page for VaxLink. `.github/workflows/deploy-web-next-pages.yml`
-builds and deploys it to GitHub Pages on every push to `main`, but see the
-[Documentation site](#documentation-site) section below — it currently loses
-the shared Pages slot to the docs site. See `content/site.ts` for the site
-copy.
-
-```bash
-cd apps/web-next
-npm ci
-npm run dev
-```
+`./scripts/package-extension.sh alpha|prod` builds the same channel ZIPs used
+for Web Store upload and GitHub Releases, stamping the channel name at build
+time. Production releases run from `main`; prereleases run from `alpha` for the
+separate VaxLink Alpha listing. Store uploads remain manual. See the
+[release process](docs/RELEASING.md).
 
 ## Notes
 
@@ -96,29 +100,50 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECUR
 ## Documentation site
 
 Architecture, the EMR adapter contract, release process, and engineering
-notes are published as a [MkDocs](https://www.mkdocs.org/) site
-([Material theme](https://squidfunk.github.io/mkdocs-material/)) at
-**<https://wdgph.github.io/VaxLink/>**.
+notes are published in the [PHIZ documentation hub](https://docs.phiz.ca/vaxlink/).
+This repository owns the Markdown, navigation, Markdown extensions, and locked
+build dependencies. `WDGPH/docs` owns the shared presentation and publication.
 
-To build it locally:
+To check the documentation locally:
 
 ```bash
-uv sync --group docs
-uv run mkdocs serve
+uv sync --locked --group docs
+uv run --locked --group docs python -m mkdocs build --strict
+uv run --locked --group docs python -m mkdocs serve
 ```
 
-Open <http://127.0.0.1:8000>.
+Open <http://127.0.0.1:8000/docs/vaxlink/latest/>. The local Material theme is
+for source checks; the hub applies its shared theme when publishing.
+The `docs.yml` workflow runs the strict check on pushes to `main` and `alpha`,
+and on pull requests. It does not publish a separate site or write to `gh-pages`.
 
-The `docs` workflow (`.github/workflows/docs.yml`) builds the site on every
-push to `main` and publishes it to the `gh-pages` branch. **This is
-currently the live Pages source for the repo** (confirmed via
-`gh api repos/WDGPH/VaxLink/pages`: `build_type: legacy`, `source.branch:
-gh-pages`) — a GitHub repo can only serve one Pages source at a time, and a
-`docs.yml` run after a `deploy-web-next-pages.yml` run flips it back to the
-branch-based docs deployment. In practice this means `apps/web-next`'s own
-Pages workflow succeeds as an Actions run but its output isn't what's
-actually served at the Pages URL; the docs site "wins."
+### Hub notifications and versions
+
+The dedicated `docs-hub-notify.yml` workflow has no checkout or package build.
+When `DOCS_HUB_NOTIFY_ENABLED` is true, it uses `DOCS_HUB_TRIGGER_TOKEN` only in
+its notification step. Packaging jobs never receive the hub credential. Stable
+releases created by release-please request reconciliation in a separate job.
+
+Main pushes request `publish.yml` on hub `main` with
+`source_repo=WDGPH/VaxLink` and `deploy=true`; the hub's deployment gate still
+controls publication. Stable `vX.Y.Z` tag pushes and deletions request
+`refresh-releases.yml` with the same source repository. Manual notification
+requests both. There is no polling schedule. Tags created by a workflow using
+`GITHUB_TOKEN` may not trigger another workflow: after such a release, run
+**Notify documentation hub** manually on `main`.
+
+The hub's `latest` manual follows `main`. Current and historical manuals use
+release commits approved in the hub's `versions.lock.json`; a tag notification
+proposes a reviewable update rather than publishing a new release immediately.
+Documentation is available from `v1.1.2`; earlier tags have no MkDocs manual.
+If an older tag is corrected or deleted, run **Notify documentation hub** on
+`main`, review the resulting hub release-lock PR and its complete build, then
+merge it. Do not replace historical Markdown with current pages.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE). The licence permits use, copying, modification and
+redistribution when the copyright and licence notice is retained. It provides
+the software "as is," without warranty, and limits the liability of its authors
+and copyright holders. Separate pilot, MOU and support obligations are distinct
+from the open-source licence.

@@ -1,21 +1,95 @@
 # VaxLink Release Process
 
+## Current release process
+
+Production releases run from `main`. v1.1.5 was released directly from `main`
+using release-please. Prerelease development now uses `alpha`, created from the
+same v1.1.5 commit; the former `dev` branch is not used.
+
+1. Merge changes with conventional commit subjects into `main`.
+2. Release-please creates or updates a release PR containing the version changes
+   and generated changelog.
+3. Merge the release PR. Release-please creates the version tag and GitHub Release.
+4. GitHub Actions packages the production extension and uploads
+   `vaxlink-prod-<v>.zip` and, for releases produced after this improvement,
+   `SHA256SUMS` calculated from that final ZIP.
+5. An authorized publisher verifies the ZIP, uploads it to the existing VaxLink
+   Chrome Web Store listing, and submits it for review. GitHub release creation
+   does not publish to the store automatically.
+
+The workflow is `.github/workflows/release-please.yml`, with stable configuration
+in `release-please-config.json`. Do not create release tags or increment versions
+manually: the release PR updates root `package.json`, the extension manifest's
+`version` and `version_name`, and `CHANGELOG.md`. Each store upload needs a version
+higher than the one already uploaded to that listing.
+
 ## Channels
 
-| Channel | Branch | Web Store listing | Manifest name (stamped) | Badge in popup |
+| Channel | Status | Web Store listing | Packaged manifest name | Popup badge |
 |---|---|---|---|---|
-| Alpha | `dev` | VaxLink Alpha | `VaxLink Alpha`, `version_name` `X.Y.Z-alpha` | shown |
-| Prod | `main` | VaxLink | `VaxLink`, `version_name` `X.Y.Z` | hidden |
+| Production | Active, releases from `main` | VaxLink | `VaxLink` | hidden |
+| Alpha | Prereleases from `alpha` | VaxLink Alpha | `VaxLink Alpha` | shown |
 
-Two independent store listings with independent version counters. Prod may jump versions (1.0.2 → 1.0.6) — gaps mean those versions were alpha-only. Same version number = same code on both channels.
+`scripts/package-extension.sh prod` and `alpha` stamp the channel name and
+`version_name` into the packaged manifest. Keep channel identity out of source
+branch differences; runtime channel behaviour derives from the manifest name.
 
-Channel identity is **never** edited in `manifest.json` (it stays "VaxLink Alpha" in git on both branches — that's what unpacked development shows). `scripts/package-extension.sh` stamps the name and `version_name` at package time. Anything else channel-specific must derive from `chrome.runtime.getManifest().name` at runtime, like the popup badge does.
+### Alpha releases
 
-## Versioning
+1. Merge conventional commits into `alpha`. Release-please uses
+   `release-please-alpha-config.json` to open or update its Alpha release PR.
+2. Review and merge that release PR into `alpha`. The workflow creates an Alpha
+   tag and GitHub prerelease, then uploads the Alpha ZIP and `SHA256SUMS`.
+3. An authorized publisher verifies the ZIP and uploads it to the separate
+   VaxLink Alpha listing for review. Store publication remains manual.
 
-- Bump `version` (and `version_name`) in `manifest.json` on `dev` only, in a dedicated `update version to X.Y.Z` commit.
-- Bump whenever a build will be uploaded to a store listing — the store requires strictly increasing versions per listing, including re-uploads after a botched build.
-- Three-part versions (`1.0.7`). If alpha ever needs multiple uploads per version, use a fourth part (`1.0.8.1`, `1.0.8.2`) and ship `1.0.8.x`'s final state to prod as `1.0.8`.
+Alpha versioning starts after v1.1.5, without the old 1.1.3 override. For patch
+changes the sequence is `1.1.6-alpha`, `1.1.6-alpha.1`, and so on; features or
+breaking changes can advance the minor or major version instead. Release-please
+owns these version changes; do not edit the version files or tag releases by hand.
+
+Chrome requires numeric versions. Packaging maps `1.1.6-alpha` to `1.1.6.0`,
+`1.1.6-alpha.1` to `1.1.6.1`, and so on, while `version_name` and the ZIP filename
+retain the full prerelease version. This lets successive Alpha uploads update
+the same listing. Production packaging requires a stable package version and
+keeps its three-part numeric version. Check the version against the target store
+listing before every upload.
+
+Promote reviewed changes to `main` when ready for production; its separate stable
+release PR and store submission still apply. Direct production fixes on `main`
+remain supported. Keep `alpha` current with those fixes. Alpha prereleases do
+not publish the stable documentation manual or notify its release reconciliation;
+the existing stable documentation-hub integration is unchanged.
+
+## Installation and updates
+
+- **Chrome Web Store:** Chrome validates the extension package through its normal distribution process and updates the installed listing automatically. Use the approved VaxLink listing for production.
+- **Manual GitHub deployment:** Partner IT downloads an approved `vaxlink-prod-<v>.zip` from the GitHub Release, verifies it, extracts it, and uses Chrome's **Load unpacked** option to deploy the folder. This is an IT-managed fallback, subject to organizational Chrome policies. It does not automatically receive Chrome Web Store updates. Partner IT must deliberately install each subsequent approved version. Reload supported Panorama tabs after an extension update.
+
+Releases produced after this improvement attach `SHA256SUMS` for their final
+ZIP assets. Historical releases, including v1.1.5, may not have a separate checksum
+file. Do not assume it is available or replace historical assets to add one.
+GitHub also provides native SHA-256 release-asset digests, which partner IT can
+use to verify older downloads when available.
+
+Download the ZIP and `SHA256SUMS` from the same release. In their directory, run
+`sha256sum -c SHA256SUMS`. On Windows, compare
+`Get-FileHash .\vaxlink-prod-<v>.zip -Algorithm SHA256` with the matching line in
+`SHA256SUMS`. A matching checksum confirms agreement with the GitHub release
+record and detects corruption or substitution relative to that record. It is
+not an independent publisher signature.
+
+### Exceptional release-asset repair
+
+Prefer a new version for changed release content. Normal release uploads do not
+replace existing assets. The workflow's manual `existing_tag` repair path is an
+exceptional administrative operation: it uses `--clobber` to replace assets and
+regenerates `SHA256SUMS` from the newly packaged ZIP. Replaced bytes may differ
+from the ZIP previously submitted to the Chrome Web Store or downloaded by
+partners. Confirm the need and coordinate with affected partners before using
+this path. Do not use it to retrofit checksums onto v1.1.5.
+
+The external pilot FAQ should distinguish these paths: automatic updates apply to Web Store installs; partner IT deploys updates for manual GitHub installs. Keep supplied partner PDFs in their established source-document process rather than copying them into this repository.
 
 ## Changelog workflow
 
@@ -28,7 +102,7 @@ Channel identity is **never** edited in `manifest.json` (it stays "VaxLink Alpha
    ```
    Credit non-code contributions explicitly (e.g. `clinic feedback: WDGPH immunization nursing team`).
 
-Maintain an `## [Unreleased]` section at the top of the changelog on `dev`; when bumping the version, rename it to `## [X.Y.Z] – YYYY-MM-DD` in the same commit. Keep a `### Known issues (tracked)` subsection so testers know what NOT to re-report, with issue numbers.
+Review the generated changelog in the release PR on its target branch (`main` or `alpha`). Keep useful hand-curated feedback tables and a `### Known issues (tracked)` subsection with issue numbers so testers know what not to re-report. Do not manually rename sections or bump versions as a separate release step.
 
 ## Feedback traceability (feedback → issue → fix → changelog)
 
@@ -39,35 +113,31 @@ Maintain an `## [Unreleased]` section at the top of the changelog on `dev`; when
 
 This gives both directions: from a nurse's complaint to the exact commit, and from any commit back to why it exists.
 
-## Release steps (automated via release-please)
+## Commit conventions
 
-Releases are driven by [release-please](https://github.com/googleapis/release-please) (`.github/workflows/release-please.yml`, config in `release-please-config.json`).
+Use conventional commit subjects on `main` and `alpha`. For squash merges,
+the PR title must follow the same convention. Enable the local `commit-msg`
+hook with `npm run setup:hooks`; PR title CI also checks GitHub changes.
+See [contributor setup](contributing.md#commit-and-pull-request-titles).
 
-**The one habit it requires: [Conventional Commit](https://www.conventionalcommits.org/) subjects** on `dev` going forward:
+Examples:
 
 - `fix: stop eating Tab keystrokes (#30)` → patch bump, "Fixed" section
 - `feat: preset dose for prefilled syringes (#24)` → minor bump, "Added" section
 - `feat!:` or a `BREAKING CHANGE:` footer → major bump
-- `chore:`/`docs:`/`test:`/`refactor:` → recorded but hidden from the changelog
-
-### Alpha (automated)
-1. Push conventional commits to `dev`. The bot opens/updates a single **Release PR** ("chore: release VaxLink X.Y.Z") that contains the version bump (root `package.json` + `manifest.json` version and version_name via jsonpath) and the generated `CHANGELOG.md` section. It accumulates until you're ready.
-2. **Merging the Release PR is the release.** The bot tags `vX.Y.Z` and creates a GitHub Release (marked prerelease). A follow-up job builds both channel zips, attaches them as release assets, and appends a **"Clinic feedback addressed"** section listing issues labeled `clinic-feedback` closed since the previous release.
-3. Upload the attached `vaxlink-alpha-<v>.zip` to the VaxLink Alpha listing. Send the release link to the pilot team.
-
-### Prod (when an alpha is confirmed good)
-1. Merge `dev → main` (manifest no longer conflicts).
-2. Download `vaxlink-prod-<v>.zip` from the same GitHub Release and upload it to the VaxLink listing.
-3. Edit the GitHub Release: untick "prerelease" to mark it as the latest full release.
-4. Comment the shipped version on each addressed issue; close after clinic confirmation.
+- `chore:`/`docs:`/`test:`/`refactor:` → hidden from the generated changelog
 
 ### Conventions the automation relies on
-- Label feedback-driven issues **`clinic-feedback`** — that's how the release notes table is generated.
+- Label feedback-driven issues **`clinic-feedback`** so they can be found when preparing release notes.
 - Reference issues in commit subjects (`(#25)`) so changelog entries link back.
 - Don't hand-edit `version` anywhere; the Release PR owns version bumps. (Hand-written changelog content *above* the generated sections is preserved — the historical 1.0.0–1.0.7 entries stay.)
-- Hand-curated "Clinic feedback addressed" tables in CHANGELOG.md remain worth writing for big pilot rounds: the automation lists the issues; the table tells the story with the nurses' words.
+- Write "Clinic feedback addressed" tables by hand for major pilot rounds; release-please generates commit-based changelog entries, not these feedback tables.
 
 ### Sanity checks before any store upload
 - Open the zip and confirm `manifest.json` has the right `name`/`version_name` for the listing.
 - Load the extracted zip unpacked and open the popup: badge present on alpha, absent on prod.
-- No `.claude/`, `README.md`, `.gitignore`, or test files inside the zip (the package script excludes them).
+- No downloaded `nvc_bundle.json`, tests, fixtures, `node_modules`, or development-only files inside the ZIP (the package script excludes them). Verify the checksum against the final ZIP before uploading.
+
+## Repository security settings
+
+Repository administrators should verify Dependabot vulnerability alerts and security updates, CodeQL default setup, and secret scanning with push protection where available. Their enabled status has not been verified as part of this PR. `.github/dependabot.yml` groups weekly GitHub Actions and documentation tooling version updates. This configuration does not enable repository security controls. These GitHub settings are separate from this repository's files and must be checked in the repository settings page.
