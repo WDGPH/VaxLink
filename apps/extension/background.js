@@ -2012,12 +2012,6 @@ function getLotTradenameReferences(concept) {
   });
 }
 
-function extractLotTradenameCode(concept) {
-  const refs = getLotTradenameReferences(concept);
-  const first = refs[0];
-  return first ? (first.code || first.display || first.raw || null) : null;
-}
-
 function extractTradenameDIN(concept) {
   for (const ext of concept.extension || []) {
     if (ext.url === 'https://nvc-cnv.canada.ca/fhir/v2/StructureDefinition/nvc-din') {
