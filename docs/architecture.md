@@ -94,7 +94,7 @@ handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 ## CI
 
 - `.github/workflows/extension-ci.yml` — on extension-related pushes to
-  `alpha`/`main` and pull requests: syntax checks, full test suite (NVC suites
+  `alpha`/`main` and pull requests: syntax checks, full test suite (live-catalogue suites
   skip if the best-effort bundle fetch fails), and channel ZIPs uploaded as
   workflow artifacts (Alpha only for prereleases; both channels for stable
   versions). Web Store uploads are manual: download the tested zip from the run.
