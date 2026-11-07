@@ -41,7 +41,7 @@ function buildPackage(root, channel, version) {
         '-c',
         `import json,sys,zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
-    print(json.dumps({'names': z.namelist(), 'manifest': json.loads(z.read('manifest.json'))}))`,
+    print(json.dumps({'names': z.namelist(), 'manifest': json.loads(z.read('manifest.json')), 'identity': z.read('build-identity.js').decode('utf-8')}))`,
         `dist/vaxlink-${channel}-${version}.zip`
       ],
       { cwd: root, encoding: 'utf8' }
@@ -208,4 +208,35 @@ test('Alpha automation targets alpha with advancing prerelease versions', () => 
     read('.github/workflows/extension-ci.yml'),
     /branches: \[alpha, main\]/
   );
+});
+
+test('package identity reflects the staged runtime files and cannot change after load', (t) => {
+  const root = packageProject(t);
+  const version = '1.1.6';
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
+  const load = (source) => {
+    const context = {};
+    runInNewContext(source, context);
+    assert.equal(Object.isFrozen(context.VaxLinkBuildIdentity), true);
+    return context.VaxLinkBuildIdentity;
+  };
+  const first = load(buildPackage(root, 'alpha', version).identity);
+  assert.match(first.id, /^[a-f0-9]{64}$/);
+  assert.equal(first.channel, 'alpha');
+  assert.equal(
+    load(buildPackage(root, 'alpha', version).identity).id,
+    first.id
+  );
+  const content = join(root, 'apps/extension/content.js');
+  writeFileSync(
+    content,
+    readFileSync(content, 'utf8') + '\n// changed runtime source\n'
+  );
+  assert.notEqual(
+    load(buildPackage(root, 'alpha', version).identity).id,
+    first.id
+  );
+  const production = load(buildPackage(root, 'prod', version).identity);
+  assert.equal(production.channel, 'prod');
+  assert.notEqual(production.id, first.id);
 });

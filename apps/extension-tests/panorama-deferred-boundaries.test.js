@@ -8,7 +8,7 @@ const source = readFileSync(
   'utf8'
 );
 
-function setup() {
+function setup(options = {}) {
   let now = 100000;
   let nextId = 1;
   const timers = new Map();
@@ -142,11 +142,17 @@ function setup() {
   };
   const window = { location, __vaxlinkHandsFreeInitialized: true };
   window.top = window.self = window;
+  const messageListeners = [];
   const chrome = {
-    runtime: { onMessage: { addListener() {} } },
+    runtime: {
+      id: 'vaxlink-test',
+      getManifest: () => options.manifest || { version_name: '1.2.0-alpha' },
+      onMessage: { addListener: (listener) => messageListeners.push(listener) }
+    },
     storage: { onChanged: { addListener() {} } }
   };
   const context = vm.createContext({
+    VaxLinkBuildIdentity: options.identity || { id: 'unpacked-source' },
     window,
     document,
     location,
@@ -169,6 +175,17 @@ function setup() {
     context.schedulePanoramaLotOrTradeSelection({ administered_at });
   return {
     context,
+    health() {
+      let response;
+      messageListeners[0](
+        { action: 'getIntegrationHealth' },
+        { id: 'vaxlink-test' },
+        (value) => {
+          response = value;
+        }
+      );
+      return response;
+    },
     clock,
     schedule,
     get fields() {
@@ -275,4 +292,21 @@ test('trusted funding-radio takeover also cancels the operation', () => {
   run.fields.date.value = 'manual';
   run.clock.advance(4000);
   assert.equal(run.fields.date.value, 'manual');
+});
+
+test('content health identifies the script at load without repairing or mutating the page', () => {
+  const manifest = { version_name: '1.2.0-alpha' };
+  const identity = { id: 'a'.repeat(64) };
+  const run = setup({ manifest, identity });
+  manifest.version_name = '2.0.0';
+  identity.id = 'b'.repeat(64);
+  const health = run.health();
+  assert.equal(health.buildAtLoad.version, '1.2.0-alpha');
+  assert.equal(health.buildAtLoad.id, 'a'.repeat(64));
+  assert.equal(health.category, 'panorama-immunization');
+  assert.equal(health.workflow, 'single');
+  assert.equal(health.initialized.listener, true);
+  assert.equal(health.initialized.settings, false);
+  assert.equal(run.fields.date.value, '');
+  assert.equal(JSON.stringify(health).includes('ehealthontario'), false);
 });

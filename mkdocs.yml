@@ -36,6 +36,7 @@ plugins:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Diagnostics: diagnostics.md
   - Adding a New EMR: adding-an-emr.md
   - Release Process: RELEASING.md
   - Roadmap: roadmap.md

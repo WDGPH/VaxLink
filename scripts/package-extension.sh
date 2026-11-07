@@ -17,7 +17,7 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHANNEL="$CHANNEL" ROOT="$ROOT" python3 - <<'PY'
-import json, os, re, shutil, tempfile, zipfile
+import hashlib, json, os, re, shutil, tempfile, zipfile
 
 channel = os.environ["CHANNEL"]
 root = os.environ["ROOT"]
@@ -69,6 +69,22 @@ try:
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
+
+    # Identify the files actually loaded by this package, independently of version reuse.
+    digest = hashlib.sha256()
+    for directory, directories, filenames in os.walk(ext):
+        directories.sort()
+        for name in sorted(filenames):
+            path = os.path.join(directory, name)
+            relative = os.path.relpath(path, ext)
+            if relative == "build-identity.js" or not name.endswith((".js", ".html", ".json")):
+                continue
+            digest.update(relative.encode("utf-8") + b"\0")
+            with open(path, "rb") as source:
+                digest.update(source.read())
+    identity = {"id": digest.hexdigest(), "channel": channel}
+    with open(os.path.join(ext, "build-identity.js"), "w") as target:
+        target.write("globalThis.VaxLinkBuildIdentity = Object.freeze(" + json.dumps(identity) + ");\n")
 
     os.makedirs(dist, exist_ok=True)
     out = os.path.join(dist, f"vaxlink-{channel}-{package_version}.zip")

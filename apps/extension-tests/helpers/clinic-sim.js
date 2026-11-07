@@ -205,6 +205,9 @@ export function createBackgroundHarness(bundle, options = {}) {
   const chrome = {
     runtime: {
       lastError: null,
+      id: 'vaxlink-test',
+      getManifest: () =>
+        options.manifest || { version: '1.1.5', version_name: '1.2.0-alpha' },
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },

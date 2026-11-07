@@ -263,6 +263,34 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     });
   }
+  document
+    .getElementById('workstationHealthBtn')
+    ?.addEventListener('click', async () => {
+      const output = document.getElementById('workstationHealth');
+      output.textContent = 'Checking workstation health…';
+      try {
+        const reply = await sendRuntimeMessage({
+          action: 'getWorkstationHealth'
+        });
+        if (!reply?.success) throw new Error();
+        const { scanner, catalogue, integration } = reply.health;
+        const labels = {
+          current: 'current page integration',
+          not_ready: 'page integration has not loaded its settings',
+          stale: 'page integration is stale; reload the chart when safe',
+          missing: 'page integration did not reply',
+          unsupported: 'no supported chart selected',
+          development:
+            'unpacked page integration; build changes cannot be compared',
+          unknown: 'page integration could not be verified'
+        };
+        output.textContent = `Scanner: ${scanner.state.replaceAll('_', ' ')} (${scanner.source}). Catalogue: ${catalogue.state}${catalogue.freshnessDegraded ? ', freshness degraded' : ''}. ${labels[integration.state] || labels.unknown}.`;
+      } catch (_) {
+        output.textContent =
+          'Workstation health could not be read. No repair was requested.';
+      }
+    });
+
   if (scannerSetupBtn) {
     scannerSetupBtn.addEventListener('click', openScannerSetupPage);
   }

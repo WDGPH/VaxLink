@@ -4,15 +4,12 @@ function vlog(...args) {
   if (VAXLINK_CONTENT_DEBUG) console.log('[VaxLink]', ...args);
 }
 
-const HANDS_FREE_BUILD = '2026-03-11-hf-recovery-1';
-vlog(
-  'content script',
-  location.href,
-  'readyState=',
-  document.readyState,
-  'build=',
-  HANDS_FREE_BUILD
-);
+const manifestAtLoad = chrome.runtime.getManifest?.() || {};
+const CONTENT_BUILD_AT_LOAD = Object.freeze({
+  id: globalThis.VaxLinkBuildIdentity?.id || 'unpacked-source',
+  version: manifestAtLoad.version_name || manifestAtLoad.version || 'unknown'
+});
+let contentSettingsReady = false;
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -187,7 +184,22 @@ function setupMessageListener() {
   window.__vaxlinkMessageListenerInitialized = true;
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    vlog('autoFill message', request?.action, request?.data);
+    if (request?.action === 'getIntegrationHealth') {
+      if (sender?.id !== chrome.runtime.id || window.top !== window.self)
+        return false;
+      sendResponse({
+        schemaVersion: 1,
+        buildAtLoad: CONTENT_BUILD_AT_LOAD,
+        initialized: { listener: true, settings: contentSettingsReady },
+        workflow: activeWorkflowMode,
+        category: isPanoramaRecordImmsPage()
+          ? 'panorama-immunization'
+          : isHandsFreeSupportedPage()
+            ? 'inputhealth'
+            : 'unsupported'
+      });
+      return false;
+    }
     if (request.action === 'vaxlinkScanCaptured') {
       if (window.top !== window.self) {
         return false;
@@ -846,6 +858,7 @@ function initHandsFreeScanner() {
     ],
     (stored) => {
       activeWorkflowMode = normalizeWorkflowMode(stored);
+      contentSettingsReady = !chrome.runtime.lastError;
       adminDateTimeAutofillEnabled =
         normalizeAdminDateTimeAutofillSetting(stored);
       reasonConsentAutofillEnabled =

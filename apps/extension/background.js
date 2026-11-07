@@ -1,5 +1,6 @@
 const VAXLINK_BG_DEBUG = false;
 importScripts('shared/gs1-parser.js');
+importScripts('build-identity.js');
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-status.js');
 
@@ -336,6 +337,35 @@ function sendRuntimeMessage(message) {
 async function sendScannerDaemonMessage(message) {
   await ensureScannerDaemon();
   return sendRuntimeMessage({ ...message, target: SCANNER_DAEMON_TARGET });
+}
+
+async function observeScannerStatus() {
+  const bootstrap = await getScannerBootstrapState();
+  let status = bootstrap.status;
+  let source = 'cached';
+  // Inspect only an existing daemon. Setup and reconnect remain explicit.
+  if (await hasScannerDaemonDocument()) {
+    const reply = await sendRuntimeMessage({
+      target: SCANNER_DAEMON_TARGET,
+      action: SCANNER_DAEMON_ACTIONS.GET_STATUS
+    }).catch(() => null);
+    if (reply?.success && reply.status) {
+      status = normalizeScannerStatusSnapshot(reply.status);
+      source = reply.observation?.source === 'fresh' ? 'fresh' : 'cached';
+    }
+  }
+  const observedAt = status.observedAt || '';
+  return {
+    success: true,
+    status,
+    observation: {
+      source,
+      observedAt,
+      ageMs: observedAt
+        ? Math.max(0, Date.now() - Date.parse(observedAt))
+        : null
+    }
+  };
 }
 
 async function maybeStartScannerDaemon(trigger = 'startup') {
@@ -2789,9 +2819,141 @@ function lookupTradenameByDIN(din, indexes = nvcIndexes) {
   };
 }
 
+function isWorkstationHealthControl(sender) {
+  if (sender?.id !== chrome.runtime.id || !sender.url) return false;
+  try {
+    const url = new URL(sender.url);
+    const root = new URL(chrome.runtime.getURL('/'));
+    return (
+      url.protocol === root.protocol &&
+      url.origin === root.origin &&
+      url.host === root.host &&
+      ['/popup.html', '/diagnostics.html'].includes(url.pathname) &&
+      (!sender.tab?.url || sender.tab.url === sender.url)
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+async function inspectPageIntegration(originTabId) {
+  const tabs = await queryTabs(
+    Number.isInteger(originTabId) ? {} : { active: true, currentWindow: true }
+  );
+  const tab = Number.isInteger(originTabId)
+    ? tabs.find((item) => item.id === originTabId)
+    : tabs[0];
+  if (!tab || !isSupportedChartUrl(tab.url)) return { state: 'unsupported' };
+  const reply = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 1000);
+    chrome.tabs.sendMessage(
+      tab.id,
+      { action: 'getIntegrationHealth' },
+      { frameId: 0 },
+      (response) => {
+        clearTimeout(timer);
+        resolve(chrome.runtime.lastError ? null : response);
+      }
+    );
+  });
+  if (!reply || reply.schemaVersion !== 1) return { state: 'missing' };
+  const id = reply.buildAtLoad?.id;
+  const version = reply.buildAtLoad?.version;
+  const categories = ['panorama-immunization', 'inputhealth', 'unsupported'];
+  if (
+    !(id === 'unpacked-source' || /^[a-f0-9]{64}$/.test(id || '')) ||
+    !/^\d+\.\d+\.\d+(?:-alpha(?:\.\d+)?)?$/.test(version || '') ||
+    !categories.includes(reply.category) ||
+    !['single', 'multiple', 'inventory'].includes(reply.workflow)
+  )
+    return { state: 'unknown' };
+  const installed = chrome.runtime.getManifest?.() || {};
+  const currentVersion = installed.version_name || installed.version;
+  const state =
+    version !== currentVersion || id !== globalThis.VaxLinkBuildIdentity.id
+      ? 'stale'
+      : reply.initialized?.listener !== true ||
+          reply.initialized?.settings !== true
+        ? 'not_ready'
+        : id === 'unpacked-source'
+          ? 'development'
+          : 'current';
+  return {
+    state,
+    buildAtLoad: { id, version },
+    category: reply.category,
+    workflow: reply.workflow,
+    initialized: {
+      listener: reply.initialized?.listener === true,
+      settings: reply.initialized?.settings === true
+    }
+  };
+}
+
+async function getWorkstationHealth(originTabId) {
+  const [scanner, catalogue, integration] = await Promise.all([
+    observeScannerStatus(),
+    getNVCUpdateStatus(),
+    inspectPageIntegration(originTabId)
+  ]);
+  const {
+    state,
+    usable,
+    usingCache,
+    freshnessDegraded,
+    updatedAt,
+    lastCheckAt,
+    lastError,
+    sha256,
+    lotCount,
+    releaseVersion,
+    releaseDate
+  } = catalogue;
+  return {
+    build: globalThis.VaxLinkBuildIdentity,
+    scanner: {
+      state: scanner.status.state,
+      captureCount: scanner.status.captureCount,
+      lastCaptureAt: scanner.status.lastCaptureAt,
+      ...scanner.observation
+    },
+    catalogue: {
+      state,
+      usable,
+      usingCache,
+      freshnessDegraded,
+      updatedAt,
+      lastCheckAt,
+      lastError,
+      sha256,
+      lotCount,
+      releaseVersion,
+      releaseDate
+    },
+    integration
+  };
+}
+
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  bgLog('Background received message:', request);
+  if (request?.action === 'getWorkstationHealth') {
+    if (!isWorkstationHealthControl(sender)) {
+      sendResponse({
+        success: false,
+        error: 'Workstation health requires an extension control.'
+      });
+      return false;
+    }
+    getWorkstationHealth(request.originTabId)
+      .then((health) => sendResponse({ success: true, health }))
+      .catch(() =>
+        sendResponse({
+          success: false,
+          error: 'Workstation health is unavailable.'
+        })
+      );
+    return true;
+  }
   if (request?.target === SCANNER_DAEMON_TARGET) {
     return false;
   }
@@ -2834,39 +2996,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    (async () => {
-      const bootstrap = await getScannerBootstrapState();
-      let status = bootstrap.status;
-      let source = 'cached';
-      // Inspect only an existing daemon. Setup and reconnect remain explicit.
-      if (await hasScannerDaemonDocument()) {
-        const reply = await sendRuntimeMessage({
-          target: SCANNER_DAEMON_TARGET,
-          action: SCANNER_DAEMON_ACTIONS.GET_STATUS
-        }).catch(() => null);
-        if (reply?.success && reply.status) {
-          status = normalizeScannerStatusSnapshot(reply.status);
-          source = reply.observation?.source === 'fresh' ? 'fresh' : 'cached';
-        }
-      }
-      const observedAt = status.observedAt || '';
-      sendResponse({
-        success: true,
-        status,
-        observation: {
-          source,
-          observedAt,
-          ageMs: observedAt
-            ? Math.max(0, Date.now() - Date.parse(observedAt))
-            : null
-        }
+    observeScannerStatus()
+      .then(sendResponse)
+      .catch(() => {
+        sendResponse({
+          success: false,
+          error: 'Could not load scanner status'
+        });
       });
-    })().catch((error) => {
-      sendResponse({
-        success: false,
-        error: error?.message || 'Could not load scanner status'
-      });
-    });
     return true;
   }
 
