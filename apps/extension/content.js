@@ -188,6 +188,10 @@ function setupMessageListener() {
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
+    if (request.action === 'getPanoramaIntegration') {
+      sendResponse({ supported: isHandsFreeSupportedPage() });
+      return true;
+    }
     if (request.action === 'vaxlinkScanCaptured') {
       if (window.top !== window.self) {
         return false;
@@ -235,9 +239,13 @@ function setupMessageListener() {
       if (window.top !== window.self) {
         return false;
       }
+      if (!isHandsFreeSupportedPage()) {
+        sendResponse({ success: false, error: 'Unsupported chart page' });
+        return true;
+      }
       try {
-        const result = autoFillTelus(request.data);
-        vlog('autoFillTelus', result?.status, result);
+        const result = autoFillPanorama(request.data);
+        vlog('autoFillPanorama', result?.status, result);
         sendResponse({
           success: isAutofillSuccess(result),
           pending: isAutofillPending(result),
@@ -245,7 +253,7 @@ function setupMessageListener() {
           error: result?.error || ''
         });
       } catch (e) {
-        console.error('Error in autoFillTelus:', e);
+        console.error('Error in autoFillPanorama:', e);
         sendResponse({ success: false, error: e.message });
       }
       return true;
@@ -760,7 +768,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   } else {
     delete parsed.administered_at;
   }
-  const autofillResult = autoFillTelus(parsed);
+  const autofillResult = autoFillPanorama(parsed);
   const success = isAutofillSuccess(autofillResult);
   const pending = isAutofillPending(autofillResult);
   logAnalyticsEvent('autofill_result', {
@@ -816,10 +824,7 @@ function isHandsFreeSupportedPage() {
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
-    const isInputHealth =
-      host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
-
-    return isPanorama || isInputHealth;
+    return isPanorama;
   } catch (error) {
     return false;
   }
@@ -2901,66 +2906,6 @@ function getPanoramaAgentCandidates(data) {
   return values;
 }
 
-function getDoseUnitFieldByLayout() {
-  const controlSelector = [
-    'select',
-    'input',
-    '[role="combobox"]',
-    '[aria-haspopup="listbox"]',
-    '.ng-select',
-    '.mat-select',
-    '.p-dropdown',
-    '.ui-dropdown'
-  ].join(', ');
-
-  function doseUnitFromCaptionNodes(nodes) {
-    for (const label of nodes) {
-      const text = normalizeForMatch(label.textContent || '');
-      if (!(text === 'dose' || text.startsWith('dose '))) continue;
-
-      const container = label.parentElement;
-      if (!container) continue;
-
-      const controls = Array.from(
-        container.querySelectorAll(controlSelector)
-      ).filter((el) => isVisible(el) && el.type !== 'hidden' && !el.disabled);
-
-      if (controls.length >= 2) {
-        const unitControl =
-          controls.find(
-            (el) =>
-              el.tagName === 'SELECT' ||
-              (el.getAttribute && el.getAttribute('role') === 'combobox')
-          ) || controls[1];
-        if (unitControl) return unitControl;
-      }
-
-      const next = container.nextElementSibling;
-      if (next) {
-        const nextControls = Array.from(
-          next.querySelectorAll(controlSelector)
-        ).filter((el) => isVisible(el) && el.type !== 'hidden' && !el.disabled);
-        if (nextControls.length >= 2) {
-          const unitControl =
-            nextControls.find(
-              (el) =>
-                el.tagName === 'SELECT' ||
-                (el.getAttribute && el.getAttribute('role') === 'combobox')
-            ) || nextControls[1];
-          if (unitControl) return unitControl;
-        }
-      }
-    }
-    return null;
-  }
-
-  // Labels first (cheap). Table layouts second — still tiny vs all span/div on SPAs.
-  return (
-    doseUnitFromCaptionNodes(document.querySelectorAll('label')) ||
-    doseUnitFromCaptionNodes(document.querySelectorAll('th, td'))
-  );
-}
-
 function buildAutofillPayloadFromQueueRecord(record) {
   if (!record) return null;
   const payload = {
@@ -3082,199 +3027,17 @@ async function finalizeDeferredPanoramaAutofill(data) {
   showVaxlinkToast(data);
 }
 
-function autoFillTelus(data) {
+function autoFillPanorama(data) {
   try {
-    if (isPanoramaImmunizationPage()) {
+    if (isHandsFreeSupportedPage() && isPanoramaImmunizationPage()) {
       const panoramaResult = fillPanoramaImmunizationFields(data);
       vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
       lastVaxlinkFillAt = Date.now();
       return panoramaResult;
     }
 
-    const mapping = [
-      {
-        value: data.lot,
-        selectors: [
-          'input[name="lot_number"]',
-          'input[name="parsed_lot"]',
-          'input[id="lot_number"]',
-          'input[id="parsed_lot"]',
-          'input[id*="lot"]',
-          'input[placeholder*="Lot"]'
-        ]
-      },
-      {
-        value: data.expiry,
-        selectors: [
-          'input[name="expiry_date"]',
-          'input[name="parsed_expiry"]',
-          'input[id="expiry_date"]',
-          'input[id="parsed_expiry"]',
-          'input[id*="expiry"]',
-          'input[placeholder*="Expiry"]'
-        ]
-      },
-      {
-        value: data.gtin,
-        selectors: [
-          'input[name="gtin"]',
-          'input[name="parsed_gtin"]',
-          'input[id="gtin"]',
-          'input[id="parsed_gtin"]',
-          'input[id*="gtin"]',
-          'input[placeholder*="GTIN"]'
-        ]
-      },
-      {
-        value: data.serial,
-        selectors: [
-          'input[name="serial"]',
-          'input[name="parsed_serial"]',
-          'input[id="serial"]',
-          'input[id="parsed_serial"]',
-          'input[id*="serial"]',
-          'input[placeholder*="Serial"]'
-        ]
-      },
-      {
-        value: data.tradename,
-        selectors: [
-          'input[name="trade_name"]',
-          'input[id="trade_name"]',
-          'input[name="tradename"]',
-          'input[id="tradename"]'
-        ]
-      },
-      {
-        value: data.generic_name,
-        selectors: ['input[name="generic_name"]', 'input[id="generic_name"]']
-      },
-      {
-        value: data.name || data.generic_name || data.tradename || data.din,
-        selectors: [
-          'input[name="name"]',
-          'input[id="name"]',
-          'input[name*="vaccine_name"]',
-          'input[id*="vaccine_name"]',
-          'input[name*="medication_name"]',
-          'input[id*="medication_name"]',
-          'input[name*="name"]:not([name*="trade"]):not([name*="manufacturer"])',
-          'input[id*="name"]:not([id*="trade"]):not([id*="manufacturer"])'
-        ]
-      },
-      {
-        value: data.disease,
-        selectors: ['input[name="disease"]', 'input[id="disease"]']
-      },
-      {
-        value: data.antigen,
-        selectors: ['input[name="antigen"]', 'input[id="antigen"]']
-      },
-      {
-        value: data.manufacturer,
-        selectors: [
-          'input[name="manufacturer"]',
-          'input[id="manufacturer"]',
-          'input[id*="manufacturer"]',
-          'input[name*="manufacturer"]'
-        ]
-      },
-      {
-        value: data.route,
-        selectors: [
-          'select[name="route"]',
-          'select[id="route"]',
-          'select[name*="route"]',
-          'select[id*="route"]',
-          'input[name="route"]',
-          'input[id="route"]',
-          'input[name*="route"]',
-          'input[id*="route"]'
-        ]
-      },
-      {
-        value: data.strength,
-        selectors: [
-          'input[name="strength"]',
-          'input[id="strength"]',
-          'input[name*="strength"]',
-          'input[id*="strength"]'
-        ]
-      },
-      {
-        value: data.dose_value,
-        selectors: [
-          'input[name="dose"]',
-          'input[id="dose"]',
-          'input[name*="dose"]',
-          'input[id*="dose"]'
-        ]
-      },
-      {
-        value: data.dose_unit,
-        selectors: [
-          '#ih-selectbox-32',
-          '[id^="ih-selectbox-"]',
-          'input[data-testid="doseUnitSelect"]',
-          'select[name="dose_unit"]',
-          'select[id="dose_unit"]',
-          'select[name*="dose"]',
-          'select[id*="dose"]',
-          'select[name*="unit"]',
-          'select[id*="unit"]',
-          'input[name="dose_unit"]',
-          'input[id="dose_unit"]',
-          'input[name*="unit"]',
-          'input[id*="unit"]',
-          'input[role="combobox"]'
-        ]
-      },
-      {
-        value: data.nvc_lot_expiry,
-        selectors: [
-          'input[name="nvc_lot_expiry"]',
-          'input[id="nvc_lot_expiry"]'
-        ]
-      },
-      {
-        value: data.drug_code || data.din,
-        selectors: [
-          'input[name="drug_code"]',
-          'input[id="drug_code"]',
-          'input[name*="drug_code"]',
-          'input[id*="drug_code"]',
-          'input[name*="drugcode"]',
-          'input[id*="drugcode"]',
-          'input[name*="drug"]',
-          'input[id*="drug"]',
-          'input[name="din"]',
-          'input[id="din"]',
-          'input[name*="din"]',
-          'input[id*="din"]'
-        ]
-      }
-    ];
-
-    let fillCount = 0;
-    for (const entry of mapping) {
-      const fields = getFields(entry.selectors);
-      for (const field of fields) {
-        if (fillField(field, entry.value)) {
-          fillCount += 1;
-        }
-      }
-    }
-
-    if (data.dose_unit) {
-      const unitField = getDoseUnitFieldByLayout();
-      if (unitField && fillField(unitField, data.dose_unit)) {
-        fillCount += 1;
-      }
-    }
-
-    vlog('generic auto-fill fields', fillCount);
-    return createAutofillResult(fillCount > 0 ? 'success' : 'failed', {
-      fillCount
+    return createAutofillResult('failed', {
+      error: 'Open a Panorama immunization form'
     });
   } catch (e) {
     console.error('Auto-fill error:', e);
@@ -3550,7 +3313,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           // of re-summoning this persistent chooser (which then only "Not now"
           // could clear).
           const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
-          const autofillResult = autoFillTelus(fillData);
+          const autofillResult = autoFillPanorama(fillData);
           if (isAutofillSuccess(autofillResult)) {
             await finalizeDeferredPanoramaAutofill(fillData);
           }
@@ -4373,7 +4136,7 @@ async function applyNextQueueItem(options = {}) {
       expiryFlag: record.expiry_flag || ''
     });
 
-    const autofillResult = autoFillTelus(data);
+    const autofillResult = autoFillPanorama(data);
     const success = isAutofillSuccess(autofillResult);
     const pending = isAutofillPending(autofillResult);
     if (success) {

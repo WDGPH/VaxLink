@@ -36,8 +36,6 @@ plugins:
 nav:
   - Home: index.md
   - Architecture: architecture.md
-  - Adding a New EMR: adding-an-emr.md
   - Release Process: RELEASING.md
-  - Roadmap: roadmap.md
   - Contributing: contributing.md
   - Security Policy: security.md

@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
-them into Ontario immunization EMRs (Panorama, InputHealth), with an
+them into Panorama immunization records, with an
 inventory management workflow for lot/expiry tracking. The extension
 (`apps/extension`) is the main deliverable, supported by a MkDocs
 documentation site.
@@ -28,7 +28,7 @@ documentation site.
 
 - Parses GS1 AIs from scanned strings (`01`, `10`, `17`, `21`)
 - Looks up vaccine metadata from the NVC bundle
-- Auto-fills CHR fields (trade name, manufacturer, route, dose, strength, DIN/drug code, lot, expiry) into Panorama and InputHealth
+- Selects Panorama agent and lot, lets Panorama derive vaccine details, and fills enabled date/time, reason, and consent fields for staff review
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Captures scans through Web Serial, including while the workstation is locked
 - Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
@@ -78,7 +78,7 @@ cd apps/extension-tests
 npm test
 ```
 
-This covers GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+This covers GS1 barcode parsing, Panorama autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
 
 ### Release channels
 
@@ -99,7 +99,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see [SECURITY.md](SECUR
 
 ## Documentation site
 
-Architecture, the EMR adapter contract, release process, and engineering
+Architecture, the release process, and engineering
 notes are published in the [PHIZ documentation hub](https://docs.phiz.ca/vaxlink/).
 This repository owns the Markdown, navigation, Markdown extensions, and locked
 build dependencies. `WDGPH/docs` owns the shared presentation and publication.

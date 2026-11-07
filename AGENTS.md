@@ -135,11 +135,11 @@ The extension has three execution contexts that communicate via `chrome.runtime.
 - Multiple-inject queue append helpers
 - Action icon and badge management
 
-**`content.js`** — injected into Panorama and InputHealth pages. Owns:
+**`content.js`** — injected into Panorama pages. Owns:
 
-- Receives Web Serial scans on supported pages
+- Receives scans routed from the background scanner channel on supported pages
 - HUD overlay on supported pages
-- EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
+- Panorama autofill on supported immunization pages
 - Workflow mode reading from `chrome.storage.local`
 
 **`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
@@ -165,11 +165,7 @@ The extension has three execution contexts that communicate via `chrome.runtime.
 
 ### Panorama Autofill Sequence
 
-Fill order must be: `agent → lot → (deferred) date/time`. Panorama auto-populates dependent fields (trade name, route, dose, manufacturer) after lot selection. Write the lot and deferred date/time only when `!isPrimeFacesAjaxBusy()`. Lot matching uses `normalizePanoramaLotToken` to handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g. `dateAdministedDate`) — keep those as-is.
-
-### Adding a New EMR
-
-The ROADMAP describes a planned platform registry refactor. Until that lands, new platforms are added to `content.js` by extending `isHandsFreeSupportedPage()` and `autoFillTelus()`. See `skills/vaxlink-emr-adaptation/SKILL.md` for the adapter contract.
+Fill order must be: `agent → lot → (deferred) date/time`. Panorama auto-populates dependent fields (trade name, route, dose, manufacturer) after lot selection. The existing bounded retries guard lot and deferred date/time writes with `!isPrimeFacesAjaxBusy()`. This isolated-world check alone does not prove that page activity has finished. Lot matching uses `normalizePanoramaLotToken` to handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g. `dateAdministedDate`) — keep those as-is.
 
 ## CI
 

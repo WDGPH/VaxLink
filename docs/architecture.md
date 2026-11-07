@@ -15,11 +15,11 @@ via `chrome.runtime.sendMessage` and `chrome.storage.local`.
 - Multiple-inject queue append helpers
 - Action icon and badge management
 
-**`content.js`** — injected into Panorama and InputHealth pages. Owns:
+**`content.js`** — injected into Panorama pages. Owns:
 
-- Receives Web Serial scans on supported pages
+- Receives scans routed from the background scanner channel on supported pages
 - HUD overlay on supported pages
-- EMR-specific autofill dispatch (`autoFillTelus` → Panorama or generic fill)
+- Panorama autofill on supported immunization pages
 - Workflow mode reading from `chrome.storage.local`
 
 **`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
@@ -82,12 +82,24 @@ added lot codes alone does not: existing vaccine information may have changed.
 Popup lookups always use the background indexes so automatic and manual updates
 are reflected in subsequent scans.
 
+## Chart boundary
+
+Chart delivery supports only HTTPS immunization paths containing `/recordImms/`
+on `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca`,
+and `trpanoramadhir.prod.ehealthontario.ca`. Manifest path matches stay broad
+so navigation within Panorama can initialize the integration; runtime checks
+restrict chart writes. Missing tab metadata requires a read-only response from
+an existing supported integration. It does not permit script injection.
+GS1 parsing, NVC lookup, scanner capture, queues, and inventory remain useful
+without an open chart. Staff review vaccine details before saving in Panorama.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama
 auto-populates dependent fields (trade name, route, dose, manufacturer) after
-lot selection. Always gate lot writes and deferred date/time behind
-`!isPrimeFacesAjaxBusy()`. Lot matching uses `normalizePanoramaLotToken` to
+lot selection. Lot writes and deferred date/time use the existing bounded retries and
+`!isPrimeFacesAjaxBusy()` guard. This isolated-world check alone does not prove
+that all page activity has finished. Lot matching uses `normalizePanoramaLotToken` to
 handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
 `dateAdministedDate`) — keep those as-is.
 

@@ -1,7 +1,7 @@
 # Bug: Extension Intercepts Legitimate Copy/Paste in Panorama
 
 **Branch:** `fix/paste-interception`  
-**Affected workflow:** All hands-free modes — any Panorama or InputHealth page where the content script is active
+**Historical affected workflow:** All hands-free modes on the Panorama and InputHealth pages supported at the time. Current chart support is Panorama only.
 
 ---
 

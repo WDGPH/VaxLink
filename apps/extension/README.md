@@ -8,7 +8,7 @@ First test VaxLink in the Panorama training environment using synthetic training
 records.
 
 The training hostname is allowed explicitly, alongside
-the existing production Panorama and InputHealth hosts. No wildcard permission
+the two existing production Panorama hosts. No wildcard permission
 for other eHealth Ontario sites or new extension API permissions is added.
 
 Scanner routing, hands-free workflows, and the Panorama HUD still require an
@@ -89,4 +89,4 @@ cd apps/extension-tests
 npm test
 ```
 
-Current automated coverage checks: GS1 barcode parsing, Panorama/InputHealth autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+Current automated coverage checks: GS1 barcode parsing, Panorama autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.

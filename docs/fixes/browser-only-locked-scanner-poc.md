@@ -12,7 +12,7 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 - Zebra DS8178/cradle configured as USB CDC (virtual COM), with HID keyboard output disabled.
 - Chrome is allowed to keep running in the background.
 - Windows power policy keeps the workstation awake during the test. Sleep and hibernation stop browser execution and serial capture.
-- A non-production test chart is open in Panorama or InputHealth before locking.
+- A non-production test chart is open in Panorama before locking.
 
 ## Test procedure
 

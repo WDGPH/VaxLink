@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WDGPH/VaxLink/blob/main/LICENSE)
 
 A Chrome extension that parses GS1 vaccine barcodes and auto-fills them into
-Ontario immunization EMRs (Panorama, InputHealth). Built by
+Panorama immunization records. Built by
 Wellington-Dufferin-Guelph Public Health.
 
 !!! info "Client-side by design"
@@ -19,8 +19,8 @@ model.
   barcode strings
 - Looks up vaccine metadata from the [NVC](https://nvc-cnv.canada.ca) FHIR
   bundle
-- Auto-fills CHR fields — trade name, manufacturer, route, dose, strength,
-  DIN/drug code, lot, expiry
+- Selects Panorama agent and lot, lets Panorama derive vaccine details, and
+  fills enabled date/time, reason, and consent fields for staff review
 - Flags expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Supports single, multiple, and inventory scan workflows with CSV export
 
@@ -42,15 +42,6 @@ capture/replay before moving to production.
 
   [:octicons-arrow-right-24: Architecture](architecture.md)
 
-- :material-puzzle-plus: **Adding a new EMR**
-
-  ***
-
-  How the platform registry works and what a new adapter profile needs
-  before it can ship.
-
-  [:octicons-arrow-right-24: Adding a New EMR](adding-an-emr.md)
-
 - :material-package-up: **Release process**
 
   ***
@@ -59,14 +50,6 @@ capture/replay before moving to production.
   stamps channel identity at build time.
 
   [:octicons-arrow-right-24: Release Process](RELEASING.md)
-
-- :material-map: **Roadmap**
-
-  ***
-
-  The planned platform-registry refactor and the backlog beyond it.
-
-  [:octicons-arrow-right-24: Roadmap](roadmap.md)
 
 - :material-account-group: **Contributing**
 

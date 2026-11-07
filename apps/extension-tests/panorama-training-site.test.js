@@ -53,6 +53,10 @@ test('manifest keeps the exact HTTPS training match without broader eHealth acce
     matches.filter((pattern) => pattern.includes('trpanorama')),
     [`https://${TRAINING_HOST}/*`]
   );
+  assert.equal(
+    matches.some((pattern) => pattern.includes('inputhealth')),
+    false
+  );
   const permissions = [
     ...matches,
     ...(manifest.host_permissions || []),
@@ -84,10 +88,10 @@ test('runtime gates recognize supported URLs and preserve the hands-free frame b
     ],
     ...['inputhealth.com', 'clinic.inputhealth.com'].map((host) => [
       `https://${host}/chart`,
-      [true, true, false]
+      [false, false, false]
     ]),
     [TRAINING_URL, [true, false, true], true],
-    ['https://clinic.inputhealth.com/chart', [true, false, false], true],
+    ['https://clinic.inputhealth.com/chart', [false, false, false], true],
     ...[
       `https://${TRAINING_HOST}/`,
       `https://${TRAINING_HOST}/login?next=${RECORD_PATH}#${RECORD_PATH}`,
@@ -139,4 +143,38 @@ test('background routes a Single scan to the active training chart', async () =>
   assert.equal(harness.tabMessages[0].tabId, 44);
   assert.equal(harness.tabMessages[0].message.action, 'vaxlinkScanCaptured');
   assert.equal(harness.tabMessages[0].options.frameId, 0);
+});
+
+test('background requires an existing integration before sending to a tab without a URL', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'active',
+    storage: { vaxlink_workflow_mode_v1: 'single' },
+    tabs: [{ id: 44, active: true, currentWindow: true }],
+    tabResponse: { supported: false }
+  });
+  await harness.sendMessage({
+    action: 'scannerScanCaptured',
+    scan: { rawText: '10LOT', source: 'web-serial' }
+  });
+  assert.deepEqual(
+    harness.tabMessages.map(({ message }) => message.action),
+    ['getPanoramaIntegration']
+  );
+});
+
+test('background delivers to a tab without a URL only after the integration handshake', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'active',
+    storage: { vaxlink_workflow_mode_v1: 'single' },
+    tabs: [{ id: 44, active: true, currentWindow: true }],
+    tabResponse: { supported: true, accepted: true }
+  });
+  await harness.sendMessage({
+    action: 'scannerScanCaptured',
+    scan: { rawText: '10LOT', source: 'web-serial' }
+  });
+  assert.deepEqual(
+    harness.tabMessages.map(({ message }) => message.action),
+    ['getPanoramaIntegration', 'vaxlinkScanCaptured']
+  );
 });

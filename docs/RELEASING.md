@@ -55,9 +55,13 @@ the same listing. Production packaging requires a stable package version and
 keeps its three-part numeric version. Check the version against the target store
 listing before every upload.
 
-Promote reviewed changes to `main` when ready for production; its separate stable
-release PR and store submission still apply. Direct production fixes on `main`
-remain supported. Keep `alpha` current with those fixes. Alpha prereleases do
+Promote reviewed changes through a separate promotion PR based on current `main`.
+Preserve the feature and fix commits so release-please can classify them; do not
+replace the changes with one `chore:` commit. Keep stable version and release
+bookkeeping from `main`, and let its stable release PR update them. Inspect the
+production package for channel-specific exclusions before promotion. The stable
+release PR and Store submission remain separate steps. Direct production fixes
+on `main` remain supported. Keep `alpha` current with those fixes. Alpha prereleases do
 not publish the stable documentation manual or notify its release reconciliation;
 the existing stable documentation-hub integration is unchanged.
 
