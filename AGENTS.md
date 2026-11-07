@@ -1,6 +1,6 @@
 # Agent guidance
 
-This is the shared repository guidance for Codex, Claude, and other coding agents.
+This is the shared repository guidance for all coding agents.
 Keep project rules here rather than in separate files for each harness. Configure
 any harness that does not discover `AGENTS.md` to read this file.
 
@@ -47,17 +47,20 @@ any harness that does not discover `AGENTS.md` to read this file.
   change, failure, or unresolved concern warrants it.
 - Separate code, package, and CI evidence from browser, scanner, Store, and live
   clinic validation. Do not claim the latter from automated checks alone.
-- Get a critical review from Astra for each PR's changes before pushing. Address
-  meaningful findings and recheck the affected work. If Astra is unavailable,
-  report that rather than silently substituting another reviewer.
+- Review each PR's changes critically before pushing. Use a separate reviewer
+  when the harness supports it. Address meaningful findings and recheck the
+  affected work.
 
 ## Delegation
 
 - Use subagents when requested or when applicable project instructions call for
   them. Give each agent a bounded task and avoid overlapping edits.
-- For requested parallel cleanup passes, use Terra agents to inspect distinct
-  areas and report concrete findings first. Review those findings before making
+- For requested parallel cleanup passes, split distinct areas between available
+  agents and have them report concrete findings first. If subagents are not
+  available, inspect those areas in sequence. Review findings before making
   broader changes. Keep proven issues separate from guesses and style preferences.
+- Treat requests for particular models or tools as task-specific unless the user
+  asks to make them a project rule.
 - Keep agent coordination and review reports out of PR descriptions.
 
 ## Development checks
