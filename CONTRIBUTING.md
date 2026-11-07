@@ -1,6 +1,6 @@
 # Contributing to VaxLink
 
-Coding agents should read [AGENTS.md](AGENTS.md) for shared project guidance.
+Coding agents should read [AGENTS.md](https://github.com/WDGPH/VaxLink/blob/alpha/AGENTS.md) for shared project guidance.
 
 ## Repository Layout
 
