@@ -244,7 +244,7 @@ function setupMessageListener() {
         return true;
       }
       try {
-        const result = autoFillPanorama(request.data);
+        const result = autoFillPanorama(beginPanoramaAutofill(request.data));
         vlog('autoFillPanorama', result?.status, result);
         sendResponse({
           success: isAutofillSuccess(result),
@@ -570,6 +570,8 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   }
   lastHandledScanValue = trimmed;
   lastHandledScanAt = now;
+  const fillData =
+    activeWorkflowMode === 'single' ? beginPanoramaAutofill({}) : null;
 
   let parsed;
   try {
@@ -644,6 +646,16 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       note: error?.message || 'Lookup failed'
     });
   }
+
+  if (fillData && !isPanoramaAutofillCurrent(fillData)) {
+    return {
+      accepted: false,
+      success: false,
+      status: 'cancelled',
+      error: 'Autofill stopped: form changed or manual takeover'
+    };
+  }
+  if (fillData) parsed._vaxlinkOwner = fillData._vaxlinkOwner;
 
   if (!parsed.lot && !parsed.expiry && !parsed.serial) {
     console.warn(
@@ -932,16 +944,16 @@ function initHandsFreeScanner() {
     vlog('workflow mode changed', activeWorkflowMode);
   });
 
-  document.addEventListener(
-    'pointerdown',
-    cancelPanoramaFillRetriesForManualEdit,
-    true
-  );
-  document.addEventListener(
-    'change',
-    cancelPanoramaFillRetriesForManualEdit,
-    true
-  );
+  for (const type of ['pointerdown', 'input', 'change', 'keydown']) {
+    document.addEventListener(
+      type,
+      handlePanoramaAutofillUserInteraction,
+      true
+    );
+  }
+  for (const type of ['pagehide', 'popstate', 'hashchange']) {
+    window.addEventListener(type, cancelPanoramaAutofill);
+  }
 }
 
 // Register listener immediately
@@ -1046,10 +1058,14 @@ function fillField(field, value) {
     nextValue = iso;
   }
 
+  assertPanoramaAutofillWrite();
   field.focus();
+  assertPanoramaAutofillWrite();
   field.value = nextValue;
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.blur();
   return true;
 }
@@ -1163,10 +1179,14 @@ function fillSelectField(field, value) {
   }
   if (!matched) return false;
 
+  assertPanoramaAutofillWrite();
   field.focus();
+  assertPanoramaAutofillWrite();
   field.value = matched.value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   if (field.id && field.id.endsWith('_input')) {
     const labelId = `${field.id.slice(0, -6)}_label`;
     const label = document.getElementById(labelId);
@@ -1175,6 +1195,7 @@ function fillSelectField(field, value) {
       label.setAttribute('title', matched.text);
     }
   }
+  assertPanoramaAutofillWrite();
   field.blur();
   return true;
 }
@@ -1199,15 +1220,20 @@ function fillComboTextField(field, value) {
   const compactRaw = normalizeForMatch(rawValue).replace(/\s+/g, '');
   const preferredTypedValue = unitTextAliases[compactRaw] || rawValue;
 
+  assertPanoramaAutofillWrite();
   field.focus();
   if ('value' in field) {
+    assertPanoramaAutofillWrite();
     field.value = preferredTypedValue;
     field.dispatchEvent(new Event('input', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     field.dispatchEvent(
       new KeyboardEvent('keyup', { key: 'a', bubbles: true })
     );
   }
+  assertPanoramaAutofillWrite();
   field.click();
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
   );
@@ -1241,19 +1267,26 @@ function fillComboTextField(field, value) {
       );
     });
     if (hit) {
+      assertPanoramaAutofillWrite();
       hit.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      assertPanoramaAutofillWrite();
       hit.click();
+      assertPanoramaAutofillWrite();
       field.dispatchEvent(new Event('change', { bubbles: true }));
+      assertPanoramaAutofillWrite();
       field.blur();
       return true;
     }
   }
 
   // Keyboard fallback for autocomplete controls.
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
   );
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.blur();
   return String(field.value || '').trim().length > 0;
 }
@@ -1751,15 +1784,21 @@ function fillPanoramaMaskedTextInput(field, nextValue) {
   if (!field || !nextValue) return false;
   const value = String(nextValue).trim();
   if (!value) return false;
+  assertPanoramaAutofillWrite();
   field.focus();
+  assertPanoramaAutofillWrite();
   field.value = '';
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.value = value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(
     new KeyboardEvent('keyup', { key: value.slice(-1) || '0', bubbles: true })
   );
+  assertPanoramaAutofillWrite();
   field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
   field.blur();
   return String(field.value || '').trim() === value;
 }
@@ -1997,11 +2036,16 @@ function fillPanoramaLotFromSelect(lotValue) {
     const matched = findBestLotMatch(options, (opt) => opt.text, lotValue);
     if (!matched) continue;
 
+    assertPanoramaAutofillWrite();
     field.focus();
+    assertPanoramaAutofillWrite();
     field.value = matched.value;
     field.dispatchEvent(new Event('input', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     field.dispatchEvent(new Event('change', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     field.blur();
+    assertPanoramaAutofillWrite();
 
     if (field.id && field.id.endsWith('_input')) {
       const labelId = `${field.id.slice(0, -6)}_label`;
@@ -2032,12 +2076,14 @@ function setPanoramaFundedRadioValue(value) {
     // what wiped the "Display Expired and Recalled Lots" checkbox, which a
     // manual radio change leaves alone. Only fall back to the synthetic path
     // when the widget did not take the click.
+    assertPanoramaAutofillWrite();
     box.click();
     if (radio.checked) {
       vlog('VaxLink: funded radio set to', desired);
       return 'clicked';
     }
   }
+  assertPanoramaAutofillWrite();
   radio.checked = true;
   // The radio AJAX re-renders this panel with the right state, but during that
   // round trip the group still DISPLAYS the previous choice (the widget did
@@ -2063,6 +2109,7 @@ function setPanoramaFundedRadioValue(value) {
       icon.classList.add('ui-icon-bullet');
     }
   }
+  assertPanoramaAutofillWrite();
   radio.dispatchEvent(new Event('change', { bubbles: true }));
   vlog('VaxLink: funded radio set to', desired);
   return 'clicked';
@@ -2093,8 +2140,10 @@ function ensurePanoramaExpiredRecalledLotsVisible() {
   if (!input) return 'not_found';
   if (input.checked) return 'already';
   const box = input.closest('.ui-chkbox')?.querySelector('.ui-chkbox-box');
+  assertPanoramaAutofillWrite();
   if (box) box.click();
   if (!input.checked) {
+    assertPanoramaAutofillWrite();
     input.checked = true;
     input.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -2144,7 +2193,9 @@ function openPanoramaLotDropdown() {
   const triggers = getFields(selectors).filter(isVisible);
   for (const trigger of triggers) {
     lastLotDropdownOpenClickAt = now;
+    assertPanoramaAutofillWrite();
     trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     trigger.click();
     return true;
   }
@@ -2164,15 +2215,19 @@ function fillPanoramaLotFromPanelItems(lotValue) {
     // Retyping the same filter on every retry pass re-filters the panel and
     // steals focus several times a second — visible churn with no progress.
     if (String(filterInput.value || '') === lotText) continue;
+    assertPanoramaAutofillWrite();
     filterInput.focus();
+    assertPanoramaAutofillWrite();
     filterInput.value = lotText;
     filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     filterInput.dispatchEvent(
       new KeyboardEvent('keyup', {
         key: lotText.slice(-1) || 'a',
         bubbles: true
       })
     );
+    assertPanoramaAutofillWrite();
     filterInput.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
@@ -2206,9 +2261,13 @@ function fillPanoramaLotFromPanelItems(lotValue) {
       );
     const matched = findBestLotMatch(items, getItemText, lotValue);
     if (!matched) continue;
+    assertPanoramaAutofillWrite();
     matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     matched.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     matched.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+    assertPanoramaAutofillWrite();
     matched.click();
     const selectedLotLabels = getFields([
       'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
@@ -2291,29 +2350,123 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
-// Issue #26: a real user interaction with the agent/lot/tradename widgets means
-// the nurse is taking over — pending VaxLink fill retries must not overwrite
-// her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
-// and so do VaxLink's own fills, so only trusted events count as manual.
-const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN =
-  /agentiterm|tradenameinput|lotnumberselect/i;
+let panoramaAutofillOwner = null;
+let panoramaWritingData = null;
 
-function isPanoramaAgentLotWidgetNode(node) {
-  if (!node || typeof node.closest !== 'function') return false;
-  const widget = node.closest(
-    '.ui-selectonemenu, .ui-selectonemenu-panel, select'
+function getPanoramaAutofillForm() {
+  const forms = new Set(
+    getFields([
+      ...getPanoramaAgentSelectors(),
+      'input[id*="dateAdministedDate:dateInput_input"]',
+      'tbody[id*="historicalfactoryTable:dataTable_data"]'
+    ])
+      .map((node) => node.closest('form'))
+      .filter(Boolean)
   );
-  if (!widget) return false;
-  return PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN.test(String(widget.id || ''));
+  return forms.size === 1 ? [...forms][0] : null;
 }
 
-function cancelPanoramaFillRetriesForManualEdit(event) {
-  if (!event.isTrusted) return;
-  if (typeof stopPanoramaLotTradeWatcher !== 'function') return;
-  if (!isPanoramaAgentLotWidgetNode(event.target)) return;
-  stopPanoramaLotTradeWatcher();
-  stopPanoramaLotTradeWatcher = null;
-  vlog('manual agent/lot interaction — cancelled pending VaxLink fill retries');
+function beginPanoramaAutofill(data = {}, explicit = true) {
+  const form = getPanoramaAutofillForm();
+  const url = location.href;
+  const step = getPanoramaMultiStepIndicatorKey();
+  // Automatic retries keep the cancelled owner. Only a new form/context or an
+  // explicit scan/Fill action can start again after the nurse takes over.
+  if (
+    explicit ||
+    !panoramaAutofillOwner ||
+    panoramaAutofillOwner.form !== form ||
+    panoramaAutofillOwner.url !== url ||
+    panoramaAutofillOwner.step !== step
+  ) {
+    cancelPanoramaAutofill();
+    panoramaAutofillOwner = {
+      document,
+      form,
+      url,
+      step,
+      mode: activeWorkflowMode,
+      cancelled: false
+    };
+  }
+  data._vaxlinkOwner = panoramaAutofillOwner;
+  return data;
+}
+
+function isPanoramaAutofillCurrent(data) {
+  const owner = data?._vaxlinkOwner;
+  return (
+    !!owner &&
+    owner === panoramaAutofillOwner &&
+    !owner.cancelled &&
+    owner.document === document &&
+    owner.form?.isConnected &&
+    owner.form === getPanoramaAutofillForm() &&
+    owner.url === location.href &&
+    owner.mode === activeWorkflowMode &&
+    owner.step === getPanoramaMultiStepIndicatorKey()
+  );
+}
+
+function cancelPanoramaAutofill() {
+  if (panoramaAutofillOwner) panoramaAutofillOwner.cancelled = true;
+  if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
+}
+
+function handlePanoramaAutofillUserInteraction(event) {
+  if (!event.isTrusted || !panoramaAutofillOwner) return;
+  if (
+    event.type === 'keydown' &&
+    (event.ctrlKey ||
+      event.metaKey ||
+      event.altKey ||
+      ['Tab', 'Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(
+        event.key
+      ))
+  )
+    return;
+  const target = event.target;
+  const control = target?.closest?.(
+    'input, select, textarea, button, a, label, [contenteditable], [role="button"], .ui-selectonemenu, .ui-selectonemenu-item, [role="option"], .ui-radiobutton, .ui-chkbox'
+  );
+  if (!control) return;
+  const form = panoramaAutofillOwner.form;
+  if (!form) return;
+  const overlay = target.closest(
+    '.ui-selectonemenu-panel, .ui-datepicker, [role="listbox"], [role="dialog"]'
+  );
+  // PrimeFaces may append a dropdown to the document body. Match its exact
+  // widget ID or an explicit ARIA link; another form's popup is unrelated.
+  const linked =
+    overlay?.id &&
+    ((overlay.id.endsWith('_panel') &&
+      form.contains(document.getElementById(overlay.id.slice(0, -6)))) ||
+      [...form.querySelectorAll('[aria-controls], [aria-owns]')].some((node) =>
+        `${node.getAttribute('aria-controls') || ''} ${node.getAttribute('aria-owns') || ''}`
+          .split(/\s+/)
+          .includes(overlay.id)
+      ));
+  if (form.contains(control) || linked) cancelPanoramaAutofill();
+}
+
+// Retain the same owner during one synchronous pass, even if a page event
+// starts a newer fill. Focus/change/click handlers can replace the form before
+// returning, so check again before the next field write or event.
+function runPanoramaAutofill(data, callback) {
+  if (!isPanoramaAutofillCurrent(data)) return false;
+  const previous = panoramaWritingData;
+  panoramaWritingData = data;
+  try {
+    return callback();
+  } finally {
+    panoramaWritingData = previous;
+  }
+}
+
+function assertPanoramaAutofillWrite() {
+  if (panoramaWritingData && !isPanoramaAutofillCurrent(panoramaWritingData)) {
+    throw new Error('Autofill stopped: form changed or manual takeover');
+  }
 }
 
 function schedulePanoramaLotOrTradeSelection(
@@ -2321,7 +2474,7 @@ function schedulePanoramaLotOrTradeSelection(
   initialDelayMs = 0,
   options = {}
 ) {
-  if (!data) return;
+  if (!isPanoramaAutofillCurrent(data)) return;
   if (typeof stopPanoramaLotTradeWatcher === 'function') {
     stopPanoramaLotTradeWatcher();
     stopPanoramaLotTradeWatcher = null;
@@ -2406,7 +2559,7 @@ function schedulePanoramaLotOrTradeSelection(
   };
   stopPanoramaLotTradeWatcher = stop;
 
-  const runAttempt = () => {
+  const attempt = () => {
     if (stopped) return;
     const now = Date.now();
     if (now - lastAttemptAt < minAttemptGapMs) return;
@@ -2568,14 +2721,36 @@ function schedulePanoramaLotOrTradeSelection(
       // consent re-enabling) can still land after we stop and clear a value we
       // already set. These late passes re-assert only what changed — every fill
       // in them is a no-op while the fields still hold the desired values.
-      setTimeout(() => fillPanoramaDeferredDetailFields(data), 1500);
-      setTimeout(() => fillPanoramaDeferredDetailFields(data), 3500);
+      setTimeout(() => runDeferredPass(), 1500);
+      setTimeout(() => runDeferredPass(), 3500);
       stop();
     }
   };
 
+  const runDeferredPass = () => {
+    try {
+      runPanoramaAutofill(data, () => fillPanoramaDeferredDetailFields(data));
+    } catch (error) {
+      vlog(error.message);
+    }
+  };
+  const runAttempt = () => {
+    if (!isPanoramaAutofillCurrent(data)) {
+      stop();
+      return;
+    }
+    try {
+      runPanoramaAutofill(data, attempt);
+    } catch (error) {
+      stop();
+      vlog(error.message);
+    }
+  };
   const start = () => {
-    if (stopped) return;
+    if (stopped || !isPanoramaAutofillCurrent(data)) {
+      stop();
+      return;
+    }
     for (const delayMs of attemptDelaysMs) {
       timers.push(setTimeout(runAttempt, delayMs));
     }
@@ -3013,7 +3188,7 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
 }
 
 async function finalizeDeferredPanoramaAutofill(data) {
-  if (!data || data._vaxlinkDeferredFinalized) {
+  if (!isPanoramaAutofillCurrent(data) || data._vaxlinkDeferredFinalized) {
     return;
   }
   data._vaxlinkDeferredFinalized = true;
@@ -3024,13 +3199,19 @@ async function finalizeDeferredPanoramaAutofill(data) {
     console.warn('VaxLink deferred queue finalize failed:', error);
   }
 
-  showVaxlinkToast(data);
+  if (isPanoramaAutofillCurrent(data)) showVaxlinkToast(data);
 }
 
 function autoFillPanorama(data) {
   try {
     if (isHandsFreeSupportedPage() && isPanoramaImmunizationPage()) {
-      const panoramaResult = fillPanoramaImmunizationFields(data);
+      if (!isPanoramaAutofillCurrent(data))
+        return createAutofillResult('failed', {
+          error: 'Autofill stopped: form changed or manual takeover'
+        });
+      const panoramaResult = runPanoramaAutofill(data, () =>
+        fillPanoramaImmunizationFields(data)
+      );
       vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
       lastVaxlinkFillAt = Date.now();
       return panoramaResult;
@@ -3287,7 +3468,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
             toastDismissTimer = null;
           }
           toastRoutineSlot.innerHTML = '';
-          const radioResult = setPanoramaFundedRadioValue(fundedChoice);
+          if (!isPanoramaAutofillCurrent(data)) return;
+          const radioResult = runPanoramaAutofill(data, () =>
+            setPanoramaFundedRadioValue(fundedChoice)
+          );
           if (radioResult === 'not_found') {
             showRoutineToast(
               `<div class="vl-toast info show">
@@ -4071,12 +4255,16 @@ let applyQueueInFlight = false;
 
 async function applyNextQueueItem(options = {}) {
   if (applyQueueInFlight) return;
+  const ownerData =
+    options.ownerData || beginPanoramaAutofill({}, options.automatic !== true);
+  if (!isPanoramaAutofillCurrent(ownerData)) return;
   applyQueueInFlight = true;
   if (hudApplyBtn) hudApplyBtn.disabled = true;
   try {
     const matchCurrentAgent = options.matchCurrentAgent === true;
     const suppressQueueEmptyToast = options.suppressQueueEmptyToast === true;
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    if (!isPanoramaAutofillCurrent(ownerData)) return;
     const rows =
       stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
         ? stored[MULTIPLE_INJECT_QUEUE_KEY]
@@ -4113,6 +4301,7 @@ async function applyNextQueueItem(options = {}) {
     const record = rows[recordIndex];
     const data = buildAutofillPayloadFromQueueRecord(record);
     if (!data) return 'no_data';
+    data._vaxlinkOwner = ownerData._vaxlinkOwner;
     data._vaxlinkQueueContext = {
       storageKey: MULTIPLE_INJECT_QUEUE_KEY,
       recordId: record.id,
@@ -4226,7 +4415,7 @@ async function tryAutoDrain() {
 
   lastAutoDrainAt = now;
   vlog('auto-drain: empty form detected, applying queue head');
-  await applyNextQueueItem();
+  await applyNextQueueItem({ automatic: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -4395,9 +4584,12 @@ async function maybeAutoFillPanoramaMultipleGrid() {
   if (!isPanoramaMultipleImmunizationGridPage()) return;
   if (isPrimeFacesAjaxBusy()) return;
 
+  const ownerData = beginPanoramaAutofill({}, false);
+  if (!isPanoramaAutofillCurrent(ownerData)) return;
   multiGridFillPending = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    if (!isPanoramaAutofillCurrent(ownerData)) return;
     const rows =
       stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
         ? stored[MULTIPLE_INJECT_QUEUE_KEY]
@@ -4412,7 +4604,9 @@ async function maybeAutoFillPanoramaMultipleGrid() {
     for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
       const payload = buildAutofillPayloadFromQueueRecord(rows[rowIndex]);
       if (!payload) continue;
-      fillPanoramaMultipleGridRow(rowIndex, payload);
+      runPanoramaAutofill(ownerData, () =>
+        fillPanoramaMultipleGridRow(rowIndex, payload)
+      );
     }
   } catch (error) {
     console.warn('VaxLink multi-grid autofill error:', error);
@@ -4514,9 +4708,12 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
     return;
   if (Date.now() - lastVaxlinkFillAt < 1200) return;
 
+  const ownerData = beginPanoramaAutofill({}, false);
+  if (!isPanoramaAutofillCurrent(ownerData)) return;
   multiStepAutoFillPending = true;
   try {
     const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+    if (!isPanoramaAutofillCurrent(ownerData)) return;
     const rows =
       stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
         ? stored[MULTIPLE_INJECT_QUEUE_KEY]
@@ -4525,6 +4722,7 @@ async function maybeAutoFillPanoramaMultiStepDetailPage() {
     if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
 
     const result = await applyNextQueueItem({
+      ownerData,
       matchCurrentAgent: true,
       suppressQueueEmptyToast: true
     });
