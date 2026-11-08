@@ -320,8 +320,19 @@ test('mode transitions cannot revive an old fill and allow new-mode work', () =>
   );
 });
 
-test('scanner context expires when the chart, form, or owner changes', () => {
+test('overlapping context probes keep an in-transit scan valid on the same form', () => {
+  const f = fixture();
+  const scanA = f.getScannerDeliveryContext();
+  const scanB = f.getScannerDeliveryContext();
+  assert.ok(scanA);
+  assert.equal(scanB, scanA);
+  assert.equal(f.isScannerDeliveryContextCurrent(scanA), true);
+});
+
+test('context changes rotate the token and cannot revive an in-transit scan', () => {
   for (const change of [
+    (f) => f.setMode('multiple'),
+    (f) => interaction(f),
     (f) => {
       f.state.form = { isConnected: true };
     },
@@ -344,6 +355,11 @@ test('scanner context expires when the chart, form, or owner changes', () => {
     const token = f.getScannerDeliveryContext();
     assert.equal(f.isScannerDeliveryContextCurrent(token), true);
     change(f);
+    assert.equal(f.isScannerDeliveryContextCurrent(token), false);
+    const replacement = f.getScannerDeliveryContext();
+    assert.notEqual(replacement, token);
+    assert.equal(f.isScannerDeliveryContextCurrent(replacement), true);
+    assert.equal(f.getScannerDeliveryContext(), replacement);
     assert.equal(f.isScannerDeliveryContextCurrent(token), false);
   }
 });

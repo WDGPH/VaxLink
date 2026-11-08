@@ -171,6 +171,10 @@ function logAnalyticsEvent(eventType, payload = {}) {
 }
 
 function getScannerDeliveryContext() {
+  // Inspecting the same form must not invalidate a scan already in transit.
+  if (isScannerDeliveryContextCurrent(scannerDeliveryContext?.token)) {
+    return scannerDeliveryContext.token;
+  }
   scannerDeliveryContext = {
     token: crypto.randomUUID(),
     form: getPanoramaAutofillForm(),
