@@ -526,16 +526,23 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('queueSaveNotice').hidden = true;
     });
 
-  document.getElementById('workstationHealthBtn')?.addEventListener('click', () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tabId = tabs?.[0]?.id;
-      if (chrome.runtime.lastError || !Number.isSafeInteger(tabId)) {
-        writeOutput('Select the Panorama tab to check, then reopen VaxLink.', 'info');
-        return;
-      }
-      chrome.tabs.create({ url: chrome.runtime.getURL(`workstation-health.html?tab=${tabId}`) });
+  document
+    .getElementById('workstationHealthBtn')
+    ?.addEventListener('click', () => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tabId = tabs?.[0]?.id;
+        if (chrome.runtime.lastError || !Number.isSafeInteger(tabId)) {
+          writeOutput(
+            'Select the Panorama tab to check, then reopen VaxLink.',
+            'info'
+          );
+          return;
+        }
+        chrome.tabs.create({
+          url: chrome.runtime.getURL(`workstation-health.html?tab=${tabId}`)
+        });
+      });
     });
-  });
   loadNVCStatus();
   void renderHeldScannerScans();
 });

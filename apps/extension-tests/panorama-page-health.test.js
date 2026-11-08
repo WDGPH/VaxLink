@@ -1,65 +1,38 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import vm from 'node:vm';
+import { createContentHarness } from './helpers/clinic-sim.js';
 
-const source = readFileSync(
-  new URL('../extension/content.js', import.meta.url),
-  'utf8'
-);
-const identity = source.slice(
-  source.indexOf('const contentManifestAtLoad'),
-  source.indexOf('const HANDS_FREE_BUILD')
-);
-const listener = source.match(/^function setupMessageListener\([^]*?^}/m)[0];
-
-test('page health keeps the identity captured at load and waits for settings', () => {
-  let manifest = {
-    version: '1.0.0',
-    version_name: '1.1.0-alpha',
-    name: 'VaxLink Alpha'
-  };
+test('page health keeps its load identity and waits for settings without changing scan context', () => {
+  const { context, messageListeners, storageReads } = createContentHarness();
+  const form = { isConnected: true };
+  context.getPanoramaAutofillForm = () => form;
+  context.getPanoramaMultiStepIndicatorKey = () => '';
+  const atLoad = context.chrome.runtime.getManifest();
   let reads = 0;
-  let onMessage;
-  const context = vm.createContext({
-    chrome: {
-      runtime: {
-        getManifest: () => {
-          reads++;
-          return manifest;
-        },
-        onMessage: {
-          addListener: (fn) => {
-            onMessage = fn;
-          }
-        }
-      }
-    },
-    window: {},
-    panoramaOperation: null,
-    VAXLINK_BUILD_ID: 'old-build',
-    isHandsFreeSupportedPage: () => true,
-    getPanoramaContext: () => ({ document: 'doc', form: 'form' }),
-    vlog() {}
-  });
-  vm.runInContext(`${identity}\n${listener}\nsetupMessageListener();`, context);
-  manifest = { version: '2.0.0', name: 'VaxLink' };
+  context.chrome.runtime.getManifest = () => {
+    reads++;
+    return { version: 'new-version', name: 'VaxLink' };
+  };
   context.VAXLINK_BUILD_ID = 'new-build';
-  let reply;
-  onMessage({ action: 'getPanoramaIntegration' }, {}, (value) => {
-    reply = value;
-  });
-  assert.equal(reply.ready, false);
-  assert.equal(reply.initialized.listener, true);
-  assert.equal(reply.initialized.settings, false);
-  assert.equal(reply.buildAtLoad.version, '1.0.0');
-  assert.equal(reply.buildAtLoad.versionName, '1.1.0-alpha');
-  assert.equal(reply.buildAtLoad.name, 'VaxLink Alpha');
-  assert.equal(reply.buildAtLoad.fingerprint, 'old-build');
-  assert.equal(reads, 1);
-  vm.runInContext('panoramaSettingsInitialized = true', context);
-  onMessage({ action: 'getPanoramaIntegration' }, {}, (value) => {
-    reply = value;
-  });
-  assert.equal(reply.ready, true);
+  const probe = () => {
+    let result;
+    messageListeners[0]({ action: 'getPanoramaIntegration' }, {}, (reply) => {
+      result = reply;
+    });
+    return result;
+  };
+  const initial = probe();
+  assert.equal(initial.ready, false);
+  assert.equal(initial.initialized.listener, true);
+  assert.equal(initial.initialized.settings, false);
+  assert.equal(initial.buildAtLoad.version, atLoad.version);
+  assert.equal(initial.buildAtLoad.versionName, atLoad.version_name);
+  assert.equal(initial.buildAtLoad.name, atLoad.name);
+  assert.equal(initial.buildAtLoad.fingerprint, null);
+  assert.equal(reads, 0);
+  storageReads[0].callback({});
+  const initialized = probe();
+  assert.equal(initialized.ready, true);
+  assert.equal(initialized.contextToken, initial.contextToken);
+  assert.equal(reads, 0);
 });

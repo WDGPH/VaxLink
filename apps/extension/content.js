@@ -227,7 +227,11 @@ function setupMessageListener() {
       sendResponse({
         supported,
         contextToken,
-        ready: supported && !!contextToken && initialized.listener && initialized.settings,
+        ready:
+          supported &&
+          !!contextToken &&
+          initialized.listener &&
+          initialized.settings,
         initialized,
         buildAtLoad: contentBuildAtLoad
       });

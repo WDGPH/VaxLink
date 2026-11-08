@@ -193,7 +193,7 @@ read. Last capture time is reported separately. NVC health reads the existing
 catalogue status and marks a usable cache degraded when the last remote check
 is older than 24 hours or has failed.
 
-The Panorama response reports only readiness flags and the build identity
+For health, the Panorama response supplies readiness flags and the build identity
 captured when the content script loaded. Packaged runtime files receive a
 fingerprint during staging. A known identity mismatch calls for reloading the
 Panorama tab when safe. Missing identity is unknown; matching version labels

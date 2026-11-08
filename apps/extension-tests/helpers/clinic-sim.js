@@ -140,6 +140,8 @@ const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 // Startup stays before DOM readiness and the initial settings response.
 export function createContentHarness(globals = {}) {
   const documentListeners = new Map();
+  const messageListeners = [];
+  const storageReads = [];
   const windowListeners = new Map();
   const location =
     globals.location ||
@@ -169,8 +171,18 @@ export function createContentHarness(globals = {}) {
       }
     },
     chrome: {
-      runtime: { onMessage: { addListener() {} } },
-      storage: { local: { get() {} }, onChanged: { addListener() {} } }
+      runtime: {
+        getManifest: () => manifest,
+        onMessage: {
+          addListener: (listener) => messageListeners.push(listener)
+        }
+      },
+      storage: {
+        local: {
+          get: (keys, callback) => storageReads.push({ keys, callback })
+        },
+        onChanged: { addListener() {} }
+      }
     }
   });
   const manifest = JSON.parse(
@@ -183,7 +195,13 @@ export function createContentHarness(globals = {}) {
       { filename: file }
     );
   }
-  return { context, documentListeners, windowListeners };
+  return {
+    context,
+    documentListeners,
+    windowListeners,
+    messageListeners,
+    storageReads
+  };
 }
 
 export function makeTestNvcBundle(code = 'TESTLOT') {

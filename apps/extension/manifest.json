@@ -13,9 +13,7 @@
     "idle"
   ],
   "minimum_chrome_version": "114",
-  "host_permissions": [
-    "https://nvc-cnv.canada.ca/*"
-  ],
+  "host_permissions": ["https://nvc-cnv.canada.ca/*"],
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",
