@@ -634,9 +634,7 @@ function isSupportedChartUrl(urlValue) {
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
       path.includes('/recordimms/');
-    const isInputHealth =
-      host === 'inputhealth.com' || host.endsWith('.inputhealth.com');
-    return isPanorama || isInputHealth;
+    return isPanorama;
   } catch (_) {
     return false;
   }
@@ -646,6 +644,21 @@ function tabMayBeSupportedChart(tab) {
   if (!tab || tab.id === undefined) return false;
   if (!tab.url) return true;
   return isSupportedChartUrl(tab.url);
+}
+
+function hasPanoramaIntegration(tabId) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000);
+    chrome.tabs.sendMessage(
+      tabId,
+      { action: 'getPanoramaIntegration' },
+      { frameId: 0 },
+      (response) => {
+        clearTimeout(timer);
+        resolve(!chrome.runtime.lastError && response?.supported === true);
+      }
+    );
+  });
 }
 
 function tabAcceptedScannerScan(response) {
@@ -660,7 +673,16 @@ function tabAcceptedScannerScan(response) {
   );
 }
 
-function sendScanToTab(tabId, scan) {
+async function sendScanToTab(tabId, scan) {
+  const tab = (await queryTabs({})).find((item) => item.id === tabId);
+  if (
+    !tab ||
+    (tab.url
+      ? !isSupportedChartUrl(tab.url)
+      : !(await hasPanoramaIntegration(tabId)))
+  ) {
+    throw new Error('Open a supported Panorama immunization page');
+  }
   return new Promise((resolve, reject) => {
     if (!tabId && tabId !== 0) {
       reject(new Error('Missing tab id'));
@@ -3058,6 +3080,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     const tabId = sender?.tab?.id;
     if (
       tabId === undefined ||
+      sender.id !== chrome.runtime.id ||
+      sender.frameId !== 0 ||
+      !isSupportedChartUrl(sender.url) ||
       (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))
     ) {
       sendResponse({

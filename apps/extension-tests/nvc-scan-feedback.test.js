@@ -44,7 +44,7 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
       parseGS1BarcodeFromScanner: globalThis.VaxLinkGS1Parser.parseGS1Barcode,
       getExpiryStatus: () => ({ flag: 'valid' }),
       getQueueStorageKeyForWorkflow: () => null,
-      autoFillTelus: (data) => {
+      autoFillPanorama: (data) => {
         fillPayload = data;
         return { status: 'failed' };
       },

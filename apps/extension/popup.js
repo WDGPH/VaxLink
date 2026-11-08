@@ -2104,47 +2104,136 @@ async function displayParsedData(data, parseRequestId) {
   }
 }
 
-function sendAutoFillMessage(tabId, data, callback = handleAutoFillResponse) {
-  // Target the main frame (frameId 0) to avoid iframe content scripts
-  // responding first with { success: false } and masking the real result.
+function isSupportedPanoramaUrl(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      [
+        'www.panorama.prod.ehealthontario.ca',
+        'panorama.prod.ehealthontario.ca',
+        'trpanoramadhir.prod.ehealthontario.ca'
+      ].includes(url.hostname) &&
+      url.pathname.toLowerCase().includes('/recordimms/')
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function getTabForFill(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.query({}, (tabs) =>
+      resolve(
+        chrome.runtime.lastError ? null : tabs?.find((tab) => tab.id === tabId)
+      )
+    );
+  });
+}
+
+function hasPanoramaIntegration(tabId) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000);
+    chrome.tabs.sendMessage(
+      tabId,
+      { action: 'getPanoramaIntegration' },
+      { frameId: 0 },
+      (response) => {
+        clearTimeout(timer);
+        resolve(!chrome.runtime.lastError && response?.supported === true);
+      }
+    );
+  });
+}
+
+async function canFillPanoramaTab(tabId) {
+  const tab = await getTabForFill(tabId);
+  return (
+    !!tab &&
+    (tab.url
+      ? isSupportedPanoramaUrl(tab.url)
+      : await hasPanoramaIntegration(tabId))
+  );
+}
+
+async function sendAutoFillMessage(
+  tabId,
+  data,
+  callback = handleAutoFillResponse
+) {
+  const unsupported = () =>
+    callback({
+      success: false,
+      error: 'Open a supported Panorama immunization page.'
+    });
+  if (!(await canFillPanoramaTab(tabId))) return unsupported();
   chrome.tabs.sendMessage(
     tabId,
     { action: 'autoFill', data },
     { frameId: 0 },
-    (response) => {
-      if (chrome.runtime.lastError) {
-        const message = chrome.runtime.lastError.message || '';
-
-        if (message.includes('Receiving end does not exist')) {
+    async (response) => {
+      if (!chrome.runtime.lastError) return callback(response);
+      const message = chrome.runtime.lastError.message || '';
+      if (!message.includes('Receiving end does not exist')) {
+        callback({ success: false, error: `Message send failed: ${message}` });
+        return;
+      }
+      // Injection requires a current URL; a handshake cannot authorize injection.
+      const tab = await getTabForFill(tabId);
+      if (!tab?.url || !isSupportedPanoramaUrl(tab.url)) return unsupported();
+      chrome.scripting.executeScript(
+        {
+          target: { tabId, frameIds: [0] },
+          func: (expectedUrl) => {
+            const url = new URL(location.href);
+            return (
+              location.href === expectedUrl &&
+              url.protocol === 'https:' &&
+              [
+                'www.panorama.prod.ehealthontario.ca',
+                'panorama.prod.ehealthontario.ca',
+                'trpanoramadhir.prod.ehealthontario.ca'
+              ].includes(url.hostname) &&
+              url.pathname.toLowerCase().includes('/recordimms/')
+            );
+          },
+          args: [tab.url]
+        },
+        (results) => {
+          const documentId = results?.[0]?.documentId;
+          if (
+            chrome.runtime.lastError ||
+            results?.[0]?.result !== true ||
+            !documentId
+          )
+            return unsupported();
           chrome.scripting.executeScript(
             {
-              target: { tabId, frameIds: [0] },
-              files: ['panorama-agent-rules.js', 'content.js']
+              target: { tabId, documentIds: [documentId] },
+              files: [
+                'panorama-agent-rules.js',
+                'shared/gs1-parser.js',
+                'content.js'
+              ]
             },
             () => {
               if (chrome.runtime.lastError) {
                 callback({
                   success: false,
-                  error: `Message failed and script injection failed: ${chrome.runtime.lastError.message}`
+                  error: `Script injection failed: ${chrome.runtime.lastError.message}`
                 });
                 return;
               }
               chrome.tabs.sendMessage(
                 tabId,
                 { action: 'autoFill', data },
-                { frameId: 0 },
+                { documentId },
                 callback
               );
             }
           );
-          return;
         }
-
-        callback({ success: false, error: `Message send failed: ${message}` });
-        return;
-      }
-
-      callback(response);
+      );
     }
   );
 }
