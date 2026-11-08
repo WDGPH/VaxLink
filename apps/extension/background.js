@@ -601,6 +601,59 @@ function appendQueueRecord(storageKey, record, options = {}) {
   return scannerQueueWriteQueue;
 }
 
+// All queue changes share the scanner append writer so a read-modify-write
+// cannot overwrite a scan received while another context is editing a row.
+function mutateQueue(storageKey, operation, payload = {}) {
+  const result = scannerQueueWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      if (
+        ![MULTIPLE_INJECT_QUEUE_KEY, INVENTORY_BATCH_KEY].includes(storageKey)
+      ) {
+        throw new Error('Invalid queue storage key');
+      }
+      const stored = await getStorage([storageKey]);
+      let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      let record = null;
+      let consumed = null;
+      if (operation === 'add') {
+        rows = [...rows, ...payload.records];
+      } else if (operation === 'clear') {
+        rows = [];
+      } else if (operation === 'remove') {
+        rows = rows.filter((row) => row?.id !== payload.id);
+      } else if (operation === 'update') {
+        rows = rows.map((row) => {
+          if (row?.id !== payload.id) return row;
+          record = { ...row, ...payload.patch };
+          return record;
+        });
+      } else if (operation === 'consume') {
+        rows = rows.flatMap((row) => {
+          if (row?.id !== payload.id) return [row];
+          consumed = row;
+          const count = (value) => {
+            const parsed = Number.parseInt(String(value ?? ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+          };
+          const remaining =
+            count(row.remaining_doses) ?? count(row.total_doses);
+          if (remaining === null) record = row;
+          else if (remaining > 1) {
+            record = { ...row, remaining_doses: remaining - 1 };
+          }
+          return record ? [record] : [];
+        });
+      } else {
+        throw new Error('Invalid queue operation');
+      }
+      await setStorage({ [storageKey]: rows });
+      return { rows, record, consumed };
+    });
+  scannerQueueWriteQueue = result;
+  return result;
+}
+
 function queryTabs(queryInfo) {
   return new Promise((resolve) => {
     chrome.tabs.query(queryInfo, (tabs) => {
@@ -3192,6 +3245,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: error?.message || 'Analytics log failed'
         })
       );
+    return true;
+  }
+
+  if (request.action === 'mutateQueue') {
+    mutateQueue(request.storageKey, request.operation, request.payload)
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
   }
 

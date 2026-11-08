@@ -5,7 +5,7 @@
  * to persist the whole array from that copy. With the popup open during
  * hands-free scanning, a scan appended by the background worker between the
  * popup's last sync and its next mutation was silently clobbered (or a
- * removal resurrected rows). Mutations now re-read storage first.
+ * removal resurrected rows). Mutations now use the serialized background writer.
  *
  * The chrome mock here deliberately does NOT fire onChanged, simulating the
  * stale-popup window where the sync hasn't arrived yet.
@@ -13,13 +13,23 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 const QUEUE_KEY = 'multiple_inject_queue_v1';
 
 function installBrowserGlobals() {
-  const store = new Map();
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  const store = harness.storageData;
   globalThis.chrome = {
-    runtime: { lastError: null },
+    runtime: {
+      lastError: null,
+      sendMessage: (message, cb) => {
+        void harness.sendMessage(message).then(cb);
+      }
+    },
     storage: {
       onChanged: { addListener() {} },
       local: {
@@ -65,7 +75,7 @@ test('a background append during a popup remove is not clobbered', async () => {
 
   await manager.remove('a');
 
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
+  const stored = Array.from(store.get(QUEUE_KEY), (r) => r.id);
   assert.deepEqual(
     stored,
     ['b', 'scan-c'],
@@ -83,7 +93,7 @@ test('a popup add does not resurrect rows removed elsewhere', async () => {
 
   await manager.add(row('popup-d'));
 
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
+  const stored = Array.from(store.get(QUEUE_KEY), (r) => r.id);
   assert.deepEqual(
     stored,
     ['a', 'popup-d'],
@@ -119,7 +129,7 @@ test('consumeById decrements doses without losing concurrent appends', async () 
 
   const consumed = await manager.consumeById('vial');
   assert.equal(consumed.remaining_doses, 9);
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
+  const stored = Array.from(store.get(QUEUE_KEY), (r) => r.id);
   assert.deepEqual(stored, ['vial', 'scan-e']);
 });
 
@@ -151,4 +161,40 @@ test('consumeById removes the row when the FRESH count says last dose', async ()
   const consumed = await manager.consumeById('vial');
   assert.equal(consumed, null, 'last dose consumed — row must be removed');
   assert.deepEqual(store.get(QUEUE_KEY), []);
+});
+
+test('background append waits for an in-flight queue removal', async () => {
+  let release;
+  let started;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [QUEUE_KEY]: [row('a')] },
+    delayStorageSet(values, resume) {
+      if (!(QUEUE_KEY in values) || release) return false;
+      release = resume;
+      started();
+      return true;
+    }
+  });
+  const remove = harness.sendMessage({
+    action: 'mutateQueue',
+    storageKey: QUEUE_KEY,
+    operation: 'remove',
+    payload: { id: 'a' }
+  });
+  await pending;
+  const append = harness.sendMessage({
+    action: 'appendQueueRecord',
+    storageKey: QUEUE_KEY,
+    record: row('new')
+  });
+  release();
+  assert.equal((await remove).success, true);
+  assert.equal((await append).success, true);
+  assert.deepEqual(
+    Array.from(harness.storageData.get(QUEUE_KEY), (item) => item.id),
+    ['new']
+  );
 });
