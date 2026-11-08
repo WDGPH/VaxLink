@@ -17,7 +17,8 @@ fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CHANNEL="$CHANNEL" ROOT="$ROOT" python3 - <<'PY'
-import json, os, re, shutil, tempfile, zipfile
+import hashlib, json, os, re, shutil, tempfile, zipfile
+from pathlib import Path
 
 channel = os.environ["CHANNEL"]
 root = os.environ["ROOT"]
@@ -59,6 +60,17 @@ try:
     with open(manifest_path, "w") as f:
         json.dump(manifest, f, indent=2)
         f.write("\n")
+
+    # Identify the actual staged runtime once, after channel identity is stamped.
+    fingerprint = hashlib.sha256()
+    for path in sorted(Path(ext).rglob("*"), key=lambda p: p.relative_to(ext).as_posix()):
+        if not path.is_file() or path.name == "build-info.js":
+            continue
+        fingerprint.update(path.relative_to(ext).as_posix().encode("utf-8") + b"\0")
+        fingerprint.update(path.read_bytes() + b"\0")
+    Path(ext, "build-info.js").write_text(
+        "globalThis.VAXLINK_BUILD_ID = " + json.dumps(fingerprint.hexdigest()) + ";\n"
+    )
 
     os.makedirs(dist, exist_ok=True)
     out = os.path.join(dist, f"vaxlink-{channel}-{package_version}.zip")

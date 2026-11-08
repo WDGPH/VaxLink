@@ -263,8 +263,15 @@ export function createBackgroundHarness(bundle, options = {}) {
       onStartup: { addListener: (fn) => startupListeners.push(fn) },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
-      sendMessage: (_message, callback) =>
-        queueMicrotask(() => callback?.({ success: true })),
+      sendMessage:
+        options.runtimeSendMessage ||
+        ((_message, callback) =>
+          queueMicrotask(() => callback?.({ success: true }))),
+      getManifest: () => ({
+        version: '1.1.5',
+        version_name: '1.2.0-alpha',
+        name: 'VaxLink Alpha'
+      }),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
       }
@@ -396,6 +403,8 @@ export function createBackgroundHarness(bundle, options = {}) {
       vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, {
         filename: path.basename(resolvedPath)
       });
+      if (scriptPath === 'build-info.js' && options.buildId)
+        sandbox.VAXLINK_BUILD_ID = options.buildId;
     }
   };
   vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, {

@@ -184,6 +184,23 @@ and the intended chart before rescanning; a warning does not identify which
 scan failed. Scanner delivery and persistence are not crash-proof exactly-once
 operations.
 
+## Workstation health
+
+Popup Settings offers a read-only workstation check for the selected tab. It
+reads the existing scanner session or labels a cached observation; opening it
+does not connect a scanner. A connection does not prove a successful barcode
+read. Last capture time is reported separately. NVC health reads the existing
+catalogue status and marks a usable cache degraded when the last remote check
+is older than 24 hours or has failed.
+
+The Panorama response reports only readiness flags and the build identity
+captured when the content script loaded. Packaged runtime files receive a
+fingerprint during staging. A known identity mismatch calls for reloading the
+Panorama tab when safe. Missing identity is unknown; matching version labels
+alone cannot prove identical source files in an unpacked development install.
+The check does not reload, inject scripts, change workflow, or fill a chart.
+Readiness does not prove a successful fill or a saved clinical record.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama

@@ -4,6 +4,15 @@ function vlog(...args) {
   if (VAXLINK_CONTENT_DEBUG) console.log('[VaxLink]', ...args);
 }
 
+const contentManifestAtLoad = chrome.runtime.getManifest();
+const contentBuildAtLoad = Object.freeze({
+  version: contentManifestAtLoad.version,
+  versionName: contentManifestAtLoad.version_name || null,
+  name: contentManifestAtLoad.name,
+  fingerprint: globalThis.VAXLINK_BUILD_ID || null
+});
+let panoramaSettingsInitialized = false;
+
 const HANDS_FREE_BUILD = '2026-03-11-hf-recovery-1';
 vlog(
   'content script',
@@ -209,9 +218,18 @@ function setupMessageListener() {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'getPanoramaIntegration') {
+      const supported = isHandsFreeSupportedPage();
+      const contextToken = getScannerDeliveryContext();
+      const initialized = {
+        listener: window.__vaxlinkMessageListenerInitialized === true,
+        settings: panoramaSettingsInitialized
+      };
       sendResponse({
-        supported: isHandsFreeSupportedPage(),
-        contextToken: getScannerDeliveryContext()
+        supported,
+        contextToken,
+        ready: supported && !!contextToken && initialized.listener && initialized.settings,
+        initialized,
+        buildAtLoad: contentBuildAtLoad
       });
       return true;
     }
@@ -856,6 +874,7 @@ function initHandsFreeScanner() {
       reasonConsentAutofillEnabled =
         normalizeReasonConsentAutofillSetting(stored);
       audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
+      panoramaSettingsInitialized = true;
       vlog('active workflow mode', activeWorkflowMode);
 
       // On Panorama SPA navigations the page is already fully loaded when this
