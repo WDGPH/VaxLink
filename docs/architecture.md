@@ -52,8 +52,14 @@ Panorama's own variables. This separation is why a page-library variable may be
 unavailable even when the page is still updating.
 
 The script receives routed scans, shows the floating VaxLink controls, and fills
-the immunization form. It handles field writes, follow-up attempts, and manual
-takeovers of the agent and lot controls.
+the immunization form. Each fill keeps the document, form, URL, workflow, and
+visible immunization step that started it. A newer fill, navigation, form
+replacement, workflow change, or meaningful manual interaction with that form
+stops its delayed writes. Clearly linked PrimeFaces dropdowns count as part of
+the form; unrelated controls do not. Automatic attempts keep a cancelled owner
+until an explicit fill or a new context starts work again. This does not detect
+a patient change that preserves the same document, URL, and form without a
+visible step change.
 It reads workflow settings from local storage.
 
 ### User controls: popup and Scanner Setup

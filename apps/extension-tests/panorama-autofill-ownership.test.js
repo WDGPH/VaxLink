@@ -18,7 +18,9 @@ function definition(name, async = false) {
 function fixture() {
   const form = {
     isConnected: true,
-    contains: (node) => node?.form === form,
+    contains(node) {
+      return node?.form === this;
+    },
     querySelectorAll: () => []
   };
   const state = {
@@ -123,7 +125,7 @@ function interaction(
     ctrlKey = false
   } = {}
 ) {
-  const control = { form: inside ? f.form : {} };
+  const control = { form: inside ? f.state.form : {} };
   const target = {
     closest: (selector) => (selector.startsWith('input,') ? control : overlay)
   };
