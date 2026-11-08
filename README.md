@@ -55,7 +55,7 @@ For local development, load the unpacked extension:
 
 First test VaxLink in the Panorama training environment with synthetic training
 records. Reload supported Panorama tabs after installing or updating the extension.
-Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture and recovery
 before moving to production.
 
 ### Data update model

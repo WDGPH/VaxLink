@@ -245,7 +245,9 @@ export function createBackgroundHarness(bundle, options = {}) {
       },
       sendMessage(tabId, message, sendOptions, callback) {
         tabMessages.push({ tabId, message, options: sendOptions });
-        const response = options.tabResponse || {
+        const response = (typeof options.tabResponse === 'function'
+          ? options.tabResponse(tabId, message)
+          : options.tabResponse) || {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };

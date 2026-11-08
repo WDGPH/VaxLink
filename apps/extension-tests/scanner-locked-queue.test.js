@@ -92,32 +92,27 @@ test('scans captured while Windows is locked in Single mode wait for unlock', as
   );
 });
 
-test('pending locked Single scans are replayed to the pinned chart after unlock', async () => {
+test('locked Single scans remain pending after unlock', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'single' },
     tabs: [
       {
         id: 44,
-        windowId: 9,
         active: true,
         currentWindow: true,
         url: 'https://www.panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml'
       }
-    ],
-    tabResponse: { accepted: true, success: true }
+    ]
   });
-
   await harness.sendMessage({
     action: 'scannerScanCaptured',
     scan: makeScan('2026-07-28T12:06:00.000Z')
   });
   harness.setIdleState('active');
-  await new Promise((resolve) => setTimeout(resolve, 20));
-
-  assert.equal(harness.tabMessages.length, 1);
-  assert.equal(harness.tabMessages[0].tabId, 44);
-  assert.equal(harness.storageData.get(PENDING_KEY).length, 0);
+  await harness.sendMessage({ action: 'getPendingScannerScanStatus' });
+  assert.equal(harness.tabMessages.length, 0);
+  assert.equal(harness.storageData.get(PENDING_KEY).length, 1);
 });
 
 test('an unlocked scan is not mislabeled as a locked queue record', async () => {

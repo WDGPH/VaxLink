@@ -128,7 +128,14 @@ test('background routes a Single scan to the active training chart', async () =>
         url: TRAINING_URL
       }
     ],
-    tabResponse: { accepted: true, success: true }
+    tabResponse: (_id, message) =>
+      message.action === 'getPanoramaIntegration'
+        ? {
+            supported: true,
+            ready: true,
+            context: { document: 'd', form: 'f' }
+          }
+        : { accepted: true, success: true }
   });
   const response = await harness.sendMessage({
     action: 'scannerScanCaptured',
@@ -139,10 +146,12 @@ test('background routes a Single scan to the active training chart', async () =>
     }
   });
   assert.equal(response.success, true);
-  assert.equal(harness.tabMessages.length, 1);
-  assert.equal(harness.tabMessages[0].tabId, 44);
-  assert.equal(harness.tabMessages[0].message.action, 'vaxlinkScanCaptured');
-  assert.equal(harness.tabMessages[0].options.frameId, 0);
+  assert.equal(harness.tabMessages.at(-1).tabId, 44);
+  assert.equal(
+    harness.tabMessages.at(-1).message.action,
+    'vaxlinkScanCaptured'
+  );
+  assert.equal(harness.tabMessages.at(-1).options.frameId, 0);
 });
 
 test('background requires an existing integration before sending to a tab without a URL', async () => {
@@ -167,7 +176,14 @@ test('background delivers to a tab without a URL only after the integration hand
     idleState: 'active',
     storage: { vaxlink_workflow_mode_v1: 'single' },
     tabs: [{ id: 44, active: true, currentWindow: true }],
-    tabResponse: { supported: true, accepted: true }
+    tabResponse: (_id, message) =>
+      message.action === 'getPanoramaIntegration'
+        ? {
+            supported: true,
+            ready: true,
+            context: { document: 'd', form: 'f' }
+          }
+        : { accepted: true }
   });
   await harness.sendMessage({
     action: 'scannerScanCaptured',
@@ -175,6 +191,6 @@ test('background delivers to a tab without a URL only after the integration hand
   });
   assert.deepEqual(
     harness.tabMessages.map(({ message }) => message.action),
-    ['getPanoramaIntegration', 'vaxlinkScanCaptured']
+    ['getPanoramaIntegration', 'getPanoramaIntegration', 'vaxlinkScanCaptured']
   );
 });

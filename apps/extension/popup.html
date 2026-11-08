@@ -1141,6 +1141,20 @@
                   </button>
                 </div>
               </div>
+              <div class="settings-card">
+                <p id="pendingScannerSummary" class="settings-hint">
+                  Checking held scanner scans…
+                </p>
+                <p class="settings-hint">
+                  Held scans may already have populated fields. Review the
+                  intended chart before recovering or rescanning them.
+                </p>
+                <div class="actions">
+                  <button id="recoverPendingScannerBtn" type="button" disabled>
+                    Move held scans to Multiple Inject
+                  </button>
+                </div>
+              </div>
               <label class="settings-check" for="reasonConsentAutofillToggle">
                 <input id="reasonConsentAutofillToggle" type="checkbox" />
                 <span>Auto-fill Reason for Immunization and Consent</span>
@@ -1189,7 +1203,7 @@
               <div class="scan-copy">
                 <div id="scanStateTitle" class="scan-title">Single Inject</div>
                 <div id="scanStateSubtitle" class="scan-subtitle">
-                  One scan fills the current chart immediately.
+                  One scan targets the selected Panorama form.
                 </div>
               </div>
             </div>

@@ -16,7 +16,7 @@ immunization page with `/recordImms/` in its path. Runtime page detection requir
 HTTPS, matching the manifest. Reload an already-open training page after
 installing or updating the extension.
 
-Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
+Check Single Inject, Multiple Inject, Inventory, and lock-screen capture and recovery
 in the training environment before moving to production.
 Automated URL and routing tests do not verify the live training site's DOM,
 scanner hardware, or organization-specific access.
@@ -67,7 +67,7 @@ Scanner capture uses a Chrome offscreen document and dedicated worker instead of
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 
-While Windows is locked, Single Inject scans are held for replay after unlock. Scans in other modes are saved to the Multiple Inject queue. VaxLink does not fill the chart while locked. The computer must stay awake; scans cannot be captured while it is sleeping or hibernating.
+While Windows is locked, Single Inject scans are held for deliberate recovery through popup Settings after unlock. Scans in other modes are saved to the Multiple Inject queue. VaxLink does not fill the chart while locked. The computer must stay awake; scans cannot be captured while it is sleeping or hibernating.
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 

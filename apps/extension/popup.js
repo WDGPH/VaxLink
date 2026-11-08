@@ -90,7 +90,7 @@ const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const MODE_CONFIG = {
   single: {
     title: 'Single Inject',
-    subtitle: 'One scan fills the current chart immediately.',
+    subtitle: 'One scan targets the selected Panorama form.',
     helper:
       'Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.',
     inputLabel: 'Scanned Barcode',
@@ -336,7 +336,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 .flag
           });
           writeOutput(
-            'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.',
+            response.reason === 'funding_choice_required'
+              ? 'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.'
+              : 'VaxLink is checking the Panorama form. Review the fields before saving.',
             'info'
           );
           return;
@@ -521,8 +523,59 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  initPendingScannerRecovery();
   loadNVCStatus();
 });
+
+function initPendingScannerRecovery() {
+  const summary = document.getElementById('pendingScannerSummary');
+  const recover = document.getElementById('recoverPendingScannerBtn');
+  if (!summary || !recover) return;
+  const refresh = async () => {
+    try {
+      const result = await chrome.runtime.sendMessage({
+        action: 'getPendingScannerScanStatus'
+      });
+      if (!result?.success) throw new Error('Status unavailable');
+      const count =
+        Number.isSafeInteger(result.count) && result.count >= 0
+          ? result.count
+          : 0;
+      summary.textContent = `${count} held scanner scan(s). Recovery adds them to Multiple Inject for deliberate use.`;
+      recover.disabled = count === 0;
+    } catch {
+      summary.textContent =
+        'Held scan status is unavailable. Reopen the popup to check again.';
+      recover.disabled = true;
+    }
+  };
+  recover.addEventListener('click', async () => {
+    if (
+      !confirm(
+        'Review the intended chart first. Some held scans may already have populated fields. Move held scans to Multiple Inject for deliberate review?'
+      )
+    )
+      return;
+    recover.disabled = true;
+    try {
+      const result = await chrome.runtime.sendMessage({
+        action: 'recoverPendingScannerScans'
+      });
+      if (!result?.success) throw new Error('Recovery not confirmed');
+      writeOutput(
+        `Moved ${result.recovered} held scan(s) to Multiple Inject. Review the queue before use.`,
+        'info'
+      );
+    } catch {
+      writeOutput(
+        'Recovery was not confirmed. Check the held scans and Multiple Inject queue before trying again.',
+        'error'
+      );
+    }
+    await refresh();
+  });
+  void refresh();
+}
 
 function handleRuntimeMessage(request) {
   if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
@@ -1943,7 +1996,9 @@ async function handleUseMultipleInjectRecord(record) {
           getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
       });
       writeOutput(
-        'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after the lot is resolved.',
+        response.reason === 'funding_choice_required'
+          ? 'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after verification.'
+          : 'VaxLink is checking the Panorama form. The queue item will update after verification.',
         'info'
       );
       return;
@@ -2179,29 +2234,53 @@ function getTabForFill(tabId) {
   });
 }
 
-function hasPanoramaIntegration(tabId) {
+function readPanoramaIntegration(tabId, target) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1000);
+    const timer = setTimeout(() => resolve(null), 1000);
     chrome.tabs.sendMessage(
       tabId,
       { action: 'getPanoramaIntegration' },
-      { frameId: 0 },
+      target,
       (response) => {
         clearTimeout(timer);
-        resolve(!chrome.runtime.lastError && response?.supported === true);
+        resolve(chrome.runtime.lastError ? null : response);
       }
     );
   });
 }
 
-async function canFillPanoramaTab(tabId) {
-  const tab = await getTabForFill(tabId);
-  return (
-    !!tab &&
-    (tab.url
-      ? isSupportedPanoramaUrl(tab.url)
-      : await hasPanoramaIntegration(tabId))
-  );
+function probePanoramaDocument(tabId, expectedUrl) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId, frameIds: [0] },
+        func: (url) => location.href === url,
+        args: [expectedUrl]
+      },
+      (results) => {
+        const result = results?.[0];
+        resolve(
+          !chrome.runtime.lastError &&
+            result?.result === true &&
+            result.documentId
+            ? result.documentId
+            : null
+        );
+      }
+    );
+  });
+}
+
+function injectPanorama(tabId, documentId) {
+  return new Promise((resolve) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId, documentIds: [documentId] },
+        files: ['panorama-agent-rules.js', 'shared/gs1-parser.js', 'content.js']
+      },
+      () => resolve(!chrome.runtime.lastError)
+    );
+  });
 }
 
 async function sendAutoFillMessage(
@@ -2212,76 +2291,40 @@ async function sendAutoFillMessage(
   const unsupported = () =>
     callback({
       success: false,
-      error: 'Open a supported Panorama immunization page.'
+      error: 'Open a ready Panorama immunization form and try again.'
     });
-  if (!(await canFillPanoramaTab(tabId))) return unsupported();
+  const tab = await getTabForFill(tabId);
+  if (!tab || (tab.url && !isSupportedPanoramaUrl(tab.url)))
+    return unsupported();
+  let target = { frameId: 0 };
+  if (tab.url) {
+    const documentId = await probePanoramaDocument(tabId, tab.url);
+    if (!documentId) return unsupported();
+    target = { documentId };
+  }
+  let integration = await readPanoramaIntegration(tabId, target);
+  if (!integration && target.documentId) {
+    if (!(await injectPanorama(tabId, target.documentId))) return unsupported();
+    integration = await readPanoramaIntegration(tabId, target);
+  }
+  if (
+    !integration?.supported ||
+    !integration.ready ||
+    !integration.context?.document ||
+    !integration.context?.form
+  )
+    return unsupported();
   chrome.tabs.sendMessage(
     tabId,
-    { action: 'autoFill', data },
-    { frameId: 0 },
-    async (response) => {
-      if (!chrome.runtime.lastError) return callback(response);
-      const message = chrome.runtime.lastError.message || '';
-      if (!message.includes('Receiving end does not exist')) {
-        callback({ success: false, error: `Message send failed: ${message}` });
-        return;
-      }
-      // Injection requires a current URL; a handshake cannot authorize injection.
-      const tab = await getTabForFill(tabId);
-      if (!tab?.url || !isSupportedPanoramaUrl(tab.url)) return unsupported();
-      chrome.scripting.executeScript(
-        {
-          target: { tabId, frameIds: [0] },
-          func: (expectedUrl) => {
-            const url = new URL(location.href);
-            return (
-              location.href === expectedUrl &&
-              url.protocol === 'https:' &&
-              [
-                'www.panorama.prod.ehealthontario.ca',
-                'panorama.prod.ehealthontario.ca',
-                'trpanoramadhir.prod.ehealthontario.ca'
-              ].includes(url.hostname) &&
-              url.pathname.toLowerCase().includes('/recordimms/')
-            );
-          },
-          args: [tab.url]
-        },
-        (results) => {
-          const documentId = results?.[0]?.documentId;
-          if (
-            chrome.runtime.lastError ||
-            results?.[0]?.result !== true ||
-            !documentId
-          )
-            return unsupported();
-          chrome.scripting.executeScript(
-            {
-              target: { tabId, documentIds: [documentId] },
-              files: [
-                'panorama-agent-rules.js',
-                'shared/gs1-parser.js',
-                'content.js'
-              ]
-            },
-            () => {
-              if (chrome.runtime.lastError) {
-                callback({
-                  success: false,
-                  error: `Script injection failed: ${chrome.runtime.lastError.message}`
-                });
-                return;
-              }
-              chrome.tabs.sendMessage(
-                tabId,
-                { action: 'autoFill', data },
-                { documentId },
-                callback
-              );
-            }
-          );
-        }
-      );
+    { action: 'autoFill', data, expectedContext: integration.context },
+    target,
+    (response) => {
+      if (chrome.runtime.lastError)
+        return callback({
+          success: false,
+          error: 'Panorama page changed. Check the form and try again.'
+        });
+      callback(response);
     }
   );
 }
@@ -2299,7 +2342,9 @@ function handleAutoFillResponse(response) {
     writeOutput('Chart auto-filled', 'success');
   } else if (response && response.pending) {
     writeOutput(
-      'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.',
+      response.reason === 'funding_choice_required'
+        ? 'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.'
+        : 'VaxLink is checking the Panorama form. Review the fields before saving.',
       'info'
     );
   } else if (response && response.error) {

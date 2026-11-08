@@ -565,7 +565,10 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
   }
   const stored = await getStorage([storageKey]);
   const rows =
-    stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+    stored && Array.isArray(stored[storageKey]) ? [...stored[storageKey]] : [];
+  if (options.uniqueId && rows.some((row) => row.id === record.id)) {
+    return { ...record, already_saved: true, queueSizeAfter: rows.length };
+  }
 
   if (
     storageKey === MULTIPLE_INJECT_QUEUE_KEY &&
@@ -599,6 +602,40 @@ function appendQueueRecord(storageKey, record, options = {}) {
     .catch(() => undefined)
     .then(() => appendQueueRecordNow(storageKey, record, options));
   return scannerQueueWriteQueue;
+}
+
+function consumeQueueRecord(tabId, recordId, expectedContext) {
+  const result = scannerQueueWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const stored = await getStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+      const rows = Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
+        ? [...stored[MULTIPLE_INJECT_QUEUE_KEY]]
+        : [];
+      const index = rows.findIndex((row) => row.id === recordId);
+      if (index < 0) throw new Error('Queue record is no longer available.');
+      const record = rows[index];
+      const remaining =
+        getPositiveInt(record.remaining_doses, null) ??
+        getPositiveInt(record.total_doses, null);
+      if (
+        !sameScannerContext(
+          expectedContext,
+          await getScannerChartContext(tabId)
+        )
+      ) {
+        throw new Error('Panorama form changed.');
+      }
+      if (remaining !== null) {
+        if (remaining > 1)
+          rows[index] = { ...record, remaining_doses: remaining - 1 };
+        else rows.splice(index, 1);
+        await setStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
+      }
+      return { record, queueSizeAfter: rows.length };
+    });
+  scannerQueueWriteQueue = result;
+  return result;
 }
 
 function queryTabs(queryInfo) {
@@ -665,32 +702,7 @@ async function updateScannerLockState(state) {
     values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
   }
   await setStorage(values);
-  if (wasLocked) {
-    void drainPendingScansAfterUnlock(existing);
-  }
   return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
-}
-
-async function drainPendingScansAfterUnlock(lockSession, attempt = 0) {
-  let tabId = Number.isInteger(lockSession?.tabId) ? lockSession.tabId : null;
-  if (tabId === null) {
-    const activeTabs = await queryTabs({ active: true, currentWindow: true });
-    tabId = activeTabs.find(tabMayBeSupportedChart)?.id ?? null;
-  }
-  if (tabId === null) return { drained: 0, remaining: null };
-  return drainPendingScansToTab(tabId)
-    .then((result) => {
-      if (result.remaining > 0 && attempt < 2) {
-        setTimeout(
-          () => {
-            void drainPendingScansAfterUnlock(lockSession, attempt + 1);
-          },
-          1000 * (attempt + 1)
-        );
-      }
-      return result;
-    })
-    .catch(() => ({ drained: 0, remaining: null }));
 }
 
 function initializeScannerLockMonitoring() {
@@ -734,62 +746,59 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
-function hasPanoramaIntegration(tabId) {
+function sameScannerContext(a, b) {
+  return (
+    !!a &&
+    !!b &&
+    typeof a.document === 'string' &&
+    !!a.document &&
+    typeof a.form === 'string' &&
+    !!a.form &&
+    a.document === b.document &&
+    a.form === b.form
+  );
+}
+
+async function getScannerChartContext(tabId) {
+  const tab = (await queryTabs({})).find((item) => item.id === tabId);
+  if (!tab || (tab.url && !isSupportedChartUrl(tab.url))) return null;
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1000);
+    const timer = setTimeout(() => resolve(null), 1000);
     chrome.tabs.sendMessage(
       tabId,
       { action: 'getPanoramaIntegration' },
       { frameId: 0 },
       (response) => {
         clearTimeout(timer);
-        resolve(!chrome.runtime.lastError && response?.supported === true);
+        const context = response?.context;
+        resolve(
+          !chrome.runtime.lastError &&
+            response?.supported === true &&
+            response?.ready === true &&
+            sameScannerContext(context, context)
+            ? { document: context.document, form: context.form }
+            : null
+        );
       }
     );
   });
 }
 
-function tabAcceptedScannerScan(response) {
-  return !!(
-    response &&
-    (response.accepted === true ||
-      response.success === true ||
-      response.pending === true ||
-      response.queued === true ||
-      response.duplicate_ignored === true ||
-      response.command_handled === true)
-  );
-}
-
-async function sendScanToTab(tabId, scan) {
-  const tab = (await queryTabs({})).find((item) => item.id === tabId);
-  if (
-    !tab ||
-    (tab.url
-      ? !isSupportedChartUrl(tab.url)
-      : !(await hasPanoramaIntegration(tabId)))
-  ) {
-    throw new Error('Open a supported Panorama immunization page');
-  }
-  return new Promise((resolve, reject) => {
-    if (!tabId && tabId !== 0) {
-      reject(new Error('Missing tab id'));
-      return;
-    }
+function sendScanToTab(tabId, row) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 5000);
     chrome.tabs.sendMessage(
       tabId,
-      { action: 'vaxlinkScanCaptured', scan },
+      {
+        action: 'vaxlinkScanCaptured',
+        scan: normalizeScanEvent(row),
+        scanId: row.scanId,
+        expectedContext: row.context
+      },
       { frameId: 0 },
       (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!tabAcceptedScannerScan(response)) {
-          reject(new Error(response?.error || 'Tab did not accept scan'));
-          return;
-        }
-        resolve(response);
+        clearTimeout(timer);
+        resolve(chrome.runtime.lastError ? null : response || null);
       }
     );
   });
@@ -956,7 +965,13 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     throw new Error('VaxLink GS1 parser is not loaded');
   }
 
-  const parsed = parser.parseGS1Barcode(scan.rawText);
+  let parsed;
+  try {
+    parsed = parser.parseGS1Barcode(scan.rawText);
+  } catch (error) {
+    if (!options.allowUnparsed) throw error;
+    parsed = { lookup_error: 'Barcode could not be parsed' };
+  }
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   if (parsed.lot) {
@@ -970,8 +985,13 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const record = await appendQueueRecord(
     storageKey,
     buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
-    { preserveEveryScan: options.preserveEveryScan === true }
+    {
+      preserveEveryScan: options.preserveEveryScan === true,
+      uniqueId: options.uniqueId === true
+    }
   );
+  if (record.already_saved)
+    return { queuedToWorkflow: true, workflow: mode, storageKey, record };
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
@@ -1036,7 +1056,7 @@ function enqueuePendingScan(scan) {
         PENDING_SCAN_INBOX_MAX_BYTES
     ) {
       throw new Error(
-        'Pending scans are full. Open a supported chart and process pending scans before scanning again.'
+        'Pending scans are full. Use Settings to recover held scans before scanning again.'
       );
     }
     await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
@@ -1044,29 +1064,93 @@ function enqueuePendingScan(scan) {
   });
 }
 
-function drainPendingScansToTab(tabId) {
+function dispatchPendingScan(tabId, onlyScanId) {
   return mutatePendingInbox(async () => {
     const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-      ? stored[PENDING_SCAN_INBOX_KEY]
+    const rows = Array.isArray(stored[PENDING_SCAN_INBOX_KEY])
+      ? [...stored[PENDING_SCAN_INBOX_KEY]]
       : [];
-    if (!rows.length) {
-      return { drained: 0, remaining: 0 };
-    }
-
-    const remaining = [];
     let drained = 0;
-    for (const row of rows) {
-      try {
-        await sendScanToTab(tabId, normalizeScanEvent(row));
-        drained += 1;
-      } catch (_) {
-        remaining.push(row);
+    let delivered = false;
+    let commandHandled = false;
+    let duplicateIgnored = false;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (
+        row.deliveryState !== 'pending' ||
+        row.tabId !== tabId ||
+        !row.scanId ||
+        !row.context ||
+        row.scanId !== onlyScanId
+      )
+        continue;
+      const context = await getScannerChartContext(tabId);
+      if (!sameScannerContext(row.context, context)) continue;
+      rows[i] = { ...row, deliveryState: 'dispatching' };
+      await setStorage({ [PENDING_SCAN_INBOX_KEY]: [...rows] });
+      const response = await sendScanToTab(tabId, row);
+      delivered = !!response;
+      if (
+        response?.accepted === true &&
+        (response.command_handled === true ||
+          response.duplicate_ignored === true)
+      ) {
+        rows.splice(i, 1);
+        await setStorage({ [PENDING_SCAN_INBOX_KEY]: [...rows] });
+        commandHandled = response.command_handled === true;
+        duplicateIgnored = response.duplicate_ignored === true;
+        drained++;
+        i--;
+        continue;
       }
+      rows[i] = {
+        ...row,
+        deliveryState: response?.accepted === true ? 'accepted' : 'held'
+      };
+      await setStorage({ [PENDING_SCAN_INBOX_KEY]: [...rows] });
+      if (response?.accepted === true) drained++;
     }
+    return {
+      drained,
+      delivered,
+      commandHandled,
+      duplicateIgnored,
+      remaining: rows.length
+    };
+  });
+}
 
-    await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
-    return { drained, remaining: remaining.length };
+function recoverPendingScans() {
+  return mutatePendingInbox(async () => {
+    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+    let rows = Array.isArray(stored[PENDING_SCAN_INBOX_KEY])
+      ? [...stored[PENDING_SCAN_INBOX_KEY]]
+      : [];
+    let recovered = 0;
+    rows = rows.map((row) =>
+      row.scanId
+        ? row
+        : { ...row, scanId: buildAnalyticsId(), deliveryState: 'held' }
+    );
+    if (rows.length) await setStorage({ [PENDING_SCAN_INBOX_KEY]: rows });
+    while (rows.length) {
+      const row = rows[0];
+      await saveScannerScanToWorkflowQueue(
+        normalizeScanEvent(row),
+        'multiple',
+        {
+          context: { id: `pending-${row.scanId}`, requires_review: true },
+          preserveEveryScan: true,
+          uniqueId: true,
+          allowUnparsed: true
+        }
+      );
+      const remaining = rows.slice(1);
+      await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
+      rows = remaining;
+      recovered++;
+    }
+    return { recovered, remaining: rows.length };
   });
 }
 
@@ -1086,6 +1170,10 @@ async function routeScanToActiveSupportedTab(rawScan) {
     if (workflowMode === 'single') {
       const pendingCount = await enqueuePendingScan({
         ...scan,
+        scanId: buildAnalyticsId(),
+        tabId: lockSession.tabId,
+        context: null,
+        deliveryState: 'pending',
         pending_workflow: 'single',
         ...buildLockedScanQueueContext(lockSession)
       });
@@ -1093,6 +1181,8 @@ async function routeScanToActiveSupportedTab(rawScan) {
         routed: false,
         queued: true,
         queuedToWorkflow: false,
+        persisted: true,
+        held: true,
         locked: true,
         lockSessionId: lockSession.id,
         pinnedTabId: lockSession.tabId,
@@ -1140,55 +1230,37 @@ async function routeScanToActiveSupportedTab(rawScan) {
     };
   }
 
-  const tried = new Set();
   const activeTabs = await queryTabs({ active: true, currentWindow: true });
-  const allTabs = await queryTabs({});
-  const candidates = [...activeTabs, ...allTabs].filter(tabMayBeSupportedChart);
-
-  for (const tab of candidates) {
-    if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
-    tried.add(tab.id);
-    try {
-      const response = await sendScanToTab(tab.id, scan);
-      return {
-        routed: true,
-        queued: false,
-        tabId: tab.id,
-        response
-      };
-    } catch (_) {
-      // Try the next tab; unsupported pages simply do not have the content script.
-    }
-  }
-
-  const workflowQueueResult = await saveScannerScanToWorkflowQueue(
-    scan,
-    workflowMode
-  ).catch((error) => ({
-    queuedToWorkflow: false,
-    workflow: workflowMode,
-    error: error?.message || 'Workflow queue save failed'
-  }));
-  if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
+  const tab = activeTabs.find(tabMayBeSupportedChart) || null;
+  const context = tab ? await getScannerChartContext(tab.id) : null;
+  const row = {
+    ...scan,
+    scanId: buildAnalyticsId(),
+    tabId: tab?.id ?? null,
+    context,
+    deliveryState: 'pending',
+    pending_workflow: 'single'
+  };
+  const pendingCount = await enqueuePendingScan(row);
+  if (!tab || !context)
     return {
       routed: false,
-      queued: !workflowQueueResult.record?.duplicate_ignored,
-      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
-      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
-      workflow: workflowQueueResult.workflow,
-      storageKey: workflowQueueResult.storageKey,
-      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
+      queued: true,
+      persisted: true,
+      held: true,
+      pendingCount
     };
-  }
-
-  const pendingCount = await enqueuePendingScan(scan);
+  const result = await dispatchPendingScan(tab.id, row.scanId);
   return {
-    routed: false,
-    queued: true,
-    queuedToWorkflow: false,
-    workflow: workflowMode,
-    pendingCount,
-    queueError: workflowQueueResult?.error || ''
+    routed: result.drained > 0,
+    delivered: result.delivered,
+    accepted: result.drained > 0,
+    command_handled: result.commandHandled,
+    duplicate_ignored: result.duplicateIgnored,
+    queued: !result.duplicateIgnored,
+    persisted: true,
+    held: result.drained === 0,
+    pendingCount: result.remaining
   };
 }
 
@@ -3195,6 +3267,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'consumeQueueRecord') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.frameId !== 0 ||
+      !Number.isInteger(sender.tab?.id) ||
+      !isSupportedChartUrl(sender.url) ||
+      (sender.tab.url && !isSupportedChartUrl(sender.tab.url)) ||
+      typeof request.recordId !== 'string' ||
+      !request.recordId ||
+      !sameScannerContext(request.expectedContext, request.expectedContext)
+    ) {
+      sendResponse({
+        success: false,
+        error: 'A supported Panorama form is required.'
+      });
+      return false;
+    }
+    consumeQueueRecord(sender.tab.id, request.recordId, request.expectedContext)
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Queue update failed.'
+        })
+      );
+    return true;
+  }
+
   if (request.action === 'appendQueueRecord') {
     appendQueueRecord(request.storageKey || '', request.record || null)
       .then((record) => sendResponse({ success: true, record }))
@@ -3220,6 +3320,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'getPendingScannerScanStatus') {
+    getStorage([PENDING_SCAN_INBOX_KEY, SCANNER_CAPTURE_ERROR_KEY])
+      .then((stored) =>
+        sendResponse({
+          success: true,
+          count: Array.isArray(stored[PENDING_SCAN_INBOX_KEY])
+            ? stored[PENDING_SCAN_INBOX_KEY].length
+            : 0,
+          captureError:
+            scannerCaptureWarning || stored[SCANNER_CAPTURE_ERROR_KEY] === true
+        })
+      )
+      .catch(() => sendResponse({ success: false }));
+    return true;
+  }
   if (request.action === 'acknowledgeScannerCaptureError') {
     if (
       sender.id !== chrome.runtime.id ||
@@ -3235,30 +3350,58 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .catch(() => sendResponse({ success: false }));
     return true;
   }
-
-  if (request.action === 'drainPendingScannerScans') {
-    const tabId = sender?.tab?.id;
+  if (request.action === 'recoverPendingScannerScans') {
     if (
-      tabId === undefined ||
       sender.id !== chrome.runtime.id ||
-      sender.frameId !== 0 ||
-      !isSupportedChartUrl(sender.url) ||
-      (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))
+      sender.url !== chrome.runtime.getURL('popup.html')
     ) {
-      sendResponse({
-        success: false,
-        error: 'Pending scans can only drain to a supported chart tab'
-      });
+      sendResponse({ success: false, error: 'Extension popup required' });
       return false;
     }
-    drainPendingScansToTab(tabId)
+    recoverPendingScans()
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) =>
         sendResponse({
           success: false,
-          error: error?.message || 'Pending scan drain failed'
+          error: error?.message || 'Pending scan action failed'
         })
       );
+    return true;
+  }
+  if (request.action === 'scannerFillApplied') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.frameId !== 0 ||
+      !Number.isInteger(sender.tab?.id) ||
+      !isSupportedChartUrl(sender.url) ||
+      (sender.tab.url && !isSupportedChartUrl(sender.tab.url))
+    ) {
+      sendResponse({ success: false });
+      return false;
+    }
+    mutatePendingInbox(async () => {
+      const currentContext = await getScannerChartContext(sender.tab.id);
+      if (!sameScannerContext(currentContext, request.context)) return false;
+      const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+      const rows = Array.isArray(stored[PENDING_SCAN_INBOX_KEY])
+        ? stored[PENDING_SCAN_INBOX_KEY]
+        : [];
+      const index = rows.findIndex(
+        (row) =>
+          row.scanId === request.scanId &&
+          row.tabId === sender.tab.id &&
+          (row.deliveryState === 'accepted' ||
+            row.deliveryState === 'dispatching') &&
+          sameScannerContext(row.context, request.context)
+      );
+      if (index < 0) return false;
+      await setStorage({
+        [PENDING_SCAN_INBOX_KEY]: rows.filter((_, i) => i !== index)
+      });
+      return true;
+    })
+      .then((removed) => sendResponse({ success: true, removed }))
+      .catch(() => sendResponse({ success: false }));
     return true;
   }
 

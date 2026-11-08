@@ -145,6 +145,19 @@ function renderDaemonRouteResult(response) {
     setStatus(els.routeStatus, 'Duplicate scan ignored.', 'info');
     return;
   }
+  if (response?.command_handled) {
+    setStatus(els.routeStatus, 'Scanner command handled.', 'success');
+    return;
+  }
+  if (response?.persisted) {
+    const message = response.delivered
+      ? response.accepted
+        ? 'Scan saved and accepted by the selected Panorama form. Application is not yet confirmed; review the chart.'
+        : 'Scan saved, but the selected form did not accept it. Review held scans in popup Settings.'
+      : 'Scan saved and held for review. Open popup Settings to move held scans to Multiple Inject.';
+    setStatus(els.routeStatus, message, 'warning');
+    return;
+  }
   if (response?.locked && response.queuedToWorkflow === false) {
     setStatus(
       els.routeStatus,

@@ -102,6 +102,32 @@ and the intended chart before rescanning; a warning does not identify which
 scan failed. Scanner delivery and persistence are not crash-proof exactly-once
 operations.
 
+## Single-scan delivery and recovery
+
+Single scanner scans are saved before chart delivery. A scan is tied to the
+selected tab and the document/form context observed there. An unready chart
+keeps the scan held; VaxLink does not search other chart tabs for a destination.
+Held Single scans are never automatically replayed after unlock or page reload.
+A changed or unknown context requires deliberate recovery. Context tokens are
+random and contain no patient identifiers or chart URLs.
+
+Delivery is recorded before sending, so an uncertain acknowledgement or worker
+restart does not automatically replay a scan that may already have populated
+fields. A content-script acceptance is separate from observed application.
+The existing scheduler reports application only after a final observation confirms
+the expected agent, exact lot token and requested deferred fields in the expected form. That observation does not
+prove that a clinical record was saved. Nurse edits, a newer fill, navigation,
+or a replacement owning form cancel later writes from the old operation.
+Replacing controls within the same owning form can continue that operation.
+
+Popup Settings shows held scans and offers **Move held scans to Multiple Inject**.
+Review the intended chart first: some held scans may already have populated
+fields. Recovery moves scans into the review queue without filling a chart. Recovered rows
+require explicit use and are skipped by automatic queue and grid fills. Unparseable
+input is retained with a warning so staff can review or remove that queue row.
+Capture warnings have a separate acknowledgement; acknowledging a warning does
+not recover a scan. Delivery, storage and clinical saving remain separate steps.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama

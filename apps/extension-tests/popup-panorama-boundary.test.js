@@ -13,33 +13,50 @@ const code = source.slice(
 );
 const supported =
   'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+const ready = {
+  supported: true,
+  ready: true,
+  context: { document: 'doc', form: 'form' }
+};
 
-function harness(urls, handshake = false, probe = null) {
+function harness({
+  url = supported,
+  probe = { result: true, documentId: 'original' },
+  replies = [ready],
+  injectFails = false,
+  fillFails = false
+} = {}) {
   const messages = [];
-  let injections = 0;
-  const targets = [];
+  const scripts = [];
   const chrome = {
     runtime: { lastError: null },
     tabs: {
       query(_query, callback) {
-        const url = urls.shift();
         queueMicrotask(() => callback([{ id: 1, url }]));
       },
-      sendMessage(_id, message, _options, callback) {
-        messages.push(message.action);
-        if (message.action === 'getPanoramaIntegration')
-          return callback({ supported: handshake });
-        chrome.runtime.lastError = { message: 'Receiving end does not exist' };
-        callback();
+      sendMessage(_id, message, options, callback) {
+        messages.push({ message, options });
+        if (message.action === 'getPanoramaIntegration') {
+          const reply = replies.shift();
+          if (!reply)
+            chrome.runtime.lastError = {
+              message: 'Receiving end does not exist'
+            };
+          callback(reply);
+          chrome.runtime.lastError = null;
+          return;
+        }
+        if (fillFails) chrome.runtime.lastError = { message: 'Document gone' };
+        callback(fillFails ? undefined : { success: true });
         chrome.runtime.lastError = null;
       }
     },
     scripting: {
       executeScript(details, callback) {
-        targets.push(details.target);
+        scripts.push(details);
         if (details.func) return callback(probe ? [probe] : []);
-        injections++;
-        chrome.runtime.lastError = { message: 'No document with id' };
+        if (injectFails)
+          chrome.runtime.lastError = { message: 'Document gone' };
         callback();
         chrome.runtime.lastError = null;
       }
@@ -49,10 +66,7 @@ function harness(urls, handshake = false, probe = null) {
   vm.runInContext(code, context);
   return {
     messages,
-    targets,
-    get injections() {
-      return injections;
-    },
+    scripts,
     send: () =>
       new Promise((resolve) =>
         context.sendAutoFillMessage(1, { lot: 'test' }, resolve)
@@ -60,45 +74,56 @@ function harness(urls, handshake = false, probe = null) {
   };
 }
 
-test('missing tab URL requires a successful read-only handshake before delivery', async () => {
-  const h = harness([undefined]);
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.deepEqual(h.messages, ['getPanoramaIntegration']);
-  assert.equal(h.injections, 0);
+test('direct fill sends the observed context to the probed document', async () => {
+  const h = harness();
+  assert.equal((await h.send()).success, true);
+  assert.deepEqual(
+    h.messages.map(({ message }) => message.action),
+    ['getPanoramaIntegration', 'autoFill']
+  );
+  assert.equal(h.messages[1].options.documentId, 'original');
+  assert.equal(h.messages[1].message.expectedContext.form, 'form');
 });
 
-test('navigation to an unsupported page prevents recovery injection', async () => {
-  const h = harness([supported, 'https://example.org/chart']);
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.deepEqual(h.messages, ['autoFill']);
-  assert.equal(h.injections, 0);
+test('missing URL needs an existing ready integration and never authorizes injection', async () => {
+  const h = harness({ url: null, replies: [null] });
+  assert.equal((await h.send()).success, false);
+  assert.deepEqual(
+    h.messages.map(({ message }) => message.action),
+    ['getPanoramaIntegration']
+  );
+  assert.equal(h.scripts.length, 0);
 });
 
-test('a handshake does not authorize injection when URL metadata is unavailable', async () => {
-  const h = harness([undefined, undefined], true);
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.deepEqual(h.messages, ['getPanoramaIntegration', 'autoFill']);
-  assert.equal(h.injections, 0);
+test('recovery stays on the probed document and requires a ready handshake', async () => {
+  const h = harness({ replies: [null, ready] });
+  assert.equal((await h.send()).success, true);
+  assert.deepEqual(Array.from(h.scripts[1].target.documentIds), ['original']);
+  assert.equal(h.messages[1].options.documentId, 'original');
+  assert.equal(h.messages[2].options.documentId, 'original');
 });
 
-test('recovery fails closed if the probe has no document identity', async () => {
-  const h = harness([supported, supported], false, { result: true });
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.equal(h.injections, 0);
+test('missing document identity, unready form, and navigation fail without delivery', async () => {
+  for (const options of [
+    { probe: null },
+    { replies: [{ ...ready, ready: false }] },
+    { replies: [null], injectFails: true }
+  ]) {
+    const h = harness(options);
+    assert.equal((await h.send()).success, false);
+    assert.equal(
+      h.messages.some(({ message }) => message.action === 'autoFill'),
+      false
+    );
+  }
 });
 
-test('navigation after probe cannot inject into the replacement document', async () => {
-  const h = harness([supported, supported], false, {
-    result: true,
-    documentId: 'original-document'
-  });
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.equal(h.injections, 1);
-  assert.deepEqual(Array.from(h.targets[1].documentIds), ['original-document']);
-  assert.deepEqual(h.messages, ['autoFill']);
+test('failed delivery does not retry against another document', async () => {
+  const h = harness({ fillFails: true });
+  assert.equal((await h.send()).success, false);
+  assert.equal(h.scripts.length, 1);
+  assert.equal(
+    h.messages.filter(({ message }) => message.action === 'autoFill').length,
+    1
+  );
 });
