@@ -1,19 +1,7 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
-
-const source = readFileSync(
-  new URL('../extension/content.js', import.meta.url),
-  'utf8'
-);
-function definition(name, async = false) {
-  const match = source.match(
-    new RegExp(`^${async ? 'async ' : ''}function ${name}\\([^]*?^}`, 'm')
-  );
-  assert.ok(match, `Missing production function ${name}`);
-  return match[0];
-}
+import { createContentHarness } from './helpers/clinic-sim.js';
 
 function fixture() {
   const form = {
@@ -31,7 +19,7 @@ function fixture() {
     now: 1000,
     resolved: false
   };
-  const context = vm.createContext({
+  const globals = {
     state,
     Date: class extends Date {
       static now() {
@@ -39,7 +27,9 @@ function fixture() {
       }
     },
     document: { getElementById: () => null },
-    location: { href: 'https://panorama.test/record' },
+    location: new URL(
+      'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+    ),
     getFields: () => [{ closest: () => state.form }],
     getPanoramaAgentSelectors: () => [],
     getPanoramaMultiStepIndicatorKey: () => state.step,
@@ -85,33 +75,24 @@ function fixture() {
     clearTimeout: () => {},
     setInterval: () => 1,
     console
-  });
-  const names = [
-    'getPanoramaAutofillForm',
-    'beginPanoramaAutofill',
-    'isPanoramaAutofillCurrent',
-    'cancelPanoramaAutofill',
-    'updatePanoramaWorkflowMode',
-    'handlePanoramaAutofillUserInteraction',
-    'runPanoramaAutofill',
-    'assertPanoramaAutofillWrite',
-    'fillPanoramaMaskedTextInput',
-    'schedulePanoramaLotOrTradeSelection'
-  ];
-  vm.runInContext(
-    `let panoramaAutofillOwner = null, panoramaWritingData = null;
-    let stopPanoramaLotTradeWatcher = null, activeWorkflowMode = 'single';
-    let lastHandledScanValue = '', lastHandledScanAt = 0;
-    let adminDateTimeAutofillEnabled = false;
-    ${names.map((name) => definition(name)).join('\n')}
-    ${definition('handleHandsFreeScan', true)}
-    globalThis.api = { beginPanoramaAutofill, isPanoramaAutofillCurrent,
-      handlePanoramaAutofillUserInteraction, runPanoramaAutofill,
-      fillPanoramaMaskedTextInput, handleHandsFreeScan, schedulePanoramaLotOrTradeSelection,
-      setMode: updatePanoramaWorkflowMode };`,
-    context
-  );
-  return { ...context.api, context, state, form };
+  };
+  const { context, documentListeners, windowListeners } =
+    createContentHarness(globals);
+  // Replace only the page/catalogue dependencies for each case. Ownership and
+  // its initial state come from the complete production script above.
+  const { document, ...dependencies } = globals;
+  Object.assign(context, dependencies);
+  Object.assign(context.document, document);
+  vm.runInContext('adminDateTimeAutofillEnabled = false;', context);
+  return {
+    ...context,
+    context,
+    state,
+    form,
+    documentListeners,
+    windowListeners,
+    setMode: context.updatePanoramaWorkflowMode
+  };
 }
 
 function interaction(
@@ -129,13 +110,14 @@ function interaction(
   const target = {
     closest: (selector) => (selector.startsWith('input,') ? control : overlay)
   };
-  f.handlePanoramaAutofillUserInteraction({
-    isTrusted: trusted,
-    type,
-    target,
-    key,
-    ctrlKey
-  });
+  for (const listener of f.documentListeners.get(type))
+    listener({
+      isTrusted: trusted,
+      type,
+      target,
+      key,
+      ctrlKey
+    });
 }
 
 test('newer fills and changed clinical context invalidate the previous owner', () => {
@@ -150,6 +132,7 @@ test('newer fills and changed clinical context invalidate the previous owner', (
     (f) => {
       f.context.location.href += '/other';
     },
+    (f) => f.windowListeners.get('pagehide').forEach((listener) => listener()),
     (f) => {
       f.state.step = 'two';
     },
@@ -206,23 +189,57 @@ test('manual interaction cancels only the active form or its linked overlay', ()
   }
 });
 
-test('form replacement during focus stops the next field write', () => {
+test('page callbacks during a field write stop the next write', () => {
+  for (const boundary of ['focus', 'input', 'change']) {
+    const f = fixture();
+    const data = f.beginPanoramaAutofill({});
+    const next = { value: 'untouched' };
+    const replace = () => {
+      f.state.form = { isConnected: true };
+    };
+    const field = {
+      value: 'original',
+      focus() {
+        if (boundary === 'focus') replace();
+      },
+      dispatchEvent(event) {
+        if (event.type === boundary) replace();
+      },
+      blur() {}
+    };
+    assert.throws(
+      () =>
+        f.runPanoramaAutofill(data, () => {
+          f.fillPanoramaMaskedTextInput(field, 'new');
+          next.value = 'overwritten';
+        }),
+      /Autofill stopped/
+    );
+    assert.equal(next.value, 'untouched');
+    if (boundary === 'focus') assert.equal(field.value, 'original');
+    if (boundary === 'input') assert.equal(field.value, '');
+  }
+});
+
+test('a funding click cannot fall through to a stale radio write', () => {
   const f = fixture();
   const data = f.beginPanoramaAutofill({});
-  const field = {
-    value: 'original',
-    focus() {
+  const box = {
+    click() {
       f.state.form = { isConnected: true };
     }
   };
+  const radio = {
+    checked: false,
+    closest: () => ({ querySelector: () => box })
+  };
+  f.context.document.querySelector = () => radio;
   assert.throws(
     () =>
-      f.runPanoramaAutofill(data, () =>
-        f.fillPanoramaMaskedTextInput(field, 'new')
-      ),
+      f.runPanoramaAutofill(data, () => f.setPanoramaFundedRadioValue('PF')),
     /Autofill stopped/
   );
-  assert.equal(field.value, 'original');
+  assert.equal(radio.checked, false);
 });
 
 test('a scan lookup resolving after manual takeover cannot start a fill', async () => {

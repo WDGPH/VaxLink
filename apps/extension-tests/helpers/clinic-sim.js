@@ -136,6 +136,56 @@ const BACKGROUND_PATH = path.resolve(
 );
 const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
+// Load the real content scripts with the same VM approach as the background.
+// Startup stays before DOM readiness and the initial settings response.
+export function createContentHarness(globals = {}) {
+  const documentListeners = new Map();
+  const windowListeners = new Map();
+  const location =
+    globals.location ||
+    new URL(
+      'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+    );
+  const window = {
+    location,
+    addEventListener(type, callback) {
+      if (!windowListeners.has(type)) windowListeners.set(type, []);
+      windowListeners.get(type).push(callback);
+    }
+  };
+  window.top = window.self = window;
+  const context = vm.createContext({
+    console,
+    crypto: globalThis.crypto,
+    ...globals,
+    location,
+    window,
+    document: {
+      readyState: 'loading',
+      ...globals.document,
+      addEventListener(type, callback) {
+        if (!documentListeners.has(type)) documentListeners.set(type, []);
+        documentListeners.get(type).push(callback);
+      }
+    },
+    chrome: {
+      runtime: { onMessage: { addListener() {} } },
+      storage: { local: { get() {} }, onChanged: { addListener() {} } }
+    }
+  });
+  const manifest = JSON.parse(
+    readFileSync(path.join(BACKGROUND_DIR, 'manifest.json'), 'utf8')
+  );
+  for (const file of manifest.content_scripts[0].js) {
+    vm.runInContext(
+      readFileSync(path.join(BACKGROUND_DIR, file), 'utf8'),
+      context,
+      { filename: file }
+    );
+  }
+  return { context, documentListeners, windowListeners };
+}
+
 export function makeTestNvcBundle(code = 'TESTLOT') {
   return {
     resourceType: 'Bundle',

@@ -1195,7 +1195,6 @@ function fillSelectField(field, value) {
       label.setAttribute('title', matched.text);
     }
   }
-  assertPanoramaAutofillWrite();
   field.blur();
   return true;
 }
@@ -2109,7 +2108,6 @@ function setPanoramaFundedRadioValue(value) {
       icon.classList.add('ui-icon-bullet');
     }
   }
-  assertPanoramaAutofillWrite();
   radio.dispatchEvent(new Event('change', { bubbles: true }));
   vlog('VaxLink: funded radio set to', desired);
   return 'clicked';
