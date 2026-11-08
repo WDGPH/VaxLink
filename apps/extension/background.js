@@ -81,6 +81,7 @@ const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
 const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
+const QUEUE_REVIEW_NOTICE_KEY = 'vaxlink_queue_review_notice_v1';
 const PENDING_SCAN_INBOX_LIMIT = 250;
 const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
@@ -148,6 +149,7 @@ ensureActionIcon();
 initializeNVCSync();
 let queueBadgeCount = 0;
 let scannerCaptureWarning = false;
+let queueReviewWarning;
 let captureWarningGeneration = 0;
 let captureWarningWrites = Promise.resolve();
 
@@ -195,14 +197,15 @@ function ensureActionIcon() {
 
 function renderQueueBadge() {
   chrome.action.setBadgeText({
-    text: scannerCaptureWarning
-      ? '!'
-      : queueBadgeCount > 0
-        ? String(queueBadgeCount)
-        : ''
+    text:
+      scannerCaptureWarning || queueReviewWarning
+        ? '!'
+        : queueBadgeCount > 0
+          ? String(queueBadgeCount)
+          : ''
   });
   chrome.action.setBadgeBackgroundColor({
-    color: scannerCaptureWarning ? '#b91c1c' : BADGE_COLOR
+    color: scannerCaptureWarning || queueReviewWarning ? '#b91c1c' : BADGE_COLOR
   });
 }
 
@@ -238,18 +241,28 @@ function acknowledgeCaptureWarning() {
 function initQueueBadge() {
   const generation = captureWarningGeneration;
   chrome.storage.local.get(
-    [MULTIPLE_INJECT_QUEUE_KEY, SCANNER_CAPTURE_ERROR_KEY],
+    [
+      MULTIPLE_INJECT_QUEUE_KEY,
+      SCANNER_CAPTURE_ERROR_KEY,
+      QUEUE_REVIEW_NOTICE_KEY
+    ],
     (stored) => {
       if (
         generation === captureWarningGeneration &&
         stored?.[SCANNER_CAPTURE_ERROR_KEY] === true
       )
         scannerCaptureWarning = true;
+      if (queueReviewWarning === undefined)
+        queueReviewWarning = !!stored?.[QUEUE_REVIEW_NOTICE_KEY];
       updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
     }
   );
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (QUEUE_REVIEW_NOTICE_KEY in changes) {
+      queueReviewWarning = !!changes[QUEUE_REVIEW_NOTICE_KEY].newValue;
+      renderQueueBadge();
+    }
     if (MULTIPLE_INJECT_QUEUE_KEY in changes)
       updateQueueBadge(changes[MULTIPLE_INJECT_QUEUE_KEY].newValue);
   });
@@ -608,7 +621,10 @@ function consumeQueueRecord(tabId, recordId, expectedContext, operationId) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      const stored = await getStorage([MULTIPLE_INJECT_QUEUE_KEY]);
+      const stored = await getStorage([
+        MULTIPLE_INJECT_QUEUE_KEY,
+        QUEUE_REVIEW_NOTICE_KEY
+      ]);
       const rows = Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
         ? [...stored[MULTIPLE_INJECT_QUEUE_KEY]]
         : [];
@@ -626,16 +642,62 @@ function consumeQueueRecord(tabId, recordId, expectedContext, operationId) {
       ) {
         throw new Error('Panorama form changed.');
       }
+      // Save with the queue update: the page may disappear before confirming.
+      // An earlier unresolved use stays for manual review, even if this use succeeds.
+      const noticeToken = crypto.randomUUID();
+      const reviewToken = stored[QUEUE_REVIEW_NOTICE_KEY] ? null : noticeToken;
+      const updates = { [QUEUE_REVIEW_NOTICE_KEY]: noticeToken };
       if (remaining !== null) {
         if (remaining > 1)
           rows[index] = { ...record, remaining_doses: remaining - 1 };
         else rows.splice(index, 1);
-        await setStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: rows });
+        updates[MULTIPLE_INJECT_QUEUE_KEY] = rows;
       }
-      return { record, queueSizeAfter: rows.length };
+      await setStorage(updates);
+      return { record, queueSizeAfter: rows.length, reviewToken };
     });
   scannerQueueWriteQueue = result;
   return result;
+}
+
+function clearQueueReviewNotice(
+  reviewToken,
+  tabId = null,
+  context = null,
+  operationId = null
+) {
+  const result = scannerQueueWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const stored = await getStorage([QUEUE_REVIEW_NOTICE_KEY]);
+      if (stored[QUEUE_REVIEW_NOTICE_KEY] !== reviewToken)
+        return { cleared: false };
+      if (
+        tabId !== null &&
+        !sameScannerContext(
+          context,
+          await getScannerChartContext(tabId, operationId)
+        )
+      )
+        return { cleared: false };
+      await setStorage({ [QUEUE_REVIEW_NOTICE_KEY]: null });
+      return { cleared: true };
+    });
+  scannerQueueWriteQueue = result;
+  return result;
+}
+
+function isQueueFormRequest(request, sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.frameId === 0 &&
+    Number.isInteger(sender.tab?.id) &&
+    isSupportedChartUrl(sender.url) &&
+    (!sender.tab.url || isSupportedChartUrl(sender.tab.url)) &&
+    typeof request.operationId === 'string' &&
+    !!request.operationId.trim() &&
+    sameScannerContext(request.expectedContext, request.expectedContext)
+  );
 }
 
 function queryTabs(queryInfo) {
@@ -3272,16 +3334,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'consumeQueueRecord') {
     if (
-      sender.id !== chrome.runtime.id ||
-      sender.frameId !== 0 ||
-      !Number.isInteger(sender.tab?.id) ||
-      !isSupportedChartUrl(sender.url) ||
-      (sender.tab.url && !isSupportedChartUrl(sender.tab.url)) ||
+      !isQueueFormRequest(request, sender) ||
       typeof request.recordId !== 'string' ||
-      !request.recordId ||
-      typeof request.operationId !== 'string' ||
-      !request.operationId.trim() ||
-      !sameScannerContext(request.expectedContext, request.expectedContext)
+      !request.recordId
     ) {
       sendResponse({
         success: false,
@@ -3302,6 +3357,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: error?.message || 'Queue update failed.'
         })
       );
+    return true;
+  }
+
+  if (
+    request.action === 'confirmQueueUse' ||
+    request.action === 'acknowledgeQueueReview'
+  ) {
+    const automatic = request.action === 'confirmQueueUse';
+    const allowed = automatic
+      ? isQueueFormRequest(request, sender)
+      : sender.id === chrome.runtime.id &&
+        sender.url === chrome.runtime.getURL('popup.html');
+    if (
+      !allowed ||
+      typeof request.reviewToken !== 'string' ||
+      !request.reviewToken
+    ) {
+      sendResponse({ success: false });
+      return false;
+    }
+    clearQueueReviewNotice(
+      request.reviewToken,
+      automatic ? sender.tab.id : null,
+      request.expectedContext,
+      request.operationId
+    )
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch(() => sendResponse({ success: false }));
     return true;
   }
 

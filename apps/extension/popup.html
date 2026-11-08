@@ -757,6 +757,12 @@
         gap: 12px;
       }
 
+      #queueReviewNotice {
+        margin-bottom: 12px;
+        border-color: #f4cda5;
+        background: #fff7ed;
+      }
+
       .settings-card {
         padding: 10px 11px;
         border-radius: 16px;
@@ -1087,6 +1093,22 @@
           </div>
         </div>
         <div class="content">
+          <div
+            id="queueReviewNotice"
+            class="settings-card"
+            role="status"
+            hidden
+          >
+            <div class="result-heading">Review chart and queue</div>
+            <p class="settings-hint">
+              A queue use was not fully confirmed. The queue may already have
+              changed. Review the chart and queue before continuing.
+              Acknowledging only dismisses this notice.
+            </p>
+            <button id="acknowledgeQueueReviewBtn" type="button">
+              I've reviewed the chart and queue
+            </button>
+          </div>
           <div id="settingsPanel" class="settings-panel" hidden>
             <div class="settings-card">
               <div class="result-heading">Data Tools</div>

@@ -442,7 +442,16 @@ for (const changed of [false, true]) {
     let applied = 0;
     const notices = [];
     const events = [];
+    const confirmations = [];
     const context = vm.createContext({
+      chrome: {
+        runtime: {
+          sendMessage: (request, callback) => {
+            confirmations.push(request);
+            callback();
+          }
+        }
+      },
       isPanoramaFormVerified: () => verified,
       consumeQueueRecordAfterDeferredAutofill: () => {
         consumes++;
@@ -468,13 +477,16 @@ for (const changed of [false, true]) {
     // A successful reply acknowledges a storage operation that already finished.
     finishConsume({
       record: { id: 'used', expiry_flag: 'valid' },
-      queueSizeAfter: 0
+      queueSizeAfter: 0,
+      reviewToken: 'notice'
     });
     await completing;
     assert.equal(applied, changed ? 0 : 1);
     assert.equal(notices.length, 1);
     assert.equal(notices[0]._queueReviewRequired === true, changed);
     assert.equal(events.length, changed ? 0 : 1);
+    assert.equal(confirmations.length, changed ? 0 : 1);
+    if (!changed) assert.equal(confirmations[0].action, 'confirmQueueUse');
     if (changed)
       assert.deepEqual(Object.keys(notices[0]), ['_queueReviewRequired']);
   });

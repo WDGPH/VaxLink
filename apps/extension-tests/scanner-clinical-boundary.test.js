@@ -452,3 +452,147 @@ test('verified duplicate acknowledgement removes the new pending scan', async ()
   assert.equal(result.held, false);
   assert.equal(h.storageData.get(key).length, 0);
 });
+
+const reviewKey = 'vaxlink_queue_review_notice_v1';
+const consumeRequest = {
+  action: 'consumeQueueRecord',
+  recordId: 'vial',
+  expectedContext: context,
+  operationId: 'operation-a'
+};
+const confirmRequest = (reviewToken) => ({
+  action: 'confirmQueueUse',
+  reviewToken,
+  expectedContext: context,
+  operationId: 'operation-a'
+});
+
+test('unconfirmed queue use survives navigation and restart without replay or restoration', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const h = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [tab],
+    tabResponse: handshake,
+    storage: { [queue]: [{ id: 'vial', remaining_doses: 1 }] }
+  });
+  const consumed = await h.sendMessage(consumeRequest, chart);
+  assert.equal(consumed.success, true);
+  assert.equal(h.storageData.get(queue).length, 0);
+  assert.equal(typeof h.storageData.get(reviewKey), 'string');
+  assert.equal(h.getBadgeText(), '!');
+  const restarted = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [],
+    storage: Object.fromEntries(h.storageData)
+  });
+  const confirmation = await restarted.sendMessage(
+    confirmRequest(consumed.reviewToken),
+    chart
+  );
+  assert.equal(confirmation.cleared, false);
+  assert.equal(restarted.getBadgeText(), '!');
+  assert.equal(restarted.storageData.get(queue).length, 0);
+  assert.equal(restarted.tabMessages.length, 0);
+  const acknowledged = await restarted.sendMessage(
+    {
+      action: 'acknowledgeQueueReview',
+      reviewToken: consumed.reviewToken
+    },
+    popup
+  );
+  assert.equal(acknowledged.cleared, true);
+  assert.equal(restarted.getBadgeText(), '');
+  assert.equal(restarted.storageData.get(queue).length, 0);
+  assert.equal(restarted.tabMessages.length, 0);
+});
+
+test('verified completion clears its own notice without another queue mutation', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  let verified = true;
+  const h = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [tab],
+    tabResponse: () => ({ ...handshake, operationVerified: verified }),
+    storage: { [queue]: [{ id: 'vial', remaining_doses: 3 }] }
+  });
+  const first = await h.sendMessage(consumeRequest, chart);
+  verified = false;
+  assert.equal(
+    (await h.sendMessage(confirmRequest(first.reviewToken), chart)).cleared,
+    false
+  );
+  assert.equal(h.getBadgeText(), '!');
+  verified = true;
+  assert.equal(
+    (await h.sendMessage(confirmRequest(first.reviewToken), chart)).cleared,
+    true
+  );
+  assert.equal(h.storageData.get(reviewKey), null);
+  assert.equal(h.storageData.get(queue)[0].remaining_doses, 2);
+  assert.equal(h.getBadgeText(), '1');
+});
+
+test('overlapping uses and stale acknowledgements preserve the latest review notice', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const h = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [tab],
+    tabResponse: handshake,
+    storage: { [queue]: [{ id: 'vial', remaining_doses: 3 }] }
+  });
+  const first = await h.sendMessage(consumeRequest, chart);
+  const second = await h.sendMessage(consumeRequest, chart);
+  assert.equal(second.reviewToken, null);
+  assert.notEqual(h.storageData.get(reviewKey), first.reviewToken);
+  assert.equal(
+    (await h.sendMessage(confirmRequest(first.reviewToken), chart)).cleared,
+    false
+  );
+  assert.equal(
+    (
+      await h.sendMessage(
+        { action: 'acknowledgeQueueReview', reviewToken: first.reviewToken },
+        popup
+      )
+    ).cleared,
+    false
+  );
+  assert.equal(h.getBadgeText(), '!');
+  const latest = h.storageData.get(reviewKey);
+  assert.equal(
+    (
+      await h.sendMessage(
+        { action: 'acknowledgeQueueReview', reviewToken: latest },
+        popup
+      )
+    ).cleared,
+    true
+  );
+  assert.equal(h.storageData.get(queue)[0].remaining_doses, 1);
+});
+
+test('failed notice persistence prevents consumption; failed acknowledgement retains the warning', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const blocked = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [tab],
+    tabResponse: handshake,
+    storage: { [queue]: [{ id: 'vial', remaining_doses: 1 }] },
+    failStorageSet: (values) => reviewKey in values
+  });
+  assert.equal(
+    (await blocked.sendMessage(consumeRequest, chart)).success,
+    false
+  );
+  assert.equal(blocked.storageData.get(queue).length, 1);
+  const retained = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [reviewKey]: 'notice', [queue]: [] },
+    failStorageSet: (values) => reviewKey in values
+  });
+  assert.equal(
+    (
+      await retained.sendMessage(
+        { action: 'acknowledgeQueueReview', reviewToken: 'notice' },
+        popup
+      )
+    ).success,
+    false
+  );
+  assert.equal(retained.storageData.get(reviewKey), 'notice');
+  assert.equal(retained.getBadgeText(), '!');
+});

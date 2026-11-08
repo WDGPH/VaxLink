@@ -86,6 +86,7 @@ const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
 const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const QUEUE_REVIEW_NOTICE_KEY = 'vaxlink_queue_review_notice_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -203,6 +204,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     exportFilenamePrefix: 'vaxlink-inventory'
   });
 
+  initQueueReviewNotice();
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
   renderMultipleModeCount(multipleInjectManager.count);
   await loadWorkflowMode();
@@ -526,6 +528,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPendingScannerRecovery();
   loadNVCStatus();
 });
+
+function initQueueReviewNotice() {
+  const notice = document.getElementById('queueReviewNotice');
+  const acknowledge = document.getElementById('acknowledgeQueueReviewBtn');
+  if (!notice || !acknowledge) return;
+  let token;
+  const render = (value) => {
+    token = value;
+    notice.hidden = !token;
+  };
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && QUEUE_REVIEW_NOTICE_KEY in changes)
+      render(changes[QUEUE_REVIEW_NOTICE_KEY].newValue);
+  });
+  void getLocalStorage([QUEUE_REVIEW_NOTICE_KEY])
+    .then((stored) => {
+      if (token === undefined) render(stored[QUEUE_REVIEW_NOTICE_KEY]);
+    })
+    .catch(() =>
+      writeOutput('Queue review status could not be loaded.', 'error')
+    );
+  acknowledge.addEventListener('click', () => {
+    const acknowledgedToken = token;
+    acknowledge.disabled = true;
+    chrome.runtime.sendMessage(
+      { action: 'acknowledgeQueueReview', reviewToken: acknowledgedToken },
+      (response) => {
+        acknowledge.disabled = false;
+        if (chrome.runtime.lastError || !response?.success) {
+          writeOutput(
+            'The review notice could not be acknowledged. Try again.',
+            'error'
+          );
+        } else if (response.cleared && token === acknowledgedToken) {
+          render(null);
+        }
+      }
+    );
+  });
+}
 
 function initPendingScannerRecovery() {
   const summary = document.getElementById('pendingScannerSummary');

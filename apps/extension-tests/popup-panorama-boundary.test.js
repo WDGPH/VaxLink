@@ -127,3 +127,69 @@ test('failed delivery does not retry against another document', async () => {
     1
   );
 });
+
+test('persistent queue review is visible outside Settings and stale acknowledgements cannot hide it', async () => {
+  const reviewKey = 'vaxlink_queue_review_notice_v1';
+  const notice = { hidden: true };
+  let acknowledgeClick;
+  const acknowledge = {
+    addEventListener: (_type, fn) => {
+      acknowledgeClick = fn;
+    }
+  };
+  let changed;
+  let reply;
+  const requests = [];
+  const errors = [];
+  const context = vm.createContext({
+    QUEUE_REVIEW_NOTICE_KEY: reviewKey,
+    document: {
+      getElementById: (id) =>
+        id === 'queueReviewNotice' ? notice : acknowledge
+    },
+    getLocalStorage: async () => ({ [reviewKey]: 'first' }),
+    chrome: {
+      storage: {
+        onChanged: {
+          addListener: (fn) => {
+            changed = fn;
+          }
+        }
+      },
+      runtime: {
+        sendMessage: (request, callback) => {
+          requests.push(request);
+          reply = callback;
+        }
+      }
+    },
+    writeOutput: (message) => errors.push(message)
+  });
+  const init = source.match(/^function initQueueReviewNotice\([^]*?^}/m)[0];
+  vm.runInContext(init, context);
+  context.initQueueReviewNotice();
+  await Promise.resolve();
+  assert.equal(notice.hidden, false);
+  acknowledgeClick();
+  assert.equal(requests[0].reviewToken, 'first');
+  changed({ [reviewKey]: { newValue: 'second' } }, 'local');
+  reply({ success: true, cleared: true });
+  assert.equal(notice.hidden, false);
+  acknowledgeClick();
+  reply({ success: false });
+  assert.equal(notice.hidden, false);
+  assert.equal(errors.length, 1);
+  acknowledgeClick();
+  reply({ success: true, cleared: true });
+  assert.equal(notice.hidden, true);
+  assert.ok(
+    requests.every((request) => request.action === 'acknowledgeQueueReview')
+  );
+  const html = readFileSync(
+    new URL('../extension/popup.html', import.meta.url),
+    'utf8'
+  );
+  assert.ok(
+    html.indexOf('id="queueReviewNotice"') < html.indexOf('id="settingsPanel"')
+  );
+});

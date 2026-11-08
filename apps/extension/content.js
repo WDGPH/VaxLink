@@ -3378,7 +3378,7 @@ async function consumeQueueRecordAfterDeferredAutofill(
     expiryFlag
   });
 
-  return { record, queueSizeAfter: queueSizeAfter };
+  return { record, queueSizeAfter, reviewToken: response.reviewToken };
 }
 
 async function completePanoramaAutofill(data) {
@@ -3415,6 +3415,19 @@ async function completePanoramaAutofill(data) {
           record.expiry_flag ||
           getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
       });
+      if (consumed.reviewToken) {
+        chrome.runtime.sendMessage(
+          {
+            action: 'confirmQueueUse',
+            reviewToken: consumed.reviewToken,
+            operationId: operation.id,
+            expectedContext: operation.context
+          },
+          () => {
+            void chrome.runtime.lastError;
+          }
+        );
+      }
     }
     reportPanoramaApplied(operation);
     showVaxlinkToast(data);
