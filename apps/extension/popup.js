@@ -522,6 +522,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   loadNVCStatus();
+  void renderHeldScannerScans();
 });
 
 function handleRuntimeMessage(request) {
@@ -539,7 +540,57 @@ function handleRuntimeMessage(request) {
   return false;
 }
 
+async function renderHeldScannerScans() {
+  const host = document.getElementById('heldScannerScans');
+  const list = document.getElementById('heldScannerScanList');
+  if (!host || !list) return;
+  try {
+    const result = await sendRuntimeMessage({ action: 'getHeldScannerScans' });
+    if (!result?.success) return;
+    host.hidden = !result.scans.length;
+    document.getElementById('heldScannerScanCount').textContent =
+      `Held scanner scans (${result.scans.length})`;
+    list.replaceChildren();
+    for (const scan of result.scans) {
+      const row = document.createElement('div');
+      const label = document.createElement('p');
+      label.textContent = scan.capturedAt || 'Capture time unknown';
+      const barcode = document.createElement('textarea');
+      barcode.readOnly = true;
+      barcode.value = scan.rawText || '';
+      barcode.setAttribute(
+        'aria-label',
+        'Held barcode; select and copy for manual input'
+      );
+      const discard = document.createElement('button');
+      discard.textContent = 'Discard held scan';
+      discard.addEventListener('click', async () => {
+        discard.disabled = true;
+        try {
+          const result = await sendRuntimeMessage({
+            action: 'discardHeldScannerScan',
+            scan
+          });
+          if (!result?.success)
+            throw new Error(result?.error || 'Could not discard scan');
+          await renderHeldScannerScans();
+        } catch (error) {
+          writeOutput(error.message, 'error');
+        } finally {
+          discard.disabled = false;
+        }
+      });
+      row.append(label, barcode, discard);
+      list.append(row);
+    }
+  } catch (error) {
+    writeOutput(error.message, 'error');
+  }
+}
+
 function handlePopupStorageChanged(changes, area) {
+  if (area === 'local' && changes.vaxlink_pending_scan_inbox_v1)
+    void renderHeldScannerScans();
   if (area !== 'local' || !(MULTIPLE_INJECT_QUEUE_KEY in changes)) return;
   const rows = Array.isArray(changes[MULTIPLE_INJECT_QUEUE_KEY]?.newValue)
     ? changes[MULTIPLE_INJECT_QUEUE_KEY].newValue

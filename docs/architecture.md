@@ -19,7 +19,8 @@ extension events and can stop it when idle. It coordinates:
 - Loading, indexing, and refreshing the vaccine catalogue (NVC).
 - Looking up a vaccine by lot and barcode product identifier (GTIN).
 - Routing scans to supported chart tabs or retaining them when delivery fails.
-- Saving pending scans, draining them to a chart, and handling queue appends in order.
+- Saving Single scans before one delivery attempt, retaining uncertain scans,
+  and handling queue appends in order.
 - Saving scanner capture warnings and analytics, and updating the icon and badge.
 - Creating the hidden scanner host and passing scanner control requests to it.
 
@@ -156,6 +157,19 @@ GS1 parsing, NVC lookup, scanner capture, queues, and inventory remain useful
 without an open chart. Staff review vaccine details before saving in Panorama.
 
 ## Pending scanner scans
+
+Single Inject saves each scan before attempting delivery once to the captured
+active tab and observed form context. Navigation, form replacement, a newer
+fill, or manual takeover invalidates that context. This detects observable
+changes; it cannot identify a patient change that preserves the same URL and
+form without a visible context change.
+
+A successful acknowledgement means the scan was handled or autofill started.
+It does not prove that later field updates completed or that Panorama saved a
+clinical record. Failed or uncertain deliveries remain held and never replay
+automatically, including after unlock. The popup lists held barcodes and capture
+times for deliberate copying into manual input or discard. Staff must check the
+chart first because an uncertain scan may already have populated fields.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan

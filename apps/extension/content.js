@@ -37,7 +37,9 @@ let lastHandledScanAt = 0;
 let audioContextRef = null;
 let expiryGuardHost = null;
 let expiryGuardRoot = null;
-let pendingScannerDrainRequested = false;
+let scannerDeliveryContext = null;
+let panoramaContextGeneration = 0;
+let lastHandledScanOwner = null;
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
@@ -168,16 +170,30 @@ function logAnalyticsEvent(eventType, payload = {}) {
   }
 }
 
-function requestPendingScannerScans() {
-  if (pendingScannerDrainRequested || !isHandsFreeSupportedPage()) return;
-  pendingScannerDrainRequested = true;
-  try {
-    chrome.runtime.sendMessage({ action: 'drainPendingScannerScans' }, () => {
-      void chrome.runtime.lastError;
-    });
-  } catch (_) {
-    // Pending scan drain is best effort.
-  }
+function getScannerDeliveryContext() {
+  scannerDeliveryContext = {
+    token: crypto.randomUUID(),
+    form: getPanoramaAutofillForm(),
+    url: location.href,
+    step: getPanoramaMultiStepIndicatorKey(),
+    mode: activeWorkflowMode,
+    generation: panoramaContextGeneration
+  };
+  return scannerDeliveryContext.form ? scannerDeliveryContext.token : null;
+}
+
+function isScannerDeliveryContextCurrent(token) {
+  const context = scannerDeliveryContext;
+  return (
+    !!token &&
+    context?.token === token &&
+    context.form?.isConnected &&
+    context.form === getPanoramaAutofillForm() &&
+    context.url === location.href &&
+    context.step === getPanoramaMultiStepIndicatorKey() &&
+    context.mode === activeWorkflowMode &&
+    context.generation === panoramaContextGeneration
+  );
 }
 
 function setupMessageListener() {
@@ -189,7 +205,10 @@ function setupMessageListener() {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'getPanoramaIntegration') {
-      sendResponse({ supported: isHandsFreeSupportedPage() });
+      sendResponse({
+        supported: isHandsFreeSupportedPage(),
+        contextToken: getScannerDeliveryContext()
+      });
       return true;
     }
     if (request.action === 'vaxlinkScanCaptured') {
@@ -198,6 +217,14 @@ function setupMessageListener() {
       }
       if (!isHandsFreeSupportedPage()) {
         sendResponse({ success: false, error: 'Unsupported chart page' });
+        return true;
+      }
+      if (!isScannerDeliveryContextCurrent(request.contextToken)) {
+        sendResponse({
+          accepted: false,
+          success: false,
+          error: 'Chart context changed; scan held in VaxLink'
+        });
         return true;
       }
       Promise.resolve(
@@ -560,7 +587,12 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   });
 
   const now = Date.now();
-  if (trimmed === lastHandledScanValue && now - lastHandledScanAt < 1500) {
+  if (
+    trimmed === lastHandledScanValue &&
+    now - lastHandledScanAt < 1500 &&
+    (activeWorkflowMode !== 'single' ||
+      isPanoramaAutofillCurrent({ _vaxlinkOwner: lastHandledScanOwner }))
+  ) {
     return {
       accepted: true,
       success: true,
@@ -568,8 +600,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       duplicate_ignored: true
     };
   }
-  lastHandledScanValue = trimmed;
-  lastHandledScanAt = now;
+  if (activeWorkflowMode !== 'single') {
+    lastHandledScanValue = trimmed;
+    lastHandledScanAt = now;
+  }
   const fillData =
     activeWorkflowMode === 'single' ? beginPanoramaAutofill({}) : null;
 
@@ -783,6 +817,11 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   const autofillResult = autoFillPanorama(parsed);
   const success = isAutofillSuccess(autofillResult);
   const pending = isAutofillPending(autofillResult);
+  if (success || pending) {
+    lastHandledScanValue = trimmed;
+    lastHandledScanAt = Date.now();
+    lastHandledScanOwner = parsed._vaxlinkOwner;
+  }
   logAnalyticsEvent('autofill_result', {
     workflow: activeWorkflowMode,
     source,
@@ -868,7 +907,6 @@ function initHandsFreeScanner() {
       reasonConsentAutofillEnabled =
         normalizeReasonConsentAutofillSetting(stored);
       audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
-      requestPendingScannerScans();
       vlog('active workflow mode', activeWorkflowMode);
 
       // On Panorama SPA navigations the page is already fully loaded when this
@@ -2414,6 +2452,7 @@ function updatePanoramaWorkflowMode(mode) {
 }
 
 function cancelPanoramaAutofill() {
+  panoramaContextGeneration += 1;
   if (panoramaAutofillOwner) panoramaAutofillOwner.cancelled = true;
   if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
 }
