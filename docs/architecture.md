@@ -109,6 +109,9 @@ it in a queue.
 Queue appends, popup edits, HUD removals, and dose consumption share the
 background writer. Each change reads the latest rows after earlier writes finish,
 so it cannot overwrite a scan appended while another context was editing.
+Only the extension popup and supported Panorama main frames can request these
+edits. Mutation messages require record arrays for adds and IDs for targeted
+changes.
 
 ## NVC catalogue readiness and refresh
 

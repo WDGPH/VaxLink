@@ -16,6 +16,8 @@ const code = source.slice(
   source.indexOf('\nfunction autoFillPanorama(')
 );
 const key = 'multiple_inject_queue_v1';
+const chartUrl =
+  'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
 
 test('one deferred use consumes once, distinct uses consume again, and unknown counts remain unlimited', async () => {
   let release;
@@ -39,12 +41,20 @@ test('one deferred use consumes once, distinct uses consume again, and unknown c
   });
   const context = vm.createContext({
     mutateQueueViaBackground: (storageKey, operation, payload) =>
-      harness.sendMessage({
-        action: 'mutateQueue',
-        storageKey,
-        operation,
-        payload
-      }),
+      harness.sendMessage(
+        {
+          action: 'mutateQueue',
+          storageKey,
+          operation,
+          payload
+        },
+        {
+          id: 'vaxlink-test',
+          frameId: 0,
+          tab: { id: 44, url: chartUrl },
+          url: chartUrl
+        }
+      ),
     isPanoramaAutofillCurrent: () => true,
     getExpiryStatus: () => ({ flag: 'valid' }),
     logAnalyticsEvent() {},

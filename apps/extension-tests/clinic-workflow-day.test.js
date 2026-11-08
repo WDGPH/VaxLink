@@ -41,7 +41,12 @@ function installBrowserGlobals() {
     runtime: {
       lastError: null,
       sendMessage: (message, cb) => {
-        void queueHarness.sendMessage(message).then(cb);
+        void queueHarness
+          .sendMessage(message, {
+            id: 'vaxlink-test',
+            url: 'chrome-extension://vaxlink-test/popup.html'
+          })
+          .then(cb);
       }
     },
     storage: {

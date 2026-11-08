@@ -19,6 +19,10 @@ import {
 } from './helpers/clinic-sim.js';
 
 const QUEUE_KEY = 'multiple_inject_queue_v1';
+const popupSender = {
+  id: 'vaxlink-test',
+  url: 'chrome-extension://vaxlink-test/popup.html'
+};
 
 function installBrowserGlobals() {
   const harness = createBackgroundHarness(makeTestNvcBundle());
@@ -27,7 +31,7 @@ function installBrowserGlobals() {
     runtime: {
       lastError: null,
       sendMessage: (message, cb) => {
-        void harness.sendMessage(message).then(cb);
+        void harness.sendMessage(message, popupSender).then(cb);
       }
     },
     storage: {
@@ -178,12 +182,15 @@ test('background append waits for an in-flight queue removal', async () => {
       return true;
     }
   });
-  const remove = harness.sendMessage({
-    action: 'mutateQueue',
-    storageKey: QUEUE_KEY,
-    operation: 'remove',
-    payload: { id: 'a' }
-  });
+  const remove = harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'remove',
+      payload: { id: 'a' }
+    },
+    popupSender
+  );
   await pending;
   const append = harness.sendMessage({
     action: 'appendQueueRecord',
@@ -197,4 +204,105 @@ test('background append waits for an in-flight queue removal', async () => {
     Array.from(harness.storageData.get(QUEUE_KEY), (item) => item.id),
     ['new']
   );
+});
+
+test('consuming a duplicate ID changes only the first matching record', async () => {
+  for (const doses of [null, 1, 3]) {
+    const first = row('duplicate', { lot: 'first', remaining_doses: doses });
+    const second = row('duplicate', { lot: 'second', remaining_doses: 1 });
+    const harness = createBackgroundHarness(makeTestNvcBundle(), {
+      storage: { [QUEUE_KEY]: [first, second] }
+    });
+    const result = await harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey: QUEUE_KEY,
+        operation: 'consume',
+        payload: { id: 'duplicate' }
+      },
+      popupSender
+    );
+    assert.equal(result.success, true);
+    assert.equal(result.consumed.lot, 'first');
+    const saved = harness.storageData.get(QUEUE_KEY);
+    assert.deepEqual(saved.at(-1), second);
+    assert.equal(saved.length, doses === 1 ? 1 : 2);
+    if (doses === 3) assert.equal(saved[0].remaining_doses, 2);
+    if (doses === null) assert.deepEqual(saved[0], first);
+  }
+});
+
+test('only the extension popup and supported top-level chart can change a queue', async () => {
+  const url =
+    'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+  const chartSender = {
+    id: 'vaxlink-test',
+    frameId: 0,
+    url,
+    tab: { id: 44, url }
+  };
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  const request = {
+    action: 'mutateQueue',
+    storageKey: QUEUE_KEY,
+    operation: 'clear'
+  };
+  const original = [row('saved')];
+  for (const sender of [
+    { ...popupSender, id: 'another-extension' },
+    { id: 'vaxlink-test' },
+    {
+      ...popupSender,
+      url: 'chrome-extension://vaxlink-test/scanner-setup.html'
+    },
+    { ...chartSender, frameId: 1 },
+    { ...chartSender, url: 'https://example.org/chart' },
+    { ...chartSender, tab: { id: 44, url: 'https://example.org/chart' } }
+  ]) {
+    harness.storageData.set(QUEUE_KEY, original);
+    assert.equal((await harness.sendMessage(request, sender)).success, false);
+    assert.equal(harness.storageData.get(QUEUE_KEY), original);
+  }
+  for (const sender of [popupSender, chartSender]) {
+    harness.storageData.set(QUEUE_KEY, original);
+    assert.equal((await harness.sendMessage(request, sender)).success, true);
+    assert.equal(harness.storageData.get(QUEUE_KEY).length, 0);
+  }
+});
+
+test('malformed queue mutations cannot change saved rows or block a later valid edit', async () => {
+  const original = [row('saved')];
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [QUEUE_KEY]: original }
+  });
+  for (const [operation, payload] of [
+    ['add', {}],
+    ['add', { records: {} }],
+    ['add', { records: [null] }],
+    ['add', { records: [{}] }],
+    ['clear', null],
+    ['remove', {}],
+    ['consume', { id: '' }],
+    ['update', { id: 'saved', patch: [] }],
+    ['update', { id: 'saved', patch: { id: 'another' } }],
+    ['unknown', {}]
+  ]) {
+    const result = await harness.sendMessage(
+      { action: 'mutateQueue', storageKey: QUEUE_KEY, operation, payload },
+      popupSender
+    );
+    assert.equal(result.success, false);
+    assert.equal(harness.storageData.get(QUEUE_KEY), original);
+  }
+  const valid = await harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'update',
+      payload: { id: 'saved', patch: { lot: 'updated' } }
+    },
+    popupSender
+  );
+  assert.equal(valid.success, true);
+  assert.equal(harness.storageData.get(QUEUE_KEY)[0].lot, 'updated');
 });
