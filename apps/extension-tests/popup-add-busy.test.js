@@ -28,6 +28,7 @@ async function popup(failSave = false, mode = 'inventory') {
       'addBatchBtn',
       'testModeAddBtn',
       'singleModeBtn',
+      'multipleModeBtn',
       'output',
       'queueSaveNotice',
       'queueSaveNoticeText',
@@ -105,6 +106,9 @@ async function popup(failSave = false, mode = 'inventory') {
     background,
     pending,
     release: () => release(),
+    setSaveFailure: (value) => {
+      failSave = value;
+    },
     click: (id) => nodes[id].listeners.click()
   };
 }
@@ -171,4 +175,22 @@ test('new input survives completion and Add recovers after success or failure', 
       }
     }
   }
+});
+
+test('a later confirmed save clears the notice, while an older completion preserves a newer failure', async () => {
+  const p = await popup(true);
+  const older = p.click('addCurrentBtn');
+  await p.pending;
+  await p.click('multipleModeBtn');
+  p.nodes.testModeBarcode.value = barcode('NEXTLOT');
+  await p.click('testModeAddBtn');
+  const warning = p.nodes.queueSaveNoticeText.textContent;
+  assert.equal(p.nodes.queueSaveNotice.hidden, false);
+  p.setSaveFailure(false);
+  p.release();
+  await older;
+  assert.equal(p.nodes.queueSaveNotice.hidden, false);
+  assert.equal(p.nodes.queueSaveNoticeText.textContent, warning);
+  await p.click('testModeAddBtn');
+  assert.equal(p.nodes.queueSaveNotice.hidden, true);
 });

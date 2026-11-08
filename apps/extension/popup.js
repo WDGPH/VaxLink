@@ -69,6 +69,7 @@ let parsedData = null;
 let activeParseRequestId = 0;
 let inventoryAddInFlight = false;
 let multipleAddInFlight = false;
+let queueSaveNoticeVersion = 0;
 let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
@@ -1761,9 +1762,17 @@ async function lookupVaccineInfo(lot, gtin) {
 }
 
 function showQueueSaveFailure(message) {
+  queueSaveNoticeVersion += 1;
   // Keep save failures visible while the preview and selected mode change.
   document.getElementById('queueSaveNoticeText').textContent = message;
   document.getElementById('queueSaveNotice').hidden = false;
+}
+
+function clearQueueSaveFailure(version) {
+  // A save already in flight must not hide a failure reported after it started.
+  if (version === queueSaveNoticeVersion) {
+    document.getElementById('queueSaveNotice').hidden = true;
+  }
 }
 
 async function addPreviewScanToInventory() {
@@ -1776,12 +1785,14 @@ async function addPreviewScanToInventory() {
     return;
   }
 
+  const noticeVersion = queueSaveNoticeVersion;
   inventoryAddInFlight = true;
   setButtonBusy(addCurrentBtn, true, 'Adding...');
   try {
     const baseData = parseInputData(rawBarcode);
     const enriched = await enrichParsedData(baseData);
     await inventoryManager.add(buildQueueRecord(enriched, rawBarcode));
+    clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {
       workflow: 'inventory',
       queue: 'inventory',
@@ -1829,6 +1840,7 @@ async function addManualScanToMultipleQueue() {
     return;
   }
 
+  const noticeVersion = queueSaveNoticeVersion;
   multipleAddInFlight = true;
   setButtonBusy(testModeAddBtn, true, 'Adding...');
   try {
@@ -1839,6 +1851,7 @@ async function addManualScanToMultipleQueue() {
     const enriched = await enrichParsedData(baseData);
     const record = buildQueueRecord(enriched, rawBarcode);
     await multipleInjectManager.add(record);
+    clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {
       workflow: 'multiple',
       queue: 'multiple',
@@ -1889,6 +1902,7 @@ async function addPendingScansToInventory() {
     return;
   }
 
+  const noticeVersion = queueSaveNoticeVersion;
   inventoryAddInFlight = true;
   setButtonBusy(addBatchBtn, true, 'Adding...');
   const records = [];
@@ -1912,6 +1926,7 @@ async function addPendingScansToInventory() {
 
     if (records.length) {
       await inventoryManager.addMany(records);
+      if (!errors.length) clearQueueSaveFailure(noticeVersion);
       logAnalyticsEvent('queue_saved', {
         workflow: 'inventory',
         queue: 'inventory',
