@@ -2261,6 +2261,7 @@ async function sendAutoFillMessage(
               files: [
                 'panorama-agent-rules.js',
                 'shared/gs1-parser.js',
+                'shared/expiry-date.js',
                 'content.js'
               ]
             },

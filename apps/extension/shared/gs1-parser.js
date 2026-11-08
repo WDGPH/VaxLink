@@ -2,16 +2,20 @@
   const GS = String.fromCharCode(0x1d);
 
   function formatDate(yymmdd) {
-    if (!yymmdd || yymmdd.length !== 6) return null;
+    if (!/^\d{6}$/.test(yymmdd || '')) return null;
     const yy = yymmdd.substring(0, 2);
     const mm = yymmdd.substring(2, 4);
     let dd = yymmdd.substring(4, 6);
+    if (Number(mm) < 1 || Number(mm) > 12) return null;
     // GS1 allows day "00" meaning "last day of the month"; resolve it here so
     // downstream date math doesn't roll back into the previous month.
     if (dd === '00') {
       const lastDay = new Date(Number(`20${yy}`), Number(mm), 0).getDate();
       dd = String(lastDay).padStart(2, '0');
     }
+    const date = new Date(Number(`20${yy}`), Number(mm) - 1, Number(dd));
+    if (date.getMonth() !== Number(mm) - 1 || date.getDate() !== Number(dd))
+      return null;
     return `${mm}/${dd}/20${yy}`;
   }
 
@@ -146,6 +150,7 @@
           throw new Error('AI(17) expiry date incomplete');
         }
         data.expiry = formatDate(scan.substring(idx + 2, idx + 8));
+        if (!data.expiry) throw new Error('AI(17) expiry date is invalid');
         idx += 8;
       } else if (currentAI === '10') {
         idx += 2;
