@@ -67,6 +67,9 @@ let testModeAddBtn;
 let testModeBarcode;
 let parsedData = null;
 let activeParseRequestId = 0;
+let inventoryAddInFlight = false;
+let multipleAddInFlight = false;
+let queueSaveNoticeVersion = 0;
 let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
@@ -478,15 +481,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (addCurrentBtn) {
-    addCurrentBtn.addEventListener('click', () => {
-      addPreviewScanToInventory();
-    });
+    addCurrentBtn.addEventListener('click', () => addPreviewScanToInventory());
   }
 
   if (addBatchBtn) {
-    addBatchBtn.addEventListener('click', () => {
-      addPendingScansToInventory();
-    });
+    addBatchBtn.addEventListener('click', () => addPendingScansToInventory());
   }
 
   if (exportCsvBtn) {
@@ -520,6 +519,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       writeOutput('Inventory tray cleared.', 'info');
     });
   }
+
+  document
+    .getElementById('dismissQueueSaveNotice')
+    ?.addEventListener('click', () => {
+      document.getElementById('queueSaveNotice').hidden = true;
+    });
 
   loadNVCStatus();
   void renderHeldScannerScans();
@@ -1756,24 +1761,38 @@ async function lookupVaccineInfo(lot, gtin) {
   return sendRuntimeMessage(message);
 }
 
+function showQueueSaveFailure(message) {
+  queueSaveNoticeVersion += 1;
+  // Keep save failures visible while the preview and selected mode change.
+  document.getElementById('queueSaveNoticeText').textContent = message;
+  document.getElementById('queueSaveNotice').hidden = false;
+}
+
+function clearQueueSaveFailure(version) {
+  // A save already in flight must not hide a failure reported after it started.
+  if (version === queueSaveNoticeVersion) {
+    document.getElementById('queueSaveNotice').hidden = true;
+  }
+}
+
 async function addPreviewScanToInventory() {
+  if (inventoryAddInFlight) return;
+  const modeSnapshot = activeMode;
+  const inputSnapshot = scannedInput?.value || '';
   const rawBarcode = getPreviewBarcodeValue();
   if (!rawBarcode) {
     writeOutput('Scan a barcode first, then add it to inventory.', 'error');
     return;
   }
 
-  const requestId = ++activeParseRequestId;
+  const noticeVersion = queueSaveNoticeVersion;
+  inventoryAddInFlight = true;
   setButtonBusy(addCurrentBtn, true, 'Adding...');
   try {
     const baseData = parseInputData(rawBarcode);
     const enriched = await enrichParsedData(baseData);
-    if (requestId !== activeParseRequestId) {
-      return;
-    }
-
-    parsedData = enriched;
     await inventoryManager.add(buildQueueRecord(enriched, rawBarcode));
+    clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {
       workflow: 'inventory',
       queue: 'inventory',
@@ -1790,29 +1809,39 @@ async function addPreviewScanToInventory() {
       expiryFlag:
         enriched.expiry_flag || getExpiryStatus(enriched.inventory_expiry).flag
     });
-    removeLastPendingScanLine();
-    queueAutoParse(true);
-    writeOutput(
-      buildParsedOutputMarkup(enriched),
-      outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry))
-    );
-  } catch (error) {
-    writeOutput(`Could not add scan: ${error.message}`, 'error');
-  } finally {
-    if (requestId === activeParseRequestId) {
-      setButtonBusy(addCurrentBtn, false);
+    if (activeMode === modeSnapshot && scannedInput?.value === inputSnapshot) {
+      removeLastPendingScanLine();
+      activeParseRequestId++;
+      parsedData = null;
+      setButtonBusy(autoFillBtn, false);
+      writeOutput(
+        buildParsedOutputMarkup(enriched),
+        outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry))
+      );
+      queueAutoParse(true);
     }
+  } catch (error) {
+    showQueueSaveFailure(
+      `Inventory save not confirmed: ${error.message}. Check the tray before retrying.`
+    );
+  } finally {
+    inventoryAddInFlight = false;
+    setButtonBusy(addCurrentBtn, false);
   }
 }
 
 async function addManualScanToMultipleQueue() {
-  const rawBarcode = testModeBarcode ? testModeBarcode.value.trim() : '';
+  if (multipleAddInFlight) return;
+  const modeSnapshot = activeMode;
+  const inputSnapshot = testModeBarcode?.value || '';
+  const rawBarcode = inputSnapshot.trim();
   if (!rawBarcode) {
     writeOutput('Paste a barcode into the Manual Add field first.', 'error');
     return;
   }
 
-  const requestId = ++activeParseRequestId;
+  const noticeVersion = queueSaveNoticeVersion;
+  multipleAddInFlight = true;
   setButtonBusy(testModeAddBtn, true, 'Adding...');
   try {
     const baseData = parseInputData(rawBarcode);
@@ -1820,12 +1849,9 @@ async function addManualScanToMultipleQueue() {
       baseData.scanned_at = new Date().toISOString();
     }
     const enriched = await enrichParsedData(baseData);
-    if (requestId !== activeParseRequestId) {
-      return;
-    }
-
     const record = buildQueueRecord(enriched, rawBarcode);
     await multipleInjectManager.add(record);
+    clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {
       workflow: 'multiple',
       queue: 'multiple',
@@ -1843,23 +1869,30 @@ async function addManualScanToMultipleQueue() {
         enriched.expiry_flag ||
         getExpiryStatus(enriched.inventory_expiry || enriched.expiry).flag
     });
-    testModeBarcode.value = '';
+    const currentInput = testModeBarcode.value === inputSnapshot;
+    if (currentInput) testModeBarcode.value = '';
     const label =
       enriched.tradename ||
       enriched.generic_name ||
       enriched.lot ||
       'Unknown vaccine';
-    writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
-  } catch (error) {
-    writeOutput(`Test mode error: ${error.message}`, 'error');
-  } finally {
-    if (requestId === activeParseRequestId) {
-      setButtonBusy(testModeAddBtn, false);
+    if (activeMode === modeSnapshot && currentInput) {
+      writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
     }
+  } catch (error) {
+    showQueueSaveFailure(
+      `Multiple Inject save not confirmed: ${error.message}. Check the queue before retrying.`
+    );
+  } finally {
+    multipleAddInFlight = false;
+    setButtonBusy(testModeAddBtn, false);
   }
 }
 
 async function addPendingScansToInventory() {
+  if (inventoryAddInFlight) return;
+  const modeSnapshot = activeMode;
+  const inputSnapshot = scannedInput?.value || '';
   const lines = getPendingScanLines();
   if (!lines.length) {
     writeOutput(
@@ -1869,7 +1902,8 @@ async function addPendingScansToInventory() {
     return;
   }
 
-  const requestId = ++activeParseRequestId;
+  const noticeVersion = queueSaveNoticeVersion;
+  inventoryAddInFlight = true;
   setButtonBusy(addBatchBtn, true, 'Adding...');
   const records = [];
   let addedCount = 0;
@@ -1890,12 +1924,9 @@ async function addPendingScansToInventory() {
       }
     }
 
-    if (requestId !== activeParseRequestId) {
-      return;
-    }
-
     if (records.length) {
       await inventoryManager.addMany(records);
+      if (!errors.length) clearQueueSaveFailure(noticeVersion);
       logAnalyticsEvent('queue_saved', {
         workflow: 'inventory',
         queue: 'inventory',
@@ -1914,10 +1945,19 @@ async function addPendingScansToInventory() {
           getExpiryStatus(lastRecord?.inventory_expiry).flag
       });
     }
-    setPendingScanLines([]);
-    parsedData = lastRecord;
+    const currentInput =
+      activeMode === modeSnapshot && scannedInput?.value === inputSnapshot;
+    if (currentInput) {
+      setPendingScanLines([]);
+      activeParseRequestId++;
+      parsedData = null;
+      setButtonBusy(autoFillBtn, false);
+    }
 
     if (errors.length) {
+      showQueueSaveFailure(
+        `Inventory batch: ${errors.length} barcode(s) could not be added. ${errors.join('; ')}`
+      );
       logAnalyticsEvent('parse_error', {
         workflow: 'inventory',
         source: 'popup_batch',
@@ -1925,6 +1965,7 @@ async function addPendingScansToInventory() {
       });
     }
 
+    if (!currentInput) return;
     if (addedCount) {
       const message = errors.length
         ? `Added ${addedCount} scan(s). ${errors.length} line(s) failed.`
@@ -1933,10 +1974,13 @@ async function addPendingScansToInventory() {
     } else {
       writeOutput(errors.join('<br>') || 'No scans were added.', 'error');
     }
+  } catch (error) {
+    showQueueSaveFailure(
+      `Inventory batch save not confirmed: ${error.message}. Check the tray before retrying.`
+    );
   } finally {
-    if (requestId === activeParseRequestId) {
-      setButtonBusy(addBatchBtn, false);
-    }
+    inventoryAddInFlight = false;
+    setButtonBusy(addBatchBtn, false);
   }
 }
 
