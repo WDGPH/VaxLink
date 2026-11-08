@@ -68,6 +68,9 @@ const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
+// Keep queue and held-scan saves in order so overlapping scans cannot overwrite
+// each other. A failed save must not block the next attempt. This covers writes
+// handled here, not other pages writing directly to storage.
 let scannerQueueWriteQueue = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
 let scannerStatusWriteQueue = Promise.resolve();
@@ -642,8 +645,9 @@ function consumeQueueRecord(tabId, recordId, expectedContext, operationId) {
       ) {
         throw new Error('Panorama form changed.');
       }
-      // Save with the queue update: the page may disappear before confirming.
-      // An earlier unresolved use stays for manual review, even if this use succeeds.
+      // Save a random notice label with the queue change, so staff can find
+      // the warning if this page closes before confirming. A successful later
+      // use must not dismiss an earlier use that still needs review.
       const noticeToken = crypto.randomUUID();
       const reviewToken = stored[QUEUE_REVIEW_NOTICE_KEY] ? null : noticeToken;
       const updates = { [QUEUE_REVIEW_NOTICE_KEY]: noticeToken };
@@ -660,6 +664,9 @@ function consumeQueueRecord(tabId, recordId, expectedContext, operationId) {
   return result;
 }
 
+// Each queue use changes the notice label. An old acknowledgement cannot
+// dismiss a newer warning. Automatic dismissal also rechecks the form; staff
+// acknowledgement only dismisses the notice and never changes queue rows.
 function clearQueueReviewNotice(
   reviewToken,
   tabId = null,
@@ -1151,6 +1158,8 @@ function dispatchPendingScan(tabId, onlyScanId) {
         continue;
       const context = await getScannerChartContext(tabId);
       if (!sameScannerContext(row.context, context)) continue;
+      // Save the delivery attempt before contacting the page. If interrupted,
+      // keep the scan for review instead of sending it again automatically.
       rows[i] = { ...row, deliveryState: 'dispatching' };
       await setStorage({ [PENDING_SCAN_INBOX_KEY]: [...rows] });
       const response = await sendScanToTab(tabId, row);
@@ -1168,6 +1177,8 @@ function dispatchPendingScan(tabId, onlyScanId) {
         i--;
         continue;
       }
+      // Acceptance means the page agreed to handle this vaccine scan. Keep it
+      // saved until the same form reports that the requested fields match.
       rows[i] = {
         ...row,
         deliveryState: response?.accepted === true ? 'accepted' : 'held'
@@ -1200,6 +1211,9 @@ function recoverPendingScans() {
     if (rows.length) await setStorage({ [PENDING_SCAN_INBOX_KEY]: rows });
     while (rows.length) {
       const row = rows[0];
+      // Save the review-queue copy before removing the inbox copy. Its stable
+      // ID lets an interrupted recovery retry without adding that row twice;
+      // separate captures remain separate even when their barcodes match.
       await saveScannerScanToWorkflowQueue(
         normalizeScanEvent(row),
         'multiple',

@@ -168,6 +168,8 @@ function logAnalyticsEvent(eventType, payload = {}) {
 }
 
 // Tokens identify only this loaded document and the current form; they contain no chart data.
+// These random labels distinguish one open page and form from another. They do
+// not identify a patient; the same tab or page address can show a different chart.
 let panoramaDocumentToken = crypto.randomUUID();
 let panoramaObservedUrl = window.location.href;
 const panoramaFormTokens = new WeakMap();
@@ -185,6 +187,8 @@ function getPanoramaOwningForm() {
     (field) => field.form || field.closest('form')
   );
   const forms = new Set(owners);
+  // Fill only when all vaccine controls belong to one form. Missing or mixed
+  // ownership leaves the chart untouched instead of guessing a destination.
   return forms.size === 1 && !forms.has(null) ? [...forms][0] : null;
 }
 
@@ -208,6 +212,8 @@ function samePanoramaContext(a, b) {
   return !!a && !!b && a.document === b.document && a.form === b.form;
 }
 
+// Only the newest fill attempt may change this form. Starting another attempt
+// cancels earlier work; delayed steps must still belong to this page and form.
 function beginPanoramaOperation(scanId = null) {
   if (typeof stopPanoramaLotTradeWatcher === 'function')
     stopPanoramaLotTradeWatcher();
@@ -218,6 +224,8 @@ function beginPanoramaOperation(scanId = null) {
   return panoramaOperation;
 }
 
+// Check again after waiting or changing a field. A field change can run
+// Panorama's own code immediately and replace the form before our next step.
 function ownsPanoramaOperation(operation) {
   return (
     !!operation &&
@@ -2509,8 +2517,9 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
-// A trusted edit to the owning form means the user is taking over. Keep the
-// context token valid for unrelated page activity, including before a scan arrives.
+// Using a control in this form means the user is taking over, even while a
+// scan lookup is still running. Changes made by VaxLink itself do not count
+// as manual edits. Unrelated page activity leaves the fill running.
 function cancelPanoramaFillRetriesForManualEdit(event) {
   if (!event.isTrusted) return;
   if (
@@ -2533,8 +2542,9 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
   );
   let belongsToForm = !!control && form.contains(control);
 
-  // PrimeFaces can move a select panel outside its form. Require an explicit
-  // relationship to a form control or the matching widget ID.
+  // PrimeFaces is Panorama's form-control library. It can place an open
+  // dropdown outside the form. Count that dropdown as a takeover only when
+  // it is explicitly linked back to a control in this form.
   if (!belongsToForm) {
     const panel = target.closest(
       '.ui-selectonemenu-panel, [role="listbox"], [role="dialog"]'
@@ -2561,12 +2571,17 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
     }
   }
   if (!belongsToForm) return;
+  // Change the page label too, so a delivery already on its way cannot start
+  // the cancelled fill again when its lookup or message finally arrives.
   panoramaOperation = null;
   panoramaDocumentToken = crypto.randomUUID();
   if (typeof stopPanoramaLotTradeWatcher === 'function')
     stopPanoramaLotTradeWatcher();
 }
 
+// Compare this form with the requested vaccine, lot or product and date/time.
+// Check reason and consent when their autofill setting is on and controls exist.
+// This confirms field values, not that Panorama has saved a clinical record.
 function isPanoramaFormVerified(data, operation) {
   if (!ownsPanoramaOperation(operation)) return false;
   const candidates = getPanoramaAgentCandidates(data);
@@ -2574,6 +2589,8 @@ function isPanoramaFormVerified(data, operation) {
   const nativeAgents = agentFields.filter(
     (field) => field.tagName === 'SELECT'
   );
+  // Text beside a dropdown can be stale. Prefer the dropdown's selected
+  // option when it exists, even if the displayed label looks correct.
   const selectedAgents = nativeAgents.length ? nativeAgents : agentFields;
   if (
     !candidates.length ||
@@ -2902,9 +2919,9 @@ function schedulePanoramaLotOrTradeSelection(
     }
 
     if (stablePasses >= 2 && isPanoramaFormVerified(data, operation)) {
-      // Keep the existing corrective passes, but retain the scan until they finish.
-      // Normal attempts resume if the last pass still needs work; the original
-      // deadline bounds both retries and follow-ups.
+      // Panorama can replace fields after they first look correct. Let the
+      // two later checks finish before confirming the fill. Resume ordinary
+      // attempts if more work is needed, within the original time limit.
       followUpsPending = true;
       for (const delay of [1500, 3500]) {
         timers.push(
@@ -3392,8 +3409,9 @@ async function completePanoramaAutofill(data) {
         operation
       );
       if (!consumed) return;
-      // The writer verified the form before committing. A later change cannot
-      // undo that confirmed queue use; retain the receipt and ask for review.
+      // The queue action has already succeeded. If the form changed while we
+      // waited for the reply, ask for review. Do not treat the scan as unused
+      // or put the row back automatically.
       if (!isPanoramaFormVerified(data, operation)) {
         showVaxlinkToast({ _queueReviewRequired: true }, 12000);
         return;
@@ -3415,6 +3433,8 @@ async function completePanoramaAutofill(data) {
           record.expiry_flag ||
           getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
       });
+      // The saved notice remains unless the background can verify this form
+      // again. An older unresolved notice still requires staff review.
       if (consumed.reviewToken) {
         chrome.runtime.sendMessage(
           {

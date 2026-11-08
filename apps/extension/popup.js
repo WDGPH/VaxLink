@@ -529,6 +529,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadNVCStatus();
 });
 
+// Show the saved notice without needing the original Panorama page or open
+// Settings. It stays available until verified completion or staff review.
 function initQueueReviewNotice() {
   const notice = document.getElementById('queueReviewNotice');
   const acknowledge = document.getElementById('acknowledgeQueueReviewBtn');
@@ -556,6 +558,8 @@ function initQueueReviewNotice() {
       { action: 'acknowledgeQueueReview', reviewToken: acknowledgedToken },
       (response) => {
         acknowledge.disabled = false;
+        // A newer notice may arrive while this acknowledgement is waiting.
+        // Hide only the notice that staff actually acknowledged.
         if (chrome.runtime.lastError || !response?.success) {
           writeOutput(
             'The review notice could not be acknowledged. Try again.',

@@ -104,41 +104,61 @@ operations.
 
 ## Single-scan delivery and recovery
 
-Single scanner scans are saved before chart delivery. A scan is tied to the
-selected tab and the document/form context observed there. An unready chart
-keeps the scan held; VaxLink does not search other chart tabs for a destination.
-Held Single scans are never automatically replayed after unlock or page reload.
-A changed or unknown context requires deliberate recovery. Context tokens are
-random and contain no patient identifiers or chart URLs.
+Single scanner scans are saved locally before VaxLink sends them to the selected
+Panorama tab. Random labels distinguish the loaded page and its form; they contain
+no patient identifiers or chart URLs. Staying in the same tab is not enough to
+establish that the same chart is still open. An unready or changed form keeps the
+scan held for staff review. VaxLink does not search other chart tabs for a destination.
 
-Delivery is recorded before sending, so an uncertain acknowledgement or worker
-restart does not automatically replay a scan that may already have populated
-fields. A content-script acceptance is separate from observed application.
-Application is reported only after the scheduled corrective passes finish and a
-fresh observation confirms the expected agent, exact lot token and requested
-fields in the intended form. Unresolved work remains pending at the retry deadline.
-That observation does not prove that a clinical record was saved. Trusted edits
-of controls in the owning form or its linked PrimeFaces panels cancel later
-writes. Unrelated page interactions do not cancel the operation. A newer fill,
-navigation, or a replacement owning form also cancels later writes.
-Replacing controls within the same owning form can continue that operation.
-Before consuming a queue row, the background writer rechecks the current operation
-and its observed fields. Native agent selection takes priority over widget labels.
+The delivery stages mean different things:
+
+- **Saved:** the scan is in local storage and can be delivered or recovered.
+- **Delivery attempted:** VaxLink saves that it is about to contact the page.
+  Interrupted or uncertain attempts remain available for review.
+- **Accepted:** the page agreed to handle the scan. This does not confirm the
+  resulting field values.
+- **Verified:** the intended form shows the expected vaccine and an exact lot
+  match, or a matching product when no lot was supplied. Requested date/time
+  values are also checked. Reason and consent are checked when their autofill
+  setting is on and those controls are present. Verification follows the later
+  follow-up checks; it does not prove that staff saved a clinical record.
+
+Panorama can replace fields after they first look correct. VaxLink waits for its
+scheduled follow-up checks before reporting application. If values still cannot
+be confirmed when attempts end, the scan remains pending.
+
+Using a control in the owning form, or one of its linked PrimeFaces dropdowns,
+means the user is taking over. PrimeFaces is Panorama's form-control library.
+This stops later writes from the old fill, even if its scan lookup is still
+running. VaxLink's own changes and unrelated page activity do not count as manual
+takeover. A newer fill, navigation, or replacement of the whole form also stops
+old work. Replacing an individual control inside the same form can continue
+that fill.
+
+Before consuming a queue row, the background code rechecks the current fill and
+its observed fields. The dropdown's selected agent takes priority over text
+beside the dropdown, which can be stale. Queue saves handled by the background
+code run in order so captures and consumption do not overwrite one another.
+This ordering does not cover other pages writing directly to storage.
+
 The form check and storage write are separate operations. With the queue update,
-VaxLink saves a generic review notice containing only a random token. A red `!`
-and a notice at the top of the popup remain discoverable after navigation or a
-worker restart. Verified completion clears its own notice. Unresolved or
+VaxLink saves a review notice containing only a random label. A red `!` and a
+notice at the top of the popup remain discoverable after navigation or a restart
+of the background code. Verified completion clears its own notice. Unresolved or
 overlapping uses require staff to review the chart and queue, then acknowledge
 the notice. Acknowledgement only dismisses the notice; it does not replay scans,
 restore rows, or change dose counts.
 
-Popup Settings shows held scans and offers **Move held scans to Multiple Inject**.
-Review the intended chart first: some held scans may already have populated
-fields. Recovery moves scans into the review queue without filling a chart. Recovered rows
-require explicit use and are skipped by automatic queue and grid fills. Unparseable
-input is retained with a warning so staff can review or remove that queue row.
-Capture warnings have a separate acknowledgement; acknowledging a warning does
-not recover a scan. Delivery, storage and clinical saving remain separate steps.
+Held Single scans are never automatically replayed after unlock or page reload.
+Popup Settings offers **Move held scans to Multiple Inject** for deliberate
+recovery. Review the intended chart first: a held scan may already have populated
+fields. Recovery saves a copy in the review queue before removing it from the
+held inbox. Repeating an interrupted recovery does not add the same row twice.
+Recovered rows require explicit use and are skipped by automatic queue and grid
+fills. Unparseable input is retained with a warning so staff can review or remove
+that row. Capture warnings have a separate acknowledgement; dismissing a warning
+does not recover a scan. Delivery, local storage and clinical saving remain
+separate steps.
 
 ## Panorama autofill sequence
 
