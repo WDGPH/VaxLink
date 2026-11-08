@@ -18,10 +18,9 @@ extension events and can stop it when idle. It coordinates:
 
 - Loading, indexing, and refreshing the vaccine catalogue (NVC).
 - Looking up a vaccine by lot and barcode product identifier (GTIN).
-- Choosing the intended chart destination and checking its current form.
-- Saving held scans, recovering them for review, and handling queue appends and
-  verified consumption in order.
-- Saving review notices and analytics, and updating the extension's icon and badge.
+- Routing scans to supported chart tabs or retaining them when delivery fails.
+- Saving pending scans, draining them to a chart, and handling queue appends in order.
+- Saving scanner capture warnings and analytics, and updating the icon and badge.
 - Creating the hidden scanner host and passing scanner control requests to it.
 
 It coordinates capture but does not own the open scanner connection.
@@ -53,15 +52,15 @@ Panorama's own variables. This separation is why a page-library variable may be
 unavailable even when the page is still updating.
 
 The script receives routed scans, shows the floating VaxLink controls, and fills
-the intended immunization form. It owns form identity, cancellation on user
-takeover, field writes, follow-up attempts, and observed field verification.
+the immunization form. It handles field writes, follow-up attempts, and manual
+takeovers of the agent and lot controls.
 It reads workflow settings from local storage.
 
 ### User controls: popup and Scanner Setup
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
 scan input and preview, workflow selection, queue and inventory controls, CSV
-export, held-scan recovery, and review notices. The popup sends fill requests to
+export, and scanner status. The popup sends fill requests to
 the selected Panorama integration.
 
 `scanner-setup.html` and `scanner-setup.js` let staff choose a scanner, grant
@@ -69,8 +68,8 @@ browser permission, and request a connection or disconnection. They do not run
 the ongoing scanner reader.
 
 A hardware scan travels from the scanner worker through the hidden host to the
-background program. The background then routes it to the intended chart or
-retains it in the appropriate queue.
+background program. The background routes it to a supported chart or retains
+it in a queue.
 
 ## Shared helpers
 
@@ -88,21 +87,20 @@ retains it in the appropriate queue.
 
 ## Key storage keys
 
-| Key                                  | Writers                      | Purpose                                          |
-| ------------------------------------ | ---------------------------- | ------------------------------------------------ |
-| `multiple_inject_queue_v1`           | background + popup + content | Multiple Inject queue rows                       |
-| `inventory_scan_batch_v1`            | background + popup           | Inventory tray rows                              |
-| `vaxlink_pending_scan_inbox_v1`      | background                   | Saved Single scans awaiting completion or review |
-| `vaxlink_scanner_capture_error_v1`   | background                   | Capture warning awaiting acknowledgement         |
-| `vaxlink_queue_review_notice_v1`     | background                   | Opaque label for an unconfirmed queue use        |
-| `vaxlink_scanner_status_snapshot_v1` | background                   | Last saved scanner status and capture history    |
-| `nvc_bundle_override`                | background                   | Cached NVC catalogue                             |
-| `vaxlink_workflow_mode_v1`           | popup + content              | Current workflow mode                            |
-| `vaxlink_analytics_v1`               | background + popup           | Local event log and summaries                    |
+| Key                                  | Writers                      | Purpose                                       |
+| ------------------------------------ | ---------------------------- | --------------------------------------------- |
+| `multiple_inject_queue_v1`           | background + popup + content | Multiple Inject queue rows                    |
+| `inventory_scan_batch_v1`            | background + popup           | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`      | background                   | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`   | background                   | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1` | background                   | Last saved scanner status and capture history |
+| `nvc_bundle_override`                | background                   | Cached NVC catalogue                          |
+| `vaxlink_workflow_mode_v1`           | popup + content              | Current workflow mode                         |
+| `vaxlink_analytics_v1`               | background + popup           | Local event log and summaries                 |
 
-Queue appends and verified consumption handled by the background run in order.
-Popup and in-page queue edits still write directly to storage; re-reading the
-rows does not make all writers one coordinated operation.
+Queue appends handled by the background run in order. Popup and in-page queue
+edits still write directly to storage; re-reading the rows does not make all
+writers one coordinated operation.
 
 ## NVC catalogue readiness and refresh
 

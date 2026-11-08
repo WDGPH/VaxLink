@@ -20,6 +20,29 @@ any harness that does not discover `AGENTS.md` to read this file.
   expanding a cleanup into a larger change.
 - Keep updates brief: what changed, what matters, and what needs user input.
 
+## Change size and clinical safety
+
+- Prefer PRs under 500 changed lines. Count additions plus deletions, including
+  tests, against the PR's intended base. At 750 lines, explicitly reconsider
+  scope. Treat 1,000 lines as a soft ceiling, not a target.
+- Optimize for conceptual simplicity. Split work by understandable behavior,
+  not just line count. Do not weaken an essential clinical safety guarantee
+  solely to meet a numeric target.
+- State the concrete failure and the smallest safety rule that prevents it
+  before adding machinery. Prefer direct JavaScript and a few clear invariants
+  over speculative abstractions, generalized transaction protocols, or broad
+  diagnostic systems.
+- Add persistent warnings, recovery states, or completion-verification machinery
+  only for a demonstrated failure with a clear benefit. Acknowledge unavoidable
+  uncertainty without implying that the browser can prove a saved clinical state.
+- Check cancellation after waiting and before meaningful changes to page fields.
+  Additional checks within synchronous code need a reason, such as a field event
+  running page code that can replace the form. Avoid repeated checks between
+  ordinary calculations.
+- When a clean rewrite is requested, use the earlier implementation to discover
+  requirements and failure modes, not as a structure to preserve. Keep superseded
+  work available until the replacement is reviewed and its requirements accounted for.
+
 ## Writing and PR descriptions
 
 - Use the user's direct writing style: familiar words, short sentences, and
@@ -46,6 +69,10 @@ any harness that does not discover `AGENTS.md` to read this file.
 - Keep tests proportionate to the change. Use existing tests, fixtures, and
   production functions. Add a focused test when it covers a meaningful failure
   or behavior that the existing checks miss.
+- Prefer one representative test per failure class, with table-driven variations
+  where useful. Test externally meaningful behavior or a safety invariant rather
+  than every internal state transition. Justify larger test suites by the distinct
+  risks they protect, and avoid another generalized mock browser or DOM framework.
 - Do not add tests just for documentation edits, unused-function removal, or
   other low-impact cleanup. Avoid a new test framework or broad harness for a
   small change.
@@ -58,6 +85,10 @@ any harness that does not discover `AGENTS.md` to read this file.
   observed field verification, and a saved clinical record. Explain which step
   an acknowledgement proves. Make uncertain outcomes visible for staff review;
   do not automatically replay or restore uncertain clinical work.
+- For substantial clinical changes, review a short design before implementation:
+  essential guarantees, minimum state, PR boundaries, and unavoidable limitations.
+  Review the combined result afterward for safety and unnecessary complexity.
+  Keep these reviews bounded; address material findings and recheck affected work.
 - Review each PR's changes critically before pushing. Use a separate reviewer
   when the harness supports it. Address meaningful findings and recheck the
   affected work.
