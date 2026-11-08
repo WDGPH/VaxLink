@@ -319,3 +319,56 @@ test('mode transitions cannot revive an old fill and allow new-mode work', () =>
     true
   );
 });
+
+test('overlapping context probes keep an in-transit scan valid on the same form', () => {
+  const f = fixture();
+  const scanA = f.getScannerDeliveryContext();
+  const scanB = f.getScannerDeliveryContext();
+  assert.ok(scanA);
+  assert.equal(scanB, scanA);
+  assert.equal(f.isScannerDeliveryContextCurrent(scanA), true);
+});
+
+test('context changes rotate the token and cannot revive an in-transit scan', () => {
+  for (const change of [
+    (f) => f.setMode('multiple'),
+    (f) => interaction(f),
+    (f) => {
+      f.state.form = { isConnected: true };
+    },
+    (f) => {
+      f.context.location.href += '?new-chart';
+    },
+    (f) => {
+      f.state.step = 'two';
+    },
+    (f) => {
+      f.beginPanoramaAutofill({});
+      f.beginPanoramaAutofill({});
+    },
+    (f) => {
+      f.beginPanoramaAutofill({});
+      interaction(f, { form: f.form });
+    }
+  ]) {
+    const f = fixture();
+    const token = f.getScannerDeliveryContext();
+    assert.equal(f.isScannerDeliveryContextCurrent(token), true);
+    change(f);
+    assert.equal(f.isScannerDeliveryContextCurrent(token), false);
+    const replacement = f.getScannerDeliveryContext();
+    assert.notEqual(replacement, token);
+    assert.equal(f.isScannerDeliveryContextCurrent(replacement), true);
+    assert.equal(f.getScannerDeliveryContext(), replacement);
+    assert.equal(f.isScannerDeliveryContextCurrent(token), false);
+  }
+});
+
+test('manual edit of a newly probed replacement form invalidates its token', () => {
+  const f = fixture();
+  f.beginPanoramaAutofill({});
+  f.state.form = { ...f.form };
+  const token = f.getScannerDeliveryContext();
+  interaction(f);
+  assert.equal(f.isScannerDeliveryContextCurrent(token), false);
+});

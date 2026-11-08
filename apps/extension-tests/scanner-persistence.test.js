@@ -84,42 +84,6 @@ test('analytics failure does not report a persisted scan as failed', async () =>
   assert.equal(harness.storageData.get('multiple_inject_queue_v1').length, 1);
 });
 
-test('enqueue waits for an in-progress drain', async () => {
-  let release;
-  let started;
-  const startedPromise = new Promise((resolve) => {
-    started = resolve;
-  });
-  const tab = {
-    id: 44,
-    url: 'https://www.panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml'
-  };
-  const harness = createBackgroundHarness(makeTestNvcBundle(), {
-    idleState: 'locked',
-    storage: { vaxlink_workflow_mode_v1: 'single', [pending]: [scan('old')] },
-    tabs: [tab],
-    tabResponse: { success: true, accepted: true },
-    delayTabMessage(_tabId, _message, resume) {
-      release = resume;
-      started();
-      return true;
-    }
-  });
-  const drain = harness.sendMessage(
-    { action: 'drainPendingScannerScans' },
-    { id: 'vaxlink-test', tab, frameId: 0, url: tab.url }
-  );
-  await startedPromise;
-  const next = captured(harness, 'new');
-  release();
-  assert.equal((await drain).drained, 1);
-  assert.equal((await next).success, true);
-  assert.deepEqual(
-    Array.from(harness.storageData.get(pending), (row) => row.rawText),
-    ['new']
-  );
-});
-
 test('duplicate queue capture is reported without another saved event', async () => {
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
     storage: { vaxlink_workflow_mode_v1: 'multiple' }
@@ -148,29 +112,6 @@ test('normal GS1 scans reach capacity at 250 and reject the next without loss', 
     false
   );
   assert.equal(harness.storageData.get(pending).length, 250);
-});
-
-test('failed inbox removal after delivery retains the scan', async () => {
-  const tab = {
-    id: 44,
-    url: 'https://panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml'
-  };
-  const row = scan('01099990000000081727123110TEST');
-  const harness = createBackgroundHarness(makeTestNvcBundle(), {
-    idleState: 'locked',
-    storage: { [pending]: [row] },
-    tabs: [tab],
-    tabResponse: { success: true },
-    failStorageSet: (values) =>
-      Array.isArray(values[pending]) && values[pending].length === 0
-  });
-  const result = await harness.sendMessage(
-    { action: 'drainPendingScannerScans' },
-    { id: 'vaxlink-test', tab, frameId: 0, url: tab.url }
-  );
-  assert.equal(result.success, false);
-  assert.equal(harness.tabMessages.length, 1);
-  assert.equal(harness.storageData.get(pending).length, 1);
 });
 
 test('warning badge survives queue updates and failed acknowledgement', async () => {

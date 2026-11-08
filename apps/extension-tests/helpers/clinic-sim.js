@@ -328,6 +328,7 @@ export function createBackgroundHarness(bundle, options = {}) {
               if (!(key in result)) result[key] = fallback;
             }
           }
+          if (options.delayStorageGet?.(keys, () => callback(result))) return;
           queueMicrotask(() => callback(result));
         },
         set(values, callback) {

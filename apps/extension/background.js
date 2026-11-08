@@ -665,32 +665,7 @@ async function updateScannerLockState(state) {
     values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
   }
   await setStorage(values);
-  if (wasLocked) {
-    void drainPendingScansAfterUnlock(existing);
-  }
   return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
-}
-
-async function drainPendingScansAfterUnlock(lockSession, attempt = 0) {
-  let tabId = Number.isInteger(lockSession?.tabId) ? lockSession.tabId : null;
-  if (tabId === null) {
-    const activeTabs = await queryTabs({ active: true, currentWindow: true });
-    tabId = activeTabs.find(tabMayBeSupportedChart)?.id ?? null;
-  }
-  if (tabId === null) return { drained: 0, remaining: null };
-  return drainPendingScansToTab(tabId)
-    .then((result) => {
-      if (result.remaining > 0 && attempt < 2) {
-        setTimeout(
-          () => {
-            void drainPendingScansAfterUnlock(lockSession, attempt + 1);
-          },
-          1000 * (attempt + 1)
-        );
-      }
-      return result;
-    })
-    .catch(() => ({ drained: 0, remaining: null }));
 }
 
 function initializeScannerLockMonitoring() {
@@ -734,62 +709,59 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
-function hasPanoramaIntegration(tabId) {
+function getScannerDestinationContext(tabId) {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1000);
+    const timer = setTimeout(() => resolve(null), 1000);
     chrome.tabs.sendMessage(
       tabId,
       { action: 'getPanoramaIntegration' },
       { frameId: 0 },
       (response) => {
         clearTimeout(timer);
-        resolve(!chrome.runtime.lastError && response?.supported === true);
+        resolve(
+          !chrome.runtime.lastError &&
+            response?.supported === true &&
+            typeof response.contextToken === 'string'
+            ? response.contextToken
+            : null
+        );
       }
     );
   });
 }
 
 function tabAcceptedScannerScan(response) {
-  return !!(
-    response &&
-    (response.accepted === true ||
-      response.success === true ||
+  return (
+    response?.accepted === true &&
+    (response.success === true ||
       response.pending === true ||
-      response.queued === true ||
       response.duplicate_ignored === true ||
       response.command_handled === true)
   );
 }
 
-async function sendScanToTab(tabId, scan) {
-  const tab = (await queryTabs({})).find((item) => item.id === tabId);
-  if (
-    !tab ||
-    (tab.url
-      ? !isSupportedChartUrl(tab.url)
-      : !(await hasPanoramaIntegration(tabId)))
-  ) {
-    throw new Error('Open a supported Panorama immunization page');
-  }
+function sendScanToTab(tabId, scan, contextToken) {
   return new Promise((resolve, reject) => {
-    if (!tabId && tabId !== 0) {
-      reject(new Error('Missing tab id'));
-      return;
-    }
+    // A missing answer is uncertain, not permission to try another chart.
+    const timer = setTimeout(
+      () => reject(new Error('Chart acknowledgement timed out')),
+      10000
+    );
     chrome.tabs.sendMessage(
       tabId,
-      { action: 'vaxlinkScanCaptured', scan },
+      { action: 'vaxlinkScanCaptured', scan, contextToken },
       { frameId: 0 },
       (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!tabAcceptedScannerScan(response)) {
-          reject(new Error(response?.error || 'Tab did not accept scan'));
-          return;
-        }
-        resolve(response);
+        clearTimeout(timer);
+        if (chrome.runtime.lastError || !tabAcceptedScannerScan(response)) {
+          reject(
+            new Error(
+              chrome.runtime.lastError?.message ||
+                response?.error ||
+                'Chart did not accept scan'
+            )
+          );
+        } else resolve(response);
       }
     );
   });
@@ -1036,7 +1008,7 @@ function enqueuePendingScan(scan) {
         PENDING_SCAN_INBOX_MAX_BYTES
     ) {
       throw new Error(
-        'Pending scans are full. Open a supported chart and process pending scans before scanning again.'
+        'Held scans are full. Inspect them in the VaxLink popup before scanning again.'
       );
     }
     await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
@@ -1044,34 +1016,41 @@ function enqueuePendingScan(scan) {
   });
 }
 
-function drainPendingScansToTab(tabId) {
+async function getHeldScannerScans() {
+  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+  return Array.isArray(stored?.[PENDING_SCAN_INBOX_KEY])
+    ? stored[PENDING_SCAN_INBOX_KEY]
+    : [];
+}
+
+function discardHeldScannerScan(scan) {
   return mutatePendingInbox(async () => {
-    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-      ? stored[PENDING_SCAN_INBOX_KEY]
-      : [];
-    if (!rows.length) {
-      return { drained: 0, remaining: 0 };
-    }
-
-    const remaining = [];
-    let drained = 0;
-    for (const row of rows) {
-      try {
-        await sendScanToTab(tabId, normalizeScanEvent(row));
-        drained += 1;
-      } catch (_) {
-        remaining.push(row);
-      }
-    }
-
-    await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
-    return { drained, remaining: remaining.length };
+    const rows = await getHeldScannerScans();
+    // New captures have unique IDs. Legacy rows stay held; discard only one
+    // matching snapshot so a concurrent identical capture is preserved.
+    const index = rows.findIndex((row) =>
+      scan?.captureId
+        ? row.captureId === scan.captureId
+        : JSON.stringify(row) === JSON.stringify(scan)
+    );
+    if (index < 0) return;
+    await setStorage({
+      [PENDING_SCAN_INBOX_KEY]: rows.filter((_, i) => i !== index)
+    });
   });
 }
 
 async function routeScanToActiveSupportedTab(rawScan) {
-  const scan = normalizeScanEvent(rawScan);
+  const scan = {
+    ...normalizeScanEvent(rawScan),
+    captureId: buildAnalyticsId()
+  };
+  // Pin the destination before storage waits; focus changes never redirect it.
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const destination = activeTabs.find(tabMayBeSupportedChart);
+  const contextPromise = destination
+    ? getScannerDestinationContext(destination.id)
+    : Promise.resolve(null);
   const idleState = await queryMachineIdleState();
   const storedWorkflow = await getStorage([
     WORKFLOW_MODE_KEY,
@@ -1080,6 +1059,7 @@ async function routeScanToActiveSupportedTab(rawScan) {
     LEGACY_HANDS_FREE_KEY
   ]);
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
+  const contextToken = await contextPromise;
 
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
@@ -1140,55 +1120,29 @@ async function routeScanToActiveSupportedTab(rawScan) {
     };
   }
 
-  const tried = new Set();
-  const activeTabs = await queryTabs({ active: true, currentWindow: true });
-  const allTabs = await queryTabs({});
-  const candidates = [...activeTabs, ...allTabs].filter(tabMayBeSupportedChart);
-
-  for (const tab of candidates) {
-    if (!tab || tab.id === undefined || tried.has(tab.id)) continue;
-    tried.add(tab.id);
+  const held = {
+    ...scan,
+    intendedTabId: destination?.id ?? null,
+    contextToken
+  };
+  const pendingCount = await enqueuePendingScan(held);
+  // Messaging must not occupy the inbox writer: other captures and deliberate
+  // discards can proceed while this one waits for its answer.
+  if (destination && contextToken) {
     try {
-      const response = await sendScanToTab(tab.id, scan);
-      return {
-        routed: true,
-        queued: false,
-        tabId: tab.id,
-        response
-      };
+      const response = await sendScanToTab(destination.id, scan, contextToken);
+      await discardHeldScannerScan(held);
+      return { routed: true, queued: false, tabId: destination.id, response };
     } catch (_) {
-      // Try the next tab; unsupported pages simply do not have the content script.
+      // The chart may already contain values. Retain the scan without replay.
     }
   }
-
-  const workflowQueueResult = await saveScannerScanToWorkflowQueue(
-    scan,
-    workflowMode
-  ).catch((error) => ({
-    queuedToWorkflow: false,
-    workflow: workflowMode,
-    error: error?.message || 'Workflow queue save failed'
-  }));
-  if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
-    return {
-      routed: false,
-      queued: !workflowQueueResult.record?.duplicate_ignored,
-      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
-      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
-      workflow: workflowQueueResult.workflow,
-      storageKey: workflowQueueResult.storageKey,
-      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
-    };
-  }
-
-  const pendingCount = await enqueuePendingScan(scan);
   return {
     routed: false,
     queued: true,
     queuedToWorkflow: false,
-    workflow: workflowMode,
-    pendingCount,
-    queueError: workflowQueueResult?.error || ''
+    workflow: 'single',
+    pendingCount
   };
 }
 
@@ -3236,29 +3190,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === 'drainPendingScannerScans') {
-    const tabId = sender?.tab?.id;
+  if (
+    request.action === 'getHeldScannerScans' ||
+    request.action === 'discardHeldScannerScan'
+  ) {
     if (
-      tabId === undefined ||
       sender.id !== chrome.runtime.id ||
-      sender.frameId !== 0 ||
-      !isSupportedChartUrl(sender.url) ||
-      (sender?.tab?.url && !isSupportedChartUrl(sender.tab.url))
+      sender.url !== chrome.runtime.getURL('popup.html')
     ) {
-      sendResponse({
-        success: false,
-        error: 'Pending scans can only drain to a supported chart tab'
-      });
+      sendResponse({ success: false });
       return false;
     }
-    drainPendingScansToTab(tabId)
-      .then((result) => sendResponse({ success: true, ...result }))
-      .catch((error) =>
-        sendResponse({
-          success: false,
-          error: error?.message || 'Pending scan drain failed'
-        })
-      );
+    const result =
+      request.action === 'getHeldScannerScans'
+        ? getHeldScannerScans().then((scans) => ({ success: true, scans }))
+        : discardHeldScannerScan(request.scan).then(() => ({ success: true }));
+    result
+      .then(sendResponse)
+      .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
