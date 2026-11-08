@@ -87,27 +87,31 @@ it in a queue.
 - **`panorama-agent-rules.js`** contains the matching rules for vaccine choices.
   Chrome loads it before `content.js` on supported pages.
 - **`queue-record.js`** normalizes popup queue records;
-  **`popup-inventory.js`** manages the popup's stored rows, display, and CSV columns.
+  **`popup-inventory.js`** manages the popup display and CSV columns, requesting
+  saved row changes through the background writer.
 - **`scanner/scanner-daemon-shared.js`** supplies common scanner status and port
   selection helpers. **`scanner/serial-profiles.js`** holds device settings, and
   **`scanner/scanner-lock-session.js`** holds lock-session metadata helpers.
 
 ## Key storage keys
 
-| Key                                  | Writers                      | Purpose                                       |
-| ------------------------------------ | ---------------------------- | --------------------------------------------- |
-| `multiple_inject_queue_v1`           | background + popup + content | Multiple Inject queue rows                    |
-| `inventory_scan_batch_v1`            | background + popup           | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`      | background                   | Single scans held for later chart delivery    |
-| `vaxlink_scanner_capture_error_v1`   | background                   | Capture warning awaiting acknowledgement      |
-| `vaxlink_scanner_status_snapshot_v1` | background                   | Last saved scanner status and capture history |
-| `nvc_bundle_override`                | background                   | Cached NVC catalogue                          |
-| `vaxlink_workflow_mode_v1`           | popup + content              | Current workflow mode                         |
-| `vaxlink_analytics_v1`               | background + popup           | Local event log and summaries                 |
+| Key                                  | Writers            | Purpose                                       |
+| ------------------------------------ | ------------------ | --------------------------------------------- |
+| `multiple_inject_queue_v1`           | background         | Multiple Inject queue rows                    |
+| `inventory_scan_batch_v1`            | background         | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`      | background         | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`   | background         | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1` | background         | Last saved scanner status and capture history |
+| `nvc_bundle_override`                | background         | Cached NVC catalogue                          |
+| `vaxlink_workflow_mode_v1`           | popup + content    | Current workflow mode                         |
+| `vaxlink_analytics_v1`               | background + popup | Local event log and summaries                 |
 
-Queue appends handled by the background run in order. Popup and in-page queue
-edits still write directly to storage; re-reading the rows does not make all
-writers one coordinated operation.
+Queue appends, popup edits, HUD removals, and dose consumption share the
+background writer. Each change reads the latest rows after earlier writes finish,
+so it cannot overwrite a scan appended while another context was editing.
+Only the extension popup and supported Panorama main frames can request these
+edits. Mutation messages require record arrays for adds and IDs for targeted
+changes.
 
 ## NVC catalogue readiness and refresh
 

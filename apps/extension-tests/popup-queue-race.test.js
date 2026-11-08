@@ -5,7 +5,7 @@
  * to persist the whole array from that copy. With the popup open during
  * hands-free scanning, a scan appended by the background worker between the
  * popup's last sync and its next mutation was silently clobbered (or a
- * removal resurrected rows). Mutations now re-read storage first.
+ * removal resurrected rows). Mutations now use the serialized background writer.
  *
  * The chrome mock here deliberately does NOT fire onChanged, simulating the
  * stale-popup window where the sync hasn't arrived yet.
@@ -13,13 +13,27 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 const QUEUE_KEY = 'multiple_inject_queue_v1';
+const popupSender = {
+  id: 'vaxlink-test',
+  url: 'chrome-extension://vaxlink-test/popup.html'
+};
 
 function installBrowserGlobals() {
-  const store = new Map();
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  const store = harness.storageData;
   globalThis.chrome = {
-    runtime: { lastError: null },
+    runtime: {
+      lastError: null,
+      sendMessage: (message, cb) => {
+        void harness.sendMessage(message, popupSender).then(cb);
+      }
+    },
     storage: {
       onChanged: { addListener() {} },
       local: {
@@ -65,7 +79,7 @@ test('a background append during a popup remove is not clobbered', async () => {
 
   await manager.remove('a');
 
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
+  const stored = Array.from(store.get(QUEUE_KEY), (r) => r.id);
   assert.deepEqual(
     stored,
     ['b', 'scan-c'],
@@ -83,7 +97,7 @@ test('a popup add does not resurrect rows removed elsewhere', async () => {
 
   await manager.add(row('popup-d'));
 
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
+  const stored = Array.from(store.get(QUEUE_KEY), (r) => r.id);
   assert.deepEqual(
     stored,
     ['a', 'popup-d'],
@@ -107,37 +121,23 @@ test('updateById patches the freshest copy of the row', async () => {
   );
 });
 
-test('consumeById decrements doses without losing concurrent appends', async () => {
+test('consumption uses the latest dose count and preserves concurrent appends', async () => {
   store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 })]);
   const manager = makeManager();
   await manager.load();
 
+  // Another consumer used a dose and a scanner appended a row before this use.
   store.set(QUEUE_KEY, [
-    row('vial', { total_doses: 10, remaining_doses: 10 }),
+    row('vial', { total_doses: 10, remaining_doses: 9 }),
     row('scan-e')
   ]);
-
   const consumed = await manager.consumeById('vial');
-  assert.equal(consumed.remaining_doses, 9);
-  const stored = store.get(QUEUE_KEY).map((r) => r.id);
-  assert.deepEqual(stored, ['vial', 'scan-e']);
-});
-
-test('consumeById decrements from the FRESH remaining count, not the stale copy', async () => {
-  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 })]);
-  const manager = makeManager();
-  await manager.load();
-
-  // Another context (queue drain / second tab) already consumed a dose.
-  store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 9 })]);
-
-  const consumed = await manager.consumeById('vial');
-  assert.equal(
-    consumed.remaining_doses,
-    8,
-    'must decrement the stored count, not resurrect the stale one'
-  );
+  assert.equal(consumed.remaining_doses, 8);
   assert.equal(store.get(QUEUE_KEY)[0].remaining_doses, 8);
+  assert.deepEqual(
+    Array.from(store.get(QUEUE_KEY), (r) => r.id),
+    ['vial', 'scan-e']
+  );
 });
 
 test('consumeById removes the row when the FRESH count says last dose', async () => {
@@ -151,4 +151,121 @@ test('consumeById removes the row when the FRESH count says last dose', async ()
   const consumed = await manager.consumeById('vial');
   assert.equal(consumed, null, 'last dose consumed — row must be removed');
   assert.deepEqual(store.get(QUEUE_KEY), []);
+});
+
+test('background append waits for an in-flight queue removal', async () => {
+  let release;
+  let started;
+  const pending = new Promise((resolve) => {
+    started = resolve;
+  });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [QUEUE_KEY]: [row('a')] },
+    delayStorageSet(values, resume) {
+      if (!(QUEUE_KEY in values) || release) return false;
+      release = resume;
+      started();
+      return true;
+    }
+  });
+  const remove = harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'remove',
+      payload: { id: 'a' }
+    },
+    popupSender
+  );
+  await pending;
+  const append = harness.sendMessage({
+    action: 'appendQueueRecord',
+    storageKey: QUEUE_KEY,
+    record: row('new')
+  });
+  release();
+  assert.equal((await remove).success, true);
+  assert.equal((await append).success, true);
+  assert.deepEqual(
+    Array.from(harness.storageData.get(QUEUE_KEY), (item) => item.id),
+    ['new']
+  );
+});
+
+test('consuming a duplicate ID changes only the first matching record', async () => {
+  const first = row('duplicate', { lot: 'first', remaining_doses: 3 });
+  const second = row('duplicate', { lot: 'second', remaining_doses: 1 });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [QUEUE_KEY]: [first, second] }
+  });
+  const result = await harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'consume',
+      payload: { id: 'duplicate' }
+    },
+    popupSender
+  );
+  assert.equal(result.success, true);
+  assert.equal(result.consumed.lot, 'first');
+  const saved = harness.storageData.get(QUEUE_KEY);
+  assert.equal(saved.length, 2);
+  assert.equal(saved[0].remaining_doses, 2);
+  assert.deepEqual(saved[1], second);
+});
+
+test('queue mutations require an authorized sender and a valid payload', async () => {
+  const url =
+    'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+  const chartSender = {
+    id: 'vaxlink-test',
+    frameId: 0,
+    url,
+    tab: { id: 44, url }
+  };
+  const original = [row('saved')];
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  for (const [sender, operation, payload, accepted] of [
+    [{ ...popupSender, id: 'another-extension' }, 'clear', {}, false],
+    [{ id: 'vaxlink-test' }, 'clear', {}, false],
+    [
+      {
+        ...popupSender,
+        url: 'chrome-extension://vaxlink-test/scanner-setup.html'
+      },
+      'clear',
+      {},
+      false
+    ],
+    [{ ...chartSender, frameId: 1 }, 'clear', {}, false],
+    [{ ...chartSender, url: 'https://example.org/chart' }, 'clear', {}, false],
+    [
+      { ...chartSender, tab: { id: 44, url: 'https://example.org/chart' } },
+      'clear',
+      {},
+      false
+    ],
+    [popupSender, 'add', {}, false],
+    [popupSender, 'consume', {}, false],
+    [popupSender, 'update', { id: 'saved', patch: { id: 'another' } }, false],
+    // A valid request must still work after a rejected mutation.
+    [popupSender, 'clear', {}, true],
+    [chartSender, 'clear', {}, true]
+  ]) {
+    harness.storageData.set(QUEUE_KEY, original);
+    const result = await harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey: QUEUE_KEY,
+        operation,
+        payload
+      },
+      sender
+    );
+    assert.equal(result.success, accepted);
+    const saved = harness.storageData.get(QUEUE_KEY);
+    if (accepted) assert.equal(saved.length, 0);
+    else assert.equal(saved, original);
+  }
 });

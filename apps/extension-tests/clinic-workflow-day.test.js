@@ -27,16 +27,28 @@ import {
   createBackgroundHarness,
   extractCatalogueLots,
   loadNvcBundle,
+  makeTestNvcBundle,
   makeSyntheticGtin14
 } from './helpers/clinic-sim.js';
 
 // popup-inventory.js touches chrome/document/URL/Blob/window only at call time
 // (never at module load), so install browser-shaped globals before importing it.
 function installBrowserGlobals() {
-  const store = new Map();
+  const queueHarness = createBackgroundHarness(makeTestNvcBundle());
+  const store = queueHarness.storageData;
   const csvCaptures = [];
   globalThis.chrome = {
-    runtime: { lastError: null },
+    runtime: {
+      lastError: null,
+      sendMessage: (message, cb) => {
+        void queueHarness
+          .sendMessage(message, {
+            id: 'vaxlink-test',
+            url: 'chrome-extension://vaxlink-test/popup.html'
+          })
+          .then(cb);
+      }
+    },
     storage: {
       onChanged: { addListener() {} },
       local: {
@@ -266,7 +278,7 @@ if (!bundle) {
       'every scan must be in the inventory tray'
     );
     assert.deepEqual(
-      browser.store.get('inventory_scan_batch_v1').map((r) => r.lot),
+      Array.from(browser.store.get('inventory_scan_batch_v1'), (r) => r.lot),
       basket.map((b) => b.lot.lotNumber),
       'persisted rows must match scan order and lots'
     );

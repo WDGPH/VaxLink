@@ -2000,15 +2000,7 @@ async function handleUseMultipleInjectRecord(record) {
       return;
     }
     const remainingDoses = getQueueRemainingDoses(record, null);
-    let nextRecord;
-    if (remainingDoses === null) {
-      // Unknown dose count — vial is unlimited; keep record in queue as-is
-      nextRecord = record;
-    } else if (remainingDoses > 1) {
-      nextRecord = await multipleInjectManager.consumeById(record.id);
-    } else {
-      nextRecord = await multipleInjectManager.remove(record.id);
-    }
+    const nextRecord = await multipleInjectManager.consumeById(record.id);
     if (nextRecord) {
       multipleInjectManager.setActiveUse(nextRecord.id);
     } else {

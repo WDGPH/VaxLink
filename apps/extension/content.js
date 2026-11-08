@@ -490,32 +490,6 @@ function getPositiveInt(value, fallback = null) {
   return parsed;
 }
 
-function getQueueRemainingDoses(row, fallback = 1) {
-  const remaining = getPositiveInt(row && row.remaining_doses, null);
-  if (remaining !== null) {
-    return remaining;
-  }
-  const total = getPositiveInt(row && row.total_doses, null);
-  return total !== null ? total : fallback;
-}
-
-function buildQueueRowsAfterRecordUse(rows, record, recordIndex) {
-  const nextRows = Array.isArray(rows) ? rows.slice() : [];
-  nextRows.splice(recordIndex, 1);
-
-  const remaining = getQueueRemainingDoses(record, null);
-  if (remaining === null) {
-    nextRows.splice(recordIndex, 0, record);
-  } else if (remaining > 1) {
-    nextRows.splice(recordIndex, 0, {
-      ...record,
-      remaining_doses: remaining - 1
-    });
-  }
-
-  return nextRows;
-}
-
 async function saveScanToQueue(data, rawBarcode, storageKey) {
   if (!storageKey) {
     throw new Error('No storage key configured for queued scan mode');
@@ -3179,6 +3153,27 @@ function isAutofillPending(result) {
   return !!result && result.status === 'pending';
 }
 
+function mutateQueueViaBackground(storageKey, operation, payload = {}) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: 'mutateQueue', storageKey, operation, payload },
+      (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+          reject(
+            new Error(
+              chrome.runtime.lastError?.message ||
+                response?.error ||
+                'Queue update failed'
+            )
+          );
+        } else {
+          resolve(response);
+        }
+      }
+    );
+  });
+}
+
 async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
   const storageKey = String(queueContext?.storageKey || '').trim();
   const recordId = String(queueContext?.recordId || '').trim();
@@ -3186,19 +3181,12 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     return null;
   }
 
-  const stored = await getLocalStorage([storageKey]);
-  const rows =
-    stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
-  const recordIndex = rows.findIndex(
-    (row) => row && String(row.id || '') === recordId
-  );
-  if (recordIndex < 0) {
-    return null;
-  }
-
-  const record = rows[recordIndex];
-  const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
-  await setLocalStorage({ [storageKey]: nextRows });
+  const result = await mutateQueueViaBackground(storageKey, 'consume', {
+    id: recordId
+  });
+  const record = result.consumed;
+  if (!record) return null;
+  const nextRows = result.rows;
 
   const workflow = queueContext.workflow || 'multiple';
   const source = queueContext.source || 'queue';
@@ -4281,20 +4269,13 @@ function renderHudQueueList(rows, visible) {
 
 async function removeHudQueueRow(id) {
   if (!id || applyQueueInFlight) return;
-  const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-  const rows =
-    stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
-      ? stored[MULTIPLE_INJECT_QUEUE_KEY]
-      : [];
-  const next = rows.filter((row) => row && row.id !== id);
-  if (next.length === rows.length) return;
-  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: next });
+  await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'remove', { id });
   updateHudState();
 }
 
 async function clearHudQueue() {
   if (applyQueueInFlight) return;
-  await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: [] });
+  await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'clear');
   updateHudState();
 }
 
@@ -4361,7 +4342,7 @@ async function applyNextQueueItem(options = {}) {
       source: 'hud'
     };
 
-    const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
+    let nextRows = rows;
 
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
@@ -4380,7 +4361,11 @@ async function applyNextQueueItem(options = {}) {
     const success = isAutofillSuccess(autofillResult);
     const pending = isAutofillPending(autofillResult);
     if (success) {
-      await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: nextRows });
+      ({ rows: nextRows } = await mutateQueueViaBackground(
+        MULTIPLE_INJECT_QUEUE_KEY,
+        'consume',
+        { id: record.id }
+      ));
     }
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',

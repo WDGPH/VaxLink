@@ -87,15 +87,24 @@ function getLocalStorage(keys) {
   });
 }
 
-function setLocalStorage(values) {
+function mutateQueue(storageKey, operation, payload = {}) {
   return new Promise((resolve, reject) => {
-    chrome.storage.local.set(values, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
+    chrome.runtime.sendMessage(
+      { action: 'mutateQueue', storageKey, operation, payload },
+      (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+          reject(
+            new Error(
+              chrome.runtime.lastError?.message ||
+                response?.error ||
+                'Queue update failed'
+            )
+          );
+        } else {
+          resolve(response);
+        }
       }
-      resolve();
-    });
+    );
   });
 }
 
@@ -145,65 +154,35 @@ export class ScanQueueManager {
     this.render();
   }
 
-  // Every mutation re-reads storage first: the background worker appends
-  // hands-free scans to the same key while the popup is open, and a mutation
-  // computed from a stale in-memory copy would silently clobber them.
-  async mutateRows(mutator) {
-    const stored = await getLocalStorage([this.storageKey]);
-    const current = (
-      stored && Array.isArray(stored[this.storageKey])
-        ? stored[this.storageKey]
-        : []
-    ).filter((row) => row && typeof row === 'object');
-    const next = mutator(current);
-    this.rows = Array.isArray(next)
-      ? next.filter((row) => row && typeof row === 'object')
-      : [];
-    await this.persist();
+  async mutateRows(operation, payload = {}) {
+    const result = await mutateQueue(this.storageKey, operation, payload);
+    this.rows = result.rows;
     this.render();
+    return result.record;
   }
 
   async add(record) {
-    await this.mutateRows((rows) => [...rows, record]);
+    await this.mutateRows('add', { records: [record] });
   }
 
   async addMany(records) {
-    await this.mutateRows((rows) => [...rows, ...records]);
+    await this.mutateRows('add', { records });
   }
 
   async clear() {
     this.activeUseId = '';
-    await this.mutateRows(() => []);
+    await this.mutateRows('clear');
   }
 
   async remove(id) {
-    if (this.activeUseId === id) {
-      this.activeUseId = '';
-    }
-    await this.mutateRows((rows) => rows.filter((row) => row.id !== id));
-  }
-
-  async replaceRows(rows) {
-    const sanitized = Array.isArray(rows)
-      ? rows.filter((row) => row && typeof row === 'object')
-      : [];
-    await this.mutateRows(() => sanitized);
+    if (this.activeUseId === id) this.activeUseId = '';
+    await this.mutateRows('remove', { id });
   }
 
   async updateById(id, patch) {
     const targetId = String(id || '');
-    if (!targetId || !patch || typeof patch !== 'object') {
-      return null;
-    }
-    let updated = null;
-    await this.mutateRows((rows) =>
-      rows.map((row) => {
-        if (!row || row.id !== targetId) return row;
-        updated = { ...row, ...patch };
-        return updated;
-      })
-    );
-    return updated;
+    if (!targetId || !patch || typeof patch !== 'object') return null;
+    return this.mutateRows('update', { id: targetId, patch });
   }
 
   async setDoseCounts(id, totalDoses) {
@@ -235,39 +214,8 @@ export class ScanQueueManager {
       return null;
     }
 
-    // Decide remove-vs-decrement from the FRESH stored row inside the mutator:
-    // another context (queue drain, second tab) may have decremented this vial
-    // since our last sync, and a stale base would resurrect a consumed dose.
-    let result = null;
-    let removed = false;
-    await this.mutateRows((rows) => {
-      const next = [];
-      for (const item of rows) {
-        if (!item || item.id !== targetId) {
-          next.push(item);
-          continue;
-        }
-        const remaining = getRemainingDoseCount(item, null);
-        if (remaining === null) {
-          // Unknown dose count — vial is unlimited; keep record alive unchanged
-          result = item;
-          next.push(item);
-        } else if (remaining <= 1) {
-          // Last dose consumed — drop the row.
-          removed = true;
-        } else {
-          const total = getTotalDoseCount(item) || remaining;
-          result = {
-            ...item,
-            total_doses: total,
-            remaining_doses: remaining - 1,
-            dose_tracking: 'manual'
-          };
-          next.push(result);
-        }
-      }
-      return next;
-    });
+    const result = await this.mutateRows('consume', { id: targetId });
+    const removed = !this.getById(targetId);
 
     if (removed && this.activeUseId === targetId) {
       this.activeUseId = '';
@@ -395,10 +343,6 @@ export class ScanQueueManager {
     });
 
     this.updateControls();
-  }
-
-  async persist() {
-    await setLocalStorage({ [this.storageKey]: this.rows });
   }
 
   updateControls() {

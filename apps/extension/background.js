@@ -601,6 +601,96 @@ function appendQueueRecord(storageKey, record, options = {}) {
   return scannerQueueWriteQueue;
 }
 
+// All queue changes share the scanner append writer so a read-modify-write
+// cannot overwrite a scan received while another context is editing a row.
+function mutateQueue(storageKey, operation, payload = {}) {
+  const result = scannerQueueWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      if (
+        ![MULTIPLE_INJECT_QUEUE_KEY, INVENTORY_BATCH_KEY].includes(storageKey)
+      ) {
+        throw new Error('Invalid queue storage key');
+      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        throw new Error('Invalid queue payload');
+      }
+      if (
+        operation === 'add' &&
+        (!Array.isArray(payload.records) ||
+          payload.records.some(
+            (row) =>
+              !row ||
+              typeof row !== 'object' ||
+              Array.isArray(row) ||
+              typeof row.id !== 'string' ||
+              !row.id.trim()
+          ))
+      ) {
+        throw new Error('Queue add requires an array of records with IDs');
+      }
+      if (
+        ['remove', 'update', 'consume'].includes(operation) &&
+        (typeof payload.id !== 'string' || !payload.id.trim())
+      ) {
+        throw new Error('Queue operation requires a record ID');
+      }
+      if (
+        operation === 'update' &&
+        (!payload.patch ||
+          typeof payload.patch !== 'object' ||
+          Array.isArray(payload.patch) ||
+          ('id' in payload.patch && payload.patch.id !== payload.id))
+      ) {
+        throw new Error(
+          'Queue update requires a patch that preserves the record ID'
+        );
+      }
+      const stored = await getStorage([storageKey]);
+      let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      let record = null;
+      let consumed = null;
+      if (operation === 'add') {
+        rows = [...rows, ...payload.records];
+      } else if (operation === 'clear') {
+        rows = [];
+      } else if (operation === 'remove') {
+        rows = rows.filter((row) => row?.id !== payload.id);
+      } else if (operation === 'update') {
+        rows = rows.map((row) => {
+          if (row?.id !== payload.id) return row;
+          record = { ...row, ...payload.patch };
+          return record;
+        });
+      } else if (operation === 'consume') {
+        // A legacy duplicate ID must not turn one use into several dose changes.
+        const index = rows.findIndex((row) => row?.id === payload.id);
+        if (index >= 0) {
+          consumed = rows[index];
+          const count = (value) => {
+            const parsed = Number.parseInt(String(value ?? ''), 10);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+          };
+          const remaining =
+            count(consumed.remaining_doses) ?? count(consumed.total_doses);
+          if (remaining === null) record = consumed;
+          else if (remaining > 1) {
+            record = { ...consumed, remaining_doses: remaining - 1 };
+          }
+          rows = rows.slice();
+          if (record) rows[index] = record;
+          else rows.splice(index, 1);
+        }
+      } else {
+        throw new Error('Invalid queue operation');
+      }
+      await setStorage({ [storageKey]: rows });
+      return { rows, record, consumed };
+    });
+  scannerQueueWriteQueue = result;
+  return result;
+}
+
 function queryTabs(queryInfo) {
   return new Promise((resolve) => {
     chrome.tabs.query(queryInfo, (tabs) => {
@@ -3146,6 +3236,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: error?.message || 'Analytics log failed'
         })
       );
+    return true;
+  }
+
+  if (request.action === 'mutateQueue') {
+    const popup = sender.url === chrome.runtime.getURL('popup.html');
+    const chart =
+      sender.frameId === 0 &&
+      Number.isInteger(sender.tab?.id) &&
+      isSupportedChartUrl(sender.url) &&
+      (!sender.tab.url || isSupportedChartUrl(sender.tab.url));
+    if (sender.id !== chrome.runtime.id || (!popup && !chart)) {
+      sendResponse({
+        success: false,
+        error: 'Queue changes require the popup or a supported chart'
+      });
+      return false;
+    }
+    mutateQueue(request.storageKey, request.operation, request.payload)
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
