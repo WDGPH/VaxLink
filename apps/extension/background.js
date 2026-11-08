@@ -120,6 +120,7 @@ chrome.runtime.onInstalled.addListener(() => {
   bgLog('Vaccine Scanner extension installed');
   ensureActionIcon();
   initializeNVCSync();
+  synchronizeScannerLockState();
   void maybeStartScannerDaemon('install').catch((error) => {
     console.warn('Scanner daemon startup failed on install:', error);
   });
@@ -129,6 +130,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   ensureActionIcon();
   initializeNVCSync();
+  synchronizeScannerLockState();
   void maybeStartScannerDaemon('startup').catch((error) => {
     console.warn('Scanner daemon startup failed on browser start:', error);
   });
@@ -151,9 +153,6 @@ let captureWarningWrites = Promise.resolve();
 
 initQueueBadge();
 initializeScannerLockMonitoring();
-void maybeStartScannerDaemon('service_worker_start').catch((error) => {
-  console.warn('Scanner daemon startup failed on service worker start:', error);
-});
 
 function ensureActionIcon() {
   if (iconInitPromise) {
@@ -702,6 +701,9 @@ function initializeScannerLockMonitoring() {
       });
     });
   }
+}
+
+function synchronizeScannerLockState() {
   void queryMachineIdleState()
     .then(updateScannerLockState)
     .catch((error) =>

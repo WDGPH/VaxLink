@@ -25,14 +25,19 @@ test('background creates exactly one persistent WORKERS offscreen document', asy
 });
 
 test('status inspection does not create a scanner daemon', async () => {
+  const writes = [];
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
     storage: {
-      vaxlink_scanner_daemon_enabled_v1: false,
+      vaxlink_scanner_daemon_enabled_v1: true,
       vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc',
       vaxlink_scanner_status_snapshot_v1: {
         state: 'connected',
         lastCaptureAt: '2026-07-28T12:00:00.000Z'
       }
+    },
+    failStorageSet(values) {
+      writes.push(...Object.keys(values));
+      return false;
     }
   });
   const result = await harness.sendMessage({
@@ -41,6 +46,10 @@ test('status inspection does not create a scanner daemon', async () => {
   assert.equal(result.source, 'cached');
   assert.equal(result.status.lastKnownCaptureAt, '2026-07-28T12:00:00.000Z');
   assert.equal(harness.offscreenCreations.length, 0);
+  assert.deepEqual(
+    writes.filter((key) => key.startsWith('vaxlink_scanner_')),
+    []
+  );
 });
 
 test('new worker capture counts are kept separate from historical capture times', async () => {
@@ -101,3 +110,34 @@ test('selection-required status disables autostart and survives a background res
   assert.equal(selected.success, true);
   assert.equal(restarted.offscreenCreations.length, 1);
 });
+
+for (const event of ['startup', 'install']) {
+  test(`${event} initializes scanner capture and lock state`, async () => {
+    let reportLock;
+    let reportCreate;
+    const created = new Promise((resolve) => {
+      reportCreate = resolve;
+    });
+    const lockWritten = new Promise((resolve) => {
+      reportLock = resolve;
+    });
+    const harness = createBackgroundHarness(makeTestNvcBundle(), {
+      storage: {
+        vaxlink_scanner_daemon_enabled_v1: true,
+        vaxlink_serial_scanner_profile_v1: 'generic-usb-cdc'
+      },
+      onOffscreenCreate: reportCreate,
+      failStorageSet(values) {
+        if ('vaxlink_scanner_lock_state_v1' in values) reportLock();
+        return false;
+      }
+    });
+    harness[event]();
+    await Promise.all([lockWritten, created]);
+    assert.equal(harness.offscreenCreations.length, 1);
+    assert.equal(
+      harness.storageData.get('vaxlink_scanner_lock_state_v1'),
+      'active'
+    );
+  });
+}

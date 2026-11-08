@@ -186,11 +186,14 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   const changedListeners = [];
   const messageListeners = [];
+  const startupListeners = [];
+  const installListeners = [];
   const alarms = [];
   const consoleLines = [];
   const idleListeners = [];
   const offscreenCreations = [];
   const tabMessages = [];
+  const optionsOnCreate = options.onOffscreenCreate;
   let offscreenExists = false;
   let idleState = options.idleState || 'active';
   let badgeText = '';
@@ -206,8 +209,8 @@ export function createBackgroundHarness(bundle, options = {}) {
     runtime: {
       id: 'vaxlink-test',
       lastError: null,
-      onInstalled: { addListener() {} },
-      onStartup: { addListener() {} },
+      onInstalled: { addListener: (fn) => installListeners.push(fn) },
+      onStartup: { addListener: (fn) => startupListeners.push(fn) },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
       sendMessage: (_message, callback) =>
@@ -220,6 +223,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       async createDocument(options) {
         offscreenCreations.push(options);
         offscreenExists = true;
+        optionsOnCreate?.();
       },
       async closeDocument() {
         offscreenExists = false;
@@ -376,6 +380,8 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    startup: () => startupListeners.forEach((fn) => fn()),
+    install: () => installListeners.forEach((fn) => fn()),
     storageData,
     alarms,
     consoleLines,
