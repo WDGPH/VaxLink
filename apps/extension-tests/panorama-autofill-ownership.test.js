@@ -89,6 +89,7 @@ function fixture() {
     'beginPanoramaAutofill',
     'isPanoramaAutofillCurrent',
     'cancelPanoramaAutofill',
+    'updatePanoramaWorkflowMode',
     'handlePanoramaAutofillUserInteraction',
     'runPanoramaAutofill',
     'assertPanoramaAutofillWrite',
@@ -105,7 +106,7 @@ function fixture() {
     globalThis.api = { beginPanoramaAutofill, isPanoramaAutofillCurrent,
       handlePanoramaAutofillUserInteraction, runPanoramaAutofill,
       fillPanoramaMaskedTextInput, handleHandsFreeScan, schedulePanoramaLotOrTradeSelection,
-      setMode: (mode) => { activeWorkflowMode = mode; } };`,
+      setMode: updatePanoramaWorkflowMode };`,
     context
   );
   return { ...context.api, context, state, form };
@@ -268,4 +269,34 @@ test('late corrective passes do not write after manual takeover', () => {
     for (const callback of late) callback();
     assert.equal(f.state.fills, cancel ? 0 : 2);
   }
+});
+
+// The form can change before an automatic observer has started its next fill.
+test('manual takeover applies to a replacement form and before the first fill', () => {
+  for (const oldOwner of [false, true]) {
+    const f = fixture();
+    if (oldOwner) f.beginPanoramaAutofill({});
+    f.state.form = { ...f.form };
+    interaction(f);
+    assert.equal(
+      f.isPanoramaAutofillCurrent(f.beginPanoramaAutofill({}, false)),
+      false
+    );
+  }
+});
+
+test('mode transitions cannot revive an old fill and allow new-mode work', () => {
+  const f = fixture();
+  const old = f.beginPanoramaAutofill({});
+  f.setMode('multiple');
+  assert.equal(
+    f.isPanoramaAutofillCurrent(f.beginPanoramaAutofill({}, false)),
+    true
+  );
+  f.setMode('single');
+  assert.equal(f.isPanoramaAutofillCurrent(old), false);
+  assert.equal(
+    f.isPanoramaAutofillCurrent(f.beginPanoramaAutofill({}, false)),
+    true
+  );
 });

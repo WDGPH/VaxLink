@@ -862,7 +862,7 @@ function initHandsFreeScanner() {
       AUDIO_FEEDBACK_KEY
     ],
     (stored) => {
-      activeWorkflowMode = normalizeWorkflowMode(stored);
+      updatePanoramaWorkflowMode(normalizeWorkflowMode(stored));
       adminDateTimeAutofillEnabled =
         normalizeAdminDateTimeAutofillSetting(stored);
       reasonConsentAutofillEnabled =
@@ -935,7 +935,7 @@ function initHandsFreeScanner() {
           ? changes[AUDIO_FEEDBACK_KEY].newValue
           : audioFeedbackEnabled
     };
-    activeWorkflowMode = normalizeWorkflowMode(nextState);
+    updatePanoramaWorkflowMode(normalizeWorkflowMode(nextState));
     adminDateTimeAutofillEnabled =
       normalizeAdminDateTimeAutofillSetting(nextState);
     reasonConsentAutofillEnabled =
@@ -2408,13 +2408,20 @@ function isPanoramaAutofillCurrent(data) {
   );
 }
 
+function updatePanoramaWorkflowMode(mode) {
+  if (activeWorkflowMode === mode) return;
+  cancelPanoramaAutofill();
+  panoramaAutofillOwner = null;
+  activeWorkflowMode = mode;
+}
+
 function cancelPanoramaAutofill() {
   if (panoramaAutofillOwner) panoramaAutofillOwner.cancelled = true;
   if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
 }
 
 function handlePanoramaAutofillUserInteraction(event) {
-  if (!event.isTrusted || !panoramaAutofillOwner) return;
+  if (!event.isTrusted) return;
   if (
     event.type === 'keydown' &&
     (event.ctrlKey ||
@@ -2430,7 +2437,7 @@ function handlePanoramaAutofillUserInteraction(event) {
     'input, select, textarea, button, a, label, [contenteditable], [role="button"], .ui-selectonemenu, .ui-selectonemenu-item, [role="option"], .ui-radiobutton, .ui-chkbox'
   );
   if (!control) return;
-  const form = panoramaAutofillOwner.form;
+  const form = getPanoramaAutofillForm();
   if (!form) return;
   const overlay = target.closest(
     '.ui-selectonemenu-panel, .ui-datepicker, [role="listbox"], [role="dialog"]'
@@ -2446,7 +2453,10 @@ function handlePanoramaAutofillUserInteraction(event) {
           .split(/\s+/)
           .includes(overlay.id)
       ));
-  if (form.contains(control) || linked) cancelPanoramaAutofill();
+  if (form.contains(control) || linked) {
+    beginPanoramaAutofill({}, false);
+    cancelPanoramaAutofill();
+  }
 }
 
 // Retain the same owner during one synchronous pass, even if a page event
@@ -3246,7 +3256,7 @@ function handleVaxlinkCommand(value) {
     vlog('unknown VAXLINK command', command);
     return true;
   }
-  activeWorkflowMode = newMode;
+  updatePanoramaWorkflowMode(newMode);
   chrome.storage.local.set({ [WORKFLOW_MODE_KEY]: newMode });
   logAnalyticsEvent('workflow_mode_set', {
     workflow: newMode,
@@ -3651,7 +3661,7 @@ async function setHudWorkflowMode(newMode) {
     return;
   }
 
-  activeWorkflowMode = nextMode;
+  updatePanoramaWorkflowMode(nextMode);
   updateHudState();
   try {
     await setLocalStorage({ [WORKFLOW_MODE_KEY]: nextMode });
