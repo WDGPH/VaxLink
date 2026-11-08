@@ -36,6 +36,7 @@ test('page health keeps the identity captured at load and waits for settings', (
       }
     },
     window: {},
+    panoramaOperation: null,
     VAXLINK_BUILD_ID: 'old-build',
     isHandsFreeSupportedPage: () => true,
     getPanoramaContext: () => ({ document: 'doc', form: 'form' }),
