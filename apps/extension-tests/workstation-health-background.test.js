@@ -17,14 +17,20 @@ const identity = {
   fingerprint: null
 };
 
-test('health reads categories without connecting, filling, or writing storage', async () => {
+test('cold health inspection reads an old catalogue without reconnecting or refreshing', async () => {
   const writes = [];
-  let startupFinished;
-  const startup = new Promise((resolve) => {
-    startupFinished = resolve;
-  });
+  let downloads = 0;
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
     tabs: [tab],
+    storage: {
+      vaxlink_scanner_daemon_enabled_v1: true,
+      vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc',
+      nvc_bundle_last_check_at: '2020-01-01T00:00:00.000Z'
+    },
+    fetch: async (url) => {
+      if (String(url).startsWith('https://nvc-cnv.canada.ca/')) downloads++;
+      throw new Error('No fetch needed for inspection');
+    },
     tabResponse: {
       supported: true,
       ready: true,
@@ -33,24 +39,19 @@ test('health reads categories without connecting, filling, or writing storage', 
     },
     failStorageSet: (values) => {
       writes.push(Object.keys(values));
-      if ('vaxlink_scanner_lock_state_v1' in values) startupFinished();
       return false;
     }
   });
-  // Let independent service-worker startup finish before measuring the request.
-  await harness.sendMessage({ action: 'getNVCUpdateStatus' });
-  await startup;
-  writes.length = 0;
-  const before = harness.offscreenCreations.length;
   const result = await harness.sendMessage({
     action: 'getWorkstationHealth',
     tabId: tab.id
   });
   assert.equal(result.success, true);
   assert.equal(result.chart.state, 'ready');
-  assert.equal(result.nvc.state, 'ready');
-  assert.equal(result.scanner.state, 'unconfigured');
-  assert.equal(harness.offscreenCreations.length, before);
+  assert.equal(result.nvc.state, 'degraded');
+  assert.equal(result.scanner.state, 'unknown');
+  assert.equal(harness.offscreenCreations.length, 0);
+  assert.equal(downloads, 0);
   assert.deepEqual(writes, []);
   assert.deepEqual(
     harness.tabMessages.map(({ message }) => message.action),

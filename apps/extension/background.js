@@ -145,9 +145,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // Load immediately when service worker starts
-bgLog('Service worker started, loading NVC bundle');
+bgLog('Service worker started, loading saved NVC bundle');
 ensureActionIcon();
-initializeNVCSync();
+void loadNVCBundle();
 let queueBadgeCount = 0;
 let scannerCaptureWarning = false;
 let captureWarningGeneration = 0;
