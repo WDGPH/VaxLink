@@ -69,7 +69,9 @@ export function createScannerStatusSnapshot(overrides = {}) {
     lastConnectedAt: '',
     lastDisconnectedAt: '',
     lastCaptureAt: '',
+    lastKnownCaptureAt: '',
     captureCount: 0,
+    selectionRequired: false,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -87,7 +89,9 @@ export function normalizeScannerStatusSnapshot(snapshot) {
     lastConnectedAt: normalizeIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeIsoTimestamp(source.lastDisconnectedAt),
     lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
+    lastKnownCaptureAt: normalizeIsoTimestamp(source.lastKnownCaptureAt),
     captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
+    selectionRequired: source.selectionRequired === true,
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(
       0,
@@ -157,24 +161,32 @@ export function selectGrantedPort(
     return { port: null, reason: 'none' };
   }
 
-  const preferred = candidates.find((candidate) => {
-    const info =
-      typeof candidate.getInfo === 'function' ? candidate.getInfo() : null;
-    return portInfoMatches(preferredPortInfo, info);
-  });
+  const preferred = normalizeScannerPortInfo(preferredPortInfo);
   if (preferred) {
-    return { port: preferred, reason: 'preferred' };
+    const matches = candidates.filter((candidate) =>
+      portInfoMatches(preferred, candidate.getInfo?.())
+    );
+    if (matches.length === 1) return { port: matches[0], reason: 'preferred' };
+    return {
+      port: null,
+      reason: matches.length ? 'ambiguous' : 'preferred_missing'
+    };
   }
 
-  const matchesProfile =
+  const matches =
     typeof profileMatcher === 'function'
-      ? candidates.find((candidate) => profileMatcher(candidate, profile))
-      : null;
-  if (matchesProfile) {
-    return { port: matchesProfile, reason: 'profile' };
+      ? candidates.filter((candidate) => profileMatcher(candidate, profile))
+      : [];
+  if (
+    matches.length === 1 &&
+    normalizeScannerPortInfo(matches[0].getInfo?.())
+  ) {
+    return { port: matches[0], reason: 'profile' };
   }
-
-  return { port: candidates[0], reason: 'first' };
+  return {
+    port: null,
+    reason: matches.length > 1 ? 'ambiguous' : 'unidentified'
+  };
 }
 
 export function normalizeScannerErrorMessage(error) {

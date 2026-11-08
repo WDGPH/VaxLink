@@ -93,6 +93,15 @@ an existing supported integration. It does not permit script injection.
 GS1 parsing, NVC lookup, scanner capture, queues, and inventory remain useful
 without an open chart. Staff review vaccine details before saving in Panorama.
 
+## Pending scanner scans
+
+The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
+limit is reached, VaxLink keeps the existing scans and reports that the new scan
+was not saved. Storage errors also leave a capture warning. Check pending scans
+and the intended chart before rescanning; a warning does not identify which
+scan failed. Scanner delivery and persistence are not crash-proof exactly-once
+operations.
+
 ## Panorama autofill sequence
 
 Fill order must be: `agent → lot → (deferred) date/time`. Panorama

@@ -54,6 +54,29 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   assert.match(worker.url, /scanner-daemon-worker\.js$/);
   assert.deepEqual(worker.messages[0], { type: 'getStatus' });
 
+  const messagesBeforeStatus = worker.messages.length;
+  let statusResponse;
+  runtimeListeners[0](
+    { target: 'scannerDaemon', action: 'scannerDaemon.getStatus' },
+    {},
+    (response) => {
+      statusResponse = response;
+    }
+  );
+  assert.equal(statusResponse.success, true);
+  assert.equal(worker.messages.length, messagesBeforeStatus);
+
+  worker.listeners.get('error')({ message: 'Worker stopped' });
+  runtimeListeners[0](
+    { target: 'scannerDaemon', action: 'scannerDaemon.getStatus' },
+    {},
+    (response) => {
+      statusResponse = response;
+    }
+  );
+  assert.equal(statusResponse.status.state, 'error');
+  assert.equal(workers.length, 1, 'status must not restart a stopped worker');
+
   const connectRequest = {
     target: 'scannerDaemon',
     action: 'scannerDaemon.connectGranted',
@@ -66,10 +89,14 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
     connectResponse = response;
   });
   assert.equal(connectResponse.success, true);
-  assert.equal(worker.messages.at(-1).type, 'connectGranted');
-  assert.equal(worker.messages.at(-1).profileId, 'zebra-ds8178-usb-cdc');
+  const connectedWorker = workers.at(-1);
+  assert.equal(connectedWorker.messages.at(-1).type, 'connectGranted');
+  assert.equal(
+    connectedWorker.messages.at(-1).profileId,
+    'zebra-ds8178-usb-cdc'
+  );
 
-  worker.emit('message', {
+  connectedWorker.emit('message', {
     type: 'scan',
     scan: { rawText: '010012345678901210LOCKLOT1', source: 'web-serial' }
   });
@@ -84,6 +111,28 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
   assert.equal(echo.response.locked, true);
 
+  connectedWorker.emit('message', {
+    type: 'status',
+    status: { state: 'error', selectionRequired: true }
+  });
+  const previousWorkers = workers.length;
+  let restartScheduled = false;
+  const originalTimer = globalThis.setTimeout;
+  globalThis.setTimeout = () => {
+    restartScheduled = true;
+    return 1;
+  };
+  connectedWorker.listeners.get('error')({
+    message: 'Worker stopped after selection failure'
+  });
+  globalThis.setTimeout = originalTimer;
+  assert.equal(restartScheduled, false);
+  assert.equal(workers.length, previousWorkers);
+  runtimeListeners[0](connectRequest, {}, () => {});
+  assert.equal(workers.length, previousWorkers + 1);
+  assert.equal(workers.at(-1).messages.at(-1).type, 'connectGranted');
+
+  await new Promise((resolve) => queueMicrotask(resolve));
   delete globalThis.Worker;
   delete globalThis.chrome;
 });

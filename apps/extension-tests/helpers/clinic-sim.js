@@ -186,11 +186,14 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   const changedListeners = [];
   const messageListeners = [];
+  const startupListeners = [];
+  const installListeners = [];
   const alarms = [];
   const consoleLines = [];
   const idleListeners = [];
   const offscreenCreations = [];
   const tabMessages = [];
+  const optionsOnCreate = options.onOffscreenCreate;
   let offscreenExists = false;
   let idleState = options.idleState || 'active';
   let badgeText = '';
@@ -204,11 +207,14 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   const chrome = {
     runtime: {
+      id: 'vaxlink-test',
       lastError: null,
-      onInstalled: { addListener() {} },
-      onStartup: { addListener() {} },
+      onInstalled: { addListener: (fn) => installListeners.push(fn) },
+      onStartup: { addListener: (fn) => startupListeners.push(fn) },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
+      sendMessage: (_message, callback) =>
+        queueMicrotask(() => callback?.({ success: true })),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
       }
@@ -217,6 +223,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       async createDocument(options) {
         offscreenCreations.push(options);
         offscreenExists = true;
+        optionsOnCreate?.();
       },
       async closeDocument() {
         offscreenExists = false;
@@ -242,6 +249,8 @@ export function createBackgroundHarness(bundle, options = {}) {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };
+        if (options.delayTabMessage?.(tabId, message, () => callback(response)))
+          return;
         queueMicrotask(() => callback(response));
       }
     },
@@ -272,6 +281,12 @@ export function createBackgroundHarness(bundle, options = {}) {
           queueMicrotask(() => callback(result));
         },
         set(values, callback) {
+          if (
+            options.delayStorageSet?.(values, () =>
+              chrome.storage.local.set(values, callback)
+            )
+          )
+            return;
           if (options.failStorageSet?.(values)) {
             queueMicrotask(() => {
               chrome.runtime.lastError = { message: 'storage write failed' };
@@ -336,7 +351,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     filename: 'background.js'
   });
 
-  function sendMessage(request) {
+  function sendMessage(request, sender = { id: 'clinic-sim' }) {
     return new Promise((resolve, reject) => {
       let settled = false;
       const sendResponse = (response) => {
@@ -346,7 +361,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       };
       let isAsync = false;
       for (const listener of messageListeners) {
-        if (listener(request, { id: 'clinic-sim' }, sendResponse) === true) {
+        if (listener(request, sender, sendResponse) === true) {
           isAsync = true;
         }
       }
@@ -365,6 +380,8 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    startup: () => startupListeners.forEach((fn) => fn()),
+    install: () => installListeners.forEach((fn) => fn()),
     storageData,
     alarms,
     consoleLines,

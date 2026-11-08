@@ -85,3 +85,57 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   delete globalThis.self;
   delete globalThis.navigator;
 });
+
+for (const [label, ports] of [
+  [
+    'ambiguous',
+    [
+      { usbVendorId: 0x05e0, usbProductId: 1 },
+      { usbVendorId: 0x05e0, usbProductId: 1 }
+    ]
+  ],
+  ['unidentified', [{}]]
+]) {
+  test(`${label} granted scanners do not retry on device events`, async () => {
+    const listeners = new Map();
+    let selections = 0;
+    let report;
+    const reported = new Promise((resolve) => {
+      report = resolve;
+    });
+    globalThis.self = {
+      postMessage(message) {
+        if (message.status?.state === 'error') report();
+      },
+      addEventListener(type, fn) {
+        listeners.set(type, fn);
+      }
+    };
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        serial: {
+          async getPorts() {
+            selections++;
+            return ports.map((info) => ({ getInfo: () => info }));
+          }
+        }
+      }
+    });
+    try {
+      await import(
+        `../extension/scanner/scanner-daemon-worker.js?selection=${label}`
+      );
+      listeners.get('message')({
+        data: { type: 'connectGranted', profileId: 'generic-usb-cdc' }
+      });
+      await reported;
+      listeners.get('message')({ data: { type: 'refreshPorts' } });
+      await Promise.resolve();
+      assert.equal(selections, 1);
+    } finally {
+      delete globalThis.self;
+      delete globalThis.navigator;
+    }
+  });
+}

@@ -69,6 +69,8 @@ const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
+let pendingInboxWriteQueue = Promise.resolve();
+let scannerStatusWriteQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
 let iconInitPromise = null;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -78,7 +80,9 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
-const PENDING_SCAN_INBOX_LIMIT = 25;
+const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
+const PENDING_SCAN_INBOX_LIMIT = 250;
+const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
@@ -116,6 +120,7 @@ chrome.runtime.onInstalled.addListener(() => {
   bgLog('Vaccine Scanner extension installed');
   ensureActionIcon();
   initializeNVCSync();
+  synchronizeScannerLockState();
   void maybeStartScannerDaemon('install').catch((error) => {
     console.warn('Scanner daemon startup failed on install:', error);
   });
@@ -125,6 +130,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
   ensureActionIcon();
   initializeNVCSync();
+  synchronizeScannerLockState();
   void maybeStartScannerDaemon('startup').catch((error) => {
     console.warn('Scanner daemon startup failed on browser start:', error);
   });
@@ -140,11 +146,13 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 bgLog('Service worker started, loading NVC bundle');
 ensureActionIcon();
 initializeNVCSync();
+let queueBadgeCount = 0;
+let scannerCaptureWarning = false;
+let captureWarningGeneration = 0;
+let captureWarningWrites = Promise.resolve();
+
 initQueueBadge();
 initializeScannerLockMonitoring();
-void maybeStartScannerDaemon('service_worker_start').catch((error) => {
-  console.warn('Scanner daemon startup failed on service worker start:', error);
-});
 
 function ensureActionIcon() {
   if (iconInitPromise) {
@@ -185,21 +193,65 @@ function ensureActionIcon() {
   return iconInitPromise;
 }
 
+function renderQueueBadge() {
+  chrome.action.setBadgeText({
+    text: scannerCaptureWarning
+      ? '!'
+      : queueBadgeCount > 0
+        ? String(queueBadgeCount)
+        : ''
+  });
+  chrome.action.setBadgeBackgroundColor({
+    color: scannerCaptureWarning ? '#b91c1c' : BADGE_COLOR
+  });
+}
+
 function updateQueueBadge(rows) {
-  const count = Array.isArray(rows) ? rows.length : 0;
-  chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+  queueBadgeCount = Array.isArray(rows) ? rows.length : 0;
+  renderQueueBadge();
+}
+
+function recordCaptureWarning() {
+  captureWarningGeneration++;
+  scannerCaptureWarning = true;
+  renderQueueBadge();
+  captureWarningWrites = captureWarningWrites
+    .catch(() => undefined)
+    .then(() => setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: true }));
+  return captureWarningWrites;
+}
+
+function acknowledgeCaptureWarning() {
+  const generation = ++captureWarningGeneration;
+  const result = captureWarningWrites
+    .catch(() => undefined)
+    .then(async () => {
+      await setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: false });
+      if (generation !== captureWarningGeneration) return;
+      scannerCaptureWarning = false;
+      renderQueueBadge();
+    });
+  captureWarningWrites = result;
+  return result;
 }
 
 function initQueueBadge() {
-  chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
-    updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
-  });
+  const generation = captureWarningGeneration;
+  chrome.storage.local.get(
+    [MULTIPLE_INJECT_QUEUE_KEY, SCANNER_CAPTURE_ERROR_KEY],
+    (stored) => {
+      if (
+        generation === captureWarningGeneration &&
+        stored?.[SCANNER_CAPTURE_ERROR_KEY] === true
+      )
+        scannerCaptureWarning = true;
+      updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
+    }
+  );
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+    if (MULTIPLE_INJECT_QUEUE_KEY in changes)
       updateQueueBadge(changes[MULTIPLE_INJECT_QUEUE_KEY].newValue);
-    }
   });
 }
 
@@ -261,6 +313,10 @@ function createScannerStatusSnapshot(overrides = {}) {
     portInfo: null,
     lastConnectedAt: '',
     lastDisconnectedAt: '',
+    lastCaptureAt: '',
+    lastKnownCaptureAt: '',
+    captureCount: 0,
+    selectionRequired: false,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -277,6 +333,10 @@ function normalizeScannerStatusSnapshot(snapshot) {
     portInfo: normalizeScannerPortInfo(source.portInfo),
     lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
+    lastCaptureAt: normalizeScannerIsoTimestamp(source.lastCaptureAt),
+    lastKnownCaptureAt: normalizeScannerIsoTimestamp(source.lastKnownCaptureAt),
+    captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
+    selectionRequired: source.selectionRequired === true,
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(
       0,
@@ -322,20 +382,41 @@ async function getScannerBootstrapState() {
   return { enabled, profileId, portInfo, status };
 }
 
-async function persistScannerStatusSnapshot(snapshot) {
-  const normalized = normalizeScannerStatusSnapshot(snapshot);
-  scannerDaemonStatusCache = normalized;
-  const values = {
-    [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
-  };
-  if (normalized.profileId) {
-    values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
-  }
-  if (normalized.portInfo) {
-    values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
-  }
-  await setStorage(values);
-  return normalized;
+function persistScannerStatusSnapshot(snapshot) {
+  const result = scannerStatusWriteQueue
+    .catch(() => undefined)
+    .then(async () => {
+      const stored = await getStorage([SCANNER_STATUS_SNAPSHOT_KEY]);
+      const previous = normalizeScannerStatusSnapshot(
+        stored[SCANNER_STATUS_SNAPSHOT_KEY]
+      );
+      const normalized = normalizeScannerStatusSnapshot(snapshot);
+      normalized.lastKnownCaptureAt =
+        [
+          previous.lastKnownCaptureAt,
+          previous.lastCaptureAt,
+          normalized.lastKnownCaptureAt,
+          normalized.lastCaptureAt
+        ]
+          .sort()
+          .at(-1) || '';
+      scannerDaemonStatusCache = normalized;
+      const values = {
+        [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
+      };
+      if (normalized.selectionRequired)
+        values[SCANNER_DAEMON_ENABLED_KEY] = false;
+      if (normalized.profileId) {
+        values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
+      }
+      if (normalized.portInfo) {
+        values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
+      }
+      await setStorage(values);
+      return normalized;
+    });
+  scannerStatusWriteQueue = result;
+  return result;
 }
 
 async function broadcastScannerStatus(snapshot) {
@@ -423,7 +504,11 @@ async function sendScannerDaemonMessage(message) {
 
 async function maybeStartScannerDaemon(trigger = 'startup') {
   const bootstrap = await getScannerBootstrapState();
-  if (!bootstrap.enabled || !bootstrap.profileId) {
+  if (
+    !bootstrap.enabled ||
+    !bootstrap.profileId ||
+    bootstrap.status.selectionRequired
+  ) {
     return { started: false, status: bootstrap.status };
   }
   await ensureScannerDaemon();
@@ -616,6 +701,9 @@ function initializeScannerLockMonitoring() {
       });
     });
   }
+}
+
+function synchronizeScannerLockState() {
   void queryMachineIdleState()
     .then(updateScannerLockState)
     .catch((error) =>
@@ -887,34 +975,39 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  await logAnalyticsEvent('scan_captured', {
-    workflow: mode,
-    source: scan.source || 'web-serial',
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      record.gtin ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
-  await logAnalyticsEvent('queue_saved', {
-    workflow: mode,
-    queue: mode === 'inventory' ? 'inventory' : 'multiple',
-    source: scan.source || 'web-serial',
-    count: 1,
-    queueSizeAfter: record.queueSizeAfter || 0,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
+  try {
+    await logAnalyticsEvent('scan_captured', {
+      workflow: mode,
+      source: scan.source || 'web-serial',
+      vaccineLabel:
+        record.tradename ||
+        record.generic_name ||
+        record.name ||
+        record.lot ||
+        record.gtin ||
+        '',
+      manufacturer: record.manufacturer || '',
+      expiryFlag
+    });
+    if (!record.duplicate_ignored)
+      await logAnalyticsEvent('queue_saved', {
+        workflow: mode,
+        queue: mode === 'inventory' ? 'inventory' : 'multiple',
+        source: scan.source || 'web-serial',
+        count: 1,
+        queueSizeAfter: record.queueSizeAfter || 0,
+        vaccineLabel:
+          record.tradename ||
+          record.generic_name ||
+          record.name ||
+          record.lot ||
+          '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag
+      });
+  } catch (_) {
+    console.warn('Scanner scan retained; usage counters could not be updated.');
+  }
 
   return {
     queuedToWorkflow: true,
@@ -924,39 +1017,57 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   };
 }
 
-async function enqueuePendingScan(scan) {
-  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-    ? stored[PENDING_SCAN_INBOX_KEY]
-    : [];
-  rows.push(scan);
-  const nextRows = rows.slice(-PENDING_SCAN_INBOX_LIMIT);
-  await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
-  return nextRows.length;
+function mutatePendingInbox(action) {
+  const result = pendingInboxWriteQueue.catch(() => undefined).then(action);
+  pendingInboxWriteQueue = result;
+  return result;
 }
 
-async function drainPendingScansToTab(tabId) {
-  const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
-  const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
-    ? stored[PENDING_SCAN_INBOX_KEY]
-    : [];
-  if (!rows.length) {
-    return { drained: 0, remaining: 0 };
-  }
-
-  const remaining = [];
-  let drained = 0;
-  for (const row of rows) {
-    try {
-      await sendScanToTab(tabId, normalizeScanEvent(row));
-      drained += 1;
-    } catch (_) {
-      remaining.push(row);
+function enqueuePendingScan(scan) {
+  return mutatePendingInbox(async () => {
+    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+      ? stored[PENDING_SCAN_INBOX_KEY]
+      : [];
+    const nextRows = [...rows, scan];
+    if (
+      nextRows.length > PENDING_SCAN_INBOX_LIMIT ||
+      new TextEncoder().encode(JSON.stringify(nextRows)).length >
+        PENDING_SCAN_INBOX_MAX_BYTES
+    ) {
+      throw new Error(
+        'Pending scans are full. Open a supported chart and process pending scans before scanning again.'
+      );
     }
-  }
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
+    return nextRows.length;
+  });
+}
 
-  await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
-  return { drained, remaining: remaining.length };
+function drainPendingScansToTab(tabId) {
+  return mutatePendingInbox(async () => {
+    const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
+    const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
+      ? stored[PENDING_SCAN_INBOX_KEY]
+      : [];
+    if (!rows.length) {
+      return { drained: 0, remaining: 0 };
+    }
+
+    const remaining = [];
+    let drained = 0;
+    for (const row of rows) {
+      try {
+        await sendScanToTab(tabId, normalizeScanEvent(row));
+        drained += 1;
+      } catch (_) {
+        remaining.push(row);
+      }
+    }
+
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: remaining });
+    return { drained, remaining: remaining.length };
+  });
 }
 
 async function routeScanToActiveSupportedTab(rawScan) {
@@ -1020,8 +1131,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
     );
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
@@ -1060,8 +1172,9 @@ async function routeScanToActiveSupportedTab(rawScan) {
   if (workflowQueueResult && workflowQueueResult.queuedToWorkflow) {
     return {
       routed: false,
-      queued: true,
-      queuedToWorkflow: true,
+      queued: !workflowQueueResult.record?.duplicate_ignored,
+      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
+      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
       workflow: workflowQueueResult.workflow,
       storageKey: workflowQueueResult.storageKey,
       queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
@@ -2919,19 +3032,49 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
     (async () => {
+      const cachedCaptureAt =
+        scannerDaemonStatusCache.lastKnownCaptureAt ||
+        scannerDaemonStatusCache.lastCaptureAt;
       const bootstrap = await getScannerBootstrapState();
       let status = bootstrap.status;
-      if (bootstrap.enabled && bootstrap.profileId) {
-        await maybeStartScannerDaemon('status_request');
-        const daemonResponse = await sendScannerDaemonMessage({
+      status.lastKnownCaptureAt =
+        [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
+          .sort()
+          .at(-1) || '';
+      let source = 'cached';
+      let captureSource = 'cached';
+      const captureError =
+        scannerCaptureWarning ||
+        (await getStorage([SCANNER_CAPTURE_ERROR_KEY]))[
+          SCANNER_CAPTURE_ERROR_KEY
+        ] === true;
+      if (await hasScannerDaemonDocument()) {
+        const reply = await sendRuntimeMessage({
+          target: SCANNER_DAEMON_TARGET,
           action: SCANNER_DAEMON_ACTIONS.GET_STATUS
         }).catch(() => null);
-        if (daemonResponse && daemonResponse.success && daemonResponse.status) {
-          status = normalizeScannerStatusSnapshot(daemonResponse.status);
-          await persistScannerStatusSnapshot(status);
+        if (reply?.success && reply.status) {
+          const liveStatus = normalizeScannerStatusSnapshot(reply.status);
+          liveStatus.lastKnownCaptureAt =
+            [
+              status.lastKnownCaptureAt,
+              liveStatus.lastKnownCaptureAt,
+              liveStatus.lastCaptureAt
+            ]
+              .sort()
+              .at(-1) || '';
+          if (liveStatus.lastCaptureAt) captureSource = 'live';
+          status = liveStatus;
+          source = 'live';
         }
       }
-      sendResponse({ success: true, status });
+      sendResponse({
+        success: true,
+        status,
+        source,
+        captureSource,
+        captureError
+      });
     })().catch((error) => {
       sendResponse({
         success: false,
@@ -3067,12 +3210,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'scannerScanCaptured') {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
-      .catch((error) =>
+      .catch((error) => {
+        void recordCaptureWarning().catch(() => undefined);
         sendResponse({
           success: false,
           error: error?.message || 'Scan routing failed'
-        })
-      );
+        });
+      });
+    return true;
+  }
+
+  if (request.action === 'acknowledgeScannerCaptureError') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('popup.html')
+    ) {
+      sendResponse({ success: false });
+      return false;
+    }
+    acknowledgeCaptureWarning()
+      .then(() =>
+        sendResponse({ success: true, captureError: scannerCaptureWarning })
+      )
+      .catch(() => sendResponse({ success: false }));
     return true;
   }
 

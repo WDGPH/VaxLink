@@ -2,7 +2,8 @@ import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
   normalizeScannerPortInfo,
-  normalizeScannerStatusSnapshot
+  normalizeScannerStatusSnapshot,
+  selectGrantedPort
 } from './scanner/scanner-daemon-shared.js';
 import {
   SERIAL_SCANNER_PROFILES,
@@ -106,7 +107,7 @@ function sendScannerDaemonCommand(action, payload = {}) {
   });
 }
 
-function applyDaemonStatus(status) {
+function applyDaemonStatus(status, source = 'live', captureSource = source) {
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   const profile = getSerialScannerProfile(
     scannerStatusSnapshot.profileId || getSelectedProfile()?.id
@@ -128,12 +129,30 @@ function applyDaemonStatus(status) {
       : `${profile.label} is connected through Web Serial, but no hardware scan has reached the daemon yet.`
     : scannerStatusSnapshot.lastError ||
       `Scanner daemon state: ${state.replaceAll('_', ' ')}.`;
-  setStatus(els.connectionStatus, message, tone);
+  const sourceNote =
+    source === 'cached' ? ' Status is cached; connection is unconfirmed.' : '';
+  const captureNote =
+    scannerStatusSnapshot.lastKnownCaptureAt && captureSource === 'cached'
+      ? ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`
+      : '';
+  setStatus(els.connectionStatus, message + sourceNote + captureNote, tone);
   updateDeviceState(connected ? 'Connected in background' : state);
   setButtons({ canConnect: !connected, canDisconnect: connected });
 }
 
 function renderDaemonRouteResult(response) {
+  if (response?.duplicate_ignored) {
+    setStatus(els.routeStatus, 'Duplicate scan ignored.', 'info');
+    return;
+  }
+  if (response?.locked && response.queuedToWorkflow === false) {
+    setStatus(
+      els.routeStatus,
+      `Scan saved to pending scans (${response.pendingCount || 0}).`,
+      'success'
+    );
+    return;
+  }
   if (response?.locked) {
     setStatus(
       els.routeStatus,
@@ -185,7 +204,19 @@ function initializePage() {
       renderProfileNote(profile);
       if (portInfo) updateDevicePanel(profile, portInfo);
       void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
-        .then((response) => applyDaemonStatus(response.status))
+        .then((response) => {
+          applyDaemonStatus(
+            response.status,
+            response.source,
+            response.captureSource
+          );
+          if (response.captureError)
+            setStatus(
+              els.routeStatus,
+              'A scan could not be saved or delivered. Check pending scans and rescan if needed.',
+              'error'
+            );
+        })
         .catch((error) =>
           setStatus(els.connectionStatus, error.message, 'error')
         );
@@ -273,12 +304,18 @@ async function reconnectGrantedPort() {
   try {
     setButtons({ canConnect: false, canDisconnect: false });
     const ports = await getGrantedSerialScannerPorts();
-    const port =
-      ports.find((candidate) => portMatchesProfile(candidate, profile)) ||
-      ports[0];
+    const selection = selectGrantedPort(
+      ports,
+      profile,
+      scannerStatusSnapshot.portInfo,
+      portMatchesProfile
+    );
+    const port = selection.port;
     if (!port) {
       throw new Error(
-        'No previously granted serial port found. Use Select Scanner first.'
+        selection.reason === 'ambiguous'
+          ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
+          : 'The selected scanner could not be identified. Reconnect it or use Select Scanner.'
       );
     }
     const response = await sendScannerDaemonCommand(

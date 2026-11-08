@@ -44,6 +44,10 @@ function applyStatus(status) {
   const hasChanged =
     JSON.stringify(nextStatus) !== JSON.stringify(currentStatus);
   currentStatus = nextStatus;
+  if (nextStatus.selectionRequired) {
+    desiredConnection = null;
+    clearRestartTimer();
+  }
   if (hasChanged) {
     postStatusToBackground(currentStatus);
   }
@@ -164,7 +168,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    ensureWorker().postMessage({ type: 'getStatus' });
     sendResponse({ success: true, status: currentStatus });
     return false;
   }

@@ -43,7 +43,7 @@ test('default scanner status reflects setup state from stored config', () => {
   );
 });
 
-test('granted port selection prefers the exact previously used port before profile fallback', () => {
+test('granted port selection requires an unambiguous identity', () => {
   const profile = getSerialScannerProfile('zebra-ds8178-usb-cdc');
   const preferred = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0200 });
   const profileMatch = makePort({ usbVendorId: 0x05e0, usbProductId: 0x0300 });
@@ -64,8 +64,24 @@ test('granted port selection prefers the exact previously used port before profi
     { usbVendorId: 0x05e0, usbProductId: 0x0200 },
     portMatchesProfile
   );
-  assert.equal(fallback.reason, 'profile');
-  assert.equal(fallback.port, profileMatch);
+  assert.equal(fallback.reason, 'preferred_missing');
+  assert.equal(fallback.port, null);
+  const ambiguous = selectGrantedPort(
+    [preferred, makePort(preferred.getInfo())],
+    profile,
+    preferred.getInfo(),
+    portMatchesProfile
+  );
+  assert.equal(ambiguous.reason, 'ambiguous');
+  assert.equal(ambiguous.port, null);
+  assert.equal(
+    selectGrantedPort([generic], profile, null, portMatchesProfile).port,
+    null
+  );
+  assert.equal(
+    selectGrantedPort([profileMatch], profile, null, portMatchesProfile).port,
+    profileMatch
+  );
 });
 
 test('scanner status descriptor exposes workflow banner only for unattended capture modes', () => {
