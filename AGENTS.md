@@ -25,6 +25,13 @@ any harness that does not discover `AGENTS.md` to read this file.
 - Use the user's direct writing style: familiar words, short sentences, and
   concrete instructions. Apply this to comments, documentation, commit messages,
   and PR descriptions. Keep technical names where they help the reader.
+- Explain non-obvious safety and ordering decisions for a reader unfamiliar
+  with JavaScript or the framework. State why the safeguard exists and what
+  could go wrong without it. Introduce unfamiliar terms when needed; avoid
+  comments that merely repeat the code.
+- Keep private planning and unvalidated future designs out of implementation
+  PRs and their public comments, commit messages, and documentation. Describe
+  implemented behavior and verified limitations.
 - Start a PR description with the problem and resulting behavior. One or two
   short paragraphs are usually enough.
 - **Do not automatically add validation reports, test counts, temporary test
@@ -47,6 +54,10 @@ any harness that does not discover `AGENTS.md` to read this file.
   change, failure, or unresolved concern warrants it.
 - Separate code, package, and CI evidence from browser, scanner, Store, and live
   clinic validation. Do not claim the latter from automated checks alone.
+- In scan workflows, distinguish capture, local persistence, page acceptance,
+  observed field verification, and a saved clinical record. Explain which step
+  an acknowledgement proves. Make uncertain outcomes visible for staff review;
+  do not automatically replay or restore uncertain clinical work.
 - Review each PR's changes critically before pushing. Use a separate reviewer
   when the harness supports it. Address meaningful findings and recheck the
   affected work.
@@ -125,43 +136,11 @@ Production releases run from `main` and prereleases from `alpha` through release
 
 ## Extension Architecture
 
-The extension has three execution contexts that communicate via `chrome.runtime.sendMessage` and `chrome.storage.local`:
-
-**`background.js`** — service worker. Owns:
-
-- NVC FHIR bundle fetch, indexing, and 24-hour auto-refresh (`nvc-auto-sync` alarm)
-- Lot lookup with GTIN-based product selection (`lookupVaccineInfo`)
-- Analytics event log (`vaxlink_analytics_v1`)
-- Multiple-inject queue append helpers
-- Action icon and badge management
-
-**`content.js`** — injected into Panorama pages. Owns:
-
-- Receives scans routed from the background scanner channel on supported pages
-- HUD overlay on supported pages
-- Panorama autofill on supported immunization pages
-- Workflow mode reading from `chrome.storage.local`
-
-**`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
-
-- Manual scan input and parse (`popup-parser.js` for GS1 AI parsing)
-- Workflow mode switching (single / multiple / inventory)
-- Inventory tray UI, CSV export, and storage via `popup-inventory.js`
-- Sending fill payloads to content script via `chrome.tabs.sendMessage`
-
-**`panorama-agent-rules.js`** — loaded before `content.js` as a content script. Contains heuristics for matching scanned lot/GTIN to a Panorama agent dropdown option.
-
-**`queue-record.js`** — shared row normalization for inventory CSV export. Keeps the exported column shape stable for downstream tools.
-
-### Key Storage Keys
-
-| Key                        | Owner           | Purpose                      |
-| -------------------------- | --------------- | ---------------------------- |
-| `multiple_inject_queue_v1` | popup + content | Active multiple-inject queue |
-| `inventory_scan_batch_v1`  | popup + content | Legacy inventory batch queue |
-| `nvc_bundle_override`      | background      | Cached NVC FHIR bundle       |
-| `vaxlink_workflow_mode_v1` | popup           | Current workflow mode        |
-| `vaxlink_analytics_v1`     | background      | Fill event log               |
+See [Architecture](docs/architecture.md) for the maintained component map,
+shared helpers, storage responsibilities, and scan delivery and recovery flow.
+Update that document when these responsibilities or contracts change. Keep the
+hard constraints below in this guidance rather than duplicating the component
+map here.
 
 ### Panorama Autofill Sequence
 

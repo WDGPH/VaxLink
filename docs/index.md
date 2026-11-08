@@ -37,8 +37,8 @@ capture/replay before moving to production.
 
   ***
 
-  The three extension execution contexts, key storage schema, and the
-  Panorama autofill sequence.
+  How the scanner reader, background program, Panorama integration, and user
+  controls work together, plus stored data and the autofill sequence.
 
   [:octicons-arrow-right-24: Architecture](architecture.md)
 
