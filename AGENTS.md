@@ -35,6 +35,11 @@ any harness that does not discover `AGENTS.md` to read this file.
 - Add persistent warnings, recovery states, or completion-verification machinery
   only for a demonstrated failure with a clear benefit. Acknowledge unavoidable
   uncertainty without implying that the browser can prove a saved clinical state.
+- Read-only inspection must not change operation ownership or invalidate a valid
+  context token. Invalidate it when the observed context or ownership changes.
+- Queue-changing messages should follow existing sender-validation conventions
+  and reject malformed payloads before writing. Keep the mutation API small;
+  do not introduce a permissions framework for a few caller checks.
 - Check cancellation after waiting and before meaningful changes to page fields.
   Additional checks within synchronous code need a reason, such as a field event
   running page code that can replace the form. Avoid repeated checks between
@@ -66,13 +71,18 @@ any harness that does not discover `AGENTS.md` to read this file.
 
 ## Tests and reviews
 
-- Keep tests proportionate to the change. Use existing tests, fixtures, and
-  production functions. Add a focused test when it covers a meaningful failure
-  or behavior that the existing checks miss.
+- Size tests by the risk and complexity of the behavior, not implementation line
+  count. Concurrency and data-loss risks deserve stronger coverage than routine
+  input validation. Use existing tests, fixtures, and production functions; add
+  a focused test for a meaningful failure the existing checks miss.
 - Prefer one representative test per failure class, with table-driven variations
   where useful. Test externally meaningful behavior or a safety invariant rather
   than every internal state transition. Justify larger test suites by the distinct
   risks they protect, and avoid another generalized mock browser or DOM framework.
+- Prefer the existing whole-script harness in
+  `apps/extension-tests/helpers/clinic-sim.js` over extracting functions with
+  regexes or string slicing. Keep fixtures focused; avoiding extraction alone
+  does not justify a large browser mock or a production refactor.
 - Do not add tests just for documentation edits, unused-function removal, or
   other low-impact cleanup. Avoid a new test framework or broad harness for a
   small change.
