@@ -434,35 +434,79 @@ test('completion verifies the form independently and acknowledges only once', as
   assert.equal(applied, 1);
 });
 
-test('completion waits for serialized consumption and rechecks ownership after the reply', async () => {
-  let verified = true;
-  let finishConsume;
-  let consumes = 0;
-  let applied = 0;
-  const context = vm.createContext({
-    isPanoramaFormVerified: () => verified,
-    consumeQueueRecordAfterDeferredAutofill: () => {
-      consumes++;
-      return new Promise((resolve) => {
-        finishConsume = resolve;
-      });
-    },
-    reportPanoramaApplied: () => {
-      applied++;
-    },
-    showVaxlinkToast() {},
-    console
+for (const changed of [false, true]) {
+  test(`confirmed queue use ${changed ? 'warns after a late form change' : 'reports application while still verified'}`, async () => {
+    let verified = true;
+    let finishConsume;
+    let consumes = 0;
+    let applied = 0;
+    const notices = [];
+    const events = [];
+    const context = vm.createContext({
+      isPanoramaFormVerified: () => verified,
+      consumeQueueRecordAfterDeferredAutofill: () => {
+        consumes++;
+        return new Promise((resolve) => {
+          finishConsume = resolve;
+        });
+      },
+      reportPanoramaApplied: () => {
+        applied++;
+      },
+      showVaxlinkToast: (data) => notices.push(data),
+      logAnalyticsEvent: (type, data) => events.push({ type, data }),
+      console
+    });
+    vm.runInContext(fn('completePanoramaAutofill'), context);
+    const data = { _vaxlinkOperation: {}, _vaxlinkQueueContext: {} };
+    const completing = context.completePanoramaAutofill(data);
+    await context.completePanoramaAutofill(data);
+    assert.equal(consumes, 1);
+    assert.equal(applied, 0);
+    assert.equal(notices.length, 0);
+    verified = !changed;
+    // A successful reply acknowledges a storage operation that already finished.
+    finishConsume({
+      record: { id: 'used', expiry_flag: 'valid' },
+      queueSizeAfter: 0
+    });
+    await completing;
+    assert.equal(applied, changed ? 0 : 1);
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0]._queueReviewRequired === true, changed);
+    assert.equal(events.length, changed ? 0 : 1);
+    if (changed)
+      assert.deepEqual(Object.keys(notices[0]), ['_queueReviewRequired']);
   });
-  vm.runInContext(fn('completePanoramaAutofill'), context);
-  const data = { _vaxlinkOperation: {}, _vaxlinkQueueContext: {} };
-  const completing = context.completePanoramaAutofill(data);
-  await context.completePanoramaAutofill(data);
-  assert.equal(consumes, 1);
-  assert.equal(applied, 0);
-  verified = false;
-  finishConsume();
-  await completing;
-  assert.equal(applied, 0);
+}
+
+test('confirmed consumption survives ownership changing before the reply', async () => {
+  let owned = true;
+  let reply;
+  const events = [];
+  const context = vm.createContext({
+    ownsPanoramaOperation: () => owned,
+    chrome: {
+      runtime: {
+        sendMessage: (_request, callback) => {
+          reply = callback;
+        }
+      }
+    },
+    logAnalyticsEvent: (type) => events.push(type)
+  });
+  vm.runInContext(fn('consumeQueueRecordAfterDeferredAutofill'), context);
+  const pending = context.consumeQueueRecordAfterDeferredAutofill(
+    { storageKey: 'queue', recordId: 'used' },
+    { id: 'operation', context: {} }
+  );
+  owned = false;
+  const record = { id: 'used', expiry_flag: 'valid' };
+  reply({ success: true, record, queueSizeAfter: 0 });
+  const consumed = await pending;
+  assert.equal(consumed.record, record);
+  assert.equal(consumed.queueSizeAfter, 0);
+  assert.deepEqual(events, ['queue_used']);
 });
 
 test('automatic grid leaves recovered rows at their existing indices', async () => {

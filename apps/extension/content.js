@@ -3353,9 +3353,8 @@ async function consumeQueueRecordAfterDeferredAutofill(
       }
     );
   });
-  if (!ownsPanoramaOperation(operation)) return null;
   const record = response.record;
-  if (!record) return null;
+  if (!record) throw new Error('Queue update response is incomplete');
   const queueSizeAfter = response.queueSizeAfter;
 
   const workflow = queueContext.workflow || 'multiple';
@@ -3378,20 +3377,6 @@ async function consumeQueueRecordAfterDeferredAutofill(
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
-  logAnalyticsEvent('autofill_result', {
-    workflow,
-    source,
-    success: true,
-    deferred: true,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
 
   return { record, queueSizeAfter: queueSizeAfter };
 }
@@ -3402,11 +3387,34 @@ async function completePanoramaAutofill(data) {
   operation.finalizing = true;
   try {
     if (data._vaxlinkQueueContext) {
-      await consumeQueueRecordAfterDeferredAutofill(
+      const consumed = await consumeQueueRecordAfterDeferredAutofill(
         data._vaxlinkQueueContext,
         operation
       );
-      if (!isPanoramaFormVerified(data, operation)) return;
+      if (!consumed) return;
+      // The writer verified the form before committing. A later change cannot
+      // undo that confirmed queue use; retain the receipt and ask for review.
+      if (!isPanoramaFormVerified(data, operation)) {
+        showVaxlinkToast({ _queueReviewRequired: true }, 12000);
+        return;
+      }
+      const { record } = consumed;
+      logAnalyticsEvent('autofill_result', {
+        workflow: data._vaxlinkQueueContext.workflow || 'multiple',
+        source: data._vaxlinkQueueContext.source || 'queue',
+        success: true,
+        deferred: true,
+        vaccineLabel:
+          record.tradename ||
+          record.generic_name ||
+          record.name ||
+          record.lot ||
+          '',
+        manufacturer: record.manufacturer || '',
+        expiryFlag:
+          record.expiry_flag ||
+          getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+      });
     }
     reportPanoramaApplied(operation);
     showVaxlinkToast(data);
@@ -3415,7 +3423,8 @@ async function completePanoramaAutofill(data) {
     if (ownsPanoramaOperation(operation))
       showVaxlinkToast({
         ...data,
-        lookup_error: 'The queue could not be updated. Review it before reuse.'
+        lookup_error:
+          'The queue update could not be confirmed. Review the chart and queue before reuse.'
       });
   }
 }
@@ -3595,6 +3604,17 @@ function showVaxlinkToast(data, durationMs = 4000) {
       toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
     }
   };
+
+  if (data._queueReviewRequired) {
+    showRoutineToast(
+      `<div class="vl-toast expiring show">
+        <div class="vl-toast-title">Review chart and queue</div>
+        <div class="vl-toast-detail">Queue use was recorded, but the Panorama form changed before confirmation finished. Check the chart and queue before using this vial again.</div>
+      </div>`,
+      durationMs
+    );
+    return;
+  }
 
   if (data._commandMode) {
     const modeLabels = {

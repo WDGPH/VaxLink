@@ -124,6 +124,11 @@ navigation, or a replacement owning form also cancels later writes.
 Replacing controls within the same owning form can continue that operation.
 Before consuming a queue row, the background writer rechecks the current operation
 and its observed fields. Native agent selection takes priority over widget labels.
+The form check and storage write are separate operations. If the form changes
+while a successful queue update is awaiting its reply, VaxLink retains that
+confirmed outcome and shows a review warning on supported Panorama pages.
+It does not report current form application or automatically restore the row.
+A page that has navigated away may no longer display that warning.
 
 Popup Settings shows held scans and offers **Move held scans to Multiple Inject**.
 Review the intended chart first: some held scans may already have populated
