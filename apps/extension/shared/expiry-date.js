@@ -5,7 +5,10 @@
     if (!raw) return null;
     // Expiry is a calendar date. Keep the written date of an NVC timestamp,
     // rather than shifting it to the previous day in another time zone.
-    const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+    // Timestamps require seconds and a UTC marker or numeric time-zone offset.
+    const iso = raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/
+    );
     const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
     if (!iso && !mdy) return null;
     if (iso && raw.includes('T') && Number.isNaN(Date.parse(raw))) return null;
