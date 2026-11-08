@@ -1,50 +1,106 @@
 # Architecture
 
-The extension has no build step — files are loaded directly by Chrome. No
-bundler, no transpilation. It has three execution contexts that communicate
-via `chrome.runtime.sendMessage` and `chrome.storage.local`.
+The extension has no build step: Chrome loads its JavaScript files directly,
+without a bundler or a language conversion step. Its parts run in separate
+places, described below. Each has its own variables. They exchange messages
+through Chrome's extension APIs and use `chrome.storage.local` for saved data.
 
 ## Execution contexts
 
-**`background.js`** — service worker. Owns:
+An execution context is a separate place where JavaScript runs. Keeping these
+roles clear helps prevent two parts from opening the scanner or changing the
+same queue independently.
 
-- NVC FHIR bundle fetch, indexing, and 24-hour auto-refresh (`nvc-auto-sync`
-  alarm)
-- Lot/GTIN lookup (`lookupVaccineInfo`)
-- Analytics event log (`vaxlink_analytics_v1`)
-- Multiple-inject queue append helpers
-- Action icon and badge management
+### Background coordination: `background.js`
 
-**`content.js`** — injected into Panorama pages. Owns:
+Chrome starts this background program, called a service worker, to handle
+extension events and can stop it when idle. It coordinates:
 
-- Receives scans routed from the background scanner channel on supported pages
-- HUD overlay on supported pages
-- Panorama autofill on supported immunization pages
-- Workflow mode reading from `chrome.storage.local`
+- Loading, indexing, and refreshing the vaccine catalogue (NVC).
+- Looking up a vaccine by lot and barcode product identifier (GTIN).
+- Routing scans to supported chart tabs or retaining them when delivery fails.
+- Saving pending scans, draining them to a chart, and handling queue appends in order.
+- Saving scanner capture warnings and analytics, and updating the icon and badge.
+- Creating the hidden scanner host and passing scanner control requests to it.
 
-**`popup.js` + `popup-inventory.js` + `popup-ui.js`** — popup window. Owns:
+It coordinates capture but does not own the open scanner connection.
 
-- Manual scan input and parse (`popup-parser.js` for GS1 AI parsing)
-- Workflow mode switching (single / multiple / inventory)
-- Inventory tray UI, CSV export, and storage via `popup-inventory.js`
-- Sending fill payloads to content script via `chrome.tabs.sendMessage`
+### Hidden scanner host: `scanner-daemon.html` and `scanner-daemon.js`
 
-**`panorama-agent-rules.js`** — loaded before `content.js` as a content
-script. Contains heuristics for matching scanned lot/GTIN to a Panorama agent
-dropdown option.
+An offscreen page is a hidden extension page. It hosts the scanner worker so
+closing the popup or Scanner Setup does not end that worker. It passes control
+requests to the worker and forwards scans and status to the background program.
+It remembers the requested connection so it can restart a failed worker.
 
-**`queue-record.js`** — shared row normalization for inventory CSV export.
-Keeps the exported column shape stable for downstream tools.
+The host passes messages; the scanner worker opens and reads the device.
+
+### Scanner reader: `scanner/scanner-daemon-worker.js`
+
+A dedicated worker runs the scanner-reading code separately from the page. It
+selects an unambiguous granted port, opens it through Chrome's Web Serial API,
+and owns the live connection and reconnect attempts. `scanner/serial-provider.js`
+reads incoming bytes and assembles complete scans. The worker sends those scans
+and connection status back to the hidden host.
+
+This stage reads scanner messages; parsing their vaccine fields happens later.
+
+### Panorama integration: `content.js`
+
+Chrome loads this content script into supported Panorama tabs. It can read and
+change the page's HTML fields, but its JavaScript variables are separate from
+Panorama's own variables. This separation is why a page-library variable may be
+unavailable even when the page is still updating.
+
+The script receives routed scans, shows the floating VaxLink controls, and fills
+the immunization form. It handles field writes, follow-up attempts, and manual
+takeovers of the agent and lot controls.
+It reads workflow settings from local storage.
+
+### User controls: popup and Scanner Setup
+
+`popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
+scan input and preview, workflow selection, queue and inventory controls, CSV
+export, and scanner status. The popup sends fill requests to
+the selected Panorama integration.
+
+`scanner-setup.html` and `scanner-setup.js` let staff choose a scanner, grant
+browser permission, and request a connection or disconnection. They do not run
+the ongoing scanner reader.
+
+A hardware scan travels from the scanner worker through the hidden host to the
+background program. The background routes it to a supported chart or retains
+it in a queue.
+
+## Shared helpers
+
+- **`shared/gs1-parser.js`** reads the tagged fields in GS1 barcodes, such as
+  product identifier, lot, expiry, and serial number. Background, content, and
+  popup code use this parser. **`popup-parser.js`** adapts popup input, including
+  manual input formats, and supplies date and expiry-status helpers.
+- **`panorama-agent-rules.js`** contains the matching rules for vaccine choices.
+  Chrome loads it before `content.js` on supported pages.
+- **`queue-record.js`** normalizes popup queue records;
+  **`popup-inventory.js`** manages the popup's stored rows, display, and CSV columns.
+- **`scanner/scanner-daemon-shared.js`** supplies common scanner status and port
+  selection helpers. **`scanner/serial-profiles.js`** holds device settings, and
+  **`scanner/scanner-lock-session.js`** holds lock-session metadata helpers.
 
 ## Key storage keys
 
-| Key                        | Owner           | Purpose                      |
-| -------------------------- | --------------- | ---------------------------- |
-| `multiple_inject_queue_v1` | popup + content | Active multiple-inject queue |
-| `inventory_scan_batch_v1`  | popup + content | Legacy inventory batch queue |
-| `nvc_bundle_override`      | background      | Cached NVC FHIR bundle       |
-| `vaxlink_workflow_mode_v1` | popup           | Current workflow mode        |
-| `vaxlink_analytics_v1`     | background      | Fill event log               |
+| Key                                  | Writers                      | Purpose                                       |
+| ------------------------------------ | ---------------------------- | --------------------------------------------- |
+| `multiple_inject_queue_v1`           | background + popup + content | Multiple Inject queue rows                    |
+| `inventory_scan_batch_v1`            | background + popup           | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`      | background                   | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`   | background                   | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1` | background                   | Last saved scanner status and capture history |
+| `nvc_bundle_override`                | background                   | Cached NVC catalogue                          |
+| `vaxlink_workflow_mode_v1`           | popup + content              | Current workflow mode                         |
+| `vaxlink_analytics_v1`               | background + popup           | Local event log and summaries                 |
+
+Queue appends handled by the background run in order. Popup and in-page queue
+edits still write directly to storage; re-reading the rows does not make all
+writers one coordinated operation.
 
 ## NVC catalogue readiness and refresh
 
