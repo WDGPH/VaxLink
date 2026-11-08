@@ -480,15 +480,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (addCurrentBtn) {
-    addCurrentBtn.addEventListener('click', () => {
-      addPreviewScanToInventory();
-    });
+    addCurrentBtn.addEventListener('click', () => addPreviewScanToInventory());
   }
 
   if (addBatchBtn) {
-    addBatchBtn.addEventListener('click', () => {
-      addPendingScansToInventory();
-    });
+    addBatchBtn.addEventListener('click', () => addPendingScansToInventory());
   }
 
   if (exportCsvBtn) {
@@ -522,6 +518,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       writeOutput('Inventory tray cleared.', 'info');
     });
   }
+
+  document
+    .getElementById('dismissQueueSaveNotice')
+    ?.addEventListener('click', () => {
+      document.getElementById('queueSaveNotice').hidden = true;
+    });
 
   loadNVCStatus();
   void renderHeldScannerScans();
@@ -1758,6 +1760,12 @@ async function lookupVaccineInfo(lot, gtin) {
   return sendRuntimeMessage(message);
 }
 
+function showQueueSaveFailure(message) {
+  // Keep save failures visible while the preview and selected mode change.
+  document.getElementById('queueSaveNoticeText').textContent = message;
+  document.getElementById('queueSaveNotice').hidden = false;
+}
+
 async function addPreviewScanToInventory() {
   if (inventoryAddInFlight) return;
   const modeSnapshot = activeMode;
@@ -1802,9 +1810,9 @@ async function addPreviewScanToInventory() {
       queueAutoParse(true);
     }
   } catch (error) {
-    if (activeMode === modeSnapshot && scannedInput?.value === inputSnapshot) {
-      writeOutput(`Could not add scan: ${error.message}`, 'error');
-    }
+    showQueueSaveFailure(
+      `Inventory save not confirmed: ${error.message}. Check the tray before retrying.`
+    );
   } finally {
     inventoryAddInFlight = false;
     setButtonBusy(addCurrentBtn, false);
@@ -1859,12 +1867,9 @@ async function addManualScanToMultipleQueue() {
       writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
     }
   } catch (error) {
-    if (
-      activeMode === modeSnapshot &&
-      testModeBarcode.value === inputSnapshot
-    ) {
-      writeOutput(`Test mode error: ${error.message}`, 'error');
-    }
+    showQueueSaveFailure(
+      `Multiple Inject save not confirmed: ${error.message}. Check the queue before retrying.`
+    );
   } finally {
     multipleAddInFlight = false;
     setButtonBusy(testModeAddBtn, false);
@@ -1935,6 +1940,9 @@ async function addPendingScansToInventory() {
     }
 
     if (errors.length) {
+      showQueueSaveFailure(
+        `Inventory batch: ${errors.length} barcode(s) could not be added. ${errors.join('; ')}`
+      );
       logAnalyticsEvent('parse_error', {
         workflow: 'inventory',
         source: 'popup_batch',
@@ -1951,6 +1959,10 @@ async function addPendingScansToInventory() {
     } else {
       writeOutput(errors.join('<br>') || 'No scans were added.', 'error');
     }
+  } catch (error) {
+    showQueueSaveFailure(
+      `Inventory batch save not confirmed: ${error.message}. Check the tray before retrying.`
+    );
   } finally {
     inventoryAddInFlight = false;
     setButtonBusy(addBatchBtn, false);

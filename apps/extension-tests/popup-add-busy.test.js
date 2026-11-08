@@ -1,211 +1,174 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import vm from 'node:vm';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
-const source = readFileSync(
-  new URL('../extension/popup.js', import.meta.url),
-  'utf8'
-);
-const code = source.slice(
-  source.indexOf('async function addPreviewScanToInventory()'),
-  source.indexOf('\nasync function addManualScanToMultipleQueue()')
-);
+const barcode = (lot) => `01001234567890121727123110${lot}`;
+let instance = 0;
 
-test('preview refresh during add cannot cancel the saved scan or leave Add busy', async () => {
-  let release;
-  const lookup = new Promise((resolve) => {
-    release = resolve;
+async function popup(failSave = false, mode = 'inventory') {
+  let release, started, ready;
+  const pending = new Promise((resolve) => {
+    started = resolve;
   });
-  const button = { busy: false };
-  const saved = [];
-  const context = vm.createContext({
-    scannedInput: { value: 'barcode' },
-    activeMode: 'inventory',
-    inventoryAddInFlight: false,
-    getPreviewBarcodeValue: () => 'barcode',
-    parseInputData: () => ({ lot: 'lot' }),
-    enrichParsedData: () => lookup,
-    setButtonBusy: (element, busy) => {
-      element.busy = busy;
-    },
-    addCurrentBtn: button,
-    autoFillBtn: {},
-    inventoryManager: {
-      add: async (record) => {
-        saved.push(record);
-      },
-      count: 1
-    },
-    buildQueueRecord: (data) => data,
-    logAnalyticsEvent() {},
-    removeLastPendingScanLine() {
-      context.scannedInput.value = '';
-    },
-    queueAutoParse() {
-      context.activeParseRequestId++;
-    },
-    getExpiryStatus: () => ({ flag: 'valid' }),
-    buildParsedOutputMarkup: () => '',
-    outputTypeForExpiry: () => '',
-    writeOutput() {},
-    activeParseRequestId: 1,
-    parsedData: null
+  const background = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { vaxlink_workflow_mode_v1: mode },
+    failStorageSet: (values) =>
+      failSave &&
+      ('inventory_scan_batch_v1' in values ||
+        'multiple_inject_queue_v1' in values)
   });
-  vm.runInContext(code, context);
-  const adding = context.addPreviewScanToInventory();
-  assert.equal(button.busy, true);
-  context.activeParseRequestId++;
-  context.scannedInput.value = 'barcode\nnew scan';
-  release({ lot: 'lot' });
-  await adding;
-  assert.equal(saved.length, 1);
-  assert.equal(context.scannedInput.value, 'barcode\nnew scan');
-  assert.equal(button.busy, false);
-});
-
-for (const mode of ['manual', 'batch']) {
-  test(`${mode} add preserves input entered during lookup`, async () => {
-    let release;
-    const lookup = new Promise((resolve) => {
-      release = resolve;
-    });
-    const start =
-      mode === 'manual'
-        ? 'async function addManualScanToMultipleQueue()'
-        : 'async function addPendingScansToInventory()';
-    const end =
-      mode === 'manual'
-        ? '\nasync function addPendingScansToInventory()'
-        : '\nasync function handleUseMultipleInjectRecord(';
-    const saved = [];
-    const input = { value: 'original' };
-    const manager = {
-      add: async (record) => saved.push(record),
-      addMany: async (records) => saved.push(...records),
-      count: 1
-    };
-    const context = vm.createContext({
-      scannedInput: input,
-      activeMode: mode === 'manual' ? 'multiple' : 'inventory',
-      inventoryAddInFlight: false,
-      multipleAddInFlight: false,
-      testModeBarcode: input,
-      testModeAddBtn: {},
-      addBatchBtn: {},
-      getPendingScanLines: () => input.value.split('\n'),
-      setPendingScanLines: (lines) => {
-        input.value = lines.join('\n');
-      },
-      parseInputData: () => ({ lot: 'lot' }),
-      enrichParsedData: () => lookup,
-      setButtonBusy() {},
-      multipleInjectManager: manager,
-      inventoryManager: manager,
-      buildQueueRecord: (data) => data,
-      logAnalyticsEvent() {},
-      getExpiryStatus: () => ({ flag: 'valid' }),
-      writeOutput() {},
-      parsedData: null
-    });
-    vm.runInContext(
-      source.slice(source.indexOf(start), source.indexOf(end)),
-      context
-    );
-    const adding =
-      mode === 'manual'
-        ? context.addManualScanToMultipleQueue()
-        : context.addPendingScansToInventory();
-    input.value = 'new scan';
-    release({ lot: 'lot' });
-    await adding;
-    assert.equal(saved.length, 1);
-    assert.equal(input.value, 'new scan');
-  });
+  const nodes = Object.fromEntries(
+    [
+      'scannedData',
+      'testModeBarcode',
+      'addCurrentBtn',
+      'addBatchBtn',
+      'testModeAddBtn',
+      'singleModeBtn',
+      'output',
+      'queueSaveNotice',
+      'queueSaveNoticeText',
+      'dismissQueueSaveNotice'
+    ].map((id) => [
+      id,
+      {
+        value: barcode('TESTLOT'),
+        textContent: 'Add',
+        innerHTML: '',
+        hidden: id === 'queueSaveNotice',
+        style: {},
+        dataset: {},
+        listeners: {},
+        classList: { toggle() {} },
+        setAttribute() {},
+        addEventListener(type, listener) {
+          this.listeners[type] = listener;
+        }
+      }
+    ])
+  );
+  globalThis.document = {
+    getElementById: (id) => nodes[id] || null,
+    addEventListener(_type, listener) {
+      ready = listener;
+    }
+  };
+  globalThis.chrome = {
+    runtime: {
+      getManifest: () => ({}),
+      onMessage: { addListener() {} },
+      sendMessage(message, done) {
+        const send = () =>
+          void background
+            .sendMessage(message, {
+              id: 'vaxlink-test',
+              url: 'chrome-extension://vaxlink-test/popup.html'
+            })
+            .then(done);
+        if (
+          message.action === 'lookupVaccineInfo' &&
+          message.lot === 'TESTLOT'
+        ) {
+          release = send;
+          started();
+        } else send();
+      }
+    },
+    storage: {
+      onChanged: { addListener() {} },
+      local: {
+        get(keys, done) {
+          done(
+            Object.fromEntries(
+              keys.map((key) => [key, background.storageData.get(key)])
+            )
+          );
+        },
+        set(values, done) {
+          for (const [key, value] of Object.entries(values))
+            background.storageData.set(key, value);
+          done();
+        }
+      }
+    }
+  };
+  // Opening a new popup creates fresh module state; the query does the same here.
+  await import(
+    new URL(`../extension/popup.js?case=${++instance}`, import.meta.url)
+  );
+  await ready();
+  return {
+    nodes,
+    background,
+    pending,
+    release: () => release(),
+    click: (id) => nodes[id].listeners.click()
+  };
 }
 
-test('overlapping inventory add requests save once and do not replace a newer preview', async () => {
-  let release;
-  const lookup = new Promise((resolve) => {
-    release = resolve;
+test('a preview refresh cannot cancel an in-flight save or replace the new input', async () => {
+  const p = await popup();
+  const adding = p.click('addCurrentBtn');
+  await p.pending;
+  p.nodes.scannedData.value = barcode('NEXTLOT');
+  await p.click('singleModeBtn');
+  let html = '';
+  const refreshed = new Promise((resolve) => {
+    Object.defineProperty(p.nodes.output, 'innerHTML', {
+      get: () => html,
+      set(value) {
+        html = value;
+        if (value.includes('NEXTLOT') && !value.includes('lookup-loading'))
+          resolve();
+      }
+    });
   });
-  const saved = [];
-  const output = [];
-  const input = { value: 'first' };
-  const context = vm.createContext({
-    scannedInput: input,
-    activeMode: 'inventory',
-    inventoryAddInFlight: false,
-    getPreviewBarcodeValue: () => input.value,
-    getPendingScanLines: () => [input.value],
-    parseInputData: () => ({ lot: 'old' }),
-    enrichParsedData: () => lookup,
-    setButtonBusy() {},
-    addCurrentBtn: {},
-    addBatchBtn: {},
-    inventoryManager: {
-      add: async (record) => saved.push(record),
-      addMany: async (records) => saved.push(...records),
-      count: 1
-    },
-    buildQueueRecord: (data) => data,
-    logAnalyticsEvent() {},
-    removeLastPendingScanLine() {},
-    setPendingScanLines() {},
-    queueAutoParse() {},
-    getExpiryStatus: () => ({ flag: 'valid' }),
-    buildParsedOutputMarkup: () => 'old output',
-    outputTypeForExpiry: () => '',
-    writeOutput: (message) => output.push(message),
-    parsedData: { lot: 'new' }
-  });
-  vm.runInContext(
-    source.slice(
-      source.indexOf('async function addPreviewScanToInventory()'),
-      source.indexOf('\nasync function handleUseMultipleInjectRecord(')
-    ),
-    context
+  p.nodes.scannedData.listeners.keydown({ key: 'Enter', preventDefault() {} });
+  await refreshed;
+  const preview = p.nodes.output.innerHTML;
+  p.release();
+  await adding;
+  assert.equal(
+    p.background.storageData.get('inventory_scan_batch_v1')[0].lot,
+    'TESTLOT'
   );
-  const first = context.addPreviewScanToInventory();
-  await context.addPreviewScanToInventory();
-  await context.addPendingScansToInventory();
-  input.value = 'new';
-  context.activeMode = 'single';
-  release({ lot: 'old' });
-  await first;
-  assert.equal(saved.length, 1);
-  assert.equal(context.parsedData.lot, 'new');
-  assert.deepEqual(output, []);
-  assert.equal(context.inventoryAddInFlight, false);
+  assert.equal(p.nodes.scannedData.value, barcode('NEXTLOT'));
+  assert.equal(p.nodes.output.innerHTML, preview);
+  assert.equal(p.nodes.addCurrentBtn.disabled, false);
 });
 
-test('clearing a saved preview invalidates its pending parse', async () => {
-  const context = vm.createContext({
-    scannedInput: { value: 'barcode' },
-    activeMode: 'inventory',
-    inventoryAddInFlight: false,
-    activeParseRequestId: 4,
-    parsedData: { lot: 'old' },
-    autoFillBtn: {},
-    addCurrentBtn: {},
-    getPreviewBarcodeValue: () => 'barcode',
-    parseInputData: () => ({ lot: 'old' }),
-    enrichParsedData: async (data) => data,
-    inventoryManager: { add: async () => {}, count: 1 },
-    setButtonBusy() {},
-    buildQueueRecord: (data) => data,
-    logAnalyticsEvent() {},
-    removeLastPendingScanLine() {
-      context.scannedInput.value = '';
-    },
-    queueAutoParse() {},
-    getExpiryStatus: () => ({ flag: 'valid' }),
-    buildParsedOutputMarkup: () => '',
-    outputTypeForExpiry: () => '',
-    writeOutput() {}
-  });
-  vm.runInContext(code, context);
-  await context.addPreviewScanToInventory();
-  assert.equal(context.activeParseRequestId, 5);
-  assert.equal(context.parsedData, null);
+test('new input survives completion and Add recovers after success or failure', async () => {
+  for (const [button, input, mode] of [
+    ['addCurrentBtn', 'scannedData', 'inventory'],
+    ['addBatchBtn', 'scannedData', 'inventory'],
+    ['testModeAddBtn', 'testModeBarcode', 'multiple']
+  ]) {
+    for (const fail of [false, true]) {
+      const p = await popup(fail, mode);
+      const adding = p.click(button);
+      await p.pending;
+      assert.equal(p.nodes[button].disabled, true);
+      p.nodes[input].value = barcode('NEXTLOT');
+      p.nodes.output.innerHTML = 'Current preview';
+      if (fail) await p.click('singleModeBtn');
+      p.release();
+      await adding;
+      assert.equal(p.nodes[input].value, barcode('NEXTLOT'));
+      assert.equal(p.nodes.output.innerHTML, 'Current preview');
+      assert.equal(p.nodes[button].disabled, false);
+      assert.equal(p.nodes[button].textContent, 'Add');
+      assert.equal(p.nodes.queueSaveNotice.hidden, !fail);
+      if (fail) {
+        assert.match(
+          p.nodes.queueSaveNoticeText.textContent,
+          /save not confirmed/
+        );
+        await p.click('dismissQueueSaveNotice');
+        assert.equal(p.nodes.queueSaveNotice.hidden, true);
+      }
+    }
+  }
 });
