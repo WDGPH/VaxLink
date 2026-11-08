@@ -114,11 +114,16 @@ random and contain no patient identifiers or chart URLs.
 Delivery is recorded before sending, so an uncertain acknowledgement or worker
 restart does not automatically replay a scan that may already have populated
 fields. A content-script acceptance is separate from observed application.
-The existing scheduler reports application only after a final observation confirms
-the expected agent, exact lot token and requested deferred fields in the expected form. That observation does not
-prove that a clinical record was saved. Nurse edits, a newer fill, navigation,
-or a replacement owning form cancel later writes from the old operation.
+Application is reported only after the scheduled corrective passes finish and a
+fresh observation confirms the expected agent, exact lot token and requested
+fields in the intended form. Unresolved work remains pending at the retry deadline.
+That observation does not prove that a clinical record was saved. Trusted edits
+of controls in the owning form or its linked PrimeFaces panels cancel later
+writes. Unrelated page interactions do not cancel the operation. A newer fill,
+navigation, or a replacement owning form also cancels later writes.
 Replacing controls within the same owning form can continue that operation.
+Before consuming a queue row, the background writer rechecks the current operation
+and its observed fields. Native agent selection takes priority over widget labels.
 
 Popup Settings shows held scans and offers **Move held scans to Multiple Inject**.
 Review the intended chart first: some held scans may already have populated

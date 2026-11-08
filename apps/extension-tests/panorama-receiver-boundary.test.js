@@ -61,8 +61,11 @@ test('trusted takeover invalidates a handshake before scan delivery', () => {
   let onMessage;
   let token = 0;
   let calls = 0;
-  const form = { isConnected: true };
-  const field = { form };
+  const form = { isConnected: true, contains: (node) => node === field };
+  const field = {
+    form,
+    closest: (selector) => (selector.startsWith('input,') ? field : null)
+  };
   const owner = source.slice(
     source.indexOf('// Tokens identify only'),
     source.indexOf('function setupMessageListener')
@@ -105,7 +108,8 @@ test('trusted takeover invalidates a handshake before scan delivery', () => {
   const expectedContext = reply.context;
   context.cancelPanoramaFillRetriesForManualEdit({
     isTrusted: true,
-    target: {}
+    type: 'input',
+    target: field
   });
   onMessage({ action: 'vaxlinkScanCaptured', expectedContext }, {}, (value) => {
     reply = value;

@@ -213,7 +213,7 @@ function beginPanoramaOperation(scanId = null) {
     stopPanoramaLotTradeWatcher();
   const context = getPanoramaContext();
   panoramaOperation = context
-    ? { context, url: window.location.href, scanId }
+    ? { id: crypto.randomUUID(), context, url: window.location.href, scanId }
     : null;
   return panoramaOperation;
 }
@@ -265,6 +265,8 @@ function setupMessageListener() {
       sendResponse({
         supported,
         ready: !!context && initialized.listener && initialized.settings,
+        operationId: panoramaOperation?.id || null,
+        operationVerified: panoramaOperation?.verifyFields?.() === true,
         context
       });
       return true;
@@ -558,32 +560,6 @@ function getPositiveInt(value, fallback = null) {
     return fallback;
   }
   return parsed;
-}
-
-function getQueueRemainingDoses(row, fallback = 1) {
-  const remaining = getPositiveInt(row && row.remaining_doses, null);
-  if (remaining !== null) {
-    return remaining;
-  }
-  const total = getPositiveInt(row && row.total_doses, null);
-  return total !== null ? total : fallback;
-}
-
-function buildQueueRowsAfterRecordUse(rows, record, recordIndex) {
-  const nextRows = Array.isArray(rows) ? rows.slice() : [];
-  nextRows.splice(recordIndex, 1);
-
-  const remaining = getQueueRemainingDoses(record, null);
-  if (remaining === null) {
-    nextRows.splice(recordIndex, 0, record);
-  } else if (remaining > 1) {
-    nextRows.splice(recordIndex, 0, {
-      ...record,
-      remaining_doses: remaining - 1
-    });
-  }
-
-  return nextRows;
 }
 
 async function saveScanToQueue(data, rawBarcode, storageKey) {
@@ -1219,8 +1195,7 @@ function fillField(field, value) {
   field.dispatchEvent(new Event('change', { bubbles: true }));
   if (!ownsPanoramaOperation(owner)) return false;
   field.blur();
-  if (!ownsPanoramaOperation(owner)) return false;
-  return true;
+  return ownsPanoramaOperation(owner);
 }
 
 function normalizeForMatch(value) {
@@ -1350,8 +1325,7 @@ function fillSelectField(field, value) {
     }
   }
   field.blur();
-  if (!ownsPanoramaOperation(owner)) return false;
-  return true;
+  return ownsPanoramaOperation(owner);
 }
 
 function fillComboTextField(field, value) {
@@ -1443,8 +1417,9 @@ function fillComboTextField(field, value) {
   field.dispatchEvent(new Event('change', { bubbles: true }));
   if (!ownsPanoramaOperation(owner)) return false;
   field.blur();
-  if (!ownsPanoramaOperation(owner)) return false;
-  return String(field.value || '').trim().length > 0;
+  return (
+    ownsPanoramaOperation(owner) && String(field.value || '').trim().length > 0
+  );
 }
 
 function isVisible(el) {
@@ -1965,8 +1940,9 @@ function fillPanoramaMaskedTextInput(field, nextValue) {
   field.dispatchEvent(new Event('change', { bubbles: true }));
   if (!ownsPanoramaOperation(owner)) return false;
   field.blur();
-  if (!ownsPanoramaOperation(owner)) return false;
-  return String(field.value || '').trim() === value;
+  return (
+    ownsPanoramaOperation(owner) && String(field.value || '').trim() === value
+  );
 }
 
 function fillPanoramaAdministeredDateTimeFields(data) {
@@ -2533,22 +2509,8 @@ function hasPanoramaLotOrTradeSelection(data) {
 
 let stopPanoramaLotTradeWatcher = null;
 
-// Issue #26: a real user interaction with the agent/lot/tradename widgets means
-// the nurse is taking over — pending VaxLink fill retries must not overwrite
-// her choice. PrimeFaces re-dispatches synthetic events (isTrusted === false),
-// and so do VaxLink's own fills, so only trusted events count as manual.
-const PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN =
-  /agentiterm|tradenameinput|lotnumberselect/i;
-
-function isPanoramaAgentLotWidgetNode(node) {
-  if (!node || typeof node.closest !== 'function') return false;
-  const widget = node.closest(
-    '.ui-selectonemenu, .ui-selectonemenu-panel, select'
-  );
-  if (!widget) return false;
-  return PANORAMA_AGENT_LOT_WIDGET_ID_PATTERN.test(String(widget.id || ''));
-}
-
+// A trusted edit to the owning form means the user is taking over. Keep the
+// context token valid for unrelated page activity, including before a scan arrives.
 function cancelPanoramaFillRetriesForManualEdit(event) {
   if (!event.isTrusted) return;
   if (
@@ -2557,6 +2519,48 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
     event.target?.closest?.('#vaxlink-toast-host, #vaxlink-hud-host')
   )
     return;
+  if (
+    event.type === 'keydown' &&
+    ['Shift', 'Control', 'Alt', 'Meta', 'Tab', 'CapsLock'].includes(event.key)
+  )
+    return;
+
+  const form = getPanoramaOwningForm();
+  const target = event.target;
+  if (!form || !target?.closest) return;
+  const control = target.closest(
+    'input, select, textarea, button, a[href], label, [contenteditable="true"], .ui-selectonemenu, .ui-radiobutton, .ui-chkbox'
+  );
+  let belongsToForm = !!control && form.contains(control);
+
+  // PrimeFaces can move a select panel outside its form. Require an explicit
+  // relationship to a form control or the matching widget ID.
+  if (!belongsToForm) {
+    const panel = target.closest(
+      '.ui-selectonemenu-panel, [role="listbox"], [role="dialog"]'
+    );
+    if (
+      panel?.id &&
+      target.closest(
+        'input, button, a[href], [role="option"], .ui-selectonemenu-item'
+      )
+    ) {
+      belongsToForm = Array.from(
+        form.querySelectorAll('[id], [aria-controls], [aria-owns]')
+      ).some((owner) => {
+        const references =
+          `${owner.getAttribute('aria-controls') || ''} ${owner.getAttribute('aria-owns') || ''}`
+            .trim()
+            .split(/\s+/);
+        return (
+          references.includes(panel.id) ||
+          (owner.classList?.contains('ui-selectonemenu') &&
+            `${owner.id}_panel` === panel.id)
+        );
+      });
+    }
+  }
+  if (!belongsToForm) return;
   panoramaOperation = null;
   panoramaDocumentToken = crypto.randomUUID();
   if (typeof stopPanoramaLotTradeWatcher === 'function')
@@ -2566,7 +2570,18 @@ function cancelPanoramaFillRetriesForManualEdit(event) {
 function isPanoramaFormVerified(data, operation) {
   if (!ownsPanoramaOperation(operation)) return false;
   const candidates = getPanoramaAgentCandidates(data);
-  if (!candidates.length || !hasPanoramaAgentSelection(data)) return false;
+  const agentFields = getFields(getPanoramaAgentSelectors());
+  const nativeAgents = agentFields.filter(
+    (field) => field.tagName === 'SELECT'
+  );
+  const selectedAgents = nativeAgents.length ? nativeAgents : agentFields;
+  if (
+    !candidates.length ||
+    !selectedAgents.some((field) =>
+      candidates.some((candidate) => isAgentCandidateAccepted(candidate, field))
+    )
+  )
+    return false;
   if (data?.lot) {
     const fields = getFields([
       'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
@@ -2686,7 +2701,7 @@ function schedulePanoramaLotOrTradeSelection(
     sharedFundingMisses = 0;
     lastSharedFundingMissAt = Date.now();
   };
-  let finalizeOnResolved = options.finalizeOnResolved === true;
+  let followUpsPending = false;
 
   const stop = () => {
     if (stopped) return;
@@ -2706,7 +2721,7 @@ function schedulePanoramaLotOrTradeSelection(
   stopPanoramaLotTradeWatcher = stop;
 
   const runAttempt = () => {
-    if (stopped) return;
+    if (stopped || followUpsPending) return;
     if (!ownsPanoramaOperation(operation)) {
       stop();
       return;
@@ -2887,20 +2902,10 @@ function schedulePanoramaLotOrTradeSelection(
     }
 
     if (stablePasses >= 2 && isPanoramaFormVerified(data, operation)) {
-      reportPanoramaApplied(operation);
-      if (finalizeOnResolved) {
-        finalizeOnResolved = false;
-        void finalizeDeferredPanoramaAutofill(data);
-      }
-      // Panorama's dependent refreshes (trade/dose/route after lot selection,
-      // consent re-enabling) can still land after we stop and clear a value we
-      // already set. These late passes re-assert only what changed — every fill
-      // in them is a no-op while the fields still hold the desired values.
-      if (observer) {
-        observer.disconnect();
-        observer = null;
-      }
-      while (timers.length) clearTimeout(timers.pop());
+      // Keep the existing corrective passes, but retain the scan until they finish.
+      // Normal attempts resume if the last pass still needs work; the original
+      // deadline bounds both retries and follow-ups.
+      followUpsPending = true;
       for (const delay of [1500, 3500]) {
         timers.push(
           setTimeout(() => {
@@ -2908,8 +2913,22 @@ function schedulePanoramaLotOrTradeSelection(
               stop();
               return;
             }
-            if (!isPrimeFacesAjaxBusy()) fillPanoramaDeferredDetailFields(data);
-            if (delay === 3500) stop();
+            if (delay === 3500) {
+              followUpsPending = false;
+              if (
+                !isPrimeFacesAjaxBusy() &&
+                isPanoramaFormVerified(data, operation)
+              ) {
+                stop();
+                void completePanoramaAutofill(data);
+                return;
+              }
+              stablePasses = 0;
+              lastStablePassAt = 0;
+              runAttempt();
+            } else if (!isPrimeFacesAjaxBusy()) {
+              fillPanoramaDeferredDetailFields(data);
+            }
           }, delay)
         );
       }
@@ -3051,11 +3070,6 @@ function fillPanoramaImmunizationFields(data) {
     return createAutofillResult('failed', { error: 'Panorama form changed' });
 
   // Panorama refreshes lot options and dependent controls asynchronously after selection.
-  const finalizeOnResolved =
-    !!data._vaxlinkQueueContext ||
-    (preserveFundingFilter &&
-      !!data?.lot &&
-      !hasPanoramaLotSelection(data.lot));
   if (
     agentCount > 0 ||
     data.lot ||
@@ -3068,8 +3082,7 @@ function fillPanoramaImmunizationFields(data) {
     // the moment an agent/radio/checkbox AJAX lands the refreshed lot options.
     schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 200 : 100, {
       fundedRadioEnsured: !preserveFundingFilter && radioResult !== 'not_found',
-      preserveFundingFilter,
-      finalizeOnResolved
+      preserveFundingFilter
     });
   }
 
@@ -3329,6 +3342,7 @@ async function consumeQueueRecordAfterDeferredAutofill(
       {
         action: 'consumeQueueRecord',
         recordId,
+        operationId: operation.id,
         expectedContext: operation.context
       },
       (result) => {
@@ -3382,32 +3396,28 @@ async function consumeQueueRecordAfterDeferredAutofill(
   return { record, queueSizeAfter: queueSizeAfter };
 }
 
-async function finalizeDeferredPanoramaAutofill(data) {
-  if (
-    !data ||
-    data._vaxlinkDeferredFinalized ||
-    !ownsPanoramaOperation(data._vaxlinkOperation)
-  ) {
-    return;
-  }
-  data._vaxlinkDeferredFinalized = true;
-
+async function completePanoramaAutofill(data) {
+  const operation = data?._vaxlinkOperation;
+  if (operation?.finalizing || !isPanoramaFormVerified(data, operation)) return;
+  operation.finalizing = true;
   try {
-    await consumeQueueRecordAfterDeferredAutofill(
-      data._vaxlinkQueueContext,
-      data._vaxlinkOperation
-    );
+    if (data._vaxlinkQueueContext) {
+      await consumeQueueRecordAfterDeferredAutofill(
+        data._vaxlinkQueueContext,
+        operation
+      );
+      if (!isPanoramaFormVerified(data, operation)) return;
+    }
+    reportPanoramaApplied(operation);
+    showVaxlinkToast(data);
   } catch (error) {
-    console.warn('VaxLink deferred queue finalize failed:', error);
-    if (ownsPanoramaOperation(data._vaxlinkOperation))
+    console.warn('VaxLink queue update failed:', error);
+    if (ownsPanoramaOperation(operation))
       showVaxlinkToast({
         ...data,
         lookup_error: 'The queue could not be updated. Review it before reuse.'
       });
-    return;
   }
-
-  if (ownsPanoramaOperation(data._vaxlinkOperation)) showVaxlinkToast(data);
 }
 
 function autoFillPanorama(data, operation) {
@@ -3415,6 +3425,7 @@ function autoFillPanorama(data, operation) {
     if (!ownsPanoramaOperation(operation))
       return createAutofillResult('failed', { error: 'Panorama form changed' });
     data._vaxlinkOperation = operation;
+    operation.verifyFields = () => isPanoramaFormVerified(data, operation);
     if (isHandsFreeSupportedPage() && isPanoramaImmunizationPage()) {
       const panoramaResult = fillPanoramaImmunizationFields(data);
       vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
@@ -4447,10 +4458,7 @@ async function clearHudQueue() {
   updateHudState();
 }
 
-// Guards the read-match-write sequence below: tryAutoDrain, the multi-step
-// observer, and the HUD apply button can all fire close together, and without
-// this flag two callers could consume the same queued record (double-fill) or
-// clobber each other's setLocalStorage (dropped record).
+// Prevent overlapping queue applications from the HUD and form observers.
 let applyQueueInFlight = false;
 
 async function applyNextQueueItem(options = {}) {
@@ -4509,8 +4517,6 @@ async function applyNextQueueItem(options = {}) {
       source: 'hud'
     };
 
-    const nextRows = buildQueueRowsAfterRecordUse(rows, record, recordIndex);
-
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source: 'hud',
@@ -4525,15 +4531,11 @@ async function applyNextQueueItem(options = {}) {
     });
 
     const autofillResult = autoFillPanorama(data, operation);
-    const success = isAutofillSuccess(autofillResult);
     const pending = isAutofillPending(autofillResult);
-    if (success) {
-      await setLocalStorage({ [MULTIPLE_INJECT_QUEUE_KEY]: nextRows });
-    }
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'hud',
-      success,
+      success: false,
       pending,
       vaccineLabel:
         record.tradename ||
@@ -4544,21 +4546,6 @@ async function applyNextQueueItem(options = {}) {
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
-    if (success) {
-      logAnalyticsEvent('queue_used', {
-        workflow: 'multiple',
-        queue: 'multiple',
-        source: 'hud',
-        count: 1,
-        queueSizeAfter: nextRows.length
-      });
-    }
-
-    if (success) {
-      showVaxlinkToast(data);
-      updateHudState();
-      return 'success';
-    }
     if (pending) {
       updateHudState();
       return 'pending';

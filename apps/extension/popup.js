@@ -1978,73 +1978,16 @@ async function handleUseMultipleInjectRecord(record) {
         getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
     const response = await sendAutoFillToActiveTab(data);
-    if (response && response.pending) {
-      logAnalyticsEvent('autofill_result', {
-        workflow: 'multiple',
-        source: 'queue',
-        success: false,
-        pending: true,
-        vaccineLabel:
-          record.tradename ||
-          record.generic_name ||
-          record.name ||
-          record.lot ||
-          '',
-        manufacturer: record.manufacturer || '',
-        expiryFlag:
-          record.expiry_flag ||
-          getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-      });
-      writeOutput(
-        response.reason === 'funding_choice_required'
-          ? 'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after verification.'
-          : 'VaxLink is checking the Panorama form. The queue item will update after verification.',
-        'info'
+    if (!response?.pending) {
+      throw new Error(
+        'The form could not be verified. Review the queue before reuse.'
       );
-      return;
     }
-    const remainingDoses = getQueueRemainingDoses(record, null);
-    let nextRecord;
-    if (remainingDoses === null) {
-      // Unknown dose count — vial is unlimited; keep record in queue as-is
-      nextRecord = record;
-    } else if (remainingDoses > 1) {
-      nextRecord = await multipleInjectManager.consumeById(record.id);
-    } else {
-      nextRecord = await multipleInjectManager.remove(record.id);
-    }
-    if (nextRecord) {
-      multipleInjectManager.setActiveUse(nextRecord.id);
-    } else {
-      multipleInjectManager.setActiveUse('');
-    }
-    const updatedRemaining =
-      remainingDoses === null
-        ? null
-        : nextRecord
-          ? getQueueRemainingDoses(nextRecord, 1)
-          : 0;
-    logAnalyticsEvent('queue_used', {
-      workflow: 'multiple',
-      queue: 'multiple',
-      source: 'queue',
-      count: 1,
-      queueSizeAfter: multipleInjectManager.count,
-      vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
-      manufacturer: record.manufacturer || '',
-      expiryFlag:
-        record.expiry_flag ||
-        getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-    });
     logAnalyticsEvent('autofill_result', {
       workflow: 'multiple',
       source: 'queue',
-      success: true,
+      success: false,
+      pending: true,
       vaccineLabel:
         record.tradename ||
         record.generic_name ||
@@ -2056,23 +1999,11 @@ async function handleUseMultipleInjectRecord(record) {
         record.expiry_flag ||
         getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
     });
-    const label =
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      'Saved vaccine';
-    const dosesMessage =
-      updatedRemaining !== null &&
-      updatedRemaining > 0 &&
-      updatedRemaining !== 1
-        ? ` ${updatedRemaining} dose(s) remaining in this vial.`
-        : '';
     writeOutput(
-      record.lookup_error
-        ? `Barcode fields filled. ${record.lookup_error}. Verify vaccine details on the chart.`
-        : `${label} auto-filled from Multiple Inject queue.${dosesMessage}`,
-      record.lookup_error ? 'warning' : 'success'
+      response.reason === 'funding_choice_required'
+        ? 'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after verification.'
+        : 'VaxLink is checking the Panorama form. The queue item will update after verification.',
+      'info'
     );
   } catch (error) {
     logAnalyticsEvent('autofill_result', {

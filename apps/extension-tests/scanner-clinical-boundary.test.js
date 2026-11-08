@@ -19,7 +19,13 @@ const scan = {
   rawText: '01001234567890121727123110LOCKLOT1',
   source: 'web-serial'
 };
-const handshake = { supported: true, ready: true, context };
+const handshake = {
+  supported: true,
+  ready: true,
+  context,
+  operationId: 'operation-a',
+  operationVerified: true
+};
 const capture = (h) => h.sendMessage({ action: 'scannerScanCaptured', scan });
 
 test('single scan is persisted before delivery and removed only by matching applied event', async () => {
@@ -281,7 +287,8 @@ test('queue consumption and concurrent append preserve both mutations', async ()
     {
       action: 'consumeQueueRecord',
       recordId: 'first',
-      expectedContext: context
+      expectedContext: context,
+      operationId: 'operation-a'
     },
     chart
   );
@@ -306,6 +313,51 @@ test('queue consumption and concurrent append preserve both mutations', async ()
   );
 });
 
+for (const change of ['operation', 'fields']) {
+  test(`queued consumption rejects changed ${change} on the same form`, async () => {
+    const queue = 'multiple_inject_queue_v1';
+    let release;
+    let started;
+    const waiting = new Promise((resolve) => {
+      started = resolve;
+    });
+    let operationId = 'operation-a';
+    let operationVerified = true;
+    const h = createBackgroundHarness(makeTestNvcBundle(), {
+      tabs: [tab],
+      storage: { [queue]: [{ id: 'first', remaining_doses: 2 }] },
+      tabResponse: () => ({ ...handshake, operationId, operationVerified }),
+      delayStorageSet(values, continuation) {
+        if (!(queue in values) || release) return false;
+        release = continuation;
+        started();
+        return true;
+      }
+    });
+    const append = h.sendMessage({
+      action: 'appendQueueRecord',
+      storageKey: queue,
+      record: { id: 'second' }
+    });
+    await waiting;
+    const consume = h.sendMessage(
+      {
+        action: 'consumeQueueRecord',
+        recordId: 'first',
+        expectedContext: context,
+        operationId: 'operation-a'
+      },
+      chart
+    );
+    if (change === 'operation') operationId = 'operation-b';
+    else operationVerified = false;
+    release();
+    assert.equal((await append).success, true);
+    assert.equal((await consume).success, false);
+    assert.equal(h.storageData.get(queue)[0].remaining_doses, 2);
+  });
+}
+
 test('queue consumption rejects changed context and failed writes without losing rows', async () => {
   const queue = 'multiple_inject_queue_v1';
   const rows = [{ id: 'first', remaining_doses: 1 }];
@@ -315,7 +367,8 @@ test('queue consumption rejects changed context and failed writes without losing
     tabResponse: {
       supported: true,
       ready: true,
-      context: { ...context, form: 'other' }
+      context: { ...context, form: 'other' },
+      operationId: 'operation-a'
     }
   });
   assert.equal(
@@ -324,7 +377,8 @@ test('queue consumption rejects changed context and failed writes without losing
         {
           action: 'consumeQueueRecord',
           recordId: 'first',
-          expectedContext: context
+          expectedContext: context,
+          operationId: 'operation-a'
         },
         chart
       )
@@ -344,7 +398,8 @@ test('queue consumption rejects changed context and failed writes without losing
         {
           action: 'consumeQueueRecord',
           recordId: 'first',
-          expectedContext: context
+          expectedContext: context,
+          operationId: 'operation-a'
         },
         chart
       )

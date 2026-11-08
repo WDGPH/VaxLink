@@ -14,9 +14,25 @@ const ownerCode = source.slice(
 const fn = (name) =>
   source.match(new RegExp(`^(?:async )?function ${name}\\([^]*?^}`, 'm'))[0];
 
+function testForm() {
+  const owners = [];
+  const form = {
+    isConnected: true,
+    contains: (node) => node?.ownerForm === form,
+    querySelectorAll: () => owners
+  };
+  const control = {
+    ownerForm: form,
+    closest(selector) {
+      return selector.startsWith('input,') ? this : null;
+    }
+  };
+  return { form, control, owners };
+}
+
 function setup() {
   let id = 0;
-  let form = { isConnected: true };
+  let { form, control, owners } = testForm();
   let field = {
     get form() {
       return form;
@@ -36,7 +52,6 @@ function setup() {
     document: { querySelectorAll: () => [field] },
     isHandsFreeSupportedPage: () => true,
     stopPanoramaLotTradeWatcher: null,
-    isPanoramaAgentLotWidgetNode: () => true,
     activeWorkflowMode: 'single',
     lastHandledScanValue: '',
     lastHandledScanAt: 0,
@@ -68,13 +83,19 @@ function setup() {
   );
   return {
     context,
+    get control() {
+      return control;
+    },
+    get owners() {
+      return owners;
+    },
     release,
     get fills() {
       return fills;
     },
     replaceForm() {
       form.isConnected = false;
-      form = { isConnected: true };
+      ({ form, control, owners } = testForm());
     },
     replaceControl() {
       field = { form, closest: () => form };
@@ -87,12 +108,80 @@ test('trusted edit during lookup prevents the old scan from filling', async () =
   const pending = h.context.handleHandsFreeScan('scan', 'scanner', 'id');
   h.context.cancelPanoramaFillRetriesForManualEdit({
     isTrusted: true,
-    target: { id: 'dateAdministedDate' }
+    target: h.control
   });
   h.release({ error: 'unavailable' });
   const result = await pending;
   assert.equal(result.accepted, false);
   assert.equal(h.fills, 0);
+});
+
+test('only meaningful interactions with the owning form or its linked panels invalidate context', () => {
+  const h = setup();
+  const operation = h.context.beginPanoramaOperation();
+  const initial = h.context.getPanoramaContext();
+  const outside = {
+    closest: (selector) => (selector.startsWith('input,') ? outside : null)
+  };
+  for (const event of [
+    { isTrusted: false, type: 'input', target: h.control },
+    { isTrusted: true, type: 'pointerdown', target: outside },
+    { isTrusted: true, type: 'keydown', key: 'Shift', target: h.control },
+    { isTrusted: true, type: 'keydown', key: 'Tab', target: h.control },
+    { isTrusted: true, type: 'pointerdown', target: { closest: () => null } }
+  ]) {
+    h.context.cancelPanoramaFillRetriesForManualEdit(event);
+    assert.equal(
+      h.context.samePanoramaContext(initial, h.context.getPanoramaContext()),
+      true
+    );
+    assert.equal(h.context.ownsPanoramaOperation(operation), true);
+  }
+  h.context.cancelPanoramaFillRetriesForManualEdit({
+    isTrusted: true,
+    type: 'input',
+    target: h.control
+  });
+  assert.equal(
+    h.context.samePanoramaContext(initial, h.context.getPanoramaContext()),
+    false
+  );
+});
+
+test('detached select panels require a link to a widget in the owning form', () => {
+  const h = setup();
+  const panel = { id: 'widget_panel' };
+  const option = {
+    closest(selector) {
+      if (selector.startsWith('.ui-selectonemenu-panel')) return panel;
+      if (selector.startsWith('input,')) return this;
+      return null;
+    }
+  };
+  const initial = h.context.getPanoramaContext();
+  const event = { isTrusted: true, type: 'pointerdown', target: option };
+  h.context.cancelPanoramaFillRetriesForManualEdit(event);
+  assert.equal(
+    h.context.samePanoramaContext(initial, h.context.getPanoramaContext()),
+    true
+  );
+  const owner = {
+    id: 'widget',
+    classList: { contains: (name) => name === 'ui-selectonemenu' },
+    getAttribute: () => null
+  };
+  h.owners.push(owner);
+  h.context.cancelPanoramaFillRetriesForManualEdit(event);
+  const afterWidget = h.context.getPanoramaContext();
+  assert.equal(h.context.samePanoramaContext(initial, afterWidget), false);
+  owner.id = 'other';
+  owner.getAttribute = (name) =>
+    name === 'aria-controls' ? 'widget_panel' : null;
+  h.context.cancelPanoramaFillRetriesForManualEdit(event);
+  assert.equal(
+    h.context.samePanoramaContext(afterWidget, h.context.getPanoramaContext()),
+    false
+  );
 });
 
 test('a replacement form invalidates ownership while replacement controls in the same form do not', () => {
@@ -118,7 +207,7 @@ test('a superseded scan can be retried with the same scan ID', async () => {
   const first = h.context.handleHandsFreeScan('scan', 'scanner', 'same-id');
   h.context.cancelPanoramaFillRetriesForManualEdit({
     isTrusted: true,
-    target: { id: 'displayExpiredRecalledCheckbox' }
+    target: h.control
   });
   h.release({ error: 'unavailable' });
   assert.equal((await first).accepted, false);
@@ -130,9 +219,10 @@ function schedulerFixture() {
   let id = 0;
   let now = 1000;
   let timerId = 0;
-  let form = { isConnected: true };
+  let { form, control, owners } = testForm();
   let field = { form, closest: () => form };
   let writes = 0;
+  let completions = 0;
   const timers = new Map();
   const setTimer = (callback, delay) => {
     const key = ++timerId;
@@ -146,7 +236,6 @@ function schedulerFixture() {
     window: { location: { href: 'https://example/recordImms/' } },
     document: { querySelectorAll: () => [field], body: null },
     isHandsFreeSupportedPage: () => true,
-    isPanoramaAgentLotWidgetNode: () => true,
     Date: { now: () => now },
     setTimeout: setTimer,
     setInterval: setTimer,
@@ -159,7 +248,9 @@ function schedulerFixture() {
     fillPanoramaDeferredDetailFields: () => {
       writes++;
     },
-    reportPanoramaApplied: () => {},
+    completePanoramaAutofill: () => {
+      completions++;
+    },
     isPanoramaFormVerified: () => true,
     console
   });
@@ -181,18 +272,24 @@ function schedulerFixture() {
   fire(800); // Second stable pass schedules the late callbacks.
   return {
     context,
+    get control() {
+      return control;
+    },
     fire,
     hasTimer: (delay) =>
       [...timers.values()].some((timer) => timer.delay === delay),
     get writes() {
       return writes;
     },
+    get completions() {
+      return completions;
+    },
     replaceControl() {
       field = { form, closest: () => form };
     },
     replaceForm() {
       form.isConnected = false;
-      form = { isConnected: true };
+      ({ form, control, owners } = testForm());
       field = { form, closest: () => form };
     }
   };
@@ -203,7 +300,7 @@ test('late scheduler writes stop after a trusted edit or a newer operation', () 
     (h) =>
       h.context.cancelPanoramaFillRetriesForManualEdit({
         isTrusted: true,
-        target: { id: 'dateAdministedDate' }
+        target: h.control
       }),
     (h) => h.context.beginPanoramaOperation()
   ]) {
@@ -222,7 +319,8 @@ test('late scheduler callbacks allow same-form controls but stop on navigation o
   same.replaceControl();
   same.fire(1500);
   same.fire(3500);
-  assert.equal(same.writes, 2);
+  assert.equal(same.writes, 1);
+  assert.equal(same.completions, 1);
   for (const change of [
     (h) => {
       h.context.window.location.href = 'https://example/other';
@@ -234,6 +332,33 @@ test('late scheduler callbacks allow same-form controls but stop on navigation o
     h.fire(1500);
     assert.equal(h.hasTimer(3500), false);
     assert.equal(h.writes, 0);
+  }
+});
+
+test('application waits for both corrective passes and a fresh full verification', () => {
+  const h = schedulerFixture();
+  assert.equal(h.completions, 0);
+  h.context.isPanoramaFormVerified = () => false;
+  h.fire(1500);
+  assert.equal(h.writes, 1);
+  assert.equal(h.completions, 0);
+  h.context.isPanoramaFormVerified = () => true;
+  h.fire(3500);
+  assert.equal(h.completions, 1);
+  assert.equal(h.hasTimer(16000), false);
+});
+
+test('busy or unverified final passes retain the scan and the original retry deadline', () => {
+  for (const busy of [true, false]) {
+    const h = schedulerFixture();
+    h.context.isPrimeFacesAjaxBusy = () => busy;
+    h.context.isPanoramaFormVerified = () => false;
+    h.fire(1500);
+    h.fire(3500);
+    assert.equal(h.completions, 0);
+    assert.equal(h.hasTimer(16000), true);
+    h.fire(16000);
+    assert.equal(h.hasTimer(500), false);
   }
 });
 
@@ -288,6 +413,58 @@ test('cancelled ownership prevents a queued record consume request', async () =>
   assert.equal(sends, 0);
 });
 
+test('completion verifies the form independently and acknowledges only once', async () => {
+  let verified = false;
+  let applied = 0;
+  const context = vm.createContext({
+    isPanoramaFormVerified: () => verified,
+    reportPanoramaApplied: () => {
+      applied++;
+    },
+    showVaxlinkToast() {},
+    console
+  });
+  vm.runInContext(fn('completePanoramaAutofill'), context);
+  const data = { _vaxlinkOperation: {} };
+  await context.completePanoramaAutofill(data);
+  assert.equal(applied, 0);
+  verified = true;
+  await context.completePanoramaAutofill(data);
+  await context.completePanoramaAutofill(data);
+  assert.equal(applied, 1);
+});
+
+test('completion waits for serialized consumption and rechecks ownership after the reply', async () => {
+  let verified = true;
+  let finishConsume;
+  let consumes = 0;
+  let applied = 0;
+  const context = vm.createContext({
+    isPanoramaFormVerified: () => verified,
+    consumeQueueRecordAfterDeferredAutofill: () => {
+      consumes++;
+      return new Promise((resolve) => {
+        finishConsume = resolve;
+      });
+    },
+    reportPanoramaApplied: () => {
+      applied++;
+    },
+    showVaxlinkToast() {},
+    console
+  });
+  vm.runInContext(fn('completePanoramaAutofill'), context);
+  const data = { _vaxlinkOperation: {}, _vaxlinkQueueContext: {} };
+  const completing = context.completePanoramaAutofill(data);
+  await context.completePanoramaAutofill(data);
+  assert.equal(consumes, 1);
+  assert.equal(applied, 0);
+  verified = false;
+  finishConsume();
+  await completing;
+  assert.equal(applied, 0);
+});
+
 test('automatic grid leaves recovered rows at their existing indices', async () => {
   const filled = [];
   const context = vm.createContext({
@@ -339,7 +516,7 @@ test('an initial field write keeps a queued record pending until scheduler verif
   });
   assert.equal(result.status, 'pending');
   assert.equal(result.reason, 'waiting_for_form_verification');
-  assert.equal(options.finalizeOnResolved, true);
+  assert.equal(options.preserveFundingFilter, false);
 });
 
 test('strict verification rejects missing agent, lot prefixes and disabled unset optional selections', () => {
@@ -349,13 +526,16 @@ test('strict verification rejects missing agent, lot prefixes and disabled unset
   const context = vm.createContext({
     ownsPanoramaOperation: () => true,
     getPanoramaAgentCandidates: () => ['agent'],
-    hasPanoramaAgentSelection: () => agent,
+    getPanoramaAgentSelectors: () => ['agent'],
+    isAgentCandidateAccepted: () => agent,
     getFields: (selectors) =>
-      selectors[0] === 'reason'
-        ? [{}]
-        : selectors[0] === 'consent'
-          ? []
-          : [{ text: lot }],
+      selectors[0] === 'agent'
+        ? [{ tagName: 'SELECT' }]
+        : selectors[0] === 'reason'
+          ? [{}]
+          : selectors[0] === 'consent'
+            ? []
+            : [{ text: lot }],
     normalizePanoramaLotToken: (value) =>
       String(value)
         .toUpperCase()
@@ -380,6 +560,46 @@ test('strict verification rejects missing agent, lot prefixes and disabled unset
   assert.equal(context.isPanoramaFormVerified({ lot: 'ABC1' }, {}), false);
   reasonSelected = true;
   assert.equal(context.isPanoramaFormVerified({ lot: 'ABC1' }, {}), true);
+});
+
+test('final agent proof uses the native selection even when the widget label is stale', () => {
+  const native = {
+    tagName: 'SELECT',
+    selectedIndex: 0,
+    options: [{ text: 'Wrong agent' }]
+  };
+  const focus = { id: 'agent_focus' };
+  const context = vm.createContext({
+    ownsPanoramaOperation: () => true,
+    getPanoramaAgentCandidates: () => ['Correct agent'],
+    getFields: () => [native, focus],
+    document: { getElementById: () => ({ textContent: 'Correct agent' }) },
+    hasPanoramaTradeSelection: () => true,
+    getPanoramaAdministeredDateTimeValues: () => ({}),
+    getPanoramaAdministeredDateTimeFields: () => ({}),
+    reasonConsentAutofillEnabled: false,
+    canFillPanoramaControl: () => true
+  });
+  vm.runInContext(
+    [
+      'normalizeForMatch',
+      'getFieldFilledText',
+      'isShortAgentCandidate',
+      'filledAgentTextMatchesCandidate',
+      'isAgentTextAccepted',
+      'isAgentCandidateAccepted',
+      'getPanoramaAgentSelectors',
+      'hasPanoramaAgentSelection',
+      'isPanoramaFormVerified'
+    ]
+      .map(fn)
+      .join('\n'),
+    context
+  );
+  assert.equal(context.hasPanoramaAgentSelection({}), true);
+  assert.equal(context.isPanoramaFormVerified({}, {}), false);
+  native.options[0].text = 'Correct agent';
+  assert.equal(context.isPanoramaFormVerified({}, {}), true);
 });
 
 test('masked input stops after focus replaces the owning form', () => {

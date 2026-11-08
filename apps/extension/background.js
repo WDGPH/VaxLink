@@ -604,7 +604,7 @@ function appendQueueRecord(storageKey, record, options = {}) {
   return scannerQueueWriteQueue;
 }
 
-function consumeQueueRecord(tabId, recordId, expectedContext) {
+function consumeQueueRecord(tabId, recordId, expectedContext, operationId) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
     .then(async () => {
@@ -621,7 +621,7 @@ function consumeQueueRecord(tabId, recordId, expectedContext) {
       if (
         !sameScannerContext(
           expectedContext,
-          await getScannerChartContext(tabId)
+          await getScannerChartContext(tabId, operationId)
         )
       ) {
         throw new Error('Panorama form changed.');
@@ -759,7 +759,7 @@ function sameScannerContext(a, b) {
   );
 }
 
-async function getScannerChartContext(tabId) {
+async function getScannerChartContext(tabId, expectedOperationId = null) {
   const tab = (await queryTabs({})).find((item) => item.id === tabId);
   if (!tab || (tab.url && !isSupportedChartUrl(tab.url))) return null;
   return new Promise((resolve) => {
@@ -775,6 +775,9 @@ async function getScannerChartContext(tabId) {
           !chrome.runtime.lastError &&
             response?.supported === true &&
             response?.ready === true &&
+            (expectedOperationId === null ||
+              (response.operationId === expectedOperationId &&
+                response.operationVerified === true)) &&
             sameScannerContext(context, context)
             ? { document: context.document, form: context.form }
             : null
@@ -3276,6 +3279,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       (sender.tab.url && !isSupportedChartUrl(sender.tab.url)) ||
       typeof request.recordId !== 'string' ||
       !request.recordId ||
+      typeof request.operationId !== 'string' ||
+      !request.operationId.trim() ||
       !sameScannerContext(request.expectedContext, request.expectedContext)
     ) {
       sendResponse({
@@ -3284,7 +3289,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    consumeQueueRecord(sender.tab.id, request.recordId, request.expectedContext)
+    consumeQueueRecord(
+      sender.tab.id,
+      request.recordId,
+      request.expectedContext,
+      request.operationId
+    )
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) =>
         sendResponse({
