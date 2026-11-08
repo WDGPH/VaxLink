@@ -265,6 +265,18 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     });
   }
+  document
+    .getElementById('acknowledgeScannerErrorBtn')
+    ?.addEventListener('click', () => {
+      chrome.runtime.sendMessage(
+        { action: 'acknowledgeScannerCaptureError' },
+        (response) => {
+          if (chrome.runtime.lastError || !response?.success) return;
+          scannerCaptureError = response.captureError === true;
+          renderScannerStatusUi();
+        }
+      );
+    });
   if (scannerSetupBtn) {
     scannerSetupBtn.addEventListener('click', openScannerSetupPage);
   }
@@ -602,14 +614,19 @@ function renderScannerStatusUi() {
     scannerStatusTitle.textContent =
       scannerStatusSource === 'cached' ? 'Cached status' : descriptor.label;
   }
+  const acknowledgeButton = document.getElementById(
+    'acknowledgeScannerErrorBtn'
+  );
+  if (acknowledgeButton) acknowledgeButton.hidden = !scannerCaptureError;
   if (scannerStatusDetail) {
     const sourceNote =
       scannerStatusSource === 'cached'
         ? ' Status is cached; connection is unconfirmed.'
         : '';
     const captureNote =
-      scannerStatusSnapshot.lastCaptureAt && scannerCaptureSource === 'cached'
-        ? ' Last capture time is cached.'
+      scannerStatusSnapshot.lastKnownCaptureAt &&
+      scannerCaptureSource === 'cached'
+        ? ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`
         : '';
     const errorNote = scannerCaptureError
       ? ' A scan could not be saved or delivered. Check pending scans and rescan if needed.'

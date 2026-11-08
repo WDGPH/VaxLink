@@ -144,6 +144,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 bgLog('Service worker started, loading NVC bundle');
 ensureActionIcon();
 initializeNVCSync();
+let queueBadgeCount = 0;
+let scannerCaptureWarning = false;
+let captureWarningGeneration = 0;
+let captureWarningWrites = Promise.resolve();
+
 initQueueBadge();
 initializeScannerLockMonitoring();
 void maybeStartScannerDaemon('service_worker_start').catch((error) => {
@@ -189,21 +194,65 @@ function ensureActionIcon() {
   return iconInitPromise;
 }
 
+function renderQueueBadge() {
+  chrome.action.setBadgeText({
+    text: scannerCaptureWarning
+      ? '!'
+      : queueBadgeCount > 0
+        ? String(queueBadgeCount)
+        : ''
+  });
+  chrome.action.setBadgeBackgroundColor({
+    color: scannerCaptureWarning ? '#b91c1c' : BADGE_COLOR
+  });
+}
+
 function updateQueueBadge(rows) {
-  const count = Array.isArray(rows) ? rows.length : 0;
-  chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-  chrome.action.setBadgeBackgroundColor({ color: BADGE_COLOR });
+  queueBadgeCount = Array.isArray(rows) ? rows.length : 0;
+  renderQueueBadge();
+}
+
+function recordCaptureWarning() {
+  captureWarningGeneration++;
+  scannerCaptureWarning = true;
+  renderQueueBadge();
+  captureWarningWrites = captureWarningWrites
+    .catch(() => undefined)
+    .then(() => setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: true }));
+  return captureWarningWrites;
+}
+
+function acknowledgeCaptureWarning() {
+  const generation = ++captureWarningGeneration;
+  const result = captureWarningWrites
+    .catch(() => undefined)
+    .then(async () => {
+      await setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: false });
+      if (generation !== captureWarningGeneration) return;
+      scannerCaptureWarning = false;
+      renderQueueBadge();
+    });
+  captureWarningWrites = result;
+  return result;
 }
 
 function initQueueBadge() {
-  chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
-    updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
-  });
+  const generation = captureWarningGeneration;
+  chrome.storage.local.get(
+    [MULTIPLE_INJECT_QUEUE_KEY, SCANNER_CAPTURE_ERROR_KEY],
+    (stored) => {
+      if (
+        generation === captureWarningGeneration &&
+        stored?.[SCANNER_CAPTURE_ERROR_KEY] === true
+      )
+        scannerCaptureWarning = true;
+      updateQueueBadge(stored && stored[MULTIPLE_INJECT_QUEUE_KEY]);
+    }
+  );
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+    if (MULTIPLE_INJECT_QUEUE_KEY in changes)
       updateQueueBadge(changes[MULTIPLE_INJECT_QUEUE_KEY].newValue);
-    }
   });
 }
 
@@ -266,7 +315,9 @@ function createScannerStatusSnapshot(overrides = {}) {
     lastConnectedAt: '',
     lastDisconnectedAt: '',
     lastCaptureAt: '',
+    lastKnownCaptureAt: '',
     captureCount: 0,
+    selectionRequired: false,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -284,7 +335,9 @@ function normalizeScannerStatusSnapshot(snapshot) {
     lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
     lastCaptureAt: normalizeScannerIsoTimestamp(source.lastCaptureAt),
+    lastKnownCaptureAt: normalizeScannerIsoTimestamp(source.lastKnownCaptureAt),
     captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
+    selectionRequired: source.selectionRequired === true,
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(
       0,
@@ -339,16 +392,21 @@ function persistScannerStatusSnapshot(snapshot) {
         stored[SCANNER_STATUS_SNAPSHOT_KEY]
       );
       const normalized = normalizeScannerStatusSnapshot(snapshot);
-      if (
-        !normalized.lastCaptureAt ||
-        previous.lastCaptureAt > normalized.lastCaptureAt
-      ) {
-        normalized.lastCaptureAt = previous.lastCaptureAt;
-      }
+      normalized.lastKnownCaptureAt =
+        [
+          previous.lastKnownCaptureAt,
+          previous.lastCaptureAt,
+          normalized.lastKnownCaptureAt,
+          normalized.lastCaptureAt
+        ]
+          .sort()
+          .at(-1) || '';
       scannerDaemonStatusCache = normalized;
       const values = {
         [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
       };
+      if (normalized.selectionRequired)
+        values[SCANNER_DAEMON_ENABLED_KEY] = false;
       if (normalized.profileId) {
         values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
       }
@@ -447,7 +505,11 @@ async function sendScannerDaemonMessage(message) {
 
 async function maybeStartScannerDaemon(trigger = 'startup') {
   const bootstrap = await getScannerBootstrapState();
-  if (!bootstrap.enabled || !bootstrap.profileId) {
+  if (
+    !bootstrap.enabled ||
+    !bootstrap.profileId ||
+    bootstrap.status.selectionRequired
+  ) {
     return { started: false, status: bootstrap.status };
   }
   await ensureScannerDaemon();
@@ -2968,16 +3030,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
     (async () => {
-      const cachedCaptureAt = scannerDaemonStatusCache.lastCaptureAt;
+      const cachedCaptureAt =
+        scannerDaemonStatusCache.lastKnownCaptureAt ||
+        scannerDaemonStatusCache.lastCaptureAt;
       const bootstrap = await getScannerBootstrapState();
       let status = bootstrap.status;
-      if (cachedCaptureAt > status.lastCaptureAt) {
-        status.lastCaptureAt = cachedCaptureAt;
-        scannerDaemonStatusCache.lastCaptureAt = cachedCaptureAt;
-      }
+      status.lastKnownCaptureAt =
+        [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
+          .sort()
+          .at(-1) || '';
       let source = 'cached';
       let captureSource = 'cached';
       const captureError =
+        scannerCaptureWarning ||
         (await getStorage([SCANNER_CAPTURE_ERROR_KEY]))[
           SCANNER_CAPTURE_ERROR_KEY
         ] === true;
@@ -2988,14 +3053,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }).catch(() => null);
         if (reply?.success && reply.status) {
           const liveStatus = normalizeScannerStatusSnapshot(reply.status);
-          if (
-            liveStatus.lastCaptureAt &&
-            liveStatus.lastCaptureAt >= status.lastCaptureAt
-          ) {
-            captureSource = 'live';
-          } else {
-            liveStatus.lastCaptureAt = status.lastCaptureAt;
-          }
+          liveStatus.lastKnownCaptureAt =
+            [
+              status.lastKnownCaptureAt,
+              liveStatus.lastKnownCaptureAt,
+              liveStatus.lastCaptureAt
+            ]
+              .sort()
+              .at(-1) || '';
+          if (liveStatus.lastCaptureAt) captureSource = 'live';
           status = liveStatus;
           source = 'live';
         }
@@ -3143,16 +3209,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => {
-        void setStorage({ [SCANNER_CAPTURE_ERROR_KEY]: true }).catch(
-          () => undefined
-        );
-        chrome.action.setBadgeText({ text: '!' });
-        chrome.action.setBadgeBackgroundColor({ color: '#b91c1c' });
+        void recordCaptureWarning().catch(() => undefined);
         sendResponse({
           success: false,
           error: error?.message || 'Scan routing failed'
         });
       });
+    return true;
+  }
+
+  if (request.action === 'acknowledgeScannerCaptureError') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('popup.html')
+    ) {
+      sendResponse({ success: false });
+      return false;
+    }
+    acknowledgeCaptureWarning()
+      .then(() =>
+        sendResponse({ success: true, captureError: scannerCaptureWarning })
+      )
+      .catch(() => sendResponse({ success: false }));
     return true;
   }
 

@@ -132,8 +132,8 @@ function applyDaemonStatus(status, source = 'live', captureSource = source) {
   const sourceNote =
     source === 'cached' ? ' Status is cached; connection is unconfirmed.' : '';
   const captureNote =
-    scannerStatusSnapshot.lastCaptureAt && captureSource === 'cached'
-      ? ' Last capture time is cached.'
+    scannerStatusSnapshot.lastKnownCaptureAt && captureSource === 'cached'
+      ? ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`
       : '';
   setStatus(els.connectionStatus, message + sourceNote + captureNote, tone);
   updateDeviceState(connected ? 'Connected in background' : state);

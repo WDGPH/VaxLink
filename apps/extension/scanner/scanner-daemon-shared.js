@@ -69,7 +69,9 @@ export function createScannerStatusSnapshot(overrides = {}) {
     lastConnectedAt: '',
     lastDisconnectedAt: '',
     lastCaptureAt: '',
+    lastKnownCaptureAt: '',
     captureCount: 0,
+    selectionRequired: false,
     lastError: '',
     recoverAttemptCount: 0,
     ...overrides
@@ -87,7 +89,9 @@ export function normalizeScannerStatusSnapshot(snapshot) {
     lastConnectedAt: normalizeIsoTimestamp(source.lastConnectedAt),
     lastDisconnectedAt: normalizeIsoTimestamp(source.lastDisconnectedAt),
     lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
+    lastKnownCaptureAt: normalizeIsoTimestamp(source.lastKnownCaptureAt),
     captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
+    selectionRequired: source.selectionRequired === true,
     lastError: String(source.lastError || '').trim(),
     recoverAttemptCount: Math.max(
       0,

@@ -107,7 +107,7 @@ test('enqueue waits for an in-progress drain', async () => {
   });
   const drain = harness.sendMessage(
     { action: 'drainPendingScannerScans' },
-    { tab, frameId: 0, url: tab.url }
+    { id: 'vaxlink-test', tab, frameId: 0, url: tab.url }
   );
   await startedPromise;
   const next = captured(harness, 'new');
@@ -130,4 +130,129 @@ test('duplicate queue capture is reported without another saved event', async ()
   assert.equal(second.queued, false);
   assert.equal(second.duplicate_ignored, true);
   assert.equal(harness.storageData.get('multiple_inject_queue_v1').length, 1);
+});
+
+test('normal GS1 scans reach capacity at 250 and reject the next without loss', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'locked',
+    storage: { vaxlink_workflow_mode_v1: 'single' }
+  });
+  for (let i = 0; i < 250; i++)
+    assert.equal(
+      (await captured(harness, `01099990000000081727123110TEST${i}`)).success,
+      true
+    );
+  assert.equal(harness.storageData.get(pending).length, 250);
+  assert.equal(
+    (await captured(harness, '01099990000000081727123110TEST251')).success,
+    false
+  );
+  assert.equal(harness.storageData.get(pending).length, 250);
+});
+
+test('failed inbox removal after delivery retains the scan', async () => {
+  const tab = {
+    id: 44,
+    url: 'https://panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/recordImms.xhtml'
+  };
+  const row = scan('01099990000000081727123110TEST');
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'locked',
+    storage: { [pending]: [row] },
+    tabs: [tab],
+    tabResponse: { success: true },
+    failStorageSet: (values) =>
+      Array.isArray(values[pending]) && values[pending].length === 0
+  });
+  const result = await harness.sendMessage(
+    { action: 'drainPendingScannerScans' },
+    { id: 'vaxlink-test', tab, frameId: 0, url: tab.url }
+  );
+  assert.equal(result.success, false);
+  assert.equal(harness.tabMessages.length, 1);
+  assert.equal(harness.storageData.get(pending).length, 1);
+});
+
+test('warning badge survives queue updates and failed acknowledgement', async () => {
+  let failAck = true;
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'locked',
+    storage: { vaxlink_workflow_mode_v1: 'single' },
+    failStorageSet: (values) =>
+      values.vaxlink_scanner_capture_error_v1 === false && failAck
+  });
+  assert.equal(
+    (await captured(harness, 'x'.repeat(1024 * 1024))).success,
+    false
+  );
+  assert.equal(harness.getBadgeText(), '!');
+  await harness.sendMessage({
+    action: 'appendQueueRecord',
+    storageKey: 'multiple_inject_queue_v1',
+    record: { id: 'queue-1' }
+  });
+  assert.equal(harness.getBadgeText(), '!');
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  assert.equal(
+    (
+      await harness.sendMessage(
+        { action: 'acknowledgeScannerCaptureError' },
+        sender
+      )
+    ).success,
+    false
+  );
+  assert.equal(harness.getBadgeText(), '!');
+  failAck = false;
+  assert.equal(
+    (
+      await harness.sendMessage(
+        { action: 'acknowledgeScannerCaptureError' },
+        sender
+      )
+    ).success,
+    true
+  );
+  assert.equal(harness.getBadgeText(), '1');
+});
+
+test('a new capture failure during acknowledgement keeps the warning', async () => {
+  let release;
+  let started;
+  const waiting = new Promise((resolve) => {
+    started = resolve;
+  });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    idleState: 'locked',
+    storage: { vaxlink_workflow_mode_v1: 'single' },
+    delayStorageSet(values, resume) {
+      if (values.vaxlink_scanner_capture_error_v1 !== false || release)
+        return false;
+      release = resume;
+      started();
+      return true;
+    }
+  });
+  await captured(harness, 'x'.repeat(1024 * 1024));
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  const ack = harness.sendMessage(
+    { action: 'acknowledgeScannerCaptureError' },
+    sender
+  );
+  await waiting;
+  await captured(harness, 'x'.repeat(1024 * 1024));
+  release();
+  const result = await ack;
+  assert.equal(result.captureError, true);
+  assert.equal(harness.getBadgeText(), '!');
+  const status = await harness.sendMessage({
+    action: 'scannerDaemon.getStatus'
+  });
+  assert.equal(status.captureError, true);
 });

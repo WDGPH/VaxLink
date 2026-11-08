@@ -204,11 +204,14 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   const chrome = {
     runtime: {
+      id: 'vaxlink-test',
       lastError: null,
       onInstalled: { addListener() {} },
       onStartup: { addListener() {} },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
+      sendMessage: (_message, callback) =>
+        queueMicrotask(() => callback?.({ success: true })),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
       }

@@ -44,6 +44,10 @@ function applyStatus(status) {
   const hasChanged =
     JSON.stringify(nextStatus) !== JSON.stringify(currentStatus);
   currentStatus = nextStatus;
+  if (nextStatus.selectionRequired) {
+    desiredConnection = null;
+    clearRestartTimer();
+  }
   if (hasChanged) {
     postStatusToBackground(currentStatus);
   }

@@ -111,6 +111,28 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
   assert.equal(echo.response.locked, true);
 
+  connectedWorker.emit('message', {
+    type: 'status',
+    status: { state: 'error', selectionRequired: true }
+  });
+  const previousWorkers = workers.length;
+  let restartScheduled = false;
+  const originalTimer = globalThis.setTimeout;
+  globalThis.setTimeout = () => {
+    restartScheduled = true;
+    return 1;
+  };
+  connectedWorker.listeners.get('error')({
+    message: 'Worker stopped after selection failure'
+  });
+  globalThis.setTimeout = originalTimer;
+  assert.equal(restartScheduled, false);
+  assert.equal(workers.length, previousWorkers);
+  runtimeListeners[0](connectRequest, {}, () => {});
+  assert.equal(workers.length, previousWorkers + 1);
+  assert.equal(workers.at(-1).messages.at(-1).type, 'connectGranted');
+
+  await new Promise((resolve) => queueMicrotask(resolve));
   delete globalThis.Worker;
   delete globalThis.chrome;
 });

@@ -148,6 +148,11 @@ async function connectGrantedPort(trigger = 'manual') {
     const port = selection.port;
 
     if (!port) {
+      if (
+        selection.reason === 'ambiguous' ||
+        selection.reason === 'unidentified'
+      )
+        desiredConnected = false;
       const noPortState = desiredProfileId
         ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
         : SCANNER_STATUS_STATES.NEVER_CONFIGURED;
@@ -159,12 +164,15 @@ async function connectGrantedPort(trigger = 'manual') {
             : selection.reason === 'preferred_missing'
               ? 'The selected scanner was not found. Reconnect it or select a scanner again.'
               : 'Scanner not found. Reconnect the cradle or power it on, then select the scanner if needed.';
-      handleConnectionFailure(
-        new Error(message),
-        selection.reason === 'ambiguous' || selection.reason === 'unidentified'
-          ? SCANNER_STATUS_STATES.ERROR
-          : noPortState
-      );
+      if (!desiredConnected) {
+        updateStatus({
+          state: SCANNER_STATUS_STATES.ERROR,
+          selectionRequired: true,
+          lastError: message
+        });
+        return;
+      }
+      handleConnectionFailure(new Error(message), noPortState);
       return;
     }
 
@@ -235,6 +243,7 @@ self.addEventListener('message', (event) => {
   switch (data.type) {
     case 'connectGranted':
       desiredConnected = true;
+      updateStatus({ selectionRequired: false });
       desiredProfileId = String(
         data.profileId || desiredProfileId || ''
       ).trim();
