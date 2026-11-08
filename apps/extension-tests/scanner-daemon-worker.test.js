@@ -80,7 +80,14 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
   workerListeners.get('message')({ data: { type: 'disconnect' } });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(closeCount, 1);
-  assert.equal(workerMessages.at(-1).status.state, 'disabled');
+  assert.ok(
+    workerMessages.some((message) => message.status?.state === 'disabled')
+  );
+  assert.ok(
+    workerMessages.some(
+      (message) => message.type === 'disconnected' && message.success
+    )
+  );
 
   delete globalThis.self;
   delete globalThis.navigator;

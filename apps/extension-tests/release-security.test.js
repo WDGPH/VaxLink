@@ -82,6 +82,10 @@ test('alpha and production packaging exclude catalogue snapshots and development
     );
     assert.ok(names.includes('manifest.json'), channel);
     assert.ok(names.includes('content.js'), channel);
+    assert.equal(
+      names.some((name) => name.startsWith('diagnostics/')),
+      channel === 'alpha'
+    );
     for (const path of excluded)
       assert.equal(names.includes(path), false, `${channel}: ${path}`);
     assert.equal(

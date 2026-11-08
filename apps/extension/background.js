@@ -3,6 +3,9 @@ importScripts('build-info.js');
 importScripts('shared/gs1-parser.js');
 importScripts('shared/expiry-date.js');
 importScripts('scanner/scanner-lock-session.js');
+if (chrome.runtime.getManifest().name === 'VaxLink Alpha') {
+  importScripts('diagnostics/scanner-test-background.js');
+}
 
 const {
   SCANNER_LOCK_STATE_KEY,
@@ -114,8 +117,27 @@ const SCANNER_STATUS_STATES = Object.freeze({
   DISABLED: 'disabled'
 });
 const VALID_SCANNER_STATES = new Set(Object.values(SCANNER_STATUS_STATES));
+let scannerControlQueue = Promise.resolve();
+function runScannerControl(action) {
+  const result = scannerControlQueue.catch(() => undefined).then(action);
+  scannerControlQueue = result;
+  return result;
+}
+
 let scannerDaemonCreatePromise = null;
 let scannerDaemonStatusCache = createScannerStatusSnapshot();
+
+const scannerTestLease = globalThis.VaxLinkScannerTestLease?.create({
+  getStorage,
+  setStorage,
+  hasDaemon: hasScannerDaemonDocument,
+  sendDaemon: () =>
+    sendRuntimeMessage({
+      target: SCANNER_DAEMON_TARGET,
+      action: SCANNER_DAEMON_ACTIONS.DISCONNECT
+    }),
+  enabledKey: SCANNER_DAEMON_ENABLED_KEY
+});
 
 // Load NVC bundle on installation/startup
 chrome.runtime.onInstalled.addListener(() => {
@@ -504,24 +526,27 @@ async function sendScannerDaemonMessage(message) {
   return sendRuntimeMessage({ ...message, target: SCANNER_DAEMON_TARGET });
 }
 
-async function maybeStartScannerDaemon(trigger = 'startup') {
-  const bootstrap = await getScannerBootstrapState();
-  if (
-    !bootstrap.enabled ||
-    !bootstrap.profileId ||
-    bootstrap.status.selectionRequired
-  ) {
-    return { started: false, status: bootstrap.status };
-  }
-  await ensureScannerDaemon();
-  const response = await sendRuntimeMessage({
-    target: SCANNER_DAEMON_TARGET,
-    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-    profileId: bootstrap.profileId,
-    preferredPortInfo: bootstrap.portInfo,
-    trigger
+function maybeStartScannerDaemon(trigger = 'startup') {
+  return runScannerControl(async () => {
+    await scannerTestLease?.checkConnect(false);
+    const bootstrap = await getScannerBootstrapState();
+    if (
+      !bootstrap.enabled ||
+      !bootstrap.profileId ||
+      bootstrap.status.selectionRequired
+    ) {
+      return { started: false, status: bootstrap.status };
+    }
+    await ensureScannerDaemon();
+    const response = await sendRuntimeMessage({
+      target: SCANNER_DAEMON_TARGET,
+      action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+      profileId: bootstrap.profileId,
+      preferredPortInfo: bootstrap.portInfo,
+      trigger
+    });
+    return { started: true, status: response?.status || bootstrap.status };
   });
-  return { started: true, status: response?.status || bootstrap.status };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -3240,9 +3265,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (
+    scannerTestLease &&
+    (request.action === 'scannerTest.acquire' ||
+      request.action === 'scannerTest.release')
+  ) {
+    runScannerControl(() =>
+      request.action === 'scannerTest.acquire'
+        ? scannerTestLease.acquire(sender)
+        : scannerTestLease.release(sender, request.lease)
+    )
+      .then(sendResponse)
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Scanner test failed'
+        })
+      );
+    return true;
+  }
+
   if (request.action === SCANNER_DAEMON_ACTIONS.ENABLE_AUTOSTART) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true })
-      .then(() => getScannerBootstrapState())
+    runScannerControl(async () => {
+      await scannerTestLease?.checkConnect(false);
+      await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true });
+      return getScannerBootstrapState();
+    })
       .then((bootstrap) =>
         sendResponse({ success: true, status: bootstrap.status })
       )
@@ -3256,7 +3304,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
-    (async () => {
+    runScannerControl(async () => {
+      await scannerTestLease?.checkConnect(true);
       const values = {};
       const requestedProfileId = String(request.profileId || '').trim();
       const requestedPortInfo = normalizeScannerPortInfo(
@@ -3278,14 +3327,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (!bootstrap.profileId) {
         throw new Error('No scanner profile is configured yet.');
       }
-      await sendScannerDaemonMessage({
+      const response = await sendScannerDaemonMessage({
         action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
         profileId: bootstrap.profileId,
         preferredPortInfo: bootstrap.portInfo,
         trigger: request.trigger || 'manual'
       });
+      if (!response?.success)
+        throw new Error(
+          response?.error || 'Scanner connection was not accepted.'
+        );
       sendResponse({ success: true, accepted: true, status: bootstrap.status });
-    })().catch((error) => {
+    }).catch((error) => {
       sendResponse({
         success: false,
         error: error?.message || 'Scanner reconnect failed'
@@ -3295,22 +3348,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
-      .then(() =>
-        sendScannerDaemonMessage({
-          action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
-          trigger: request.trigger || 'manual'
+    runScannerControl(() =>
+      setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
+        .then(() =>
+          sendScannerDaemonMessage({
+            action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
+            trigger: request.trigger || 'manual'
+          })
+        )
+        .then((response) => {
+          if (response?.success !== true || response.released !== true)
+            throw new Error(
+              'Scanner release was not confirmed. Close the test page or reload the extension before reconnecting.'
+            );
+          sendResponse({ success: true, released: true, response });
         })
-      )
-      .then((response) =>
-        sendResponse({ success: true, accepted: true, response })
-      )
-      .catch((error) =>
-        sendResponse({
-          success: false,
-          error: error?.message || 'Scanner disconnect failed'
-        })
-      );
+    ).catch((error) =>
+      sendResponse({
+        success: false,
+        error: error?.message || 'Scanner disconnect failed'
+      })
+    );
     return true;
   }
 

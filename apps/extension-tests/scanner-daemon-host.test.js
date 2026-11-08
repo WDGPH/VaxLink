@@ -30,7 +30,10 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
 
   globalThis.Worker = FakeWorker;
   globalThis.chrome = {
+    storage: { local: { get: async () => ({}) } },
     runtime: {
+      id: 'vaxlink-test',
+      getManifest: () => ({ name: 'VaxLink Alpha' }),
       lastError: null,
       getURL: (path) => `chrome-extension://vaxlink-test/${path}`,
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
@@ -85,9 +88,19 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
     trigger: 'test'
   };
   let connectResponse = null;
-  runtimeListeners[0](connectRequest, {}, (response) => {
-    connectResponse = response;
-  });
+  await new Promise((resolve) =>
+    runtimeListeners[0](
+      connectRequest,
+      {
+        id: 'vaxlink-test',
+        url: 'chrome-extension://vaxlink-test/background.js'
+      },
+      (response) => {
+        connectResponse = response;
+        resolve();
+      }
+    )
+  );
   assert.equal(connectResponse.success, true);
   const connectedWorker = workers.at(-1);
   assert.equal(connectedWorker.messages.at(-1).type, 'connectGranted');
@@ -111,7 +124,75 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
   assert.equal(echo.response.locked, true);
 
-  connectedWorker.emit('message', {
+  const backgroundSender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/background.js'
+  };
+  const rejectedSender = await new Promise((resolve) =>
+    runtimeListeners[0](
+      connectRequest,
+      {
+        id: 'vaxlink-test',
+        url: 'chrome-extension://vaxlink-test/scanner-setup.html',
+        tab: { id: 1 }
+      },
+      resolve
+    )
+  );
+  assert.equal(rejectedSender.accepted, false);
+  globalThis.chrome.storage.local.get = async () => ({
+    vaxlink_scanner_test_lease_v1: { token: 'held' }
+  });
+  const blockedByLease = await new Promise((resolve) =>
+    runtimeListeners[0](connectRequest, backgroundSender, resolve)
+  );
+  assert.equal(blockedByLease.accepted, false);
+  globalThis.chrome.storage.local.get = async () => ({});
+
+  let timeoutCallback;
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback) => {
+    timeoutCallback = callback;
+    return 99;
+  };
+  const timeoutResponse = new Promise((resolve) =>
+    runtimeListeners[0](
+      { target: 'scannerDaemon', action: 'scannerDaemon.disconnect' },
+      {},
+      resolve
+    )
+  );
+  timeoutCallback();
+  assert.equal((await timeoutResponse).released, false);
+  globalThis.setTimeout = realSetTimeout;
+
+  await new Promise((resolve) =>
+    runtimeListeners[0](
+      connectRequest,
+      {
+        id: 'vaxlink-test',
+        url: 'chrome-extension://vaxlink-test/background.js'
+      },
+      resolve
+    )
+  );
+  const crashResponse = new Promise((resolve) =>
+    runtimeListeners[0](
+      { target: 'scannerDaemon', action: 'scannerDaemon.disconnect' },
+      {},
+      resolve
+    )
+  );
+  connectedWorker.listeners.get('error')({
+    message: 'Worker stopped during disconnect'
+  });
+  assert.equal((await crashResponse).released, false);
+
+  await new Promise((resolve) =>
+    runtimeListeners[0](connectRequest, backgroundSender, resolve)
+  );
+  const selectionWorker = workers.at(-1);
+  selectionWorker.emit('message', {
     type: 'status',
     status: { state: 'error', selectionRequired: true }
   });
@@ -122,17 +203,19 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
     restartScheduled = true;
     return 1;
   };
-  connectedWorker.listeners.get('error')({
+  selectionWorker.listeners.get('error')({
     message: 'Worker stopped after selection failure'
   });
   globalThis.setTimeout = originalTimer;
   assert.equal(restartScheduled, false);
   assert.equal(workers.length, previousWorkers);
-  runtimeListeners[0](connectRequest, {}, () => {});
+  await new Promise((resolve) =>
+    runtimeListeners[0](connectRequest, backgroundSender, resolve)
+  );
   assert.equal(workers.length, previousWorkers + 1);
   assert.equal(workers.at(-1).messages.at(-1).type, 'connectGranted');
-
   await new Promise((resolve) => queueMicrotask(resolve));
+
   delete globalThis.Worker;
   delete globalThis.chrome;
 });

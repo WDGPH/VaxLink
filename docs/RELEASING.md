@@ -138,6 +138,11 @@ Examples:
 - Don't hand-edit `version` anywhere; the Release PR owns version bumps. (Hand-written changelog content _above_ the generated sections is preserved — the historical 1.0.0–1.0.7 entries stay.)
 - Write "Clinic feedback addressed" tables by hand for major pilot rounds; release-please generates commit-based changelog entries, not these feedback tables.
 
+The isolated scanner-test implementation is included only in Alpha ZIPs under
+`diagnostics/`. Production ZIPs exclude those executable assets; hiding a control
+alone is insufficient. Workstation health and shared scanner reliability fixes
+remain in both channels. Verify the actual packaged files when promoting changes.
+
 ### Sanity checks before any store upload
 
 - Open the zip and confirm `manifest.json` has the right `name`/`version_name` for the listing.

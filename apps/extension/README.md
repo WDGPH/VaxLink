@@ -71,6 +71,21 @@ While Windows is locked, Single Inject scans are held for replay after unlock. S
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 
+## Isolated scanner test in Alpha
+
+Scanner Setup offers an optional isolated scanner test in Alpha builds. Start
+it and wait for the active-test message before scanning the displayed synthetic
+barcode. The test reports port, byte, complete-frame and synthetic GS1 parse
+checkpoints. It discards the input without adding it to a chart, queue, inventory
+or usage counter. The barcode is hidden while the test is inactive.
+
+The test stops after one minute. Normal capture stays paused until you deliberately
+reconnect in Scanner Setup. If reader release cannot be confirmed, close the test
+page before reconnecting. An in-flight stop may require another reconnect attempt.
+A failed reader close can require reloading the extension before capture resumes.
+Production packages exclude the scanner-test executable assets. Workstation health
+is available in both channels.
+
 ## Testing
 
 Static checks:

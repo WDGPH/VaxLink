@@ -8,7 +8,14 @@ import {
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
+const testGuard =
+  chrome.runtime.getManifest().name === 'VaxLink Alpha'
+    ? (await import('./diagnostics/scanner-test-host.js')).canConnect
+    : null;
+
 let daemonWorker = null;
+let disconnectSequence = 0;
+const pendingDisconnects = new Map();
 let restartTimer = null;
 let desiredConnection = null;
 let currentStatus = createScannerStatusSnapshot();
@@ -70,6 +77,10 @@ function ensureWorker() {
   );
   daemonWorker.addEventListener('message', (event) => {
     const data = event.data || {};
+    if (data.type === 'disconnected') {
+      pendingDisconnects.get(data.requestId)?.(data.success === true);
+      return;
+    }
     if (data.type === 'status') {
       applyStatus(data.status);
       return;
@@ -79,6 +90,7 @@ function ensureWorker() {
     }
   });
   daemonWorker.addEventListener('error', (event) => {
+    for (const finish of pendingDisconnects.values()) finish(false);
     const message = String(event?.message || 'Scanner worker crashed.').trim();
     daemonWorker = null;
     applyStatus({
@@ -142,7 +154,23 @@ function requestConnect(message = {}) {
 
 function requestDisconnect() {
   desiredConnection = null;
-  ensureWorker().postMessage({ type: 'disconnect' });
+  clearRestartTimer();
+  if (!daemonWorker) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const requestId = ++disconnectSequence;
+    const finish = (success) => {
+      clearTimeout(timer);
+      pendingDisconnects.delete(requestId);
+      resolve(success);
+    };
+    const timer = setTimeout(() => finish(false), 5000);
+    pendingDisconnects.set(requestId, finish);
+    try {
+      daemonWorker.postMessage({ type: 'disconnect', requestId });
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 function refreshGrantedPorts(trigger = 'device-event') {
@@ -156,15 +184,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
-    requestConnect(request);
-    sendResponse({ success: true, accepted: true, status: currentStatus });
-    return false;
+    if (!testGuard) {
+      requestConnect(request);
+      sendResponse({ success: true, accepted: true, status: currentStatus });
+      return false;
+    }
+    testGuard(sender)
+      .then((allowed) => {
+        if (!allowed) return sendResponse({ success: false, accepted: false });
+        requestConnect(request);
+        sendResponse({ success: true, accepted: true, status: currentStatus });
+      })
+      .catch(() => sendResponse({ success: false, accepted: false }));
+    return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    requestDisconnect();
-    sendResponse({ success: true, accepted: true, status: currentStatus });
-    return false;
+    requestDisconnect().then((released) =>
+      sendResponse({ success: released, released, status: currentStatus })
+    );
+    return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {

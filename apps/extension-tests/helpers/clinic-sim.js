@@ -311,6 +311,16 @@ export function createBackgroundHarness(bundle, options = {}) {
       onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
     },
     tabs: {
+      get(tabId, callback) {
+        if (options.getTab) return options.getTab(tabId, callback, chrome);
+        const tab = (options.tabs || []).find((item) => item.id === tabId);
+        queueMicrotask(() => {
+          if (!tab)
+            chrome.runtime.lastError = { message: `No tab with id: ${tabId}.` };
+          callback(tab);
+          chrome.runtime.lastError = null;
+        });
+      },
       query(queryInfo, callback) {
         let tabs = Array.isArray(options.tabs) ? options.tabs : [];
         if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);

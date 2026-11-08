@@ -30,12 +30,15 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     typeof handlers.onStatus === 'function' ? handlers.onStatus : () => {};
   const onError =
     typeof handlers.onError === 'function' ? handlers.onError : () => {};
+  const onBytes =
+    typeof handlers.onBytes === 'function' ? handlers.onBytes : () => {};
   const decoder = createLineFrameDecoder(profile.decoder || {});
   const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;
   let activeReader = null;
   let idleFlushTimer = null;
   let terminalReadError = null;
+  let terminalCloseError = null;
 
   const clearIdleFlush = () => {
     if (idleFlushTimer) {
@@ -84,7 +87,8 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
       try {
         while (keepReading) {
           const { value, done } = await activeReader.read();
-          if (done) break;
+          if (done || !keepReading) break;
+          onBytes(value?.byteLength || 0);
           const frames = decoder.push(value);
           emitFrames(frames);
           scheduleIdleFlush();
@@ -102,9 +106,21 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     clearIdleFlush();
     if (terminalReadError) {
       if (port.readable || port.writable) {
-        await port.close().catch(() => undefined);
+        try {
+          await port.close();
+        } catch (error) {
+          terminalCloseError = error;
+        }
       }
-      onError(terminalReadError);
+      if (terminalCloseError) {
+        onError(
+          Object.assign(new Error('Scanner port release failed'), {
+            releaseFailed: true
+          })
+        );
+      } else {
+        onError(terminalReadError);
+      }
     } else if (keepReading) {
       onStatus({ state: 'disconnected', profile, portInfo: port.getInfo() });
     }
@@ -121,11 +137,12 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
       clearIdleFlush();
       decoder.reset();
       if (activeReader) {
-        await activeReader.cancel().catch(() => undefined);
+        await activeReader.cancel();
       }
-      await readLoop.catch(() => undefined);
+      await readLoop;
+      if (terminalCloseError) throw terminalCloseError;
       if (port.readable || port.writable) {
-        await port.close().catch(() => undefined);
+        await port.close();
       }
       onStatus({ state: 'closed', profile });
     }

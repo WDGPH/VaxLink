@@ -467,3 +467,13 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+// The test implementation is omitted from production packages.
+if (chrome.runtime.getManifest().name === 'VaxLink Alpha') {
+  fetch(chrome.runtime.getURL('diagnostics/scanner-test.html'))
+    .then((response) => {
+      if (response.ok)
+        document.getElementById('alphaScannerTestLink').hidden = false;
+    })
+    .catch(() => undefined);
+}

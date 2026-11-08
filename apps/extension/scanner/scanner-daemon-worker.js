@@ -23,6 +23,8 @@ let activeConnection = null;
 let activePort = null;
 let reconnectTimer = null;
 let openingPromise = null;
+let disconnecting = false;
+let releaseFailed = false;
 let recoverAttemptCount = 0;
 let currentStatus = createScannerStatusSnapshot();
 
@@ -50,7 +52,7 @@ async function closeActiveConnection() {
   activeConnection = null;
   activePort = null;
   if (!connection) return;
-  await connection.close().catch(() => undefined);
+  await connection.close();
 }
 
 function scheduleReconnect() {
@@ -139,6 +141,7 @@ async function connectGrantedPort(trigger = 'manual') {
 
     const profile = getSerialScannerProfile(desiredProfileId);
     const ports = await getGrantedSerialScannerPorts();
+    if (!desiredConnected) return;
     const selection = selectGrantedPort(
       ports,
       profile,
@@ -182,6 +185,7 @@ async function connectGrantedPort(trigger = 'manual') {
     try {
       activeConnection = await openSerialScanner(port, profile, {
         onScan: (scan) => {
+          if (!desiredConnected || disconnecting) return;
           updateStatus({
             lastCaptureAt: scan.capturedAt || new Date().toISOString(),
             captureCount: currentStatus.captureCount + 1
@@ -211,6 +215,16 @@ async function connectGrantedPort(trigger = 'manual') {
           }
         },
         onError: (error) => {
+          if (error?.releaseFailed) {
+            releaseFailed = true;
+            desiredConnected = false;
+            clearReconnectTimer();
+            updateStatus({
+              state: SCANNER_STATUS_STATES.ERROR,
+              lastError: 'Scanner port release failed.'
+            });
+            return;
+          }
           handleConnectionFailure(error);
         }
       });
@@ -225,9 +239,12 @@ async function connectGrantedPort(trigger = 'manual') {
 }
 
 async function disconnectScanner() {
+  disconnecting = true;
   desiredConnected = false;
   recoverAttemptCount = 0;
   clearReconnectTimer();
+  if (openingPromise) await openingPromise;
+  if (releaseFailed) throw new Error('Scanner release failed');
   await closeActiveConnection();
   updateStatus({
     state: SCANNER_STATUS_STATES.DISABLED,
@@ -242,6 +259,7 @@ self.addEventListener('message', (event) => {
   const data = event.data || {};
   switch (data.type) {
     case 'connectGranted':
+      if (disconnecting || releaseFailed) break;
       desiredConnected = true;
       updateStatus({ selectionRequired: false });
       desiredProfileId = String(
@@ -253,7 +271,36 @@ self.addEventListener('message', (event) => {
       void connectGrantedPort(data.trigger || 'manual');
       break;
     case 'disconnect':
-      void disconnectScanner();
+      if (disconnecting) {
+        postToHost({
+          type: 'disconnected',
+          requestId: data.requestId,
+          success: false
+        });
+        break;
+      }
+      void disconnectScanner().then(
+        () => {
+          disconnecting = false;
+          postToHost({
+            type: 'disconnected',
+            requestId: data.requestId,
+            success: true
+          });
+        },
+        () => {
+          updateStatus({
+            state: SCANNER_STATUS_STATES.ERROR,
+            lastError:
+              'Scanner release was not confirmed. Reload the extension before reconnecting.'
+          });
+          postToHost({
+            type: 'disconnected',
+            requestId: data.requestId,
+            success: false
+          });
+        }
+      );
       break;
     case 'refreshPorts':
       if (desiredConnected && !activeConnection && !openingPromise) {

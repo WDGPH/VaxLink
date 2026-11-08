@@ -29,6 +29,8 @@ dist = os.path.join(root, "dist")
 EXCLUDE = {".claude", ".gitignore", "README.md", "nvc_bundle.json",
            "node_modules", "__pycache__", "tests", "test", "__tests__",
            "fixtures", ".DS_Store"}
+if channel == "prod":
+    EXCLUDE.add("diagnostics")
 
 staging = tempfile.mkdtemp(prefix="vaxlink-pkg-")
 try:

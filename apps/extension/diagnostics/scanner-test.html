@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scanner test - VaxLink Alpha</title>
+    <style>
+      body {
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 42rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Scanner test</h1>
+    <p>
+      Scan the synthetic test barcode only after the test is active. Normal
+      scanner capture stops during this test and stays paused until you
+      reconnect in Scanner Setup. The test ends after one minute.
+    </p>
+    <img
+      id="barcode"
+      hidden
+      src="synthetic-barcode.svg"
+      alt="Synthetic GS1 test barcode"
+      style="max-width: 100%"
+    />
+    <p id="status" role="status">Ready to start.</p>
+    <ul>
+      <li>Scanner port: <span id="port">Not observed</span></li>
+      <li>Bytes received: <span id="bytes">Not observed</span></li>
+      <li>Complete scan: <span id="frame">Not observed</span></li>
+      <li>Synthetic barcode parsed: <span id="parsed">Not observed</span></li>
+    </ul>
+    <button id="start" type="button">Start test</button>
+    <button id="stop" type="button" disabled>Stop test</button>
+    <script type="module" src="scanner-test.js"></script>
+  </body>
+</html>
