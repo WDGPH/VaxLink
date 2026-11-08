@@ -386,28 +386,8 @@ function appendQueueRecordViaBackground(storageKey, record) {
   });
 }
 
-function parseDateToLocal(value) {
-  if (!value) return null;
-  const raw = String(value).trim();
-  if (!raw) return null;
-
-  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) {
-    return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
-  }
-
-  const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) {
-    return new Date(Number(mdy[3]), Number(mdy[1]) - 1, Number(mdy[2]));
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-}
-
 function getExpiryStatus(value) {
-  const expiry = parseDateToLocal(value);
+  const expiry = globalThis.VaxLinkExpiryDate.parseDateToLocal(value);
   if (!expiry) {
     return {
       flag: 'unknown',
@@ -415,16 +395,7 @@ function getExpiryStatus(value) {
     };
   }
 
-  const today = new Date();
-  const todayMidnight = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.floor(
-    (expiry.getTime() - todayMidnight.getTime()) / msPerDay
-  );
+  const daysRemaining = globalThis.VaxLinkExpiryDate.daysUntil(expiry);
 
   if (daysRemaining < 0) {
     return { flag: 'expired', daysRemaining };

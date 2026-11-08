@@ -83,7 +83,9 @@ it in a queue.
 - **`shared/gs1-parser.js`** reads the tagged fields in GS1 barcodes, such as
   product identifier, lot, expiry, and serial number. Background, content, and
   popup code use this parser. **`popup-parser.js`** adapts popup input, including
-  manual input formats, and supplies date and expiry-status helpers.
+  manual input formats, and supplies expiry-status helpers.
+- **`shared/expiry-date.js`** validates calendar dates and counts days without
+  daylight-saving shifts. Background, content, and popup code share it.
 - **`panorama-agent-rules.js`** contains the matching rules for vaccine choices.
   Chrome loads it before `content.js` on supported pages.
 - **`queue-record.js`** normalizes popup queue records;

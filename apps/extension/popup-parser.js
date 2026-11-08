@@ -1,4 +1,5 @@
 import './shared/gs1-parser.js';
+import './shared/expiry-date.js';
 
 const GS1Parser = globalThis.VaxLinkGS1Parser;
 
@@ -90,31 +91,7 @@ export function parseManualTestInput(input) {
   return null;
 }
 
-export function parseDateToLocal(dateValue) {
-  if (!dateValue) return null;
-  const raw = String(dateValue).trim();
-  if (!raw) return null;
-
-  const mdy = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) {
-    const mm = Number(mdy[1]);
-    const dd = Number(mdy[2]);
-    const yyyy = Number(mdy[3]);
-    return new Date(yyyy, mm - 1, dd);
-  }
-
-  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (ymd) {
-    const yyyy = Number(ymd[1]);
-    const mm = Number(ymd[2]);
-    const dd = Number(ymd[3]);
-    return new Date(yyyy, mm - 1, dd);
-  }
-
-  const parsed = new Date(raw);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-}
+export const parseDateToLocal = globalThis.VaxLinkExpiryDate.parseDateToLocal;
 
 export function getExpiryStatus(dateValue) {
   const expiry = parseDateToLocal(dateValue);
@@ -127,16 +104,7 @@ export function getExpiryStatus(dateValue) {
     };
   }
 
-  const today = new Date();
-  const todayMidnight = new Date(
-    today.getFullYear(),
-    today.getMonth(),
-    today.getDate()
-  );
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const daysRemaining = Math.floor(
-    (expiry.getTime() - todayMidnight.getTime()) / msPerDay
-  );
+  const daysRemaining = globalThis.VaxLinkExpiryDate.daysUntil(expiry);
 
   if (daysRemaining < 0) {
     return {
