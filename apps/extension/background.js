@@ -1,4 +1,5 @@
 const VAXLINK_BG_DEBUG = false;
+importScripts('build-info.js');
 importScripts('shared/gs1-parser.js');
 importScripts('shared/expiry-date.js');
 importScripts('scanner/scanner-lock-session.js');
@@ -144,9 +145,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 // Load immediately when service worker starts
-bgLog('Service worker started, loading NVC bundle');
+bgLog('Service worker started, loading saved NVC bundle');
 ensureActionIcon();
-initializeNVCSync();
+void loadNVCBundle();
 let queueBadgeCount = 0;
 let scannerCaptureWarning = false;
 let captureWarningGeneration = 0;
@@ -3008,6 +3009,174 @@ function lookupTradenameByDIN(din, indexes = nvcIndexes) {
   };
 }
 
+async function readScannerStatus() {
+  const cachedCaptureAt =
+    scannerDaemonStatusCache.lastKnownCaptureAt ||
+    scannerDaemonStatusCache.lastCaptureAt;
+  const bootstrap = await getScannerBootstrapState();
+  let status = bootstrap.status;
+  status.lastKnownCaptureAt =
+    [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
+      .sort()
+      .at(-1) || '';
+  let source = 'cached';
+  let captureSource = 'cached';
+  const captureError =
+    scannerCaptureWarning ||
+    (await getStorage([SCANNER_CAPTURE_ERROR_KEY]))[
+      SCANNER_CAPTURE_ERROR_KEY
+    ] === true;
+  if (await hasScannerDaemonDocument()) {
+    const reply = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), 1000);
+      sendRuntimeMessage({
+        target: SCANNER_DAEMON_TARGET,
+        action: SCANNER_DAEMON_ACTIONS.GET_STATUS
+      }).then(
+        (response) => {
+          clearTimeout(timer);
+          resolve(response);
+        },
+        () => {
+          clearTimeout(timer);
+          resolve(null);
+        }
+      );
+    });
+    if (reply?.success && reply.status) {
+      const liveStatus = normalizeScannerStatusSnapshot(reply.status);
+      liveStatus.lastKnownCaptureAt =
+        [
+          status.lastKnownCaptureAt,
+          liveStatus.lastKnownCaptureAt,
+          liveStatus.lastCaptureAt
+        ]
+          .sort()
+          .at(-1) || '';
+      if (liveStatus.lastCaptureAt) captureSource = 'live';
+      status = liveStatus;
+      source = 'live';
+    }
+  }
+  return { status, source, captureSource, captureError };
+}
+
+const workstationBuildAtLoad = (() => {
+  const manifest = chrome.runtime.getManifest();
+  return {
+    version: manifest.version || '',
+    versionName: manifest.version_name || '',
+    name: manifest.name || '',
+    fingerprint: globalThis.VAXLINK_BUILD_ID || null
+  };
+})();
+
+async function getWorkstationHealth(tabId) {
+  const result = {
+    success: true,
+    scanner: { state: 'unknown', captureSource: 'unknown', lastCaptureAt: '' },
+    nvc: { state: 'unknown' },
+    chart: { state: 'unknown' }
+  };
+  try {
+    const scanner = await readScannerStatus();
+    result.scanner = {
+      state: !scanner.status.profileId
+        ? 'unconfigured'
+        : scanner.source !== 'live'
+          ? 'unknown'
+          : scanner.status.state === SCANNER_STATUS_STATES.CONNECTED
+            ? 'connected'
+            : 'disconnected',
+      captureSource:
+        scanner.status.lastCaptureAt || scanner.status.lastKnownCaptureAt
+          ? scanner.captureSource
+          : 'none',
+      lastCaptureAt:
+        scanner.source === 'live' && scanner.status.lastCaptureAt
+          ? scanner.status.lastCaptureAt
+          : scanner.status.lastKnownCaptureAt || ''
+    };
+  } catch (_) {
+    /* Leave the category unknown. */
+  }
+  try {
+    const nvc = await getNVCUpdateStatus();
+    const age = Date.now() - Date.parse(nvc.lastCheckAt || '');
+    result.nvc.state = !nvc.usable
+      ? 'unavailable'
+      : nvc.freshnessDegraded ||
+          !Number.isFinite(age) ||
+          age < 0 ||
+          age > 24 * 60 * 60 * 1000
+        ? 'degraded'
+        : 'ready';
+  } catch (_) {
+    /* Leave the category unknown. */
+  }
+  try {
+    if (!Number.isSafeInteger(tabId) || tabId < 0) return result;
+    const tab = (await queryTabs({})).find((item) => item.id === tabId);
+    if (!tab || (tab.url && !isSupportedChartUrl(tab.url))) {
+      result.chart.state = 'missing';
+      return result;
+    }
+    const reply = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ unknown: true }), 1000);
+      chrome.tabs.sendMessage(
+        tabId,
+        { action: 'getPanoramaIntegration' },
+        { frameId: 0 },
+        (response) => {
+          clearTimeout(timer);
+          const error = chrome.runtime.lastError;
+          resolve(
+            error
+              ? /Receiving end does not exist/i.test(error.message || '')
+                ? { supported: false }
+                : { unknown: true }
+              : response || { unknown: true }
+          );
+        }
+      );
+    });
+    if (reply.unknown) result.chart.state = 'unknown';
+    else if (!reply.supported) result.chart.state = 'missing';
+    else if (!reply.buildAtLoad) result.chart.state = 'unknown';
+    else if (
+      ['version', 'versionName', 'name'].some(
+        (key) =>
+          reply.buildAtLoad[key] &&
+          reply.buildAtLoad[key] !== workstationBuildAtLoad[key]
+      ) ||
+      (workstationBuildAtLoad.fingerprint &&
+        reply.buildAtLoad.fingerprint &&
+        reply.buildAtLoad.fingerprint !== workstationBuildAtLoad.fingerprint)
+    )
+      result.chart.state = 'stale';
+    // Unpacked source can change without a version change. Only fingerprints
+    // can establish that the page and running extension use the same files.
+    else if (
+      ['version', 'versionName', 'name'].some(
+        (key) => !reply.buildAtLoad[key]
+      ) ||
+      !workstationBuildAtLoad.fingerprint ||
+      !reply.buildAtLoad.fingerprint
+    )
+      result.chart.state = 'unknown';
+    else
+      result.chart.state =
+        reply.ready === true &&
+        reply.initialized?.listener === true &&
+        reply.initialized?.settings === true
+          ? 'ready'
+          : 'not_ready';
+  } catch (_) {
+    /* Leave the category unknown. */
+  }
+  return result;
+}
+
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   bgLog('Background received message:', request);
@@ -3037,6 +3206,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.action === 'getWorkstationHealth') {
+    getWorkstationHealth(request.tabId)
+      .then(sendResponse)
+      .catch(() => sendResponse({ success: false }));
+    return true;
+  }
+
   if (request.action === SCANNER_DAEMON_ACTIONS.ENSURE) {
     ensureScannerDaemon()
       .then(() => getScannerBootstrapState())
@@ -3053,56 +3229,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    (async () => {
-      const cachedCaptureAt =
-        scannerDaemonStatusCache.lastKnownCaptureAt ||
-        scannerDaemonStatusCache.lastCaptureAt;
-      const bootstrap = await getScannerBootstrapState();
-      let status = bootstrap.status;
-      status.lastKnownCaptureAt =
-        [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
-          .sort()
-          .at(-1) || '';
-      let source = 'cached';
-      let captureSource = 'cached';
-      const captureError =
-        scannerCaptureWarning ||
-        (await getStorage([SCANNER_CAPTURE_ERROR_KEY]))[
-          SCANNER_CAPTURE_ERROR_KEY
-        ] === true;
-      if (await hasScannerDaemonDocument()) {
-        const reply = await sendRuntimeMessage({
-          target: SCANNER_DAEMON_TARGET,
-          action: SCANNER_DAEMON_ACTIONS.GET_STATUS
-        }).catch(() => null);
-        if (reply?.success && reply.status) {
-          const liveStatus = normalizeScannerStatusSnapshot(reply.status);
-          liveStatus.lastKnownCaptureAt =
-            [
-              status.lastKnownCaptureAt,
-              liveStatus.lastKnownCaptureAt,
-              liveStatus.lastCaptureAt
-            ]
-              .sort()
-              .at(-1) || '';
-          if (liveStatus.lastCaptureAt) captureSource = 'live';
-          status = liveStatus;
-          source = 'live';
-        }
-      }
-      sendResponse({
-        success: true,
-        status,
-        source,
-        captureSource,
-        captureError
-      });
-    })().catch((error) => {
-      sendResponse({
-        success: false,
-        error: error?.message || 'Could not load scanner status'
-      });
-    });
+    readScannerStatus()
+      .then((result) => sendResponse({ success: true, ...result }))
+      .catch((error) =>
+        sendResponse({
+          success: false,
+          error: error?.message || 'Could not load scanner status'
+        })
+      );
     return true;
   }
 

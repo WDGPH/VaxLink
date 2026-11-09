@@ -40,7 +40,7 @@ function buildPackage(root, channel, version) {
         '-c',
         `import json,sys,zipfile
 with zipfile.ZipFile(sys.argv[1]) as z:
-    print(json.dumps({'names': z.namelist(), 'manifest': json.loads(z.read('manifest.json'))}))`,
+    print(json.dumps({'names': z.namelist(), 'manifest': json.loads(z.read('manifest.json')), 'buildId': z.read('build-info.js').decode()}))`,
         `dist/vaxlink-${channel}-${version}.zip`
       ],
       { cwd: root, encoding: 'utf8' }
@@ -162,4 +162,22 @@ test('Alpha automation targets alpha with advancing prerelease versions', () => 
     read('.github/workflows/extension-ci.yml'),
     /branches: \[alpha, main\]/
   );
+});
+
+// Build identity follows shipped bytes and stays stable across repeated packaging.
+test('package fingerprint changes with runtime assets and ignores excluded files', (t) => {
+  const root = packageProject(t);
+  const version = '1.1.5';
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
+  const first = buildPackage(root, 'alpha', version).buildId;
+  assert.match(first, /[a-f0-9]{64}/);
+  assert.equal(buildPackage(root, 'alpha', version).buildId, first);
+  writeFileSync(join(root, 'apps/extension/nvc_bundle.json'), 'excluded');
+  assert.equal(buildPackage(root, 'alpha', version).buildId, first);
+  const content = join(root, 'apps/extension/content.js');
+  writeFileSync(
+    content,
+    readFileSync(content, 'utf8') + '\n// fingerprint regression probe\n'
+  );
+  assert.notEqual(buildPackage(root, 'alpha', version).buildId, first);
 });

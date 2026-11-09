@@ -140,6 +140,8 @@ const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 // Startup stays before DOM readiness and the initial settings response.
 export function createContentHarness(globals = {}) {
   const documentListeners = new Map();
+  const messageListeners = [];
+  const storageReads = [];
   const windowListeners = new Map();
   const location =
     globals.location ||
@@ -169,8 +171,18 @@ export function createContentHarness(globals = {}) {
       }
     },
     chrome: {
-      runtime: { onMessage: { addListener() {} } },
-      storage: { local: { get() {} }, onChanged: { addListener() {} } }
+      runtime: {
+        getManifest: () => manifest,
+        onMessage: {
+          addListener: (listener) => messageListeners.push(listener)
+        }
+      },
+      storage: {
+        local: {
+          get: (keys, callback) => storageReads.push({ keys, callback })
+        },
+        onChanged: { addListener() {} }
+      }
     }
   });
   const manifest = JSON.parse(
@@ -183,7 +195,13 @@ export function createContentHarness(globals = {}) {
       { filename: file }
     );
   }
-  return { context, documentListeners, windowListeners };
+  return {
+    context,
+    documentListeners,
+    windowListeners,
+    messageListeners,
+    storageReads
+  };
 }
 
 export function makeTestNvcBundle(code = 'TESTLOT') {
@@ -263,8 +281,15 @@ export function createBackgroundHarness(bundle, options = {}) {
       onStartup: { addListener: (fn) => startupListeners.push(fn) },
       onMessage: { addListener: (fn) => messageListeners.push(fn) },
       getURL: (p) => `chrome-extension://vaxlink-test/${p}`,
-      sendMessage: (_message, callback) =>
-        queueMicrotask(() => callback?.({ success: true })),
+      sendMessage:
+        options.runtimeSendMessage ||
+        ((_message, callback) =>
+          queueMicrotask(() => callback?.({ success: true }))),
+      getManifest: () => ({
+        version: '1.1.5',
+        version_name: '1.2.0-alpha',
+        name: 'VaxLink Alpha'
+      }),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
       }
@@ -396,6 +421,8 @@ export function createBackgroundHarness(bundle, options = {}) {
       vm.runInContext(readFileSync(resolvedPath, 'utf8'), sandbox, {
         filename: path.basename(resolvedPath)
       });
+      if (scriptPath === 'build-info.js' && options.buildId)
+        sandbox.VAXLINK_BUILD_ID = options.buildId;
     }
   };
   vm.runInContext(readFileSync(BACKGROUND_PATH, 'utf8'), sandbox, {

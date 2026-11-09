@@ -37,6 +37,7 @@
         "https://trpanoramadhir.prod.ehealthontario.ca/*"
       ],
       "js": [
+        "build-info.js",
         "panorama-agent-rules.js",
         "shared/gs1-parser.js",
         "shared/expiry-date.js",
