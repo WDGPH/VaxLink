@@ -3154,11 +3154,14 @@ async function getWorkstationHealth(tabId) {
         reply.buildAtLoad.fingerprint !== workstationBuildAtLoad.fingerprint)
     )
       result.chart.state = 'stale';
+    // Unpacked source can change without a version change. Only fingerprints
+    // can establish that the page and running extension use the same files.
     else if (
       ['version', 'versionName', 'name'].some(
         (key) => !reply.buildAtLoad[key]
       ) ||
-      (workstationBuildAtLoad.fingerprint && !reply.buildAtLoad.fingerprint)
+      !workstationBuildAtLoad.fingerprint ||
+      !reply.buildAtLoad.fingerprint
     )
       result.chart.state = 'unknown';
     else

@@ -14,13 +14,14 @@ const identity = {
   version: '1.1.5',
   versionName: '1.2.0-alpha',
   name: 'VaxLink Alpha',
-  fingerprint: null
+  fingerprint: 'packaged-build'
 };
 
 test('cold health inspection reads an old catalogue without reconnecting or refreshing', async () => {
   const writes = [];
   let downloads = 0;
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    buildId: identity.fingerprint,
     tabs: [tab],
     storage: {
       vaxlink_scanner_daemon_enabled_v1: true,
@@ -59,7 +60,7 @@ test('cold health inspection reads an old catalogue without reconnecting or refr
   );
 });
 
-test('health distinguishes stale and not-ready content', async () => {
+test('health distinguishes stale, not-ready and missing content', async () => {
   for (const [response, expected] of [
     [
       {
@@ -78,9 +79,18 @@ test('health distinguishes stale and not-ready content', async () => {
       },
       'not_ready'
     ],
+    [
+      {
+        supported: true,
+        buildAtLoad: { ...identity, fingerprint: 'older-build' }
+      },
+      'stale'
+    ],
+    [{ supported: true }, 'unknown'],
     [{ supported: false }, 'missing']
   ]) {
     const harness = createBackgroundHarness(makeTestNvcBundle(), {
+      buildId: identity.fingerprint,
       tabs: [tab],
       tabResponse: response
     });
@@ -92,23 +102,32 @@ test('health distinguishes stale and not-ready content', async () => {
   }
 });
 
-test('missing packaged page identity is unknown', async () => {
-  for (const buildAtLoad of [undefined, { ...identity, fingerprint: null }]) {
-    const harness = createBackgroundHarness(makeTestNvcBundle(), {
-      buildId: 'packaged-build',
-      tabs: [tab],
-      tabResponse: {
-        supported: true,
-        ready: true,
-        initialized: { listener: true, settings: true },
-        buildAtLoad
-      }
-    });
-    const result = await harness.sendMessage({
-      action: 'getWorkstationHealth',
-      tabId: tab.id
-    });
-    assert.equal(result.chart.state, 'unknown');
+test('missing fingerprints cannot establish identity from matching unpacked version labels', async () => {
+  for (const [buildId, fingerprint] of [
+    [null, null],
+    [null, identity.fingerprint],
+    [identity.fingerprint, null]
+  ]) {
+    for (const version of [identity.version, 'old']) {
+      const harness = createBackgroundHarness(makeTestNvcBundle(), {
+        buildId,
+        tabs: [tab],
+        tabResponse: {
+          supported: true,
+          ready: true,
+          initialized: { listener: true, settings: true },
+          buildAtLoad: { ...identity, version, fingerprint }
+        }
+      });
+      const result = await harness.sendMessage({
+        action: 'getWorkstationHealth',
+        tabId: tab.id
+      });
+      assert.equal(
+        result.chart.state,
+        version === identity.version ? 'unknown' : 'stale'
+      );
+    }
   }
 });
 
@@ -119,6 +138,7 @@ test('unresponsive daemon status times out without blocking other health categor
     observed = resolve;
   });
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    buildId: identity.fingerprint,
     storage: {
       vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc',
       vaxlink_scanner_status_snapshot_v1: {
