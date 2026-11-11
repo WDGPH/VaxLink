@@ -96,10 +96,12 @@ function applyDaemonStatus(status, source = 'live') {
       : 'info';
   setStatus(
     els.connectionStatus,
-    getScannerConnectionLabel(status, source) +
-      (source === 'live' && scannerStatusSnapshot.lastError
-        ? `: ${scannerStatusSnapshot.lastError}`
-        : ''),
+    [
+      getScannerConnectionLabel(status, source),
+      source === 'live' ? scannerStatusSnapshot.lastError : ''
+    ]
+      .filter(Boolean)
+      .join(': '),
     tone
   );
   const identityKnown = !!scannerStatusSnapshot.profileId;
@@ -269,5 +271,6 @@ function setButtons({ canConnect, canDisconnect }) {
 function setStatus(el, message, type = 'info') {
   if (!el) return;
   el.textContent = message;
+  el.hidden = !message;
   el.className = `status ${type}`;
 }

@@ -129,7 +129,7 @@ export function getScannerConnectionLabel(status, source = 'live') {
   const snapshot = normalizeScannerStatusSnapshot(status);
   const state = snapshot.state;
   if (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !snapshot.profileId)
-    return 'Not paired';
+    return '';
   if (state === SCANNER_STATUS_STATES.PERMISSION_LOST) return 'Pair again';
   if (source !== 'live') return 'Connection unknown';
   if (state === SCANNER_STATUS_STATES.CONNECTED) return 'Connected';

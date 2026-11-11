@@ -123,7 +123,7 @@ test('connection labels do not present a cached connection as confirmed', () => 
   );
   assert.equal(
     getScannerConnectionLabel({ state: 'never_configured' }, 'cached'),
-    'Not paired'
+    ''
   );
 });
 
