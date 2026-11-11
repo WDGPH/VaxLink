@@ -696,7 +696,10 @@
       }
       .settings-update {
         flex-shrink: 0;
-        text-align: right;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
       }
       .settings-state {
         display: block;
@@ -1017,7 +1020,7 @@
                   <small id="nvcSettingsVersion">Version unavailable</small>
                 </div>
                 <div class="settings-update">
-                  <button id="refreshNvcBtn" type="button">Update</button>
+                  <button id="refreshNvcBtn" type="button">Recheck</button>
                   <span
                     id="nvcSettingsState"
                     class="settings-state"

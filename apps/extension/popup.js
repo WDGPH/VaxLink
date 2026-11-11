@@ -1446,7 +1446,7 @@ function loadNVCStatus() {
       if (nvcStatusDiv) {
         nvcStatusDiv.hidden = false;
         nvcStatusDiv.textContent =
-          'NVC status could not be checked. Try Update.';
+          'NVC status could not be checked. Try Recheck.';
       }
       return;
     }
