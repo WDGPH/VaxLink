@@ -79,7 +79,7 @@ test('refresh feedback separates first download, changed data, and confirmed unc
   assert.equal((await status(bg)).releaseVersion, '1.138');
 });
 
-test('accepted publication metadata survives reopening and popup HTML escapes upstream text', async () => {
+test('accepted publication metadata survives reopening and popup renders upstream metadata as text', async () => {
   const bg = harness(catalogue(), () =>
     catalogue(['A', 'B'], '<img src=x onerror=alert(1)>')
   );
@@ -96,24 +96,26 @@ test('accepted publication metadata survives reopening and popup HTML escapes up
   assert.equal(restored.releaseDate, '2026-11-05');
   assert.equal(restored.lotCount, 2);
   assert.notEqual(restored.updatedAt, restored.releaseDate);
-  const container = { innerHTML: '' };
+  const version = {};
+  const container = {
+    ownerDocument: {
+      getElementById: (id) => (id === 'nvcSettingsVersion' ? version : null)
+    }
+  };
   renderNVCStatus(restored, container);
-  assert.match(container.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
-  assert.doesNotMatch(container.innerHTML, /<img/);
-  assert.doesNotMatch(
-    container.innerHTML,
-    /<details|lot codes|NVC is ready|Last downloaded|Last refresh attempt|Auto-check/
+  assert.equal(
+    version.textContent,
+    'Version <img src=x onerror=alert(1)> · November 5, 2026'
   );
-  assert.match(container.innerHTML, /Published:<\/dt><dd>November 5, 2026/);
-  assert.match(container.innerHTML, /Last checked:/);
+  assert.equal(container.textContent, '');
+  assert.equal(container.hidden, true);
   const missing = await status(
     createBackgroundHarness(catalogue(['A'], null, null))
   );
   assert.equal(missing.releaseDate, null);
   assert.equal(missing.releaseVersion, null);
   renderNVCStatus(missing, container);
-  assert.match(container.innerHTML, /NVC version unavailable/);
-  assert.match(container.innerHTML, /Published:<\/dt><dd>Unavailable/);
+  assert.equal(version.textContent, 'Version unavailable');
 });
 
 test('compact catalogue status distinguishes a usable cache from a recent successful check', () => {
@@ -175,12 +177,13 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   ]) {
     assert.equal(after[key], accepted[key]);
   }
-  const container = { innerHTML: '' };
+  const container = {};
   renderNVCStatus(after, container);
   assert.match(
-    container.innerHTML,
+    container.textContent,
     /Previously downloaded catalogue remains available/
   );
+  assert.equal(container.hidden, false);
   assert.equal(
     formatNVCRefreshMessage({ success: false, usable: false }),
     'Unable to refresh NVC. No usable catalogue is available.'
@@ -200,4 +203,5 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   );
   loadStatus();
   assert.match(statusArea.textContent, /NVC status could not be checked/);
+  assert.equal(statusArea.hidden, false);
 });

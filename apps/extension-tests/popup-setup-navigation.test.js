@@ -25,7 +25,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       'analyticsPanel',
       'analyticsToggleBtn',
       'analyticsSummary',
-      'scannerSettingsState',
+      'scannerSettingsTitle',
       'mainWorkflowPanel',
       'singleModeBtn',
       'multipleModeBtn',
@@ -56,16 +56,14 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       }
     ])
   );
-  let focusedSummary = false;
-  let scrolledSummary = false;
-  nodes.scannerSettingsSection.querySelector = () => ({
-    focus() {
-      focusedSummary = true;
-    },
-    scrollIntoView() {
-      scrolledSummary = true;
-    }
-  });
+  let focusedTitle = false;
+  let scrolledSection = false;
+  nodes.scannerSettingsTitle.focus = () => {
+    focusedTitle = true;
+  };
+  nodes.scannerSettingsSection.scrollIntoView = () => {
+    scrolledSection = true;
+  };
   let ready;
   const opened = [];
   const queries = [];
@@ -155,12 +153,11 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
         nodes.mainWorkflowPanel.classList.values['scanner-setup-required'],
         true
       );
-      focusedSummary = false;
-      scrolledSummary = false;
+      focusedTitle = false;
+      scrolledSection = false;
       listeners['openScannerSettingsBtn:click']();
-      assert.equal(nodes.scannerSettingsSection.open, true);
-      assert.equal(focusedSummary, true);
-      assert.equal(scrolledSummary, true);
+      assert.equal(focusedTitle, true);
+      assert.equal(scrolledSection, true);
       assert.equal(nodes.settingsPanel.hidden, false);
       assert.equal(nodes.mainWorkflowPanel.hidden, true);
       assert.equal(nodes.workflowHeader.hidden, true);

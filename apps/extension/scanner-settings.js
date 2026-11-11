@@ -155,7 +155,7 @@ function loadScannerConnection() {
   navigator.serial.addEventListener('connect', () => {
     setStatus(
       els.connectionStatus,
-      'Scanner detected. Choose Reconnect or Pair scanner.',
+      'Scanner detected. Choose Reconnect or Pair.',
       'info'
     );
   });
@@ -226,7 +226,7 @@ async function reconnectGrantedPort() {
       throw new Error(
         selection.reason === 'ambiguous'
           ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
-          : 'The selected scanner could not be identified. Reconnect it or use Pair scanner.'
+          : 'The selected scanner could not be identified. Reconnect it or use Pair.'
       );
     }
     const versionAtRequest = statusChangeVersion;

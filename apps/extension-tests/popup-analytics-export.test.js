@@ -7,7 +7,7 @@ import {
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
-test('Today JSON uses the local day and All time retains every stored day', async () => {
+test('Activity export retains every stored day and Today counts use the local day', async () => {
   const RealDate = Date;
   const createObjectURL = URL.createObjectURL;
   const downloads = [];
@@ -30,11 +30,7 @@ test('Today JSON uses the local day and All time retains every stored day', asyn
   };
   const background = createBackgroundHarness(makeTestNvcBundle());
   const nodes = Object.fromEntries(
-    [
-      'analyticsSummary',
-      'exportTodayAnalyticsBtn',
-      'exportAllAnalyticsBtn'
-    ].map((id) => [
+    ['analyticsSummary', 'exportAllAnalyticsBtn'].map((id) => [
       id,
       {
         addEventListener(type, listener) {
@@ -118,11 +114,6 @@ test('Today JSON uses the local day and All time retains every stored day', asyn
     await import('../extension/popup.js?local-analytics-export');
     await ready();
     await recorded;
-    await listeners['exportTodayAnalyticsBtn:click']();
-    const today = JSON.parse(await downloads[0].blob.text());
-    assert.deepEqual(Object.keys(today.days), ['2026-06-11']);
-    assert.equal(today.rollup.workflows.single.liveScans, 3);
-    assert.equal(today.rollup.autofill.success, 3);
     assert.ok(
       data.vaxlink_analytics_v1.days['2026-06-11'].popupOpens > 0,
       'popup events also use the local day'
@@ -132,7 +123,7 @@ test('Today JSON uses the local day and All time retains every stored day', asyn
       /Scans<\/th><td>3<\/td><td>10<\/td>/
     );
     await listeners['exportAllAnalyticsBtn:click']();
-    const all = JSON.parse(await downloads[1].blob.text());
+    const all = JSON.parse(await downloads[0].blob.text());
     assert.deepEqual(Object.keys(all.days), [
       '2026-06-10',
       '2026-06-11',

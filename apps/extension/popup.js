@@ -22,7 +22,6 @@ import {
 import {
   SCANNER_DAEMON_ACTIONS,
   buildScannerStatusDescriptor,
-  getScannerConnectionLabel,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
@@ -49,7 +48,6 @@ let settingsPanel;
 let analyticsToggleBtn;
 let analyticsPanel;
 let mainWorkflowPanel;
-let exportTodayAnalyticsBtn;
 let exportAllAnalyticsBtn;
 let resetAnalyticsBtn;
 let adminDateAutofillToggle;
@@ -80,7 +78,6 @@ let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
-let scannerStatusSource = 'cached';
 let scannerCaptureError = false;
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -140,7 +137,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   analyticsToggleBtn = document.getElementById('analyticsToggleBtn');
   analyticsPanel = document.getElementById('analyticsPanel');
   mainWorkflowPanel = document.getElementById('mainWorkflowPanel');
-  exportTodayAnalyticsBtn = document.getElementById('exportTodayAnalyticsBtn');
   exportAllAnalyticsBtn = document.getElementById('exportAllAnalyticsBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateAutofillToggle = document.getElementById('adminDateAutofillToggle');
@@ -253,11 +249,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     .getElementById('openScannerSettingsBtn')
     ?.addEventListener('click', () => {
       const section = document.getElementById('scannerSettingsSection');
-      if (section) section.open = true;
       void setPopupPanel('settings');
-      const summary = section?.querySelector('summary');
-      summary?.focus();
-      summary?.scrollIntoView({ block: 'nearest' });
+      document.getElementById('scannerSettingsTitle')?.focus();
+      section?.scrollIntoView({ block: 'nearest' });
     });
   document
     .getElementById('continueWithoutScannerBtn')
@@ -432,7 +426,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     refreshNvcBtn.addEventListener('click', () => {
       refreshNvcBtn.disabled = true;
       writeOutput('Refreshing NVC catalogue...', 'info');
-      if (nvcStatusDiv) nvcStatusDiv.textContent = 'NVC is refreshing.';
+      if (nvcStatusDiv) {
+        nvcStatusDiv.hidden = false;
+        nvcStatusDiv.textContent = 'NVC is refreshing.';
+      }
 
       chrome.runtime.sendMessage({ action: 'refreshNVCBundle' }, (response) => {
         refreshNvcBtn.disabled = false;
@@ -453,15 +450,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (exportTodayAnalyticsBtn) {
-    exportTodayAnalyticsBtn.addEventListener('click', async () => {
-      await exportAnalyticsJson('today');
-    });
-  }
-
   if (exportAllAnalyticsBtn) {
     exportAllAnalyticsBtn.addEventListener('click', async () => {
-      await exportAnalyticsJson('pilot');
+      await exportAnalyticsJson();
     });
   }
 
@@ -533,7 +524,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function handleRuntimeMessage(request) {
   if (request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED) {
-    applyScannerStatus(request.status, 'live');
+    applyScannerStatus(request.status);
     return false;
   }
   if (
@@ -633,7 +624,7 @@ async function loadScannerStatus() {
     );
     if (response && response.success && response.status) {
       scannerCaptureError = response.captureError === true;
-      applyScannerStatus(response.status, response.source);
+      applyScannerStatus(response.status);
       return;
     }
   } catch (_) {
@@ -642,20 +633,13 @@ async function loadScannerStatus() {
   renderScannerStatusUi();
 }
 
-function applyScannerStatus(status, source = 'cached') {
-  scannerStatusSource = source;
+function applyScannerStatus(status) {
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   renderScannerStatusUi();
 }
 
 function renderScannerStatusUi() {
   const descriptor = buildScannerStatusDescriptor(scannerStatusSnapshot);
-  const state = document.getElementById('scannerSettingsState');
-  if (state)
-    state.textContent = scannerCaptureError
-      ? 'Scan needs review'
-      : getScannerConnectionLabel(scannerStatusSnapshot, scannerStatusSource);
-
   const captureWarning = document.getElementById('scannerCaptureWarning');
   if (captureWarning) captureWarning.hidden = !scannerCaptureError;
   const needsSetup = ['never_configured', 'permission_lost'].includes(
@@ -897,14 +881,13 @@ function downloadTextFile(filename, text, mimeType) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function exportAnalyticsJson(scope) {
+async function exportAnalyticsJson() {
   try {
     const store = await getLocalAnalyticsStore();
-    const normalizedScope = scope === 'today' ? 'today' : 'pilot';
     store.lastExportAt = new Date().toISOString();
     await setLocalAnalyticsStore(store);
-    const data = buildAnalyticsExportFromStore(store, normalizedScope);
-    const filename = `vaxlink-analytics-${normalizedScope}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const data = buildAnalyticsExportFromStore(store, 'pilot');
+    const filename = `vaxlink-activity-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
     downloadTextFile(
       filename,
       JSON.stringify(data, null, 2),
@@ -1460,9 +1443,11 @@ function getPreviewBarcodeValue() {
 function loadNVCStatus() {
   chrome.runtime.sendMessage({ action: 'getNVCUpdateStatus' }, (status) => {
     if (chrome.runtime.lastError || !status) {
-      if (nvcStatusDiv)
+      if (nvcStatusDiv) {
+        nvcStatusDiv.hidden = false;
         nvcStatusDiv.textContent =
-          'NVC status could not be checked. Try Refresh.';
+          'NVC status could not be checked. Try Update.';
+      }
       return;
     }
     renderNVCStatus(status, nvcStatusDiv);

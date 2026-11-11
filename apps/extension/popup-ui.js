@@ -1,16 +1,5 @@
 import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
 
-function formatNVCCheckDate(value) {
-  if (!value) return 'Never';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('en-CA', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-}
-
 export function describeNVCHealth(status) {
   if (status.state === 'refreshing') {
     return status.usable
@@ -68,13 +57,8 @@ export function renderNVCStatus(status, container) {
       .join(' · ');
   }
   const health = describeNVCHealth(status);
-  container.innerHTML = `
-    <div class="nvc-status-version">${escapeHtml(status.releaseVersion ? `v${status.releaseVersion}` : 'NVC version unavailable')}</div>
-    <dl class="nvc-status-release">
-      <div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div>
-      <div><dt>Last checked:</dt><dd>${escapeHtml(formatNVCCheckDate(status.lastCheckAt))}</dd></div>
-    </dl>
-    ${health ? `<p class="nvc-status-health">${escapeHtml(health)}</p>` : ''}`;
+  container.textContent = health;
+  container.hidden = !health;
 }
 
 export function getNVCStatusLabel(status, now = Date.now()) {
