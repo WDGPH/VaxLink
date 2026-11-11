@@ -125,10 +125,25 @@ export function isScannerConnected(status) {
   );
 }
 
-export function shouldShowScannerWorkflowBanner(mode, status) {
-  const normalizedMode =
-    mode === 'multiple' || mode === 'inventory' ? mode : 'single';
-  return normalizedMode !== 'single' && !isScannerConnected(status);
+export function getScannerConnectionLabel(status, source = 'live') {
+  const snapshot = normalizeScannerStatusSnapshot(status);
+  const state = snapshot.state;
+  if (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !snapshot.profileId)
+    return '';
+  if (state === SCANNER_STATUS_STATES.PERMISSION_LOST) return 'Pair again';
+  if (source !== 'live') return 'Connection unknown';
+  if (state === SCANNER_STATUS_STATES.CONNECTED) return 'Connected';
+  if (
+    state === SCANNER_STATUS_STATES.STARTING ||
+    state === SCANNER_STATUS_STATES.RECOVERING
+  )
+    return 'Checking';
+  if (state === SCANNER_STATUS_STATES.BUSY) return 'In use elsewhere';
+  return 'Disconnected';
+}
+
+export function shouldShowScannerWorkflowBanner(status) {
+  return !isScannerConnected(status);
 }
 
 export function getScannerReconnectDelayMs(attemptCount) {
@@ -288,9 +303,9 @@ export function classifyScannerConnectionFailure(
   };
 }
 
-export function buildScannerStatusDescriptor(status, mode = 'single') {
+export function buildScannerStatusDescriptor(status) {
   const snapshot = normalizeScannerStatusSnapshot(status);
-  const canBanner = shouldShowScannerWorkflowBanner(mode, snapshot);
+  const canBanner = shouldShowScannerWorkflowBanner(snapshot);
   const descriptor = {
     label: 'Disconnected',
     detail: 'Scanner connection is unavailable.',
@@ -328,8 +343,7 @@ export function buildScannerStatusDescriptor(status, mode = 'single') {
       descriptor.label = 'Needs Setup';
       descriptor.detail = 'No granted scanner found. Open setup once to pair.';
       descriptor.tone = 'warning';
-      descriptor.bannerText =
-        'Scanner setup is required before unattended scan capture will work.';
+      descriptor.bannerText = 'Scanner setup is required';
       break;
     case SCANNER_STATUS_STATES.WAITING_FOR_DEVICE:
       descriptor.label = 'Disconnected';

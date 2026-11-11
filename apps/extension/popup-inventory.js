@@ -97,7 +97,7 @@ function mutateQueue(storageKey, operation, payload = {}) {
             new Error(
               chrome.runtime.lastError?.message ||
                 response?.error ||
-                'Queue update failed'
+                'Tray update failed'
             )
           );
         } else {
@@ -274,7 +274,9 @@ export class ScanQueueManager {
 
     if (!this.rows.length) {
       this.summaryEl.textContent = this.emptySummary;
-      this.listEl.innerHTML = `<div class="inventory-empty">${escapeHtml(this.emptyMessage)}</div>`;
+      this.listEl.innerHTML = this.emptyMessage
+        ? `<div class="inventory-empty">${escapeHtml(this.emptyMessage)}</div>`
+        : '';
       this.updateControls();
       return;
     }

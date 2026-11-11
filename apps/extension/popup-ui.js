@@ -1,12 +1,5 @@
 import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
 
-export function formatDateTime(value) {
-  if (!value) return 'Never';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
-}
-
 export function describeNVCHealth(status) {
   if (status.state === 'refreshing') {
     return status.usable
@@ -17,7 +10,7 @@ export function describeNVCHealth(status) {
     return 'NVC catalogue is unavailable. Barcode details can still be captured.';
   if (status.freshnessDegraded)
     return 'NVC refresh failed. Previously downloaded catalogue remains available.';
-  return 'NVC is ready.';
+  return '';
 }
 
 export function formatNVCRefreshMessage(status) {
@@ -38,32 +31,47 @@ export function formatNVCRefreshMessage(status) {
 
 export function renderNVCStatus(status, container) {
   if (!container || !status) return;
+  const state = getNVCStatusLabel(status);
+  const stateSummary =
+    container.ownerDocument?.getElementById('nvcSettingsState');
+  const versionSummary =
+    container.ownerDocument?.getElementById('nvcSettingsVersion');
+  if (stateSummary) stateSummary.textContent = state;
   const publication =
     status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
-      ? status.releaseDate
+      ? new Date(status.releaseDate).toLocaleDateString('en-CA', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          timeZone: 'UTC'
+        })
       : 'Unavailable';
-  const rows = [
-    ['Last downloaded', formatDateTime(status.updatedAt)],
-    ['Last checked by VaxLink', formatDateTime(status.lastCheckAt)],
-    ['Last refresh attempt', formatDateTime(status.lastAttemptAt)]
-  ];
-  container.innerHTML = `
-    <div>${escapeHtml(describeNVCHealth(status))}</div>
-    <div class="nvc-status-heading">
-      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `NVC v${status.releaseVersion}` : 'NVC version unavailable')}</span>
-      ${status.lotCount == null ? '' : `<span class="nvc-status-count">${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</span>`}
-    </div>
-    <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
-    <details class="nvc-status-sync">
-      <summary>Refresh details</summary>
-      <dl class="nvc-status-details">${rows
-        .map(
-          ([label, value]) =>
-            `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`
-        )
-        .join('')}</dl>
-      <div class="nvc-status-footer">Auto-check: every ${Math.round((status.autoSyncIntervalMinutes || 0) / 60)}h</div>
-    </details>`;
+  if (versionSummary) {
+    versionSummary.textContent = [
+      status.releaseVersion
+        ? `Version ${status.releaseVersion}`
+        : 'Version unavailable',
+      publication !== 'Unavailable' ? publication : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
+  const health = describeNVCHealth(status);
+  container.textContent = health;
+  container.hidden = !health;
+}
+
+export function getNVCStatusLabel(status, now = Date.now()) {
+  if (!status?.usable)
+    return status?.state === 'refreshing' ? 'Checking' : 'Unavailable';
+  if (status.state === 'refreshing') return 'Ready · checking';
+  if (status.freshnessDegraded || status.lastError)
+    return 'Ready · check failed';
+  const age = now - Date.parse(status.lastCheckAt || '');
+  const interval = (status.autoSyncIntervalMinutes || 1440) * 60000;
+  return Number.isFinite(age) && age >= 0 && age < interval
+    ? 'Up to date'
+    : 'Ready · check due';
 }
 
 export function setButtonBusy(button, busy, busyText) {

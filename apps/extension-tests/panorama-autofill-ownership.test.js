@@ -83,7 +83,10 @@ function fixture() {
   const { document, ...dependencies } = globals;
   Object.assign(context, dependencies);
   Object.assign(context.document, document);
-  vm.runInContext('adminDateTimeAutofillEnabled = false;', context);
+  vm.runInContext(
+    'adminDateAutofillEnabled = false; adminTimeAutofillEnabled = false;',
+    context
+  );
   return {
     ...context,
     context,

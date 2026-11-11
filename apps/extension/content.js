@@ -29,14 +29,22 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
-const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
+  'vaxlink_administered_datetime_autofill_v1';
+const ADMIN_DATE_AUTOFILL_KEY = 'vaxlink_administered_date_autofill_v1';
+const ADMIN_TIME_AUTOFILL_KEY = 'vaxlink_administered_time_autofill_v1';
+const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
+const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
 const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
-let adminDateTimeAutofillEnabled = true;
-let reasonConsentAutofillEnabled = true;
+let adminDateAutofillEnabled = true;
+let adminTimeAutofillEnabled = true;
+let reasonAutofillEnabled = true;
+let consentAutofillEnabled = true;
+let autofillSettings = {};
 let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
@@ -50,12 +58,33 @@ let scannerDeliveryContext = null;
 let panoramaContextGeneration = 0;
 let lastHandledScanOwner = null;
 
-function normalizeAdminDateTimeAutofillSetting(stored) {
-  return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
+// Preserve the old combined choices until staff set each field separately.
+function normalizeAutofillSetting(stored, key, legacyKey) {
+  return (stored?.[key] ?? stored?.[legacyKey]) !== false;
 }
 
-function normalizeReasonConsentAutofillSetting(stored) {
-  return !(stored && stored[REASON_CONSENT_AUTOFILL_KEY] === false);
+function applyAutofillSettings(stored) {
+  autofillSettings = stored || {};
+  adminDateAutofillEnabled = normalizeAutofillSetting(
+    stored,
+    ADMIN_DATE_AUTOFILL_KEY,
+    LEGACY_ADMIN_DATETIME_AUTOFILL_KEY
+  );
+  adminTimeAutofillEnabled = normalizeAutofillSetting(
+    stored,
+    ADMIN_TIME_AUTOFILL_KEY,
+    LEGACY_ADMIN_DATETIME_AUTOFILL_KEY
+  );
+  reasonAutofillEnabled = normalizeAutofillSetting(
+    stored,
+    REASON_AUTOFILL_KEY,
+    LEGACY_REASON_CONSENT_AUTOFILL_KEY
+  );
+  consentAutofillEnabled = normalizeAutofillSetting(
+    stored,
+    CONSENT_AUTOFILL_KEY,
+    LEGACY_REASON_CONSENT_AUTOFILL_KEY
+  );
 }
 
 function normalizeAudioFeedbackSetting(stored) {
@@ -399,7 +428,7 @@ function appendQueueRecordViaBackground(storageKey, record) {
           return;
         }
         if (!response || !response.success) {
-          reject(new Error(response?.error || 'Queue append failed'));
+          reject(new Error(response?.error || 'Tray save failed'));
           return;
         }
         resolve(response.record || null);
@@ -779,12 +808,6 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
-  if (adminDateTimeAutofillEnabled) {
-    parsed.administered_at =
-      parsed.administered_at || parsed.scanned_at || scanCapturedAt;
-  } else {
-    delete parsed.administered_at;
-  }
   const autofillResult = autoFillPanorama(parsed);
   const success = isAutofillSuccess(autofillResult);
   const pending = isAutofillPending(autofillResult);
@@ -867,16 +890,17 @@ function initHandsFreeScanner() {
       LEGACY_POPUP_MODE_KEY,
       LEGACY_REMOTE_MODE_KEY,
       LEGACY_HANDS_FREE_KEY,
-      ADMIN_DATETIME_AUTOFILL_KEY,
-      REASON_CONSENT_AUTOFILL_KEY,
+      LEGACY_ADMIN_DATETIME_AUTOFILL_KEY,
+      ADMIN_DATE_AUTOFILL_KEY,
+      ADMIN_TIME_AUTOFILL_KEY,
+      LEGACY_REASON_CONSENT_AUTOFILL_KEY,
+      REASON_AUTOFILL_KEY,
+      CONSENT_AUTOFILL_KEY,
       AUDIO_FEEDBACK_KEY
     ],
     (stored) => {
       updatePanoramaWorkflowMode(normalizeWorkflowMode(stored));
-      adminDateTimeAutofillEnabled =
-        normalizeAdminDateTimeAutofillSetting(stored);
-      reasonConsentAutofillEnabled =
-        normalizeReasonConsentAutofillSetting(stored);
+      applyAutofillSettings(stored);
       audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
       panoramaSettingsInitialized = true;
       vlog('active workflow mode', activeWorkflowMode);
@@ -909,8 +933,12 @@ function initHandsFreeScanner() {
       !(LEGACY_POPUP_MODE_KEY in changes) &&
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
-      !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
-      !(REASON_CONSENT_AUTOFILL_KEY in changes) &&
+      !(LEGACY_ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
+      !(ADMIN_DATE_AUTOFILL_KEY in changes) &&
+      !(ADMIN_TIME_AUTOFILL_KEY in changes) &&
+      !(LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes) &&
+      !(REASON_AUTOFILL_KEY in changes) &&
+      !(CONSENT_AUTOFILL_KEY in changes) &&
       !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
@@ -932,24 +960,37 @@ function initHandsFreeScanner() {
         LEGACY_HANDS_FREE_KEY in changes
           ? changes[LEGACY_HANDS_FREE_KEY].newValue
           : undefined,
-      [ADMIN_DATETIME_AUTOFILL_KEY]:
-        ADMIN_DATETIME_AUTOFILL_KEY in changes
-          ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
-          : adminDateTimeAutofillEnabled,
-      [REASON_CONSENT_AUTOFILL_KEY]:
-        REASON_CONSENT_AUTOFILL_KEY in changes
-          ? changes[REASON_CONSENT_AUTOFILL_KEY].newValue
-          : reasonConsentAutofillEnabled,
+      [LEGACY_ADMIN_DATETIME_AUTOFILL_KEY]:
+        LEGACY_ADMIN_DATETIME_AUTOFILL_KEY in changes
+          ? changes[LEGACY_ADMIN_DATETIME_AUTOFILL_KEY].newValue
+          : autofillSettings[LEGACY_ADMIN_DATETIME_AUTOFILL_KEY],
+      [ADMIN_DATE_AUTOFILL_KEY]:
+        ADMIN_DATE_AUTOFILL_KEY in changes
+          ? changes[ADMIN_DATE_AUTOFILL_KEY].newValue
+          : autofillSettings[ADMIN_DATE_AUTOFILL_KEY],
+      [ADMIN_TIME_AUTOFILL_KEY]:
+        ADMIN_TIME_AUTOFILL_KEY in changes
+          ? changes[ADMIN_TIME_AUTOFILL_KEY].newValue
+          : autofillSettings[ADMIN_TIME_AUTOFILL_KEY],
+      [LEGACY_REASON_CONSENT_AUTOFILL_KEY]:
+        LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes
+          ? changes[LEGACY_REASON_CONSENT_AUTOFILL_KEY].newValue
+          : autofillSettings[LEGACY_REASON_CONSENT_AUTOFILL_KEY],
+      [REASON_AUTOFILL_KEY]:
+        REASON_AUTOFILL_KEY in changes
+          ? changes[REASON_AUTOFILL_KEY].newValue
+          : autofillSettings[REASON_AUTOFILL_KEY],
+      [CONSENT_AUTOFILL_KEY]:
+        CONSENT_AUTOFILL_KEY in changes
+          ? changes[CONSENT_AUTOFILL_KEY].newValue
+          : autofillSettings[CONSENT_AUTOFILL_KEY],
       [AUDIO_FEEDBACK_KEY]:
         AUDIO_FEEDBACK_KEY in changes
           ? changes[AUDIO_FEEDBACK_KEY].newValue
           : audioFeedbackEnabled
     };
     updatePanoramaWorkflowMode(normalizeWorkflowMode(nextState));
-    adminDateTimeAutofillEnabled =
-      normalizeAdminDateTimeAutofillSetting(nextState);
-    reasonConsentAutofillEnabled =
-      normalizeReasonConsentAutofillSetting(nextState);
+    applyAutofillSettings(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     vlog('workflow mode changed', activeWorkflowMode);
   });
@@ -1606,17 +1647,19 @@ function formatPanoramaTimeValue(dateValue) {
   return `${hh}:${mm}`;
 }
 
+// One timestamp belongs to this fill, never to the saved scan. Retain it when
+// Panorama rerenders so retries cannot change the date or advance the time.
+function markPanoramaAutofillStarted(data) {
+  if (!data._vaxlinkAutofillAt)
+    data._vaxlinkAutofillAt = new Date().toISOString();
+}
+
 function getPanoramaAdministeredDateTimeValues(data) {
-  const sourceValue =
-    data?.administered_at ||
-    (adminDateTimeAutofillEnabled ? data?.scanned_at : '');
-  const parsed = parseAdministeredDateTime(sourceValue);
-  if (!parsed) {
-    return { date: '', time: '' };
-  }
+  const parsed = parseAdministeredDateTime(data?._vaxlinkAutofillAt);
+  if (!parsed) return { date: '', time: '' };
   return {
-    date: formatPanoramaDateValue(parsed),
-    time: formatPanoramaTimeValue(parsed)
+    date: adminDateAutofillEnabled ? formatPanoramaDateValue(parsed) : '',
+    time: adminTimeAutofillEnabled ? formatPanoramaTimeValue(parsed) : ''
   };
 }
 
@@ -1741,14 +1784,16 @@ function tryFillPanoramaAgent(data) {
 function hasPanoramaDeferredDetailData(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (administered.date || administered.time) return true;
-  // Reason for immunization (default "Routine") and consent are filled whenever
-  // those controls exist on the immunization form, regardless of scan payload —
-  // unless the nurse turned that off in Data Tools.
-  if (reasonConsentAutofillEnabled) {
-    if (getFields(getPanoramaReasonForImmunizationSelectors()).length)
-      return true;
-    if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
-  }
+  if (
+    reasonAutofillEnabled &&
+    getFields(getPanoramaReasonForImmunizationSelectors()).length
+  )
+    return true;
+  if (
+    consentAutofillEnabled &&
+    getFields(getPanoramaConsentReasonSelectors()).length
+  )
+    return true;
   return false;
 }
 
@@ -1775,13 +1820,13 @@ function hasPanoramaDeferredDetailFieldsFilled(data) {
     !administered.time ||
     String(timeField?.value || '').trim() === administered.time;
   const reasonSatisfied =
-    !reasonConsentAutofillEnabled ||
+    !reasonAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaReasonForImmunizationSelectors(),
       getPanoramaReasonForImmunizationValue(data)
     );
   const consentSatisfied =
-    !reasonConsentAutofillEnabled ||
+    !consentAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaConsentReasonSelectors(),
       getPanoramaConsentReasonValue(data)
@@ -1890,7 +1935,7 @@ function panoramaSelectAutofillSatisfied(selectors, desiredText) {
 }
 
 function fillPanoramaReasonForImmunization(data) {
-  if (!reasonConsentAutofillEnabled) return 0;
+  if (!reasonAutofillEnabled) return 0;
   const selectors = getPanoramaReasonForImmunizationSelectors();
   const value = getPanoramaReasonForImmunizationValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
@@ -1898,7 +1943,7 @@ function fillPanoramaReasonForImmunization(data) {
 }
 
 function fillPanoramaConsentReason(data) {
-  if (!reasonConsentAutofillEnabled) return 0;
+  if (!consentAutofillEnabled) return 0;
   const selectors = getPanoramaConsentReasonSelectors();
   const value = getPanoramaConsentReasonValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
@@ -2871,6 +2916,8 @@ function fillPanoramaImmunizationFields(data) {
     }
   }
 
+  markPanoramaAutofillStarted(data);
+
   // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
   // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
   // expiry not selected after selecting the agent). The scheduler below only
@@ -3129,9 +3176,6 @@ function buildAutofillPayloadFromQueueRecord(record) {
     name:
       record.name || record.generic_name || record.tradename || record.din || ''
   };
-  if (adminDateTimeAutofillEnabled) {
-    payload.administered_at = record.scanned_at || new Date().toISOString();
-  }
   return payload;
 }
 
@@ -3157,7 +3201,7 @@ function mutateQueueViaBackground(storageKey, operation, payload = {}) {
             new Error(
               chrome.runtime.lastError?.message ||
                 response?.error ||
-                'Queue update failed'
+                'Tray update failed'
             )
           );
         } else {
@@ -3415,8 +3459,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._commandMode) {
     const modeLabels = {
-      single: 'Single Inject',
-      multiple: 'Multiple Inject',
+      single: 'Single Immunization',
+      multiple: 'Multiple Immunizations',
       inventory: 'Inventory'
     };
     const sourceDetail =
@@ -3436,7 +3480,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._queueEmpty) {
     showRoutineToast(
       `<div class="vl-toast info show">
-      <div class="vl-toast-title">Queue empty</div>
+      <div class="vl-toast-title">Tray empty</div>
       <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
     </div>`,
       durationMs
@@ -3447,8 +3491,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._stepMatchMissing) {
     showRoutineToast(
       `<div class="vl-toast info show">
-      <div class="vl-toast-title">No queued match for this agent</div>
-      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the queue. VaxLink left the queue unchanged.</div>
+      <div class="vl-toast-title">No tray match for this agent</div>
+      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the tray. VaxLink left the tray unchanged.</div>
     </div>`,
       durationMs + 2000
     );
@@ -3575,7 +3619,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     showRoutineToast(
       `<div class="vl-toast duplicate show">
       <div class="vl-toast-title">Duplicate scan ignored</div>
-      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
+      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the tray</div>
       ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     </div>`,
       durationMs
@@ -3591,7 +3635,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         : 'valid';
   const isExpired = flag === 'expired';
   const queuedNote = data._queuedCount
-    ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
+    ? `<div class="vl-toast-detail">Added to tray (${Number(data._queuedCount)} saved)</div>`
     : '';
 
   const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
@@ -4015,7 +4059,7 @@ function initHud() {
   hudClearBtn = document.createElement('button');
   hudClearBtn.className = 'vl-hud-btn vl-hud-clear-btn';
   hudClearBtn.textContent = 'Clear';
-  hudClearBtn.title = 'Clear the multiple-inject queue';
+  hudClearBtn.title = 'Clear the immunization tray';
   hudClearBtn.addEventListener('click', () => {
     // Two-step confirm so a stray click cannot wipe a clinic's scans.
     if (hudClearBtn.dataset.confirming === 'true') {
@@ -4249,7 +4293,7 @@ function renderHudQueueList(rows, visible) {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'vl-hud-item-remove';
     removeBtn.textContent = '×';
-    removeBtn.title = `Remove ${name} from queue`;
+    removeBtn.title = `Remove ${name} from tray`;
     removeBtn.setAttribute('aria-label', removeBtn.title);
     removeBtn.addEventListener('click', () => {
       void removeHudQueueRow(row.id);
@@ -4598,6 +4642,7 @@ function fillPanoramaMultipleGridRow(rowIndex, data) {
   const agentNeeded = !rowState.agentText;
   const dateNeeded = !rowState.dateText;
   let changed = false;
+  if (agentNeeded || dateNeeded) markPanoramaAutofillStarted(data);
 
   if (agentNeeded) {
     changed = fillPanoramaMultipleGridAgent(rowIndex, data) || changed;

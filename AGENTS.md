@@ -19,6 +19,18 @@ any harness that does not discover `AGENTS.md` to read this file.
 - Keep unrelated findings separate. Explain the issue and its impact before
   expanding a cleanup into a larger change.
 - Keep updates brief: what changed, what matters, and what needs user input.
+- After UI updates, provide one combined image showing the full Settings,
+  Analytics, Single Inject, Multiple Inject, and Inventory views. Capture each
+  view's full height instead of separate scrolled screenshots. Use an isolated
+  browser profile with sample data, include any setup or entry states changed by
+  the request, and keep exports outside the packaged extension. Share the single
+  combined image in the response immediately following the update; do not add
+  individual exports or a ZIP unless requested.
+- Open and inspect the UI exports before handing them back. Compare the result
+  with the user's request and review clarity, hierarchy, spacing, alignment,
+  clipping, and relevant states. Fix issues within the agreed scope, then capture
+  and inspect the final result again. Use the images to help iterate on the UI,
+  not just to record that a change was made.
 
 ## Change size and clinical safety
 

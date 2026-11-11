@@ -5,6 +5,7 @@ import {
   SCANNER_STATUS_STATES,
   buildDefaultScannerStatus,
   buildScannerStatusDescriptor,
+  getScannerConnectionLabel,
   classifyScannerConnectionFailure,
   getScannerReconnectDelayMs,
   selectGrantedPort
@@ -84,26 +85,24 @@ test('granted port selection requires an unambiguous identity', () => {
   );
 });
 
-test('scanner status descriptor exposes workflow banner only for unattended capture modes', () => {
-  const descriptor = buildScannerStatusDescriptor(
-    {
-      state: SCANNER_STATUS_STATES.RECOVERING,
-      profileId: 'zebra-ds8178-usb-cdc'
-    },
-    'multiple'
-  );
+test('scanner status banner describes setup and connection problems in every workflow', () => {
+  const descriptor = buildScannerStatusDescriptor({
+    state: SCANNER_STATUS_STATES.RECOVERING,
+    profileId: 'zebra-ds8178-usb-cdc'
+  });
   assert.equal(descriptor.label, 'Recovering');
   assert.equal(descriptor.showReconnect, true);
   assert.match(descriptor.bannerText, /retrying automatically/i);
 
-  const singleModeDescriptor = buildScannerStatusDescriptor(
-    {
-      state: SCANNER_STATUS_STATES.RECOVERING,
-      profileId: 'zebra-ds8178-usb-cdc'
-    },
-    'single'
+  assert.equal(
+    buildScannerStatusDescriptor({}).bannerText,
+    'Scanner setup is required'
   );
-  assert.equal(singleModeDescriptor.bannerText, '');
+  assert.equal(
+    buildScannerStatusDescriptor({ state: SCANNER_STATUS_STATES.CONNECTED })
+      .bannerText,
+    ''
+  );
 });
 
 test('scanner reconnect delay backs off and then caps', () => {
@@ -111,6 +110,21 @@ test('scanner reconnect delay backs off and then caps', () => {
   assert.equal(getScannerReconnectDelayMs(1), 1000);
   assert.equal(getScannerReconnectDelayMs(4), 30000);
   assert.equal(getScannerReconnectDelayMs(99), 60000);
+});
+
+test('connection labels do not present a cached connection as confirmed', () => {
+  assert.equal(
+    getScannerConnectionLabel({ state: 'connected' }, 'cached'),
+    'Connection unknown'
+  );
+  assert.equal(
+    getScannerConnectionLabel({ state: 'connected' }, 'live'),
+    'Connected'
+  );
+  assert.equal(
+    getScannerConnectionLabel({ state: 'never_configured' }, 'cached'),
+    ''
+  );
 });
 
 test('serial failure classification distinguishes recoverable disconnects from busy ports', () => {

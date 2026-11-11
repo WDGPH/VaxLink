@@ -29,7 +29,7 @@ It coordinates capture but does not own the open scanner connection.
 ### Hidden scanner host: `scanner-daemon.html` and `scanner-daemon.js`
 
 An offscreen page is a hidden extension page. It hosts the scanner worker so
-closing the popup or Scanner Setup does not end that worker. It passes control
+closing the popup does not end that worker. It passes control
 requests to the worker and forwards scans and status to the background program.
 It remembers the requested connection so it can restart a failed worker.
 
@@ -63,16 +63,53 @@ a patient change that preserves the same document, URL, and form without a
 visible step change.
 It reads workflow settings from local storage.
 
-### User controls: popup and Scanner Setup
+### User controls: popup
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
 scan input and preview, workflow selection, queue and inventory controls, CSV
 export, and scanner status. The popup sends fill requests to
 the selected Panorama integration.
 
-`scanner-setup.html` and `scanner-setup.js` let staff choose a scanner, grant
-browser permission, and request a connection or disconnection. They do not run
-the ongoing scanner reader.
+The header shows the installed version below VaxLink and provides separate
+Settings and Local Activity controls. Each view uses the top bar for its title
+and a close button that returns to the workflow.
+Settings has three sections, in order: Scanner, Autofill, and National Vaccine Catalogue.
+`scanner-settings.js` provides connection controls directly within the Scanner
+section. It shows connection status and the saved scanner name, with pairing,
+reconnect, and disconnect controls. Cached status cannot confirm a live
+connection. Actual connection errors remain visible. The popup sends connection
+requests to the background; it does not run the ongoing scanner reader.
+
+National Vaccine Catalogue shows its version, publication date, and last checked
+date, with a Refresh button. Loading and refresh errors stay visible.
+
+Autofill has four separate switches: administration date, administration time,
+Reason for Immunization, and Consent for Service. Each field inherits its old
+combined preference until staff set it separately. Date and time use the local
+time when form filling starts, for both live scans and tray items. A fill keeps
+that timestamp through retries and rerenders. The scan timestamp remains scan
+history and is not used as the administration timestamp. The Multiple
+Immunizations entry grid fills only its date field; detail forms can fill both
+fields. Disabled fields keep their existing values.
+
+Local Activity is available from the header and shows a table with Today and All
+time columns. All statistics stay visible,
+with JSON export and reset buttons in one row. JSON exports cover
+today in local time or all activity since the last reset. Its counts describe
+extension activity, not confirmation that Panorama saved a clinical record.
+
+Immunization and Inventory show a Setup Scanner button when no scanner
+is configured or permission needs to be granted again. It opens Settings with
+the Scanner section expanded and focused. The small close button allows manual
+input and saved queues without scanner setup. This choice lasts for the current
+popup and does not change scanner capture or routing.
+
+The Multiple Immunizations and Inventory trays use **+** to open barcode text
+entry in packaged and unpacked installs. They use the existing parser, catalogue
+lookup, and background queue writer. Inventory accepts one barcode per line and
+keeps CSV export. Entry closes after a confirmed save when the input has not
+changed; failed saves and newly typed text keep the entry open. After a partial
+Inventory batch save, only the failed lines remain for correction.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
@@ -97,16 +134,22 @@ it in a queue.
 
 ## Key storage keys
 
-| Key                                  | Writers            | Purpose                                       |
-| ------------------------------------ | ------------------ | --------------------------------------------- |
-| `multiple_inject_queue_v1`           | background         | Multiple Inject queue rows                    |
-| `inventory_scan_batch_v1`            | background         | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`      | background         | Single scans held for later chart delivery    |
-| `vaxlink_scanner_capture_error_v1`   | background         | Capture warning awaiting acknowledgement      |
-| `vaxlink_scanner_status_snapshot_v1` | background         | Last saved scanner status and capture history |
-| `nvc_bundle_override`                | background         | Cached NVC catalogue                          |
-| `vaxlink_workflow_mode_v1`           | popup + content    | Current workflow mode                         |
-| `vaxlink_analytics_v1`               | background + popup | Local event log and summaries                 |
+| Key                                         | Writers            | Purpose                                       |
+| ------------------------------------------- | ------------------ | --------------------------------------------- |
+| `multiple_inject_queue_v1`                  | background         | Multiple Immunizations queue rows             |
+| `inventory_scan_batch_v1`                   | background         | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`             | background         | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`          | background         | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1`        | background         | Last saved scanner status and capture history |
+| `nvc_bundle_override`                       | background         | Cached NVC catalogue                          |
+| `vaxlink_administered_date_autofill_v1`     | popup              | Date Administered autofill preference         |
+| `vaxlink_administered_time_autofill_v1`     | popup              | Time Administered autofill preference         |
+| `vaxlink_administered_datetime_autofill_v1` | legacy popup       | Default for unset date and time switches      |
+| `vaxlink_reason_autofill_v1`                | popup              | Reason for Immunization autofill preference   |
+| `vaxlink_consent_autofill_v1`               | popup              | Consent for Service autofill preference       |
+| `vaxlink_reason_consent_autofill_v1`        | legacy popup       | Default for unset reason and consent switches |
+| `vaxlink_workflow_mode_v1`                  | popup + content    | Current workflow mode                         |
+| `vaxlink_analytics_v1`                      | background + popup | Local event log and summaries                 |
 
 Queue appends, popup edits, HUD removals, and dose consumption share the
 background writer. Each change reads the latest rows after earlier writes finish,
@@ -164,7 +207,7 @@ without an open chart. Staff review vaccine details before saving in Panorama.
 
 ## Pending scanner scans
 
-Single Inject saves each scan before attempting delivery once to the captured
+Single Immunization saves each scan before attempting delivery once to the captured
 active tab and observed form context. Navigation, form replacement, a newer
 fill, or manual takeover invalidates that context. This detects observable
 changes; it cannot identify a patient change that preserves the same URL and
@@ -183,23 +226,6 @@ was not saved. Storage errors also leave a capture warning. Check pending scans
 and the intended chart before rescanning; a warning does not identify which
 scan failed. Scanner delivery and persistence are not crash-proof exactly-once
 operations.
-
-## Workstation health
-
-Popup Settings offers a read-only workstation check for the selected tab. It
-reads the existing scanner session or labels a cached observation; opening it
-does not connect a scanner. A connection does not prove a successful barcode
-read. Last capture time is reported separately. NVC health reads the existing
-catalogue status and marks a usable cache degraded when the last remote check
-is older than 24 hours or has failed.
-
-For health, the Panorama response supplies readiness flags and the build identity
-captured when the content script loaded. Packaged runtime files receive a
-fingerprint during staging. A known identity mismatch calls for reloading the
-Panorama tab when safe. Missing identity is unknown; matching version labels
-alone cannot prove identical source files in an unpacked development install.
-The check does not reload, inject scripts, change workflow, or fill a chart.
-Readiness does not prove a successful fill or a saved clinical record.
 
 ## Panorama autofill sequence
 

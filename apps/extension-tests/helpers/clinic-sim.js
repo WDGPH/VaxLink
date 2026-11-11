@@ -142,6 +142,7 @@ export function createContentHarness(globals = {}) {
   const documentListeners = new Map();
   const messageListeners = [];
   const storageReads = [];
+  const storageListeners = [];
   const windowListeners = new Map();
   const location =
     globals.location ||
@@ -181,7 +182,9 @@ export function createContentHarness(globals = {}) {
         local: {
           get: (keys, callback) => storageReads.push({ keys, callback })
         },
-        onChanged: { addListener() {} }
+        onChanged: {
+          addListener: (listener) => storageListeners.push(listener)
+        }
       }
     }
   });
@@ -200,7 +203,8 @@ export function createContentHarness(globals = {}) {
     documentListeners,
     windowListeners,
     messageListeners,
-    storageReads
+    storageReads,
+    storageListeners
   };
 }
 
