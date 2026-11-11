@@ -100,12 +100,12 @@ test('accepted publication metadata survives reopening and popup HTML escapes up
   renderNVCStatus(restored, container);
   assert.match(container.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
   assert.doesNotMatch(container.innerHTML, /<img/);
-  assert.match(
+  assert.doesNotMatch(
     container.innerHTML,
-    /2 distinct lot codes in the NVC catalogue/
+    /<details|lot codes|NVC is ready|Last downloaded|Last refresh attempt|Auto-check/
   );
   assert.match(container.innerHTML, /Published:<\/dt><dd>November 5, 2026/);
-  assert.match(container.innerHTML, /Last checked by VaxLink/);
+  assert.match(container.innerHTML, /Last checked:/);
   const missing = await status(
     createBackgroundHarness(catalogue(['A'], null, null))
   );

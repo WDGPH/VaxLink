@@ -1513,7 +1513,7 @@ function loadNVCStatus() {
     if (chrome.runtime.lastError || !status) {
       if (nvcStatusDiv)
         nvcStatusDiv.textContent =
-          'NVC status could not be checked. Try Refresh NVC Data.';
+          'NVC status could not be checked. Try Refresh.';
       return;
     }
     renderNVCStatus(status, nvcStatusDiv);

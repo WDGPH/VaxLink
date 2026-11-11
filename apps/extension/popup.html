@@ -340,23 +340,10 @@
         color: #486071;
       }
 
-      .nvc-status-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 4px 12px;
-      }
-
       .nvc-status-version {
         font-size: 12px;
         font-weight: 600;
         color: #1f3d58;
-      }
-
-      .nvc-status-count {
-        color: var(--subtle);
-        font-variant-numeric: tabular-nums;
       }
 
       .nvc-status-release {
@@ -370,36 +357,8 @@
       .nvc-status-release dd {
         margin: 0;
       }
-      .nvc-status-sync {
-        margin-top: 5px;
-      }
-      .nvc-status-sync summary {
-        width: fit-content;
-        cursor: pointer;
-        color: #486071;
-      }
-      .nvc-status-sync summary:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 3px;
-      }
-      .nvc-status-details {
+      .nvc-status-health {
         margin: 8px 0 0;
-      }
-      .nvc-status-details > div {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 12px;
-        padding: 3px 0;
-      }
-      .nvc-status-details dd {
-        margin: 0;
-        text-align: right;
-        color: #1f3d58;
-        overflow-wrap: anywhere;
-      }
-      .nvc-status-footer {
-        margin-top: 5px;
-        color: var(--subtle);
       }
 
       .output {
@@ -1065,7 +1024,7 @@
             </details>
             <details id="nvcSettingsSection" class="settings-card">
               <summary>
-                <strong>NVC Catalogue</strong>
+                <strong>National Vaccine Catalogue</strong>
                 <span id="nvcSettingsState" class="settings-state"
                   >Checking</span
                 >

@@ -1,10 +1,14 @@
 import { buildExpiryBanner, getExpiryStatus } from './popup-parser.js';
 
-export function formatDateTime(value) {
+function formatNVCCheckDate(value) {
   if (!value) return 'Never';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleDateString('en-CA', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 }
 
 export function describeNVCHealth(status) {
@@ -17,7 +21,7 @@ export function describeNVCHealth(status) {
     return 'NVC catalogue is unavailable. Barcode details can still be captured.';
   if (status.freshnessDegraded)
     return 'NVC refresh failed. Previously downloaded catalogue remains available.';
-  return 'NVC is ready.';
+  return '';
 }
 
 export function formatNVCRefreshMessage(status) {
@@ -63,29 +67,14 @@ export function renderNVCStatus(status, container) {
       .filter(Boolean)
       .join(' · ');
   }
-  const rows = [
-    ['Last downloaded', formatDateTime(status.updatedAt)],
-    ['Last checked by VaxLink', formatDateTime(status.lastCheckAt)],
-    ['Last refresh attempt', formatDateTime(status.lastAttemptAt)]
-  ];
+  const health = describeNVCHealth(status);
   container.innerHTML = `
-    <div class="nvc-status-heading">
-      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `v${status.releaseVersion}` : 'NVC version unavailable')}</span>
-      <span>${escapeHtml(state)}</span>
-    </div>
-    <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
-    <details class="nvc-status-sync">
-      <summary>Details</summary>
-      <p>${escapeHtml(describeNVCHealth(status))}</p>
-      ${status.lotCount == null ? '' : `<p>${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</p>`}
-      <dl class="nvc-status-details">${rows
-        .map(
-          ([label, value]) =>
-            `<div><dt>${label}</dt><dd>${escapeHtml(value)}</dd></div>`
-        )
-        .join('')}</dl>
-      <div class="nvc-status-footer">Auto-check: every ${Math.round((status.autoSyncIntervalMinutes || 0) / 60)}h</div>
-    </details>`;
+    <div class="nvc-status-version">${escapeHtml(status.releaseVersion ? `v${status.releaseVersion}` : 'NVC version unavailable')}</div>
+    <dl class="nvc-status-release">
+      <div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div>
+      <div><dt>Last checked:</dt><dd>${escapeHtml(formatNVCCheckDate(status.lastCheckAt))}</dd></div>
+    </dl>
+    ${health ? `<p class="nvc-status-health">${escapeHtml(health)}</p>` : ''}`;
 }
 
 export function getNVCStatusLabel(status, now = Date.now()) {

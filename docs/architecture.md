@@ -73,15 +73,15 @@ the selected Panorama integration.
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
-Settings has three sections, in order: Scanner, Autofill, and NVC Catalogue.
+Settings has three sections, in order: Scanner, Autofill, and National Vaccine Catalogue.
 `scanner-settings.js` provides connection controls directly within the Scanner
 section. It shows connection status and the saved scanner name, with pairing,
 reconnect, and disconnect controls. Cached status cannot confirm a live
 connection. Actual connection errors remain visible. The popup sends connection
 requests to the background; it does not run the ongoing scanner reader.
 
-NVC Catalogue shows availability and update information and provides a manual
-refresh. Autofill holds the existing Panorama preferences. Local Activity is
+National Vaccine Catalogue shows its version, publication date, and last checked
+date, with a Refresh button. Loading and refresh errors stay visible. Autofill holds the existing Panorama preferences. Local Activity is
 available from the header and shows a table with Today and All time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
 today in local time or all activity since the last reset. Its counts describe
