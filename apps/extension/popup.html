@@ -829,12 +829,16 @@
       }
       .activity-table .activity-group th {
         padding: 16px 0 4px;
+      }
+      .activity-table .activity-group-title,
+      .activity-table .activity-group th {
         font-size: 11px;
         font-weight: 600;
         color: #14505f;
       }
-      .activity-table tbody:first-of-type .activity-group th {
-        padding-top: 8px;
+      .activity-table .activity-group-title {
+        padding-left: 0;
+        text-align: left;
       }
       .activity-table tfoot th,
       .activity-table tfoot td {
@@ -1017,13 +1021,20 @@
                 Pre-fills the administration date and time from the barcode
                 scan. Verify before saving.
               </p>
-              <label class="settings-check" for="reasonConsentAutofillToggle">
-                <input id="reasonConsentAutofillToggle" type="checkbox" />
-                <span>Auto-fill Reason for Immunization and Consent</span>
+              <label class="settings-check" for="reasonAutofillToggle">
+                <input id="reasonAutofillToggle" type="checkbox" />
+                <span>Auto-fill Reason for Immunization</span>
               </label>
               <p class="settings-hint">
-                When enabled, VaxLink sets Reason for Immunization to "Routine"
-                and Consent for Service to "Consent obtained" on the Panorama
+                Sets Reason for Immunization to "Routine" on the Panorama
+                immunization form.
+              </p>
+              <label class="settings-check" for="consentAutofillToggle">
+                <input id="consentAutofillToggle" type="checkbox" />
+                <span>Auto-fill Consent</span>
+              </label>
+              <p class="settings-hint">
+                Sets Consent for Service to "Consent obtained" on the Panorama
                 immunization form.
               </p>
             </details>

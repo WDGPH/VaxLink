@@ -81,8 +81,14 @@ connection. Actual connection errors remain visible. The popup sends connection
 requests to the background; it does not run the ongoing scanner reader.
 
 National Vaccine Catalogue shows its version, publication date, and last checked
-date, with a Refresh button. Loading and refresh errors stay visible. Autofill holds the existing Panorama preferences. Local Activity is
-available from the header and shows a table with Today and All time columns. All statistics stay visible,
+date, with a Refresh button. Loading and refresh errors stay visible.
+
+Autofill has separate switches for scan date/time, Reason for Immunization,
+and Consent for Service. Reason and consent each fall back to the old combined
+preference until staff set them separately.
+
+Local Activity is available from the header and shows a table with Today and All
+time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
 today in local time or all activity since the last reset. Its counts describe
 extension activity, not confirmation that Panorama saved a clinical record.
@@ -131,6 +137,9 @@ it in a queue.
 | `vaxlink_scanner_capture_error_v1`   | background         | Capture warning awaiting acknowledgement      |
 | `vaxlink_scanner_status_snapshot_v1` | background         | Last saved scanner status and capture history |
 | `nvc_bundle_override`                | background         | Cached NVC catalogue                          |
+| `vaxlink_reason_autofill_v1`         | popup              | Reason for Immunization autofill preference   |
+| `vaxlink_consent_autofill_v1`        | popup              | Consent for Service autofill preference       |
+| `vaxlink_reason_consent_autofill_v1` | legacy popup       | Default for unset reason and consent switches |
 | `vaxlink_workflow_mode_v1`           | popup + content    | Current workflow mode                         |
 | `vaxlink_analytics_v1`               | background + popup | Local event log and summaries                 |
 

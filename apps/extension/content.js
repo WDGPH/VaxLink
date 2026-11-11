@@ -30,13 +30,17 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
+const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
 const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 let activeWorkflowMode = 'single';
 let adminDateTimeAutofillEnabled = true;
-let reasonConsentAutofillEnabled = true;
+let reasonAutofillEnabled = true;
+let consentAutofillEnabled = true;
+let reasonConsentAutofillSettings = {};
 let audioFeedbackEnabled = true;
 let hudInitialized = false;
 let lastAutoDrainAt = 0;
@@ -54,8 +58,23 @@ function normalizeAdminDateTimeAutofillSetting(stored) {
   return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
 }
 
-function normalizeReasonConsentAutofillSetting(stored) {
-  return !(stored && stored[REASON_CONSENT_AUTOFILL_KEY] === false);
+// Keep the old combined choice as the default for fields without a separate preference.
+function normalizeReasonConsentAutofillSetting(stored, key) {
+  return (
+    (stored?.[key] ?? stored?.[LEGACY_REASON_CONSENT_AUTOFILL_KEY]) !== false
+  );
+}
+
+function applyReasonConsentAutofillSettings(stored) {
+  reasonConsentAutofillSettings = stored || {};
+  reasonAutofillEnabled = normalizeReasonConsentAutofillSetting(
+    stored,
+    REASON_AUTOFILL_KEY
+  );
+  consentAutofillEnabled = normalizeReasonConsentAutofillSetting(
+    stored,
+    CONSENT_AUTOFILL_KEY
+  );
 }
 
 function normalizeAudioFeedbackSetting(stored) {
@@ -868,15 +887,16 @@ function initHandsFreeScanner() {
       LEGACY_REMOTE_MODE_KEY,
       LEGACY_HANDS_FREE_KEY,
       ADMIN_DATETIME_AUTOFILL_KEY,
-      REASON_CONSENT_AUTOFILL_KEY,
+      LEGACY_REASON_CONSENT_AUTOFILL_KEY,
+      REASON_AUTOFILL_KEY,
+      CONSENT_AUTOFILL_KEY,
       AUDIO_FEEDBACK_KEY
     ],
     (stored) => {
       updatePanoramaWorkflowMode(normalizeWorkflowMode(stored));
       adminDateTimeAutofillEnabled =
         normalizeAdminDateTimeAutofillSetting(stored);
-      reasonConsentAutofillEnabled =
-        normalizeReasonConsentAutofillSetting(stored);
+      applyReasonConsentAutofillSettings(stored);
       audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
       panoramaSettingsInitialized = true;
       vlog('active workflow mode', activeWorkflowMode);
@@ -910,7 +930,9 @@ function initHandsFreeScanner() {
       !(LEGACY_REMOTE_MODE_KEY in changes) &&
       !(LEGACY_HANDS_FREE_KEY in changes) &&
       !(ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
-      !(REASON_CONSENT_AUTOFILL_KEY in changes) &&
+      !(LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes) &&
+      !(REASON_AUTOFILL_KEY in changes) &&
+      !(CONSENT_AUTOFILL_KEY in changes) &&
       !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
@@ -936,10 +958,18 @@ function initHandsFreeScanner() {
         ADMIN_DATETIME_AUTOFILL_KEY in changes
           ? changes[ADMIN_DATETIME_AUTOFILL_KEY].newValue
           : adminDateTimeAutofillEnabled,
-      [REASON_CONSENT_AUTOFILL_KEY]:
-        REASON_CONSENT_AUTOFILL_KEY in changes
-          ? changes[REASON_CONSENT_AUTOFILL_KEY].newValue
-          : reasonConsentAutofillEnabled,
+      [LEGACY_REASON_CONSENT_AUTOFILL_KEY]:
+        LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes
+          ? changes[LEGACY_REASON_CONSENT_AUTOFILL_KEY].newValue
+          : reasonConsentAutofillSettings[LEGACY_REASON_CONSENT_AUTOFILL_KEY],
+      [REASON_AUTOFILL_KEY]:
+        REASON_AUTOFILL_KEY in changes
+          ? changes[REASON_AUTOFILL_KEY].newValue
+          : reasonConsentAutofillSettings[REASON_AUTOFILL_KEY],
+      [CONSENT_AUTOFILL_KEY]:
+        CONSENT_AUTOFILL_KEY in changes
+          ? changes[CONSENT_AUTOFILL_KEY].newValue
+          : reasonConsentAutofillSettings[CONSENT_AUTOFILL_KEY],
       [AUDIO_FEEDBACK_KEY]:
         AUDIO_FEEDBACK_KEY in changes
           ? changes[AUDIO_FEEDBACK_KEY].newValue
@@ -948,8 +978,7 @@ function initHandsFreeScanner() {
     updatePanoramaWorkflowMode(normalizeWorkflowMode(nextState));
     adminDateTimeAutofillEnabled =
       normalizeAdminDateTimeAutofillSetting(nextState);
-    reasonConsentAutofillEnabled =
-      normalizeReasonConsentAutofillSetting(nextState);
+    applyReasonConsentAutofillSettings(nextState);
     audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
     vlog('workflow mode changed', activeWorkflowMode);
   });
@@ -1741,14 +1770,16 @@ function tryFillPanoramaAgent(data) {
 function hasPanoramaDeferredDetailData(data) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (administered.date || administered.time) return true;
-  // Reason for immunization (default "Routine") and consent are filled whenever
-  // those controls exist on the immunization form, regardless of scan payload —
-  // unless the nurse turned that off in Data Tools.
-  if (reasonConsentAutofillEnabled) {
-    if (getFields(getPanoramaReasonForImmunizationSelectors()).length)
-      return true;
-    if (getFields(getPanoramaConsentReasonSelectors()).length) return true;
-  }
+  if (
+    reasonAutofillEnabled &&
+    getFields(getPanoramaReasonForImmunizationSelectors()).length
+  )
+    return true;
+  if (
+    consentAutofillEnabled &&
+    getFields(getPanoramaConsentReasonSelectors()).length
+  )
+    return true;
   return false;
 }
 
@@ -1775,13 +1806,13 @@ function hasPanoramaDeferredDetailFieldsFilled(data) {
     !administered.time ||
     String(timeField?.value || '').trim() === administered.time;
   const reasonSatisfied =
-    !reasonConsentAutofillEnabled ||
+    !reasonAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaReasonForImmunizationSelectors(),
       getPanoramaReasonForImmunizationValue(data)
     );
   const consentSatisfied =
-    !reasonConsentAutofillEnabled ||
+    !consentAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaConsentReasonSelectors(),
       getPanoramaConsentReasonValue(data)
@@ -1890,7 +1921,7 @@ function panoramaSelectAutofillSatisfied(selectors, desiredText) {
 }
 
 function fillPanoramaReasonForImmunization(data) {
-  if (!reasonConsentAutofillEnabled) return 0;
+  if (!reasonAutofillEnabled) return 0;
   const selectors = getPanoramaReasonForImmunizationSelectors();
   const value = getPanoramaReasonForImmunizationValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
@@ -1898,7 +1929,7 @@ function fillPanoramaReasonForImmunization(data) {
 }
 
 function fillPanoramaConsentReason(data) {
-  if (!reasonConsentAutofillEnabled) return 0;
+  if (!consentAutofillEnabled) return 0;
   const selectors = getPanoramaConsentReasonSelectors();
   const value = getPanoramaConsentReasonValue(data);
   if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;

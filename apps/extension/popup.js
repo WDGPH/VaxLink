@@ -56,7 +56,8 @@ let adminDateTimeAutofillToggle;
 let scannerSetupPrompt;
 let scannerConnectionNote;
 let continueWithoutScanner = false;
-let reasonConsentAutofillToggle;
+let reasonAutofillToggle;
+let consentAutofillToggle;
 let addQueueBtn;
 let queueBarcodeInput;
 let queueEntryPanel;
@@ -81,7 +82,6 @@ let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerStatusSource = 'cached';
 let scannerCaptureError = false;
-let reasonConsentAutofillEnabled = true;
 
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
@@ -90,7 +90,9 @@ const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
-const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
+const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
+const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -143,9 +145,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   );
   scannerSetupPrompt = document.getElementById('scannerSetupPrompt');
   scannerConnectionNote = document.getElementById('scannerConnectionNote');
-  reasonConsentAutofillToggle = document.getElementById(
-    'reasonConsentAutofillToggle'
-  );
+  reasonAutofillToggle = document.getElementById('reasonAutofillToggle');
+  consentAutofillToggle = document.getElementById('consentAutofillToggle');
   addQueueBtn = document.getElementById('addQueueBtn');
   queueBarcodeInput = document.getElementById('queueBarcodeInput');
   queueEntryPanel = document.getElementById('queueEntryPanel');
@@ -189,7 +190,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
-  await loadReasonConsentAutofillSetting();
+  await loadReasonConsentAutofillSettings();
   await loadAnalyticsSummary();
   await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
@@ -289,13 +290,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       );
     });
-  if (reasonConsentAutofillToggle) {
-    reasonConsentAutofillToggle.addEventListener('change', () => {
-      void setReasonConsentAutofillSetting(
-        !!reasonConsentAutofillToggle.checked
-      );
-    });
-  }
+  reasonAutofillToggle?.addEventListener('change', () => {
+    void setAutofillSetting(REASON_AUTOFILL_KEY, reasonAutofillToggle.checked);
+  });
+  consentAutofillToggle?.addEventListener('change', () => {
+    void setAutofillSetting(
+      CONSENT_AUTOFILL_KEY,
+      consentAutofillToggle.checked
+    );
+  });
 
   if (autoFillBtn) {
     autoFillBtn.addEventListener('click', async () => {
@@ -753,43 +756,40 @@ async function setAdminDateTimeAutofillSetting(enabled) {
   }
 }
 
-function normalizeReasonConsentAutofillSetting(stored) {
-  return !(stored && stored[REASON_CONSENT_AUTOFILL_KEY] === false);
+// The old combined switch remains the default until each field is set separately.
+function normalizeReasonConsentAutofillSetting(stored, key) {
+  return (
+    (stored?.[key] ?? stored?.[LEGACY_REASON_CONSENT_AUTOFILL_KEY]) !== false
+  );
 }
 
-function applyReasonConsentAutofillSetting(enabled) {
-  reasonConsentAutofillEnabled = !!enabled;
-  if (reasonConsentAutofillToggle) {
-    reasonConsentAutofillToggle.checked = reasonConsentAutofillEnabled;
-  }
-}
-
-async function loadReasonConsentAutofillSetting() {
+async function loadReasonConsentAutofillSettings() {
+  let stored = {};
   try {
-    const stored = await getLocalStorage([REASON_CONSENT_AUTOFILL_KEY]);
-    applyReasonConsentAutofillSetting(
-      normalizeReasonConsentAutofillSetting(stored)
+    stored = await getLocalStorage([
+      LEGACY_REASON_CONSENT_AUTOFILL_KEY,
+      REASON_AUTOFILL_KEY,
+      CONSENT_AUTOFILL_KEY
+    ]);
+  } catch (_) {}
+  if (reasonAutofillToggle)
+    reasonAutofillToggle.checked = normalizeReasonConsentAutofillSetting(
+      stored,
+      REASON_AUTOFILL_KEY
     );
-  } catch (_) {
-    applyReasonConsentAutofillSetting(true);
-  }
+  if (consentAutofillToggle)
+    consentAutofillToggle.checked = normalizeReasonConsentAutofillSetting(
+      stored,
+      CONSENT_AUTOFILL_KEY
+    );
 }
 
-async function setReasonConsentAutofillSetting(enabled) {
-  applyReasonConsentAutofillSetting(enabled);
+async function setAutofillSetting(key, enabled) {
   try {
-    await setLocalStorage({
-      [REASON_CONSENT_AUTOFILL_KEY]: reasonConsentAutofillEnabled
-    });
-    writeOutput(
-      reasonConsentAutofillEnabled
-        ? 'Reason for Immunization and Consent auto-fill is enabled.'
-        : 'Reason for Immunization and Consent auto-fill is disabled.',
-      'info'
-    );
+    await setLocalStorage({ [key]: !!enabled });
   } catch (error) {
     writeOutput(
-      error.message || 'Could not update Reason/Consent auto-fill setting.',
+      error.message || 'Could not save autofill preference.',
       'error'
     );
   }
@@ -884,12 +884,12 @@ function renderAnalyticsSummary(summary) {
   ];
   analyticsSummaryDiv.innerHTML = `
     <table class="activity-table" aria-label="Activity statistics">
-      <thead><tr><td></td><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
+      <thead><tr><td class="activity-group-title">Scanning</td><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
       ${groups
         .map(
-          ([title, labels]) => `
-        <tbody>
-          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>
+          ([title, labels], index) => `
+        <tbody aria-label="${escapeAnalyticsHtml(title)}">
+          ${index === 0 ? '' : `<tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>`}
           ${labels.map(renderRow).join('')}
         </tbody>
       `
