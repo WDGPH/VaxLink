@@ -75,7 +75,7 @@ export function renderNVCStatus(status, container) {
     </div>
     <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
     <details class="nvc-status-sync">
-      <summary>Technical details</summary>
+      <summary>Details</summary>
       <p>${escapeHtml(describeNVCHealth(status))}</p>
       ${status.lotCount == null ? '' : `<p>${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</p>`}
       <dl class="nvc-status-details">${rows
@@ -99,24 +99,6 @@ export function getNVCStatusLabel(status, now = Date.now()) {
   return Number.isFinite(age) && age >= 0 && age < interval
     ? 'Up to date'
     : 'Ready · check due';
-}
-
-export function describePanoramaIntegration(chart) {
-  const states = {
-    ready:
-      'Panorama integration is ready in the selected tab. This does not confirm a saved record.',
-    stale:
-      'The selected Panorama tab has an older extension. Reload it when safe to do so.',
-    not_ready:
-      'Panorama integration is still initializing in the selected tab. Wait, then check again.',
-    missing:
-      'Panorama integration was not found in the selected tab. Open a supported Panorama page, then reopen VaxLink.',
-    unknown:
-      'Panorama integration could not be confirmed in the selected tab. Reopen VaxLink on the chart, then check again.'
-  };
-  return Object.hasOwn(states, chart?.state)
-    ? states[chart.state]
-    : states.unknown;
 }
 
 export function setButtonBusy(button, busy, busyText) {

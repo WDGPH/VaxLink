@@ -2,7 +2,7 @@
 
 ## Goal
 
-Confirm that a USB CDC scanner paired with VaxLink remains readable after the setup tab is closed and while Windows is locked. Scans captured during the lock must appear exactly once, in order, in the Multiple Immunizations queue after unlock.
+Confirm that a USB CDC scanner paired with VaxLink remains readable after the popup is closed and while Windows is locked. Scans captured during the lock must appear exactly once, in order, in the Multiple Immunizations queue after unlock.
 
 This proof of concept is browser-only: it requires the Chrome extension but no Windows service, native messaging host, administrator install, or separate bridge application.
 
@@ -19,7 +19,7 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 1. Open Scanner in VaxLink Settings.
 2. Select **Pair scanner**, grant the serial-port permission, and wait for the connected status.
 3. Select Multiple Immunizations and scan one test barcode. Confirm it appears in the queue. Separately, focus a blank text editor and scan a test barcode. If characters appear in the editor, the scanner is still acting as an HID keyboard and this test is invalid.
-4. Close VaxLink and any standalone Scanner Setup tab.
+4. Close the VaxLink popup.
 5. Scan one barcode while Windows is unlocked. Verify the normal open-chart behavior.
 6. Clear or record the current Multiple Immunizations queue count.
 7. Lock Windows with **Win+L**. Do not put the workstation to sleep.
@@ -40,10 +40,10 @@ This proof of concept is browser-only: it requires the Chrome extension but no W
 
 The proof of concept passes only if:
 
-- Scanner Setup can be closed before locking.
+- The popup can be closed before locking.
 - Every locked scan is retained exactly once and in order, including consecutive identical scans.
 - No patient identifier or chart URL is copied into the lock-session metadata.
 - Locked scans are queued and are not automatically injected into the chart.
-- The extension reconnects after a temporary USB disconnect without reopening Scanner Setup.
+- The extension reconnects after a temporary USB disconnect without reopening the popup.
 
 If capture fails, inspect the extension service worker and offscreen document from `chrome://extensions` and record the scanner status/error. A message that Web Serial is unavailable in the scanner worker means the installed Chrome build does not expose Web Serial in that extension worker context; that workstation cannot use this browser-only design and would need a native bridge fallback.

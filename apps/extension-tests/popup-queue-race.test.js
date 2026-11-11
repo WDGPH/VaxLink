@@ -232,7 +232,7 @@ test('queue mutations require an authorized sender and a valid payload', async (
     [
       {
         ...popupSender,
-        url: 'chrome-extension://vaxlink-test/scanner-setup.html'
+        url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
       },
       'clear',
       {},

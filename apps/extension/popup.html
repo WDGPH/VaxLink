@@ -77,26 +77,11 @@
         color: #0b3d4f;
       }
 
-      .alpha-badge {
-        display: inline-block;
-        margin-left: 8px;
-        padding: 2px 7px;
+      #extensionVersion {
+        display: block;
+        margin-top: 2px;
         font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.6px;
-        text-transform: uppercase;
-        color: #7c3a00;
-        background: #ffe5b4;
-        border: 1px solid #f5a623;
-        border-radius: 6px;
-        vertical-align: middle;
-        line-height: 1.4;
-      }
-
-      /* The class's display rule outranks the UA's [hidden] rule — without this,
-       the badge renders on the prod channel despite the hidden attribute. */
-      .alpha-badge[hidden] {
-        display: none;
+        color: var(--subtle);
       }
 
       .header-icon-btn {
@@ -340,12 +325,12 @@
 
       #refreshNvcBtn {
         width: auto;
-        padding: 6px 0;
-        background: transparent;
-        border: 0;
-        color: #14505f;
+        padding: 7px 10px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
         font-size: 12px;
-        text-decoration: underline;
       }
 
       #nvcStatus {
@@ -813,12 +798,6 @@
         cursor: pointer;
       }
 
-      #deviceMetadata {
-        overflow-wrap: anywhere;
-        line-height: 1.5;
-      }
-
-      #checkPanoramaBtn,
       #resetAnalyticsBtn {
         width: auto;
         margin-top: 12px;
@@ -829,9 +808,47 @@
         background: #fff;
         color: var(--ink);
       }
-      #scannerSettingsFrame {
-        width: 100%;
-        border: 0;
+      #connectionStatus {
+        font-size: 13px;
+        line-height: 1.45;
+        color: #1f3d58;
+      }
+      #connectionStatus.success {
+        color: #10683e;
+      }
+      #connectionStatus.error {
+        color: #b42318;
+      }
+      #connectionStatus.warning {
+        color: #9a3412;
+      }
+      #scannerIdentity {
+        margin: 8px 0 0;
+        font-size: 13px;
+        color: var(--subtle);
+      }
+      .scanner-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .scanner-actions button {
+        width: auto;
+        padding: 9px 12px;
+        border-radius: 8px;
+        background: #0e7490;
+        color: #fff;
+      }
+      #connectGrantedBtn {
+        background: #e7f3f4;
+        border: 1px solid #bddadd;
+        color: #14505f;
+      }
+      #disconnectBtn {
+        background: #fff7ed;
+        border: 1px solid #f4cda5;
+        color: #9a3412;
       }
 
       .analytics-summary {
@@ -919,14 +936,6 @@
         flex-wrap: wrap;
       }
 
-      #deviceMetadata {
-        white-space: pre-line;
-      }
-
-      .analytics-field {
-        margin-top: 10px;
-      }
-
       .settings-check {
         margin-top: 10px;
         display: flex;
@@ -954,12 +963,6 @@
         color: #5f7283;
       }
 
-      #saveAnalyticsLabelBtn {
-        background: #d9f0ef;
-        border: 1px solid #b6dcda;
-        color: #114b53;
-      }
-
       #exportTodayAnalyticsBtn,
       #exportAllAnalyticsBtn {
         background: #0e7490;
@@ -979,12 +982,8 @@
                 alt="VaxLink logo"
               />
               <div>
-                <!-- Channel badge: hidden by default; popup.js reveals it when the
-                   manifest name (stamped by scripts/package-extension.sh) says Alpha. -->
-                <h2 class="title">
-                  VaxLink
-                  <span id="alphaBadge" class="alpha-badge" hidden>Alpha</span>
-                </h2>
+                <h2 class="title">VaxLink</h2>
+                <small id="extensionVersion"></small>
               </div>
             </div>
             <div class="header-actions">
@@ -1061,26 +1060,19 @@
                   </button>
                 </div>
               </div>
-              <iframe
-                id="scannerSettingsFrame"
-                title="Scanner settings"
-                allow="serial"
-              ></iframe>
-            </details>
-            <details id="nvcSettingsSection" class="settings-card">
-              <summary>
-                <strong>NVC Catalogue</strong>
-                <span id="nvcSettingsState" class="settings-state"
-                  >Checking</span
-                >
-                <small id="nvcSettingsVersion">Version unavailable</small>
-              </summary>
-              <div
-                id="nvcStatus"
-                role="status"
-                aria-label="NVC catalogue status"
-              ></div>
-              <button id="refreshNvcBtn">Refresh</button>
+              <div id="connectionStatus" role="status">
+                Checking scanner connection…
+              </div>
+              <p id="scannerIdentity" hidden></p>
+              <div class="scanner-actions">
+                <button id="requestPortBtn" type="button">Pair scanner</button>
+                <button id="connectGrantedBtn" type="button" hidden>
+                  Reconnect
+                </button>
+                <button id="disconnectBtn" type="button" hidden disabled>
+                  Disconnect
+                </button>
+              </div>
             </details>
             <details id="autofillSettingsSection" class="settings-card">
               <summary>
@@ -1105,35 +1097,20 @@
                 immunization form.
               </p>
             </details>
-            <details id="supportSettingsSection" class="settings-card">
+            <details id="nvcSettingsSection" class="settings-card">
               <summary>
-                <strong>Support &amp; Diagnostics</strong>
-                <small>Workstation details and Panorama integration</small>
+                <strong>NVC Catalogue</strong>
+                <span id="nvcSettingsState" class="settings-state"
+                  >Checking</span
+                >
+                <small id="nvcSettingsVersion">Version unavailable</small>
               </summary>
-              <p id="extensionInfo" class="settings-hint"></p>
-              <button id="checkPanoramaBtn" type="button">
-                Check Panorama integration
-              </button>
-              <p id="panoramaCheckResult" class="settings-hint" role="status">
-                Checks the Panorama tab selected when Settings was opened. It
-                does not change the form.
-              </p>
-              <div class="analytics-field">
-                <label for="analyticsLabelInput">Workstation label</label>
-                <input
-                  id="analyticsLabelInput"
-                  type="text"
-                  placeholder="Example: Clinic 2"
-                />
-              </div>
-              <div class="actions">
-                <button id="saveAnalyticsLabelBtn">Save label</button>
-              </div>
-              <details class="technical-details">
-                <summary>Device details and reset</summary>
-                <p id="deviceMetadata"></p>
-                <button id="resetAnalyticsBtn">Reset local activity</button>
-              </details>
+              <div
+                id="nvcStatus"
+                role="status"
+                aria-label="NVC catalogue status"
+              ></div>
+              <button id="refreshNvcBtn">Refresh</button>
             </details>
           </div>
           <div id="analyticsPanel" class="analytics" hidden>
@@ -1150,6 +1127,7 @@
                 </div>
               </div>
             </details>
+            <button id="resetAnalyticsBtn" type="button">Reset activity</button>
           </div>
           <div id="mainWorkflowPanel">
             <div

@@ -5,12 +5,12 @@ import {
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
-test('Settings keeps scanner controls in place and offers a specific Panorama support check', async () => {
+test('Scanner setup opens and focuses Settings without leaving the popup', async () => {
   const background = createBackgroundHarness(makeTestNvcBundle());
   const listeners = {};
   const nodes = Object.fromEntries(
     [
-      'scannerSettingsFrame',
+      'scannerSettingsSection',
       'scannerSetupPrompt',
       'scannerConnectionNote',
       'scannerCaptureWarning',
@@ -25,10 +25,6 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       'analyticsPanel',
       'analyticsToggleBtn',
       'analyticsSummary',
-      'analyticsLabelInput',
-      'deviceMetadata',
-      'checkPanoramaBtn',
-      'panoramaCheckResult',
       'scannerSettingsState',
       'mainWorkflowPanel',
       'singleModeBtn',
@@ -60,9 +56,17 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       }
     ])
   );
+  let focusedSummary = false;
+  let scrolledSummary = false;
+  nodes.scannerSettingsSection.querySelector = () => ({
+    focus() {
+      focusedSummary = true;
+    },
+    scrollIntoView() {
+      scrolledSummary = true;
+    }
+  });
   let ready;
-  let selectedTabs = [{ id: 7 }];
-  let queryError = null;
   const opened = [];
   const queries = [];
   const requests = [];
@@ -120,8 +124,7 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
     tabs: {
       query(options, done) {
         queries.push(options);
-        chrome.runtime.lastError = queryError;
-        done(selectedTabs);
+        done([]);
         chrome.runtime.lastError = null;
       },
       create(options, done) {
@@ -144,8 +147,7 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       /Forms filled today<\/span>\s*<strong[^>]*>5<\/strong>/
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
-    assert.match(nodes.deviceMetadata.textContent, /SAMPLE-DEVICE-ID/);
-    assert.equal(nodes.analyticsLabelInput.value, 'Sample workstation');
+    assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);
     for (const mode of ['single', 'multiple', 'inventory']) {
       await listeners[`${mode}ModeBtn:click`]();
       assert.equal(nodes.scannerSetupPrompt.hidden, false);
@@ -153,7 +155,12 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
         nodes.mainWorkflowPanel.classList.values['scanner-setup-required'],
         true
       );
+      focusedSummary = false;
+      scrolledSummary = false;
       listeners['openScannerSettingsBtn:click']();
+      assert.equal(nodes.scannerSettingsSection.open, true);
+      assert.equal(focusedSummary, true);
+      assert.equal(scrolledSummary, true);
       assert.equal(nodes.settingsPanel.hidden, false);
       assert.equal(nodes.mainWorkflowPanel.hidden, true);
       assert.equal(nodes.workflowHeader.hidden, true);
@@ -188,15 +195,6 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       messages.some((message) => message.action === 'getWorkstationHealth'),
       false
     );
-    listeners['settingsToggleBtn:click']();
-    selectedTabs = [{ id: 99 }];
-    await listeners['checkPanoramaBtn:click']();
-    assert.deepEqual(
-      messages.find((message) => message.action === 'getWorkstationHealth'),
-      { action: 'getWorkstationHealth', tabId: 7 }
-    );
-    assert.match(nodes.panoramaCheckResult.textContent, /Panorama integration/);
-    listeners['settingsToggleBtn:click']();
     const previousWrites = writes.length;
     listeners['continueWithoutScannerBtn:click']();
     assert.equal(
@@ -237,34 +235,8 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
     );
     assert.match(nodes.scannerConnectionNote.textContent, /offline/);
     await Promise.all(requests);
-    for (const [tabs, error] of [
-      [[{ id: 7 }], null],
-      [[], null],
-      [[{ id: 7 }], { message: 'Tab query failed' }]
-    ]) {
-      selectedTabs = tabs;
-      queryError = error;
-      nodes.scannerSettingsFrame.attributes.src = '';
-      listeners['settingsToggleBtn:click']();
-      assert.deepEqual(queries.at(-1), {
-        active: true,
-        currentWindow: true
-      });
-      assert.equal(
-        nodes.scannerSettingsFrame.attributes.src,
-        'chrome-extension://vaxlink-test/scanner-setup.html'
-      );
-      const queryCount = queries.length;
-      listeners['settingsToggleBtn:click']();
-      listeners['settingsToggleBtn:click']();
-      assert.equal(
-        queries.length,
-        queryCount + 1,
-        'reopening keeps the iframe and selects the current chart for support'
-      );
-      listeners['settingsToggleBtn:click']();
-    }
     assert.deepEqual(opened, [], 'Settings does not open a separate tab');
+    assert.deepEqual(queries, [], 'Settings does not inspect the selected tab');
     assert.equal(
       messages.some(
         (message) => message.action === 'scannerDaemon.connectGranted'

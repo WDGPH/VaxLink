@@ -29,7 +29,7 @@ It coordinates capture but does not own the open scanner connection.
 ### Hidden scanner host: `scanner-daemon.html` and `scanner-daemon.js`
 
 An offscreen page is a hidden extension page. It hosts the scanner worker so
-closing the popup or Scanner Setup does not end that worker. It passes control
+closing the popup does not end that worker. It passes control
 requests to the worker and forwards scans and status to the background program.
 It remembers the requested connection so it can restart a failed worker.
 
@@ -63,36 +63,34 @@ a patient change that preserves the same document, URL, and form without a
 visible step change.
 It reads workflow settings from local storage.
 
-### User controls: popup and Scanner Setup
+### User controls: popup
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
 scan input and preview, workflow selection, queue and inventory controls, CSV
 export, and scanner status. The popup sends fill requests to
 the selected Panorama integration.
 
-The header provides separate Settings and Local Activity controls. Each view
-uses the top bar for its title and a close button that returns to the workflow.
-Settings has
-four sections: Scanner, NVC Catalogue, Autofill, and Support & Diagnostics.
-Scanner connection controls are embedded in Settings and also available on
-the standalone Scanner Setup page. They show connection status and the saved
-scanner name, with pairing, reconnect, and disconnect controls. Cached status
-cannot confirm a live connection. Actual connection errors remain visible.
-The setup page does not run the ongoing scanner reader. The embedded page
-expands to its content and uses the popup's scrollbar.
+The header shows the installed version below VaxLink and provides separate
+Settings and Local Activity controls. Each view uses the top bar for its title
+and a close button that returns to the workflow.
+Settings has three sections, in order: Scanner, Autofill, and NVC Catalogue.
+`scanner-settings.js` provides connection controls directly within the Scanner
+section. It shows connection status and the saved scanner name, with pairing,
+reconnect, and disconnect controls. Cached status cannot confirm a live
+connection. Actual connection errors remain visible. The popup sends connection
+requests to the background; it does not run the ongoing scanner reader.
 
 NVC Catalogue shows availability and update information and provides a manual
-refresh. Autofill holds the existing Panorama preferences. Support & Diagnostics
-shows the extension version and offers a read-only check of the selected
-Panorama tab. Workstation label, device details, and reset controls stay in this
-section. Local Activity remains available from the header. JSON exports cover
-today in local time or all activity since the last reset. Its counts are
+refresh. Autofill holds the existing Panorama preferences. Local Activity is
+available from the header and contains the activity reset. JSON exports cover
+today in local time or all activity since the last reset. Its counts describe
 extension activity, not confirmation that Panorama saved a clinical record.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
-is configured or permission needs to be granted again. It opens Settings; the
-small close button allows manual input and saved queues without scanner setup. This choice
-lasts for the current popup and does not change scanner capture or routing.
+is configured or permission needs to be granted again. It opens Settings with
+the Scanner section expanded and focused. The small close button allows manual
+input and saved queues without scanner setup. This choice lasts for the current
+popup and does not change scanner capture or routing.
 
 The Multiple Immunizations and Inventory queue cards use **+** to open barcode text
 entry in packaged and unpacked installs. They use the existing parser, catalogue
@@ -210,17 +208,6 @@ was not saved. Storage errors also leave a capture warning. Check pending scans
 and the intended chart before rescanning; a warning does not identify which
 scan failed. Scanner delivery and persistence are not crash-proof exactly-once
 operations.
-
-## Panorama integration check
-
-Support & Diagnostics can check the selected Panorama tab without changing the
-scanner or chart. The check compares the content script's build identity with
-the running extension and reports a known mismatch so staff can reload the tab
-when safe. A missing identity leaves the result unknown; matching version labels
-alone cannot prove identical source files in an unpacked development install.
-The check does not reload, inject scripts, or fill a chart. Readiness does not
-prove a successful fill or a saved clinical record. The internal health request
-also reads existing scanner and catalogue status for its diagnostic contract.
 
 ## Panorama autofill sequence
 

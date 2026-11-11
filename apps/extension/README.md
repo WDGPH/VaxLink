@@ -27,7 +27,7 @@ scanner hardware, or organization-specific access.
 - `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
 - `content.js` handles scan routing, autofill, and workflow automation on supported chart pages.
 - `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
-- `scanner-setup.html` + `scanner/` provide the Web Serial scanner connection controls.
+- `scanner-settings.js` provides scanner connection controls within the popup Settings view.
 - `inventory-manager.html` + `inventory-manager.js` open the full inventory operations page in its own extension tab.
 
 ## Inventory Architecture
@@ -63,7 +63,7 @@ The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup in
 
 ## Dedicated Scanner Channel
 
-Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use Scanner in Settings to pair the scanner and check its connection. The setup page can then be closed.
+Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use Scanner in Settings to pair the scanner and check its connection. The popup can then be closed.
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 

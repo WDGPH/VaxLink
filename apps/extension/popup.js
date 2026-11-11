@@ -1,3 +1,4 @@
+import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
   buildInventorySummary,
@@ -14,7 +15,6 @@ import {
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,
-  describePanoramaIntegration,
   formatNVCRefreshMessage,
   setButtonBusy,
   showOutput
@@ -44,19 +44,15 @@ let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
 let analyticsSummaryDiv;
-let analyticsLabelInput;
 let settingsToggleBtn;
 let settingsPanel;
 let analyticsToggleBtn;
 let analyticsPanel;
 let mainWorkflowPanel;
-let saveAnalyticsLabelBtn;
 let exportTodayAnalyticsBtn;
 let exportAllAnalyticsBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
-let scannerSettingsFrame;
-let settingsTabId = null;
 let scannerSetupPrompt;
 let scannerConnectionNote;
 let continueWithoutScanner = false;
@@ -111,13 +107,10 @@ const MODE_CONFIG = {
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Channel badge: only the alpha channel shows it. The manifest name is the
-  // channel discriminator — "VaxLink Alpha" in git/unpacked and in alpha zips,
-  // "VaxLink" stamped by scripts/package-extension.sh for prod uploads.
-  const alphaBadge = document.getElementById('alphaBadge');
-  if (alphaBadge && /alpha/i.test(chrome.runtime.getManifest().name || '')) {
-    alphaBadge.hidden = false;
-  }
+  const version = document.getElementById('extensionVersion');
+  const manifest = chrome.runtime.getManifest();
+  if (version)
+    version.textContent = `v${manifest.version_name || manifest.version}`;
 
   autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
@@ -137,30 +130,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
   analyticsSummaryDiv = document.getElementById('analyticsSummary');
-  analyticsLabelInput = document.getElementById('analyticsLabelInput');
   settingsToggleBtn = document.getElementById('settingsToggleBtn');
   settingsPanel = document.getElementById('settingsPanel');
   analyticsToggleBtn = document.getElementById('analyticsToggleBtn');
   analyticsPanel = document.getElementById('analyticsPanel');
   mainWorkflowPanel = document.getElementById('mainWorkflowPanel');
-  saveAnalyticsLabelBtn = document.getElementById('saveAnalyticsLabelBtn');
   exportTodayAnalyticsBtn = document.getElementById('exportTodayAnalyticsBtn');
   exportAllAnalyticsBtn = document.getElementById('exportAllAnalyticsBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById(
     'adminDateTimeAutofillToggle'
   );
-  scannerSettingsFrame = document.getElementById('scannerSettingsFrame');
-  scannerSettingsFrame?.addEventListener('load', () => {
-    const content = scannerSettingsFrame.contentDocument?.querySelector('main');
-    if (!content) return;
-    // Keep Settings on the popup's scrollbar as scanner connection text changes.
-    new ResizeObserver(() => {
-      const height = content.getBoundingClientRect().height;
-      if (height > 0)
-        scannerSettingsFrame.style.height = `${Math.ceil(height)}px`;
-    }).observe(content);
-  });
   scannerSetupPrompt = document.getElementById('scannerSetupPrompt');
   scannerConnectionNote = document.getElementById('scannerConnectionNote');
   reasonConsentAutofillToggle = document.getElementById(
@@ -273,6 +253,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const section = document.getElementById('scannerSettingsSection');
       if (section) section.open = true;
       void setPopupPanel('settings');
+      const summary = section?.querySelector('summary');
+      summary?.focus();
+      summary?.scrollIntoView({ block: 'nearest' });
     });
   document
     .getElementById('continueWithoutScannerBtn')
@@ -294,31 +277,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     });
   }
-  document
-    .getElementById('checkPanoramaBtn')
-    ?.addEventListener('click', async () => {
-      const button = document.getElementById('checkPanoramaBtn');
-      const result = document.getElementById('panoramaCheckResult');
-      if (!Number.isSafeInteger(settingsTabId) || settingsTabId < 0) {
-        result.textContent =
-          'Select the Panorama tab to check, then reopen Settings in VaxLink.';
-        return;
-      }
-      setButtonBusy(button, true, 'Checking…');
-      try {
-        const response = await sendRuntimeMessage({
-          action: 'getWorkstationHealth',
-          tabId: settingsTabId
-        });
-        result.textContent = describePanoramaIntegration(
-          response?.success ? response.chart : null
-        );
-      } catch {
-        result.textContent = describePanoramaIntegration(null);
-      } finally {
-        setButtonBusy(button, false);
-      }
-    });
   document
     .getElementById('acknowledgeScannerErrorBtn')
     ?.addEventListener('click', () => {
@@ -486,22 +444,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (saveAnalyticsLabelBtn) {
-    saveAnalyticsLabelBtn.addEventListener('click', async () => {
-      try {
-        const store = await getLocalAnalyticsStore();
-        store.deviceLabel = String(analyticsLabelInput?.value || '')
-          .trim()
-          .slice(0, 80);
-        await setLocalAnalyticsStore(store);
-        renderAnalyticsSummary(buildAnalyticsSummaryFromStore(store));
-        writeOutput('Analytics label saved locally.', 'success');
-      } catch (error) {
-        writeOutput(error.message || 'Could not save analytics label', 'error');
-      }
-    });
-  }
-
   if (exportTodayAnalyticsBtn) {
     exportTodayAnalyticsBtn.addEventListener('click', async () => {
       await exportAnalyticsJson('today');
@@ -520,7 +462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const store = createEmptyAnalyticsStore();
         await setLocalAnalyticsStore(store);
         renderAnalyticsSummary(buildAnalyticsSummaryFromStore(store));
-        writeOutput('Local analytics reset on this workstation.', 'info');
+        writeOutput('Activity reset.', 'info');
       } catch (error) {
         writeOutput(error.message || 'Could not reset analytics', 'error');
       }
@@ -691,24 +633,6 @@ async function loadScannerStatus() {
   renderScannerStatusUi();
 }
 
-function loadScannerSettings() {
-  // The explicit support check keeps the chart selected when Settings opened.
-  // Opening Settings does not probe or change the form.
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    settingsTabId = chrome.runtime.lastError ? null : (tabs?.[0]?.id ?? null);
-  });
-  if (scannerSettingsFrame && !scannerSettingsFrame.getAttribute('src')) {
-    scannerSettingsFrame.setAttribute(
-      'src',
-      chrome.runtime.getURL('scanner-setup.html')
-    );
-  }
-  const manifest = chrome.runtime.getManifest();
-  const info = document.getElementById('extensionInfo');
-  if (info)
-    info.textContent = `${manifest.name} · ${manifest.version_name || manifest.version}`;
-}
-
 function applyScannerStatus(status, source = 'cached') {
   scannerStatusSource = source;
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
@@ -767,7 +691,7 @@ function applyPopupPanel(panel) {
   if (panelTitle) panelTitle.textContent = title;
   closeButton?.setAttribute('aria-label', `Close ${title}`);
   closeButton?.setAttribute('title', `Close ${title}`);
-  if (panel === 'settings' && settingsPanel?.hidden) loadScannerSettings();
+  if (panel === 'settings') initializeScannerSettings();
   if (settingsPanel) {
     settingsPanel.hidden = panel !== 'settings';
   }
@@ -921,10 +845,6 @@ async function loadAnalyticsSummary() {
 
 function renderAnalyticsSummary(summary) {
   if (!summary || !analyticsSummaryDiv) return;
-  if (analyticsLabelInput) {
-    analyticsLabelInput.value = summary.deviceLabel || '';
-  }
-
   const today = summary.today || {};
   const rollup = summary.rollup || {};
   const todayLiveScans =
@@ -955,14 +875,6 @@ function renderAnalyticsSummary(summary) {
   const pilotQueueUses = rollup.queues?.multipleUsed || 0;
   const pilotExports = rollup.exports?.inventoryCount || 0;
 
-  const deviceLabel = document.getElementById('activityDeviceLabel');
-  if (deviceLabel)
-    deviceLabel.textContent = summary.deviceLabel
-      ? `On this device · ${summary.deviceLabel}`
-      : 'On this device';
-  const metadata = document.getElementById('deviceMetadata');
-  if (metadata)
-    metadata.textContent = `Device ID: ${summary.deviceId || 'Unavailable'}\nTracking began: ${formatAnalyticsDate(summary.firstSeenAt)}\nTracked days: ${formatAnalyticsNumber(summary.daysTracked)}`;
   analyticsSummaryDiv.innerHTML = `
     <div class="activity-today">
       ${renderAnalyticsMetric('Scans today', todayScans)}
@@ -982,7 +894,7 @@ function renderAnalyticsSummary(summary) {
       </div>
     </details>
     <details class="activity-section">
-      <summary>Technical details</summary>
+      <summary>Details</summary>
       <div class="activity-secondary">
         ${renderAnalyticsMetric('Scanner captures today', todayLiveScans)}
         ${renderAnalyticsMetric('Popup entries today', todayPopupParses)}
@@ -992,13 +904,6 @@ function renderAnalyticsSummary(summary) {
       </div>
     </details>
   `;
-}
-
-function formatAnalyticsDate(value) {
-  const date = new Date(value || '');
-  return Number.isFinite(date.getTime())
-    ? date.toLocaleDateString()
-    : 'Unavailable';
 }
 
 function renderAnalyticsMetric(label, value) {

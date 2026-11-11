@@ -23,24 +23,31 @@ let statusChangeVersion = 0;
 let configuredProfileId;
 
 const els = {};
-const embedded = window.parent !== window;
-if (embedded) document.documentElement.classList.add('embedded');
-
-document.addEventListener('DOMContentLoaded', () => {
+export function initializeScannerSettings() {
+  if (els.connectionStatus || !document.getElementById('connectionStatus'))
+    return;
   [
     'requestPortBtn',
     'connectGrantedBtn',
     'disconnectBtn',
     'connectionStatus',
-    'scannerIdentity',
-    'captureWarning'
+    'scannerIdentity'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
-
   bindEvents();
-  initializePage();
-});
+  chrome.runtime.onMessage.addListener((request) => {
+    if (
+      request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED &&
+      request.status
+    ) {
+      statusChangeVersion++;
+      applyDaemonStatus(request.status);
+    }
+    return false;
+  });
+  loadScannerConnection();
+}
 
 function bindEvents() {
   els.requestPortBtn?.addEventListener('click', () => {
@@ -55,24 +62,6 @@ function bindEvents() {
     void disconnectActivePort();
   });
 }
-
-chrome.runtime.onMessage.addListener((request) => {
-  if (
-    request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED &&
-    request.status
-  ) {
-    statusChangeVersion++;
-    applyDaemonStatus(request.status);
-  }
-  if (request?.action === SCANNER_DAEMON_ACTIONS.SCAN_ECHO && request.scan) {
-    if (
-      request.response?.success === false ||
-      request.response?.response?.success === false
-    )
-      els.captureWarning.hidden = embedded;
-  }
-  return false;
-});
 
 function sendScannerDaemonCommand(action, payload = {}) {
   return new Promise((resolve, reject) => {
@@ -126,7 +115,7 @@ function applyDaemonStatus(status, source = 'live') {
   els.disconnectBtn.hidden = !connected;
 }
 
-function initializePage() {
+function loadScannerConnection() {
   if (!isWebSerialSupported()) {
     setStatus(
       els.connectionStatus,
@@ -154,7 +143,6 @@ function initializePage() {
       void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
         .then((response) => {
           applyDaemonStatus(response.status, response.source);
-          els.captureWarning.hidden = embedded || !response.captureError;
         })
         .catch((error) =>
           setStatus(els.connectionStatus, error.message, 'error')

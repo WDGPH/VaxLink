@@ -10,8 +10,7 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       'connectGrantedBtn',
       'disconnectBtn',
       'connectionStatus',
-      'scannerIdentity',
-      'captureWarning'
+      'scannerIdentity'
     ].map((id) => [
       id,
       {
@@ -33,14 +32,9 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     globalThis,
     'navigator'
   );
-  let ready, listener, releaseCommand, commandStarted;
-  globalThis.window = {};
-  window.parent = window;
+  let listener, releaseCommand, commandStarted;
   globalThis.document = {
-    getElementById: (id) => nodes[id],
-    addEventListener(_type, handler) {
-      ready = handler;
-    }
+    getElementById: (id) => nodes[id]
   };
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
@@ -93,15 +87,12 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       }
     });
   try {
-    await import('../extension/scanner-setup.js?status-regression');
-    await ready();
+    const { initializeScannerSettings } =
+      await import('../extension/scanner-settings.js?status-regression');
+    initializeScannerSettings();
+    await Promise.resolve();
     assert.equal(nodes.connectionStatus.textContent, 'Connection unknown');
     assert.equal(nodes.connectGrantedBtn.hidden, false);
-    assert.equal(
-      nodes.captureWarning.hidden,
-      false,
-      'standalone capture warnings must be visible'
-    );
     live('error');
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
     for (const action of ['requestPortBtn', 'connectGrantedBtn']) {
@@ -133,7 +124,6 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     }
   } finally {
     delete globalThis.document;
-    delete globalThis.window;
     delete globalThis.chrome;
     if (navigatorDescriptor)
       Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
