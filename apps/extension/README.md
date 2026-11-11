@@ -63,7 +63,7 @@ The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup in
 
 ## Dedicated Scanner Channel
 
-Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use `scanner-setup.html` from the popup settings to grant Web Serial permission once, test the raw framed scan, and confirm the scanner is not also typing into a focused input. The setup tab can then be closed.
+Scanner capture uses a Chrome offscreen document and dedicated worker instead of page-level keyboard, paste, or input interception. Use Scanner in Settings to pair the scanner and check its connection and capture status. The setup page can then be closed.
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 

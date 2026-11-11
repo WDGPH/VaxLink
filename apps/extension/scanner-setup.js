@@ -3,7 +3,8 @@ import {
   SCANNER_STATUS_STATES,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
-  selectGrantedPort
+  selectGrantedPort,
+  getScannerConnectionLabel
 } from './scanner/scanner-daemon-shared.js';
 import {
   SERIAL_SCANNER_PROFILES,
@@ -20,9 +21,11 @@ import {
 } from './scanner/serial-provider.js';
 
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
-let lastLeakageInputAt = 0;
+let statusChangeVersion = 0;
 
 const els = {};
+const embedded = window.parent !== window;
+if (embedded) document.documentElement.classList.add('embedded');
 
 document.addEventListener('DOMContentLoaded', () => {
   [
@@ -32,14 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
     'connectGrantedBtn',
     'disconnectBtn',
     'connectionStatus',
-    'deviceProfile',
-    'deviceVendor',
-    'deviceProduct',
-    'deviceState',
-    'decodedOutput',
-    'rawBytesOutput',
-    'leakageInput',
-    'leakageStatus',
+    'scannerIdentity',
+    'connectionDetails',
+    'scannerUsbIdentity',
     'routeStatus'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
@@ -68,10 +66,6 @@ function bindEvents() {
   els.disconnectBtn?.addEventListener('click', () => {
     void disconnectActivePort();
   });
-
-  els.leakageInput?.addEventListener('input', () => {
-    lastLeakageInputAt = Date.now();
-  });
 }
 
 chrome.runtime.onMessage.addListener((request) => {
@@ -79,14 +73,13 @@ chrome.runtime.onMessage.addListener((request) => {
     request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED &&
     request.status
   ) {
+    statusChangeVersion++;
     applyDaemonStatus(request.status);
   }
   if (request?.action === SCANNER_DAEMON_ACTIONS.SCAN_ECHO && request.scan) {
-    els.decodedOutput.textContent = request.scan.rawText || '';
-    els.rawBytesOutput.textContent =
-      request.scan.rawBytesHex || 'No raw bytes captured.';
-    checkKeyboardLeakage(request.scan.rawText || '');
     renderDaemonRouteResult(request.response || {});
+    if (!embedded && els.routeStatus.classList.contains('error'))
+      document.getElementById('scannerDiagnostics').open = true;
   }
   return false;
 });
@@ -112,32 +105,52 @@ function applyDaemonStatus(status, source = 'live', captureSource = source) {
   const profile = getSerialScannerProfile(
     scannerStatusSnapshot.profileId || getSelectedProfile()?.id
   );
-  if (scannerStatusSnapshot.portInfo) {
-    updateDevicePanel(profile, scannerStatusSnapshot.portInfo);
-  }
   const state = scannerStatusSnapshot.state;
-  const connected = state === SCANNER_STATUS_STATES.CONNECTED;
+  const connected =
+    state === SCANNER_STATUS_STATES.CONNECTED && source === 'live';
   const tone = connected
     ? 'success'
-    : state === SCANNER_STATUS_STATES.ERROR ||
-        state === SCANNER_STATUS_STATES.BUSY
+    : source === 'live' &&
+        (state === SCANNER_STATUS_STATES.ERROR ||
+          state === SCANNER_STATUS_STATES.BUSY)
       ? 'error'
       : 'info';
-  const message = connected
-    ? scannerStatusSnapshot.captureCount > 0
-      ? `${profile.label} is connected through Web Serial. Hardware captures since daemon start: ${scannerStatusSnapshot.captureCount}; latest ${scannerStatusSnapshot.lastCaptureAt || 'time unavailable'}.`
-      : `${profile.label} is connected through Web Serial, but no hardware scan has reached the daemon yet.`
-    : scannerStatusSnapshot.lastError ||
-      `Scanner daemon state: ${state.replaceAll('_', ' ')}.`;
-  const sourceNote =
-    source === 'cached' ? ' Status is cached; connection is unconfirmed.' : '';
-  const captureNote =
-    scannerStatusSnapshot.lastKnownCaptureAt && captureSource === 'cached'
-      ? ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`
-      : '';
-  setStatus(els.connectionStatus, message + sourceNote + captureNote, tone);
-  updateDeviceState(connected ? 'Connected in background' : state);
+  setStatus(
+    els.connectionStatus,
+    getScannerConnectionLabel(status, source),
+    tone
+  );
+  const identityKnown = !!scannerStatusSnapshot.profileId;
+  els.scannerIdentity.hidden = !identityKnown;
+  els.scannerIdentity.textContent = identityKnown
+    ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label} (Web Serial)`
+    : '';
+  let detail = '';
+  if (
+    source === 'live' &&
+    (scannerStatusSnapshot.captureCount > 0 ||
+      scannerStatusSnapshot.lastCaptureAt)
+  )
+    detail = `Hardware captures in this session: ${scannerStatusSnapshot.captureCount}; latest ${scannerStatusSnapshot.lastCaptureAt || 'time unavailable'}.`;
+  else if (connected)
+    detail = 'No hardware scan has reached VaxLink in this session.';
+  if (scannerStatusSnapshot.lastError)
+    detail += ` ${scannerStatusSnapshot.lastError}`;
+  if (scannerStatusSnapshot.lastKnownCaptureAt && captureSource === 'cached')
+    detail += ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`;
+  setStatus(els.connectionDetails, detail.trim(), tone);
+  els.connectionDetails.hidden = !detail.trim();
+  const info = scannerStatusSnapshot.portInfo;
+  els.scannerUsbIdentity.hidden = !info;
+  els.scannerUsbIdentity.textContent = info
+    ? `${connected ? 'USB device' : 'Saved USB device'}: vendor ${formatUsbId(info.usbVendorId)}, product ${formatUsbId(info.usbProductId)}`
+    : '';
   setButtons({ canConnect: !connected, canDisconnect: connected });
+  els.requestPortBtn.hidden = connected;
+  els.connectGrantedBtn.hidden =
+    connected ||
+    (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !identityKnown);
+  els.disconnectBtn.hidden = !connected;
 }
 
 function renderDaemonRouteResult(response) {
@@ -202,7 +215,10 @@ function initializePage() {
       );
       els.profileSelect.value = profile.id;
       renderProfileNote(profile);
-      if (portInfo) updateDevicePanel(profile, portInfo);
+      if (portInfo) {
+        els.scannerIdentity.hidden = false;
+        els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
+      }
       void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
         .then((response) => {
           applyDaemonStatus(
@@ -210,12 +226,14 @@ function initializePage() {
             response.source,
             response.captureSource
           );
-          if (response.captureError)
+          if (response.captureError && !embedded) {
+            document.getElementById('scannerDiagnostics').open = true;
             setStatus(
               els.routeStatus,
               'A scan could not be saved or delivered. Check pending scans and rescan if needed.',
               'error'
             );
+          }
         })
         .catch((error) =>
           setStatus(els.connectionStatus, error.message, 'error')
@@ -226,7 +244,7 @@ function initializePage() {
   navigator.serial.addEventListener('connect', () => {
     setStatus(
       els.connectionStatus,
-      'Serial device connected. Use Reconnect Granted Port or Select Scanner.',
+      'Scanner detected. Choose Reconnect or Pair scanner.',
       'info'
     );
   });
@@ -276,22 +294,20 @@ async function requestAndOpenPort() {
     );
     const port = await requestSerialScannerPort(profile);
     const portInfo = normalizeScannerPortInfo(port.getInfo());
-    updateDevicePanel(profile, portInfo);
-    const response = await sendScannerDaemonCommand(
-      SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-      {
-        profileId: profile.id,
-        preferredPortInfo: portInfo,
-        enableAutostart: true,
-        trigger: 'setup_permission_granted'
-      }
-    );
-    applyDaemonStatus(response.status);
-    setStatus(
-      els.connectionStatus,
-      'Permission granted. The background scanner daemon is connecting; this tab may be closed.',
-      'success'
-    );
+    els.scannerIdentity.hidden = false;
+    els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
+    const versionAtRequest = statusChangeVersion;
+    await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
+      profileId: profile.id,
+      preferredPortInfo: portInfo,
+      enableAutostart: true,
+      trigger: 'setup_permission_granted'
+    });
+    // The command acknowledges the request using a saved snapshot. A live
+    // update must confirm connection, and a late acknowledgement must not
+    // replace an update received while the request was pending.
+    if (statusChangeVersion === versionAtRequest)
+      setStatus(els.connectionStatus, 'Scanner selected. Connecting…', 'info');
   } catch (error) {
     const message = error.message || 'Scanner selection failed.';
     setStatus(els.connectionStatus, message, 'error');
@@ -315,24 +331,22 @@ async function reconnectGrantedPort() {
       throw new Error(
         selection.reason === 'ambiguous'
           ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
-          : 'The selected scanner could not be identified. Reconnect it or use Select Scanner.'
+          : 'The selected scanner could not be identified. Reconnect it or use Pair scanner.'
       );
     }
-    const response = await sendScannerDaemonCommand(
-      SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-      {
-        profileId: profile.id,
-        preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
-        enableAutostart: true,
-        trigger: 'setup_reconnect'
-      }
-    );
-    applyDaemonStatus(response.status);
-    setStatus(
-      els.connectionStatus,
-      'Reconnect requested. The background daemon will keep retrying if the scanner is temporarily unavailable.',
-      'success'
-    );
+    const versionAtRequest = statusChangeVersion;
+    await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
+      profileId: profile.id,
+      preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
+      enableAutostart: true,
+      trigger: 'setup_reconnect'
+    });
+    if (statusChangeVersion === versionAtRequest)
+      setStatus(
+        els.connectionStatus,
+        'Reconnect requested. Checking connection…',
+        'info'
+      );
   } catch (error) {
     const message = error.message || 'Reconnect failed.';
     setStatus(els.connectionStatus, message, 'error');
@@ -396,55 +410,6 @@ function renderChartRouteResult(response) {
     `Scan reached chart tab ${response.tabId}, but ${message}`,
     'error'
   );
-}
-
-function checkKeyboardLeakage(rawText) {
-  const before = String(els.leakageInput.value || '');
-  const startedAt = Date.now();
-  setTimeout(() => {
-    const after = String(els.leakageInput.value || '');
-    const recentInput = lastLeakageInputAt >= startedAt - 250;
-    const leakedText = normalizeForLeakage(after).includes(
-      normalizeForLeakage(rawText)
-    );
-    if (recentInput || (after !== before && leakedText)) {
-      setStatus(
-        els.leakageStatus,
-        'Scanner is still emitting keyboard input. Reconfigure the scanner/cradle to USB CDC only and disable HID keyboard output.',
-        'error'
-      );
-      return;
-    }
-    setStatus(
-      els.leakageStatus,
-      'No keyboard leakage detected for the latest serial scan.',
-      'success'
-    );
-  }, 350);
-}
-
-function normalizeForLeakage(value) {
-  return String(value || '')
-    .replace(/\s+/g, '')
-    .toLowerCase();
-}
-
-function updateDevicePanel(profile, info = {}) {
-  els.deviceProfile.textContent = profile.label;
-  els.deviceVendor.textContent = formatUsbId(info.usbVendorId);
-  els.deviceProduct.textContent = formatUsbId(info.usbProductId);
-  updateDeviceState('Connected');
-}
-
-function updateDeviceState(state) {
-  if (els.deviceState) {
-    els.deviceState.textContent = state;
-  }
-  if (state === 'Disconnected') {
-    els.deviceProfile.textContent = 'Not connected';
-    els.deviceVendor.textContent = 'Unknown';
-    els.deviceProduct.textContent = 'Unknown';
-  }
 }
 
 function setButtons({ canConnect, canDisconnect }) {

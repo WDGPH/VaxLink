@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <style>
       :root {
-        --bg: #f2f7fb;
         --panel: #ffffff;
         --ink: #102135;
         --subtle: #5d6b7a;
@@ -25,22 +24,15 @@
         min-height: 100%;
         color: var(--ink);
         font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
-        background:
-          radial-gradient(circle at 10% -20%, #d8eef7 0%, transparent 46%),
-          radial-gradient(circle at 95% 0%, #dff4ec 0%, transparent 40%),
-          var(--bg);
-      }
-
-      .shell {
-        padding: 8px;
+        background: var(--panel);
       }
 
       .panel {
-        border: 1px solid var(--line);
-        border-radius: 24px;
         background: var(--panel);
-        box-shadow: 0 10px 26px rgba(16, 33, 53, 0.12);
         overflow: hidden;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
 
       .brand {
@@ -78,12 +70,6 @@
         color: #0b3d4f;
       }
 
-      .tagline {
-        margin: 4px 0 0;
-        font-size: 12px;
-        color: var(--subtle);
-      }
-
       .alpha-badge {
         display: inline-block;
         margin-left: 8px;
@@ -107,32 +93,54 @@
       }
 
       .header-icon-btn {
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
         flex: 0 0 auto;
         display: grid;
         place-items: center;
         padding: 0;
-        border-radius: 12px;
-        border: 1px solid #cfe0eb;
-        background: rgba(255, 255, 255, 0.78);
+        border-radius: 8px;
+        border: 0;
+        background: transparent;
         color: #14505f;
-        box-shadow: 0 6px 14px rgba(16, 33, 53, 0.08);
+        box-shadow: none;
+        font-size: 28px;
+        line-height: 1;
       }
 
-      .header-icon-btn:hover {
-        filter: none;
-        background: #ffffff;
-      }
-
+      .header-icon-btn:hover,
       .header-icon-btn[aria-expanded='true'] {
-        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
-        border-color: transparent;
-        color: #ffffff;
+        filter: none;
+        color: #0f8b8d;
+      }
+
+      .header-icon-btn:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
       }
 
       .content {
         padding: 12px 14px 14px;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #mainWorkflowPanel,
+      .mode-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #mainWorkflowPanel[hidden] {
+        display: none;
       }
 
       .mode-switch {
@@ -164,46 +172,6 @@
       .mode-panel[hidden],
       .scanner-input[hidden] {
         display: none !important;
-      }
-
-      .scan-state {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        margin-bottom: 12px;
-        padding: 12px 13px;
-        border-radius: 18px;
-        border: 1px solid #cfe0eb;
-        background: linear-gradient(145deg, #f7fcff 0%, #eef8f8 100%);
-      }
-
-      .scan-icon {
-        width: 40px;
-        height: 40px;
-        border-radius: 14px;
-        display: grid;
-        place-items: center;
-        font-size: 20px;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.18);
-        flex: 0 0 auto;
-      }
-
-      .scan-copy {
-        min-width: 0;
-      }
-
-      .scan-title {
-        font-weight: 800;
-        font-size: 14px;
-        color: #10384a;
-      }
-
-      .scan-subtitle {
-        margin-top: 2px;
-        font-size: 12px;
-        line-height: 1.4;
-        color: #597081;
       }
 
       label {
@@ -271,43 +239,55 @@
         box-shadow: 0 0 0 3px var(--ring);
       }
 
-      .scan-helper {
-        margin: 8px 2px 0;
-        font-size: 11px;
-        line-height: 1.45;
-        color: #5f7283;
-      }
-
-      .workflow-note {
-        margin-top: 10px;
-        padding: 10px 11px;
-        border-radius: 14px;
-        border: 1px solid #d9e7ef;
-        background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
-        font-size: 12px;
-        line-height: 1.5;
-        color: #486071;
-      }
-
-      .scanner-banner[hidden] {
+      .scanner-setup-prompt[hidden] {
         display: none !important;
       }
 
-      .scanner-banner {
-        margin-top: 10px;
-        padding: 10px 11px;
-        border-radius: 14px;
-        border: 1px solid #f2d3a6;
-        background: #fff7ed;
-        font-size: 12px;
-        line-height: 1.5;
-        color: #9a3412;
+      .scanner-setup-prompt {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        padding: 48px 16px;
+        text-align: center;
       }
 
-      .scanner-banner.error {
-        border-color: #efc2c4;
-        background: #fff4f4;
-        color: #97272c;
+      .scanner-setup-prompt h3 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .scanner-setup-prompt p,
+      #scannerConnectionNote {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--subtle);
+      }
+
+      .scanner-setup-prompt button {
+        width: auto;
+        background: transparent;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      #continueWithoutScannerBtn {
+        padding: 4px;
+        border: 0;
+        color: var(--subtle);
+        font-size: 12px;
+        font-weight: 400;
+        text-decoration: underline;
+      }
+
+      .scanner-setup-required .scanner-input,
+      .scanner-setup-required .mode-panel {
+        display: none !important;
       }
 
       .actions {
@@ -353,39 +333,23 @@
         color: #fff;
       }
 
-      #clearMultipleBtn,
-      #addCurrentBtn {
-        background: #0f8b8d;
-        color: #fff;
-      }
-
-      #addBatchBtn {
-        background: #d9f0ef;
-        border: 1px solid #b6dcda;
-        color: #114b53;
-      }
-
       #exportCsvBtn {
         background: #164e63;
         color: #fff;
       }
 
-      #clearInventoryBtn {
-        background: #fff7ed;
-        border: 1px solid #f4cda5;
-        color: #9a3412;
-      }
-
       #refreshNvcBtn {
-        background: #e7f3f4;
-        border: 1px solid #bddadd;
+        width: auto;
+        padding: 6px 0;
+        background: transparent;
+        border: 0;
         color: #14505f;
+        font-size: 12px;
+        text-decoration: underline;
       }
 
       #nvcStatus {
-        margin: 10px 0 16px;
-        padding: 0 0 12px;
-        border-bottom: 1px solid var(--line);
+        margin: 10px 0 0;
         font-size: 11px;
         line-height: 1.5;
         color: #486071;
@@ -577,6 +541,7 @@
       }
 
       .inventory {
+        flex: 1;
         margin-top: 12px;
         padding: 10px 11px;
         border-radius: 16px;
@@ -594,8 +559,6 @@
         margin-top: 10px;
         display: grid;
         gap: 8px;
-        max-height: 220px;
-        overflow-y: auto;
         padding-right: 2px;
       }
 
@@ -693,61 +656,88 @@
         font-size: 11px;
       }
 
-      /* ── Test Mode (manual barcode add in Multiple Inject) ── */
-      .test-mode-panel {
-        margin-top: 10px;
-        border-radius: 14px;
-        border: 1px dashed #b6d4e0;
-        background: #f4fafc;
-        overflow: hidden;
-      }
-
-      .test-mode-panel > summary {
-        list-style: none;
-        padding: 9px 12px;
-        font-size: 12px;
-        font-weight: 700;
-        color: #0e6e88;
-        cursor: pointer;
-        user-select: none;
-      }
-
-      .test-mode-panel > summary::-webkit-details-marker {
-        display: none;
-      }
-      .test-mode-panel > summary::before {
-        content: '▶ ';
-        font-size: 10px;
-      }
-      .test-mode-panel[open] > summary::before {
-        content: '▼ ';
-      }
-
-      .test-mode-body {
-        padding: 0 12px 12px;
-        display: grid;
+      .queue-heading {
+        display: flex;
+        align-items: center;
         gap: 8px;
+        margin-bottom: 10px;
       }
 
-      .test-mode-body label {
+      .queue-heading .result-heading {
+        margin: 0;
+        text-transform: none;
+        font-size: 13px;
+      }
+
+      .queue-count {
+        padding: 3px 7px;
+        border-radius: 8px;
+        background: #e7f1f6;
+        color: #597081;
         font-size: 11px;
         font-weight: 700;
-        color: #476173;
       }
 
-      .test-mode-body textarea {
-        width: 100%;
-        min-height: 56px;
-        box-sizing: border-box;
-        resize: vertical;
+      #clearMultipleBtn,
+      #clearInventoryBtn {
+        margin-left: auto;
+        width: auto;
+        padding: 6px;
+        background: transparent;
+        color: #597081;
+        font-size: 11px;
       }
 
-      #testModeAddBtn {
-        background: #0e7490;
+      #queueEntryToggleBtn,
+      #inventoryEntryToggleBtn {
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        border-radius: 9px;
+        background: #0e8495;
         color: #fff;
+        font-size: 24px;
+        font-weight: 400;
+        line-height: 1;
       }
 
-      .settings-panel[hidden] {
+      .queue-entry[hidden],
+      .inventory-list:empty {
+        display: none;
+      }
+
+      .queue-entry {
+        margin-top: 12px;
+      }
+
+      .queue-entry textarea {
+        min-height: 62px;
+      }
+
+      .queue-entry-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .queue-entry-actions button {
+        background: #0e8495;
+        color: #fff;
+        width: auto;
+        padding: 8px 12px;
+        border-radius: 9px;
+        font-size: 11px;
+      }
+
+      #cancelQueueEntryBtn,
+      #cancelInventoryEntryBtn {
+        background: transparent;
+        color: #597081;
+      }
+
+      .settings-panel[hidden],
+      #analyticsPanel[hidden] {
         display: none !important;
       }
 
@@ -761,166 +751,163 @@
         padding: 10px 11px;
         border-radius: 16px;
         border: 1px solid #c8d9e8;
-        background: linear-gradient(180deg, #f8fcff 0%, #f2f8fb 100%);
+        background: #fff;
       }
 
-      .analytics {
-        padding: 12px;
-        border-radius: 18px;
-        border: 1px solid #c9dbea;
-        background:
-          radial-gradient(
-            circle at top right,
-            rgba(15, 139, 141, 0.12) 0%,
-            transparent 36%
-          ),
-          linear-gradient(180deg, #f8fcff 0%, #eef7fb 100%);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      .settings-card > summary {
+        cursor: pointer;
+        font-size: 13px;
+        color: var(--ink);
+      }
+
+      .settings-card > summary small {
+        display: block;
+        margin: 5px 0 0 14px;
+        font-size: 11px;
+        font-weight: 400;
+        color: var(--subtle);
+      }
+
+      .settings-state {
+        float: right;
+        font-size: 11px;
+        color: var(--subtle);
+      }
+
+      .settings-card[open] > summary {
+        margin-bottom: 12px;
+      }
+
+      .settings-card[open] .settings-state {
+        display: none;
+      }
+
+      #nvcSettingsSection[open] #nvcSettingsVersion {
+        display: none;
+      }
+
+      .settings-title {
+        margin: 0 0 2px;
+        font-size: 17px;
+      }
+
+      .technical-details {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--subtle);
+      }
+
+      .technical-details summary {
+        cursor: pointer;
+      }
+
+      #deviceMetadata {
+        overflow-wrap: anywhere;
+        line-height: 1.5;
+      }
+
+      #checkPanoramaBtn {
+        width: auto;
+        margin-top: 12px;
+        padding: 7px 10px;
+        font-size: 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+      }
+      #scannerSettingsFrame {
+        width: 100%;
+        border: 0;
       }
 
       .analytics-summary {
         display: grid;
-        gap: 10px;
+        gap: 16px;
+        margin-top: 16px;
       }
 
-      .analytics-hero {
-        padding: 12px;
-        border-radius: 16px;
-        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
-        color: #ffffff;
-        box-shadow: 0 10px 22px rgba(14, 116, 144, 0.2);
-      }
-
-      .analytics-hero-label {
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-        color: rgba(255, 255, 255, 0.82);
-      }
-
-      .analytics-hero-value {
-        margin-top: 4px;
-        font-size: 28px;
-        line-height: 1;
-        font-weight: 800;
-        letter-spacing: -0.4px;
-      }
-
-      .analytics-hero-subtitle {
-        margin-top: 6px;
-        font-size: 12px;
-        line-height: 1.45;
-        color: rgba(255, 255, 255, 0.9);
-      }
-
-      .analytics-grid {
+      .activity-today {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        padding: 0 0 16px;
+        border-bottom: 1px solid var(--line);
       }
 
-      .analytics-card {
-        padding: 11px;
-        border-radius: 14px;
-        border: 1px solid #d7e5ef;
-        background: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
-      }
-
-      .analytics-card.device {
-        grid-column: 1 / -1;
-        background: linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%);
-      }
-
-      .analytics-card-header {
+      .activity-metric {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 10px;
-      }
-
-      .analytics-card-title {
-        font-size: 12px;
-        font-weight: 800;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-        color: #0f4c5c;
-      }
-
-      .analytics-chip {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #e5f4f5;
-        color: #14505f;
-        font-size: 10px;
-        font-weight: 800;
-        letter-spacing: 0.2px;
-        text-transform: uppercase;
-      }
-
-      .analytics-metrics {
-        display: grid;
-        gap: 7px;
-      }
-
-      .analytics-metric {
-        display: flex;
         align-items: baseline;
-        justify-content: space-between;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--subtle);
+      }
+
+      .activity-metric-value {
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .activity-today .activity-metric {
+        display: block;
+      }
+
+      .activity-today .activity-metric-value {
+        display: block;
+        margin-top: 8px;
+        font-size: 30px;
+      }
+
+      .activity-secondary {
+        display: grid;
         gap: 10px;
-        padding-top: 7px;
-        border-top: 1px solid rgba(148, 163, 184, 0.18);
       }
 
-      .analytics-metric:first-child {
-        padding-top: 0;
-        border-top: 0;
+      .activity-section {
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        font-size: 12px;
       }
 
-      .analytics-metric-label {
-        min-width: 0;
+      .activity-section summary {
+        cursor: pointer;
+        color: var(--ink);
+      }
+
+      .activity-section summary small {
+        display: block;
+        margin: 4px 0 0 14px;
+        color: var(--subtle);
         font-size: 11px;
-        line-height: 1.35;
-        color: #5a7082;
       }
 
-      .analytics-metric-value {
-        flex: 0 0 auto;
-        font-size: 16px;
-        font-weight: 800;
-        color: #11364a;
-        text-align: right;
+      .activity-section[open] summary {
+        margin-bottom: 12px;
       }
 
-      .analytics-device-name {
-        font-size: 14px;
-        font-weight: 800;
-        color: #12364a;
-        word-break: break-word;
+      .activity-section .settings-hint {
+        margin-bottom: 12px;
       }
 
-      .analytics-device-meta {
-        margin-top: 6px;
+      #analyticsPanel button,
+      .settings-card .actions button {
+        width: auto;
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        font-size: 11px;
+      }
+
+      .settings-card .actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
       }
 
-      .analytics-device-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #eef6fb;
-        color: #345067;
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 0.2px;
-        text-transform: uppercase;
+      #deviceMetadata {
+        white-space: pre-line;
       }
 
       .analytics-field {
@@ -952,79 +939,6 @@
         font-size: 11px;
         line-height: 1.45;
         color: #5f7283;
-      }
-
-      .scanner-status-card {
-        margin-top: 10px;
-        padding: 10px 11px;
-        border-radius: 14px;
-        border: 1px solid #d7e5ef;
-        background: rgba(255, 255, 255, 0.92);
-        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
-      }
-
-      .scanner-status-top {
-        display: flex;
-        justify-content: space-between;
-        gap: 10px;
-        align-items: center;
-      }
-
-      .scanner-status-label {
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-        color: #0f4c5c;
-      }
-
-      .scanner-status-title {
-        margin-top: 4px;
-        font-size: 14px;
-        font-weight: 800;
-        color: #12364a;
-      }
-
-      .scanner-status-detail {
-        margin-top: 8px;
-        font-size: 12px;
-        line-height: 1.45;
-        color: #5a7082;
-      }
-
-      .scanner-status-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #eef6fb;
-        color: #345067;
-        font-size: 10px;
-        font-weight: 800;
-        letter-spacing: 0.2px;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-
-      .scanner-status-pill.success {
-        background: #e9f9ef;
-        color: #10683e;
-      }
-
-      .scanner-status-pill.warning {
-        background: #fff7ed;
-        color: #9a3412;
-      }
-
-      .scanner-status-pill.error {
-        background: #fff4f4;
-        color: #97272c;
-      }
-
-      #scannerReconnectBtn {
-        background: #d9f0ef;
-        border: 1px solid #b6dcda;
-        color: #114b53;
       }
 
       #saveAnalyticsLabelBtn {
@@ -1069,21 +983,42 @@
                   VaxLink
                   <span id="alphaBadge" class="alpha-badge" hidden>Alpha</span>
                 </h2>
-                <p class="tagline">
-                  Scan once. Parse automatically. Chart faster.
-                </p>
               </div>
             </div>
-            <button
-              id="settingsToggleBtn"
-              class="header-icon-btn"
-              type="button"
-              aria-label="Open settings and analytics"
-              aria-expanded="false"
-              aria-controls="settingsPanel"
-            >
-              &#9881;
-            </button>
+            <div class="header-actions">
+              <button
+                id="analyticsToggleBtn"
+                class="header-icon-btn"
+                type="button"
+                aria-label="Local Activity"
+                title="Local Activity"
+                aria-expanded="false"
+                aria-controls="analyticsPanel"
+              >
+                <svg
+                  width="24"
+                  height="24"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="M4 3v17h17M8 16v-5m5 5V7m5 9V4" />
+                </svg>
+              </button>
+              <button
+                id="settingsToggleBtn"
+                class="header-icon-btn"
+                type="button"
+                aria-label="Settings"
+                title="Settings"
+                aria-expanded="false"
+                aria-controls="settingsPanel"
+              >
+                &#9881;
+              </button>
+            </div>
           </div>
         </div>
         <div class="content">
@@ -1092,62 +1027,60 @@
             <button id="dismissQueueSaveNotice" type="button">Dismiss</button>
           </div>
           <div id="settingsPanel" class="settings-panel" hidden>
-            <div class="settings-card">
-              <div class="result-heading">Data Tools</div>
-              <div class="actions">
-                <button id="refreshNvcBtn">Refresh NVC Data</button>
+            <h3 class="settings-title">Settings</h3>
+            <details id="scannerSettingsSection" class="settings-card">
+              <summary>
+                <strong>Scanner</strong>
+                <span id="scannerSettingsState" class="settings-state"
+                  >Checking</span
+                >
+                <small>Pairing, connection and diagnostics</small>
+              </summary>
+              <div id="scannerCaptureWarning" class="settings-card" hidden>
+                <p class="settings-hint" role="status">
+                  A scan could not be saved or delivered. Check pending scans
+                  and the chart before rescanning.
+                </p>
+                <div class="actions">
+                  <button id="acknowledgeScannerErrorBtn" type="button">
+                    Acknowledge scanner warning
+                  </button>
+                </div>
               </div>
+              <iframe
+                id="scannerSettingsFrame"
+                title="Scanner settings"
+                allow="serial"
+              ></iframe>
+            </details>
+            <details id="nvcSettingsSection" class="settings-card">
+              <summary>
+                <strong>NVC Catalogue</strong>
+                <span id="nvcSettingsState" class="settings-state"
+                  >Checking</span
+                >
+                <small id="nvcSettingsVersion">Version unavailable</small>
+              </summary>
               <div
                 id="nvcStatus"
                 role="status"
                 aria-label="NVC catalogue status"
               ></div>
+              <button id="refreshNvcBtn">Refresh</button>
+            </details>
+            <details id="autofillSettingsSection" class="settings-card">
+              <summary>
+                <strong>Autofill</strong>
+                <small>Date, reason and consent preferences</small>
+              </summary>
               <label class="settings-check" for="adminDateTimeAutofillToggle">
                 <input id="adminDateTimeAutofillToggle" type="checkbox" />
-                <span>Auto-fill Date Administered from scan time</span>
+                <span>Use scan time for Date Administered</span>
               </label>
               <p class="settings-hint">
-                When enabled, VaxLink fills Panorama Date Administered date and
-                time using the scan timestamp.
+                Pre-fills the administration date and time from the barcode
+                scan. Verify before saving.
               </p>
-              <p class="settings-hint">
-                Pair a USB CDC scanner once. Background Web Serial capture
-                continues when the setup tab is closed and queues scans while
-                Windows is locked.
-              </p>
-              <div class="actions">
-                <button id="acknowledgeScannerErrorBtn" type="button" hidden>
-                  Acknowledge scanner warning
-                </button>
-                <button id="scannerSetupBtn" type="button">
-                  Open Scanner Setup
-                </button>
-                <button id="workstationHealthBtn" type="button">
-                  Check workstation health
-                </button>
-              </div>
-              <div id="scannerStatusCard" class="scanner-status-card">
-                <div class="scanner-status-top">
-                  <div>
-                    <div class="scanner-status-label">Station Scanner</div>
-                    <div id="scannerStatusTitle" class="scanner-status-title">
-                      Needs Setup
-                    </div>
-                  </div>
-                  <div id="scannerStatusPill" class="scanner-status-pill">
-                    Offline
-                  </div>
-                </div>
-                <div id="scannerStatusDetail" class="scanner-status-detail">
-                  Open Scanner Setup once to pair a Web Serial scanner for this
-                  workstation.
-                </div>
-                <div class="actions">
-                  <button id="scannerReconnectBtn" type="button" hidden>
-                    Open Setup
-                  </button>
-                </div>
-              </div>
               <label class="settings-check" for="reasonConsentAutofillToggle">
                 <input id="reasonConsentAutofillToggle" type="checkbox" />
                 <span>Auto-fill Reason for Immunization and Consent</span>
@@ -1157,24 +1090,47 @@
                 and Consent for Service to "Consent obtained" on the Panorama
                 immunization form.
               </p>
-            </div>
-            <div class="analytics">
-              <div class="result-heading">Local Analytics</div>
-              <div id="analyticsSummary" class="analytics-summary">
-                Loading analytics...
-              </div>
+            </details>
+            <details id="supportSettingsSection" class="settings-card">
+              <summary>
+                <strong>Support &amp; Diagnostics</strong>
+                <small>Workstation details and Panorama integration</small>
+              </summary>
+              <p id="extensionInfo" class="settings-hint"></p>
+              <button id="checkPanoramaBtn" type="button">
+                Check Panorama integration
+              </button>
+              <p id="panoramaCheckResult" class="settings-hint" role="status">
+                Checks the Panorama tab selected when Settings was opened. It
+                does not change the form.
+              </p>
               <div class="analytics-field">
-                <label for="analyticsLabelInput"
-                  >Workstation / Nurse Label</label
-                >
+                <label for="analyticsLabelInput">Workstation label</label>
                 <input
                   id="analyticsLabelInput"
                   type="text"
-                  placeholder="Example: Clinic 2 - Nurse A"
+                  placeholder="Example: Clinic 2"
                 />
               </div>
               <div class="actions">
-                <button id="saveAnalyticsLabelBtn">Save Label</button>
+                <button id="saveAnalyticsLabelBtn">Save label</button>
+              </div>
+              <details class="technical-details">
+                <summary>Device details and reset</summary>
+                <p id="deviceMetadata"></p>
+                <button id="resetAnalyticsBtn">Reset local activity</button>
+              </details>
+            </details>
+          </div>
+          <div id="analyticsPanel" class="analytics" hidden>
+            <h3 class="settings-title">Local Activity</h3>
+            <p id="activityDeviceLabel" class="settings-hint">On this device</p>
+            <div id="analyticsSummary" class="analytics-summary">
+              Loading activity...
+            </div>
+            <details class="technical-details">
+              <summary>Export activity data</summary>
+              <div class="actions">
                 <div class="action-row">
                   <button id="exportTodayAnalyticsBtn">
                     Export Today JSON
@@ -1183,24 +1139,11 @@
                     Export Pilot JSON
                   </button>
                 </div>
-                <div class="action-row">
-                  <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
-                  <button id="resetAnalyticsBtn">Reset Analytics</button>
-                </div>
+                <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
               </div>
-            </div>
+            </details>
           </div>
           <div id="mainWorkflowPanel">
-            <div id="scanState" class="scan-state" aria-live="polite">
-              <div id="scanStateIcon" class="scan-icon">&#128137;</div>
-              <div class="scan-copy">
-                <div id="scanStateTitle" class="scan-title">Single Inject</div>
-                <div id="scanStateSubtitle" class="scan-subtitle">
-                  One scan fills the current chart immediately.
-                </div>
-              </div>
-            </div>
-
             <div
               class="mode-switch"
               role="tablist"
@@ -1235,6 +1178,21 @@
               </button>
             </div>
 
+            <section
+              id="scannerSetupPrompt"
+              class="scanner-setup-prompt"
+              hidden
+            >
+              <h3>Setup Scanner</h3>
+              <p>Connect your scanner in Settings to get started.</p>
+              <button id="openScannerSettingsBtn" type="button">
+                Open Settings
+              </button>
+              <button id="continueWithoutScannerBtn" type="button">
+                Continue without scanner
+              </button>
+            </section>
+            <p id="scannerConnectionNote" role="status" hidden></p>
             <details id="heldScannerScans" hidden>
               <summary id="heldScannerScanCount">Held scanner scans</summary>
               <p>
@@ -1254,76 +1212,112 @@
               ></textarea>
             </div>
 
-            <p id="modeHelper" class="scan-helper">
-              Use this when one vaccine is being charted now. Paste barcode text
-              below to preview, or connect a Web Serial scanner for hands-free
-              auto-fill.
-            </p>
-            <div id="scannerWorkflowBanner" class="scanner-banner" hidden></div>
-
             <div id="singleModeSection" class="mode-panel">
-              <div class="workflow-note">
-                Web Serial scanner capture fills the open chart in Single Inject
-                and saves scans automatically in Multiple Inject or Inventory.
-              </div>
               <div class="actions">
-                <button id="autoFillBtn">Auto-fill CHR</button>
+                <button id="autoFillBtn">Fill Chart</button>
               </div>
             </div>
 
             <div id="multipleModeSection" class="mode-panel" hidden>
-              <div class="workflow-note">
-                With a Web Serial scanner connected, scans are stored in a
-                station session vault and can be consumed for multiple patients
-                by setting remaining doses.
-              </div>
-              <div class="actions">
-                <button id="clearMultipleBtn">Clear Queue</button>
-              </div>
-
-              <details id="testModePanel" class="test-mode-panel" hidden>
-                <summary>🧪 Manual Add (no scanner)</summary>
-                <div class="test-mode-body">
-                  <label for="testModeBarcode"
-                    >Paste a GS1 barcode to add directly to the queue:</label
+              <div class="inventory">
+                <div class="queue-heading">
+                  <h3 class="result-heading">Queue</h3>
+                  <span
+                    id="multipleQueueCount"
+                    class="queue-count"
+                    aria-label="Saved vaccines"
+                    >0</span
                   >
-                  <textarea
-                    id="testModeBarcode"
-                    rows="2"
-                    placeholder="e.g. ]d2010305718580811211609302110HN1234"
-                  ></textarea>
-                  <button id="testModeAddBtn" type="button">
-                    Add to Queue
+                  <button
+                    id="clearMultipleBtn"
+                    type="button"
+                    aria-label="Clear queue"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    id="queueEntryToggleBtn"
+                    type="button"
+                    disabled
+                    aria-label="Add a vaccine as text"
+                    title="Add a vaccine as text"
+                    aria-expanded="false"
+                    aria-controls="queueEntryPanel"
+                  >
+                    +
                   </button>
                 </div>
-              </details>
-
-              <div class="inventory">
-                <div class="result-heading">Multiple Inject Queue</div>
                 <div id="multipleQueueSummary" class="inventory-summary">
-                  No saved vaccines yet.
+                  Scan a vaccine barcode or select + to add it as text.
+                </div>
+                <div id="queueEntryPanel" class="queue-entry" hidden>
+                  <label for="queueBarcodeInput">Barcode</label>
+                  <textarea
+                    id="queueBarcodeInput"
+                    rows="2"
+                    placeholder="Paste barcode text here..."
+                  ></textarea>
+                  <div class="queue-entry-actions">
+                    <button id="cancelQueueEntryBtn" type="button">
+                      Cancel
+                    </button>
+                    <button id="addQueueBtn" type="button">Add to Queue</button>
+                  </div>
                 </div>
                 <div id="multipleQueueList" class="inventory-list"></div>
               </div>
             </div>
 
             <div id="inventoryModeSection" class="mode-panel" hidden>
-              <div class="actions">
-                <div class="action-row">
-                  <button id="addCurrentBtn">Add Current Scan</button>
-                  <button id="addBatchBtn">Add All Lines</button>
-                </div>
-                <div class="action-row">
-                  <button id="exportCsvBtn">Export CSV</button>
-                  <button id="clearInventoryBtn">Clear Inventory</button>
-                </div>
-              </div>
               <div class="inventory">
-                <div class="result-heading">Inventory Tray</div>
+                <div class="queue-heading">
+                  <h3 class="result-heading">Queue</h3>
+                  <span
+                    id="inventoryQueueCount"
+                    class="queue-count"
+                    aria-label="Saved inventory scans"
+                    >0</span
+                  >
+                  <button
+                    id="clearInventoryBtn"
+                    type="button"
+                    aria-label="Clear inventory queue"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    id="inventoryEntryToggleBtn"
+                    type="button"
+                    disabled
+                    aria-label="Add a vaccine as text"
+                    title="Add a vaccine as text"
+                    aria-expanded="false"
+                    aria-controls="inventoryEntryPanel"
+                  >
+                    +
+                  </button>
+                </div>
                 <div id="inventorySummary" class="inventory-summary">
-                  No inventory scans yet.
+                  Scan a vaccine barcode or select + to add it as text.
+                </div>
+                <div id="inventoryEntryPanel" class="queue-entry" hidden>
+                  <label for="inventoryBarcodeInput">Barcode</label>
+                  <textarea
+                    id="inventoryBarcodeInput"
+                    rows="2"
+                    placeholder="Paste one barcode per line..."
+                  ></textarea>
+                  <div class="queue-entry-actions">
+                    <button id="cancelInventoryEntryBtn" type="button">
+                      Cancel
+                    </button>
+                    <button id="addBatchBtn" type="button">Add to Queue</button>
+                  </div>
                 </div>
                 <div id="inventoryList" class="inventory-list"></div>
+              </div>
+              <div class="actions">
+                <button id="exportCsvBtn">Export CSV</button>
               </div>
             </div>
           </div>

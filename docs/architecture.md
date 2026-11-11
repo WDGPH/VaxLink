@@ -70,9 +70,33 @@ scan input and preview, workflow selection, queue and inventory controls, CSV
 export, and scanner status. The popup sends fill requests to
 the selected Panorama integration.
 
-`scanner-setup.html` and `scanner-setup.js` let staff choose a scanner, grant
-browser permission, and request a connection or disconnection. They do not run
-the ongoing scanner reader.
+The header provides separate Settings and Local Activity controls. Settings has
+four sections: Scanner, NVC Catalogue, Autofill, and Support & Diagnostics.
+Scanner controls and diagnostics are embedded in Settings and also available on
+the standalone Scanner Setup page. They show connection and capture status,
+including whether an observation is live or cached, and provide pairing,
+reconnection and routing feedback. The setup page
+does not run the ongoing scanner reader. The embedded page uses the popup's
+scrollbar and expands with its disclosed details.
+
+NVC Catalogue shows availability and update information and provides a manual
+refresh. Autofill holds the existing Panorama preferences. Support & Diagnostics
+shows the extension version and offers a read-only check of the selected
+Panorama tab. Workstation label, device details, and reset controls stay in this
+section. Local Activity remains available from the header; its counts are
+extension activity, not confirmation that Panorama saved a clinical record.
+
+Injection and Inventory show a plain Setup Scanner prompt when no scanner
+is configured or permission needs to be granted again. It opens Settings; staff
+can continue without a scanner to use manual input and saved queues. This choice
+lasts for the current popup and does not change scanner capture or routing.
+
+The Multiple Inject and Inventory queue cards use **+** to open barcode text
+entry in packaged and unpacked installs. They use the existing parser, catalogue
+lookup, and background queue writer. Inventory accepts one barcode per line and
+keeps CSV export. Entry closes after a confirmed save when the input has not
+changed; failed saves and newly typed text keep the entry open. After a partial
+Inventory batch save, only the failed lines remain for correction.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
@@ -184,22 +208,16 @@ and the intended chart before rescanning; a warning does not identify which
 scan failed. Scanner delivery and persistence are not crash-proof exactly-once
 operations.
 
-## Workstation health
+## Panorama integration check
 
-Popup Settings offers a read-only workstation check for the selected tab. It
-reads the existing scanner session or labels a cached observation; opening it
-does not connect a scanner. A connection does not prove a successful barcode
-read. Last capture time is reported separately. NVC health reads the existing
-catalogue status and marks a usable cache degraded when the last remote check
-is older than 24 hours or has failed.
-
-For health, the Panorama response supplies readiness flags and the build identity
-captured when the content script loaded. Packaged runtime files receive a
-fingerprint during staging. A known identity mismatch calls for reloading the
-Panorama tab when safe. Missing identity is unknown; matching version labels
+Support & Diagnostics can check the selected Panorama tab without changing the
+scanner or chart. The check compares the content script's build identity with
+the running extension and reports a known mismatch so staff can reload the tab
+when safe. A missing identity leaves the result unknown; matching version labels
 alone cannot prove identical source files in an unpacked development install.
-The check does not reload, inject scripts, change workflow, or fill a chart.
-Readiness does not prove a successful fill or a saved clinical record.
+The check does not reload, inject scripts, or fill a chart. Readiness does not
+prove a successful fill or a saved clinical record. The internal health request
+also reads existing scanner and catalogue status for its diagnostic contract.
 
 ## Panorama autofill sequence
 

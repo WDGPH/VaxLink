@@ -9,7 +9,7 @@ const barcode = (lot) => `01001234567890121727123110${lot}`;
 let instance = 0;
 
 async function popup(failSave = false, mode = 'inventory') {
-  let release, started, ready;
+  let release, started, ready, focused;
   const pending = new Promise((resolve) => {
     started = resolve;
   });
@@ -23,10 +23,16 @@ async function popup(failSave = false, mode = 'inventory') {
   const nodes = Object.fromEntries(
     [
       'scannedData',
-      'testModeBarcode',
-      'addCurrentBtn',
+      'queueBarcodeInput',
       'addBatchBtn',
-      'testModeAddBtn',
+      'addQueueBtn',
+      'queueEntryPanel',
+      'queueEntryToggleBtn',
+      'cancelQueueEntryBtn',
+      'inventoryBarcodeInput',
+      'inventoryEntryPanel',
+      'inventoryEntryToggleBtn',
+      'cancelInventoryEntryBtn',
       'singleModeBtn',
       'multipleModeBtn',
       'output',
@@ -39,12 +45,25 @@ async function popup(failSave = false, mode = 'inventory') {
         value: barcode('TESTLOT'),
         textContent: 'Add',
         innerHTML: '',
-        hidden: id === 'queueSaveNotice',
+        hidden: [
+          'queueSaveNotice',
+          'queueEntryPanel',
+          'inventoryEntryPanel'
+        ].includes(id),
+        disabled: ['queueEntryToggleBtn', 'inventoryEntryToggleBtn'].includes(
+          id
+        ),
         style: {},
         dataset: {},
         listeners: {},
         classList: { toggle() {} },
-        setAttribute() {},
+        attributes: {},
+        setAttribute(name, value) {
+          this.attributes[name] = value;
+        },
+        focus() {
+          focused = id;
+        },
         addEventListener(type, listener) {
           this.listeners[type] = listener;
         }
@@ -59,7 +78,9 @@ async function popup(failSave = false, mode = 'inventory') {
   };
   globalThis.chrome = {
     runtime: {
-      getManifest: () => ({}),
+      getManifest: () => ({
+        update_url: 'https://clients2.google.com/service/update2/crx'
+      }),
       onMessage: { addListener() {} },
       sendMessage(message, done) {
         const send = () =>
@@ -103,6 +124,7 @@ async function popup(failSave = false, mode = 'inventory') {
   await ready();
   return {
     nodes,
+    focused: () => focused,
     background,
     pending,
     release: () => release(),
@@ -115,7 +137,8 @@ async function popup(failSave = false, mode = 'inventory') {
 
 test('a preview refresh cannot cancel an in-flight save or replace the new input', async () => {
   const p = await popup();
-  const adding = p.click('addCurrentBtn');
+  p.click('inventoryEntryToggleBtn');
+  const adding = p.click('addBatchBtn');
   await p.pending;
   p.nodes.scannedData.value = barcode('NEXTLOT');
   await p.click('singleModeBtn');
@@ -141,17 +164,18 @@ test('a preview refresh cannot cancel an in-flight save or replace the new input
   );
   assert.equal(p.nodes.scannedData.value, barcode('NEXTLOT'));
   assert.equal(p.nodes.output.innerHTML, preview);
-  assert.equal(p.nodes.addCurrentBtn.disabled, false);
+  assert.equal(p.nodes.addBatchBtn.disabled, false);
 });
 
 test('new input survives completion and Add recovers after success or failure', async () => {
   for (const [button, input, mode] of [
-    ['addCurrentBtn', 'scannedData', 'inventory'],
-    ['addBatchBtn', 'scannedData', 'inventory'],
-    ['testModeAddBtn', 'testModeBarcode', 'multiple']
+    ['addBatchBtn', 'inventoryBarcodeInput', 'inventory'],
+    ['addQueueBtn', 'queueBarcodeInput', 'multiple']
   ]) {
     for (const fail of [false, true]) {
       const p = await popup(fail, mode);
+      if (mode === 'multiple') p.click('queueEntryToggleBtn');
+      else p.click('inventoryEntryToggleBtn');
       const adding = p.click(button);
       await p.pending;
       assert.equal(p.nodes[button].disabled, true);
@@ -161,6 +185,9 @@ test('new input survives completion and Add recovers after success or failure', 
       p.release();
       await adding;
       assert.equal(p.nodes[input].value, barcode('NEXTLOT'));
+      if (mode === 'multiple')
+        assert.equal(p.nodes.queueEntryPanel.hidden, false);
+      else assert.equal(p.nodes.inventoryEntryPanel.hidden, false);
       assert.equal(p.nodes.output.innerHTML, 'Current preview');
       assert.equal(p.nodes[button].disabled, false);
       assert.equal(p.nodes[button].textContent, 'Add');
@@ -179,11 +206,11 @@ test('new input survives completion and Add recovers after success or failure', 
 
 test('a later confirmed save clears the notice, while an older completion preserves a newer failure', async () => {
   const p = await popup(true);
-  const older = p.click('addCurrentBtn');
+  const older = p.click('addBatchBtn');
   await p.pending;
   await p.click('multipleModeBtn');
-  p.nodes.testModeBarcode.value = barcode('NEXTLOT');
-  await p.click('testModeAddBtn');
+  p.nodes.queueBarcodeInput.value = barcode('NEXTLOT');
+  await p.click('addQueueBtn');
   const warning = p.nodes.queueSaveNoticeText.textContent;
   assert.equal(p.nodes.queueSaveNotice.hidden, false);
   p.setSaveFailure(false);
@@ -191,6 +218,86 @@ test('a later confirmed save clears the notice, while an older completion preser
   await older;
   assert.equal(p.nodes.queueSaveNotice.hidden, false);
   assert.equal(p.nodes.queueSaveNoticeText.textContent, warning);
-  await p.click('testModeAddBtn');
+  await p.click('addQueueBtn');
+  assert.equal(p.nodes.queueSaveNotice.hidden, true);
+});
+
+test('both queues keep entry drafts and close only after a confirmed save', async () => {
+  for (const [mode, panel, toggle, input, cancel, add] of [
+    [
+      'multiple',
+      'queueEntryPanel',
+      'queueEntryToggleBtn',
+      'queueBarcodeInput',
+      'cancelQueueEntryBtn',
+      'addQueueBtn'
+    ],
+    [
+      'inventory',
+      'inventoryEntryPanel',
+      'inventoryEntryToggleBtn',
+      'inventoryBarcodeInput',
+      'cancelInventoryEntryBtn',
+      'addBatchBtn'
+    ]
+  ]) {
+    for (const fail of [false, true]) {
+      const p = await popup(fail, mode);
+      assert.equal(p.nodes[panel].hidden, true);
+      assert.equal(p.nodes[toggle].disabled, false);
+      p.click(toggle);
+      assert.equal(p.nodes[panel].hidden, false);
+      assert.equal(p.nodes[toggle].attributes['aria-expanded'], 'true');
+      assert.equal(p.focused(), input);
+      p.click(cancel);
+      assert.equal(p.nodes[panel].hidden, true);
+      assert.equal(p.nodes[input].value, barcode('TESTLOT'));
+      assert.equal(p.focused(), toggle);
+      p.click(toggle);
+      const adding = p.click(add);
+      await p.pending;
+      assert.equal(p.nodes[toggle].disabled, true);
+      assert.equal(p.nodes[cancel].disabled, true);
+      p.release();
+      await adding;
+      assert.equal(p.nodes[toggle].disabled, false);
+      assert.equal(p.nodes[cancel].disabled, false);
+      assert.equal(p.nodes[panel].hidden, !fail);
+      assert.equal(p.nodes[input].value, fail ? barcode('TESTLOT') : '');
+      assert.equal(p.nodes[toggle].attributes['aria-expanded'], String(fail));
+      if (!fail) assert.equal(p.focused(), toggle);
+    }
+  }
+});
+
+test('inventory batch saves valid lines and keeps only failed lines for correction', async () => {
+  const p = await popup();
+  p.click('inventoryEntryToggleBtn');
+  p.nodes.inventoryBarcodeInput.value = `${barcode('TESTLOT')}\n{}\n${barcode('NEXTLOT')}`;
+  const adding = p.click('addBatchBtn');
+  await p.pending;
+  p.release();
+  await adding;
+  assert.deepEqual(
+    Array.from(
+      p.background.storageData.get('inventory_scan_batch_v1'),
+      (row) => row.lot
+    ),
+    ['TESTLOT', 'NEXTLOT']
+  );
+  assert.equal(
+    p.background.storageData.get('multiple_inject_queue_v1'),
+    undefined
+  );
+  assert.equal(p.nodes.inventoryBarcodeInput.value, '{}');
+  assert.equal(p.nodes.inventoryEntryPanel.hidden, false);
+  assert.equal(p.nodes.queueSaveNotice.hidden, false);
+  p.nodes.inventoryBarcodeInput.value = barcode('FIXEDLOT');
+  await p.click('addBatchBtn');
+  assert.equal(
+    p.background.storageData.get('inventory_scan_batch_v1').length,
+    3
+  );
+  assert.equal(p.nodes.inventoryEntryPanel.hidden, true);
   assert.equal(p.nodes.queueSaveNotice.hidden, true);
 });

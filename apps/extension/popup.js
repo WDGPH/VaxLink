@@ -14,6 +14,7 @@ import {
 import {
   buildParsedOutputMarkup,
   renderNVCStatus,
+  describePanoramaIntegration,
   formatNVCRefreshMessage,
   setButtonBusy,
   showOutput
@@ -21,12 +22,12 @@ import {
 import {
   SCANNER_DAEMON_ACTIONS,
   buildScannerStatusDescriptor,
+  getScannerConnectionLabel,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
 let autoFillBtn;
 let refreshNvcBtn;
-let addCurrentBtn;
 let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
@@ -42,13 +43,12 @@ let scannedInputLabel;
 let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
-let modeHelper;
-let scanStateTitle;
-let scanStateSubtitle;
 let analyticsSummaryDiv;
 let analyticsLabelInput;
 let settingsToggleBtn;
 let settingsPanel;
+let analyticsToggleBtn;
+let analyticsPanel;
 let mainWorkflowPanel;
 let saveAnalyticsLabelBtn;
 let exportTodayAnalyticsBtn;
@@ -56,15 +56,23 @@ let exportPilotAnalyticsBtn;
 let exportAnalyticsCsvBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
-let scannerSetupBtn;
-let scannerReconnectBtn;
-let scannerStatusTitle;
-let scannerStatusDetail;
-let scannerStatusPill;
-let scannerWorkflowBanner;
+let scannerSettingsFrame;
+let settingsTabId = null;
+let scannerSetupPrompt;
+let scannerConnectionNote;
+let continueWithoutScanner = false;
 let reasonConsentAutofillToggle;
-let testModeAddBtn;
-let testModeBarcode;
+let addQueueBtn;
+let queueBarcodeInput;
+let queueEntryPanel;
+let queueEntryToggleBtn;
+let cancelQueueEntryBtn;
+let multipleQueueCount;
+let inventoryBarcodeInput;
+let inventoryEntryPanel;
+let inventoryEntryToggleBtn;
+let cancelInventoryEntryBtn;
+let inventoryQueueCount;
 let parsedData = null;
 let activeParseRequestId = 0;
 let inventoryAddInFlight = false;
@@ -77,7 +85,6 @@ let activeMode = 'single';
 let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerStatusSource = 'cached';
-let scannerCaptureSource = 'cached';
 let scannerCaptureError = false;
 let reasonConsentAutofillEnabled = true;
 
@@ -92,29 +99,15 @@ const REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 
 const MODE_CONFIG = {
   single: {
-    title: 'Single Inject',
-    subtitle: 'One scan fills the current chart immediately.',
-    helper:
-      'Use this when one vaccine is being charted now. Paste barcode text below to preview, or connect a Web Serial scanner for hands-free auto-fill.',
     inputLabel: 'Scanned Barcode',
     inputPlaceholder: 'Paste barcode text here...',
     usesScannerInput: true
   },
   multiple: {
-    title: 'Multiple Inject',
-    subtitle: 'Scan several vaccines now, choose them for chart fill later.',
-    helper:
-      'Leave this mode active with a Web Serial scanner connected. Each scan is saved automatically, then you can choose Use for Chart on each saved vaccine.',
     usesScannerInput: false
   },
   inventory: {
-    title: 'Inventory',
-    subtitle: 'Capture vaccines into an export tray.',
-    helper:
-      'Use this for stock or export work. Paste barcode text below and add to the inventory tray, or use a Web Serial scanner to save scans automatically.',
-    inputLabel: 'Inventory Barcode Input',
-    inputPlaceholder: 'Paste one barcode per line...',
-    usesScannerInput: true
+    usesScannerInput: false
   }
 };
 
@@ -129,7 +122,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
-  addCurrentBtn = document.getElementById('addCurrentBtn');
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
@@ -145,13 +137,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
-  modeHelper = document.getElementById('modeHelper');
-  scanStateTitle = document.getElementById('scanStateTitle');
-  scanStateSubtitle = document.getElementById('scanStateSubtitle');
   analyticsSummaryDiv = document.getElementById('analyticsSummary');
   analyticsLabelInput = document.getElementById('analyticsLabelInput');
   settingsToggleBtn = document.getElementById('settingsToggleBtn');
   settingsPanel = document.getElementById('settingsPanel');
+  analyticsToggleBtn = document.getElementById('analyticsToggleBtn');
+  analyticsPanel = document.getElementById('analyticsPanel');
   mainWorkflowPanel = document.getElementById('mainWorkflowPanel');
   saveAnalyticsLabelBtn = document.getElementById('saveAnalyticsLabelBtn');
   exportTodayAnalyticsBtn = document.getElementById('exportTodayAnalyticsBtn');
@@ -161,23 +152,33 @@ document.addEventListener('DOMContentLoaded', async () => {
   adminDateTimeAutofillToggle = document.getElementById(
     'adminDateTimeAutofillToggle'
   );
-  scannerSetupBtn = document.getElementById('scannerSetupBtn');
-  scannerReconnectBtn = document.getElementById('scannerReconnectBtn');
-  scannerStatusTitle = document.getElementById('scannerStatusTitle');
-  scannerStatusDetail = document.getElementById('scannerStatusDetail');
-  scannerStatusPill = document.getElementById('scannerStatusPill');
-  scannerWorkflowBanner = document.getElementById('scannerWorkflowBanner');
+  scannerSettingsFrame = document.getElementById('scannerSettingsFrame');
+  scannerSettingsFrame?.addEventListener('load', () => {
+    const content = scannerSettingsFrame.contentDocument?.querySelector('main');
+    if (!content) return;
+    // Keep Settings on the popup's scrollbar as connection and health text changes.
+    new ResizeObserver(() => {
+      const height = content.getBoundingClientRect().height;
+      if (height > 0)
+        scannerSettingsFrame.style.height = `${Math.ceil(height)}px`;
+    }).observe(content);
+  });
+  scannerSetupPrompt = document.getElementById('scannerSetupPrompt');
+  scannerConnectionNote = document.getElementById('scannerConnectionNote');
   reasonConsentAutofillToggle = document.getElementById(
     'reasonConsentAutofillToggle'
   );
-  testModeAddBtn = document.getElementById('testModeAddBtn');
-  testModeBarcode = document.getElementById('testModeBarcode');
-  // Only show test mode panel when running as an unpacked (developer) extension.
-  // Store-installed builds always have update_url in the manifest; unpacked builds never do.
-  const testModePanel = document.getElementById('testModePanel');
-  if (testModePanel && !chrome.runtime.getManifest().update_url) {
-    testModePanel.hidden = false;
-  }
+  addQueueBtn = document.getElementById('addQueueBtn');
+  queueBarcodeInput = document.getElementById('queueBarcodeInput');
+  queueEntryPanel = document.getElementById('queueEntryPanel');
+  queueEntryToggleBtn = document.getElementById('queueEntryToggleBtn');
+  cancelQueueEntryBtn = document.getElementById('cancelQueueEntryBtn');
+  multipleQueueCount = document.getElementById('multipleQueueCount');
+  inventoryBarcodeInput = document.getElementById('inventoryBarcodeInput');
+  inventoryEntryPanel = document.getElementById('inventoryEntryPanel');
+  inventoryEntryToggleBtn = document.getElementById('inventoryEntryToggleBtn');
+  cancelInventoryEntryBtn = document.getElementById('cancelInventoryEntryBtn');
+  inventoryQueueCount = document.getElementById('inventoryQueueCount');
 
   multipleInjectManager = new ScanQueueManager({
     storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -187,9 +188,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     onUseRecord: handleUseMultipleInjectRecord,
     showUseAction: true,
     useButtonLabel: 'Use for Chart',
-    emptySummary: 'No saved vaccines yet.',
-    emptyMessage:
-      'Leave Multiple Inject active, scan several vaccines on the live chart page, then come back and choose one to fill.',
+    emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
+    emptyMessage: '',
     summaryBuilder: buildMultipleInjectSummary
   });
 
@@ -199,15 +199,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     listEl: document.getElementById('inventoryList'),
     clearButton: clearInventoryBtn,
     exportButton: exportCsvBtn,
-    emptySummary: 'No inventory scans yet.',
-    emptyMessage:
-      'Scan vaccines into the inventory tray, then export when ready.',
+    emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
+    emptyMessage: '',
     summaryBuilder: buildInventorySummary,
     exportFilenamePrefix: 'vaxlink-inventory'
   });
 
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
   renderMultipleModeCount(multipleInjectManager.count);
+  renderInventoryCount(inventoryManager.count);
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAdminDateTimeAutofillSetting();
@@ -230,10 +230,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
       }
       event.preventDefault();
-      if (activeMode === 'inventory') {
-        addPreviewScanToInventory();
-        return;
-      }
       if (activeMode === 'single') {
         queueAutoParse(true);
       }
@@ -255,12 +251,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (settingsToggleBtn) {
     settingsToggleBtn.addEventListener('click', () => {
       const nextState = settingsPanel?.hidden ?? true;
-      void setSettingsPanelOpen(nextState);
+      void setPopupPanel(nextState ? 'settings' : 'workflow');
       if (nextState) {
         void loadScannerStatus();
       }
     });
   }
+  analyticsToggleBtn?.addEventListener('click', () => {
+    const nextState = analyticsPanel?.hidden ?? true;
+    void setPopupPanel(nextState ? 'analytics' : 'workflow');
+    if (nextState) void loadAnalyticsSummary();
+  });
+  document
+    .getElementById('openScannerSettingsBtn')
+    ?.addEventListener('click', () => {
+      const section = document.getElementById('scannerSettingsSection');
+      if (section) section.open = true;
+      void setPopupPanel('settings');
+      settingsToggleBtn?.focus();
+    });
+  document
+    .getElementById('continueWithoutScannerBtn')
+    ?.addEventListener('click', () => {
+      continueWithoutScanner = true;
+      renderScannerStatusUi();
+      const target =
+        activeMode === 'single'
+          ? scannedInput
+          : activeMode === 'multiple'
+            ? queueEntryToggleBtn
+            : inventoryEntryToggleBtn;
+      target?.focus();
+    });
   if (adminDateTimeAutofillToggle) {
     adminDateTimeAutofillToggle.addEventListener('change', () => {
       void setAdminDateTimeAutofillSetting(
@@ -268,6 +290,31 @@ document.addEventListener('DOMContentLoaded', async () => {
       );
     });
   }
+  document
+    .getElementById('checkPanoramaBtn')
+    ?.addEventListener('click', async () => {
+      const button = document.getElementById('checkPanoramaBtn');
+      const result = document.getElementById('panoramaCheckResult');
+      if (!Number.isSafeInteger(settingsTabId) || settingsTabId < 0) {
+        result.textContent =
+          'Select the Panorama tab to check, then reopen Settings in VaxLink.';
+        return;
+      }
+      setButtonBusy(button, true, 'Checking…');
+      try {
+        const response = await sendRuntimeMessage({
+          action: 'getWorkstationHealth',
+          tabId: settingsTabId
+        });
+        result.textContent = describePanoramaIntegration(
+          response?.success ? response.chart : null
+        );
+      } catch {
+        result.textContent = describePanoramaIntegration(null);
+      } finally {
+        setButtonBusy(button, false);
+      }
+    });
   document
     .getElementById('acknowledgeScannerErrorBtn')
     ?.addEventListener('click', () => {
@@ -280,12 +327,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       );
     });
-  if (scannerSetupBtn) {
-    scannerSetupBtn.addEventListener('click', openScannerSetupPage);
-  }
-  if (scannerReconnectBtn) {
-    scannerReconnectBtn.addEventListener('click', openScannerSetupPage);
-  }
   if (reasonConsentAutofillToggle) {
     reasonConsentAutofillToggle.addEventListener('change', () => {
       void setReasonConsentAutofillSetting(
@@ -396,17 +437,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (testModeAddBtn && testModeBarcode) {
-    testModeAddBtn.addEventListener('click', () =>
-      addManualScanToMultipleQueue()
-    );
-    testModeBarcode.addEventListener('keydown', (event) => {
+  queueEntryToggleBtn?.addEventListener('click', () => {
+    setQueueEntryOpen(queueEntryPanel.hidden);
+  });
+  cancelQueueEntryBtn?.addEventListener('click', () => {
+    setQueueEntryOpen(false);
+  });
+
+  if (addQueueBtn && queueBarcodeInput) {
+    addQueueBtn.addEventListener('click', () => addManualScanToMultipleQueue());
+    queueBarcodeInput.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         event.preventDefault();
         addManualScanToMultipleQueue();
       }
     });
   }
+
+  // Enable entry after its handlers are ready; scanner status loads first.
+  if (queueEntryToggleBtn) queueEntryToggleBtn.disabled = false;
 
   if (refreshNvcBtn) {
     refreshNvcBtn.addEventListener('click', () => {
@@ -480,13 +529,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (addCurrentBtn) {
-    addCurrentBtn.addEventListener('click', () => addPreviewScanToInventory());
-  }
-
+  inventoryEntryToggleBtn?.addEventListener('click', () => {
+    setInventoryEntryOpen(inventoryEntryPanel.hidden);
+  });
+  cancelInventoryEntryBtn?.addEventListener('click', () => {
+    setInventoryEntryOpen(false);
+  });
   if (addBatchBtn) {
     addBatchBtn.addEventListener('click', () => addPendingScansToInventory());
   }
+  if (inventoryEntryToggleBtn) inventoryEntryToggleBtn.disabled = false;
 
   if (exportCsvBtn) {
     exportCsvBtn.addEventListener('click', () => {
@@ -516,7 +568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         queue: 'inventory',
         source: 'popup_button'
       });
-      writeOutput('Inventory tray cleared.', 'info');
+      writeOutput('Inventory queue cleared.', 'info');
     });
   }
 
@@ -526,23 +578,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('queueSaveNotice').hidden = true;
     });
 
-  document
-    .getElementById('workstationHealthBtn')
-    ?.addEventListener('click', () => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const tabId = tabs?.[0]?.id;
-        if (chrome.runtime.lastError || !Number.isSafeInteger(tabId)) {
-          writeOutput(
-            'Select the Panorama tab to check, then reopen VaxLink.',
-            'info'
-          );
-          return;
-        }
-        chrome.tabs.create({
-          url: chrome.runtime.getURL(`workstation-health.html?tab=${tabId}`)
-        });
-      });
-    });
   loadNVCStatus();
   void renderHeldScannerScans();
 });
@@ -613,6 +648,10 @@ async function renderHeldScannerScans() {
 function handlePopupStorageChanged(changes, area) {
   if (area === 'local' && changes.vaxlink_pending_scan_inbox_v1)
     void renderHeldScannerScans();
+  if (area === 'local' && INVENTORY_BATCH_KEY in changes) {
+    const rows = changes[INVENTORY_BATCH_KEY]?.newValue;
+    renderInventoryCount(Array.isArray(rows) ? rows.length : 0);
+  }
   if (area !== 'local' || !(MULTIPLE_INJECT_QUEUE_KEY in changes)) return;
   const rows = Array.isArray(changes[MULTIPLE_INJECT_QUEUE_KEY]?.newValue)
     ? changes[MULTIPLE_INJECT_QUEUE_KEY].newValue
@@ -620,11 +659,16 @@ function handlePopupStorageChanged(changes, area) {
   renderMultipleModeCount(rows.length);
 }
 
+function renderInventoryCount(count) {
+  if (inventoryQueueCount) inventoryQueueCount.textContent = String(count);
+}
+
 function renderMultipleModeCount(count) {
-  if (!multipleModeBtn) return;
   const normalized = Math.max(0, Number.parseInt(count, 10) || 0);
-  multipleModeBtn.textContent =
-    normalized > 0 ? `Multiple Inject (${normalized})` : 'Multiple Inject';
+  if (multipleQueueCount) multipleQueueCount.textContent = String(normalized);
+  if (multipleModeBtn)
+    multipleModeBtn.textContent =
+      normalized > 0 ? `Multiple Inject (${normalized})` : 'Multiple Inject';
 }
 
 function writeOutput(message, type = 'info') {
@@ -638,11 +682,7 @@ async function loadScannerStatus() {
     );
     if (response && response.success && response.status) {
       scannerCaptureError = response.captureError === true;
-      applyScannerStatus(
-        response.status,
-        response.source,
-        response.captureSource
-      );
+      applyScannerStatus(response.status, response.source);
       return;
     }
   } catch (_) {
@@ -651,113 +691,89 @@ async function loadScannerStatus() {
   renderScannerStatusUi();
 }
 
-function openScannerSetupPage() {
-  chrome.tabs.create(
-    { url: chrome.runtime.getURL('scanner-setup.html') },
-    () => {
-      if (chrome.runtime.lastError) {
-        writeOutput(
-          chrome.runtime.lastError.message || 'Could not open scanner setup.',
-          'error'
-        );
-        return;
-      }
-      writeOutput(
-        'Scanner Setup opened. After granting the scanner once, the background daemon continues when the setup tab is closed.',
-        'info'
-      );
-    }
-  );
+function loadScannerSettings() {
+  // The explicit support check keeps the chart selected when Settings opened.
+  // Opening Settings does not probe or change the form.
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    settingsTabId = chrome.runtime.lastError ? null : (tabs?.[0]?.id ?? null);
+  });
+  if (scannerSettingsFrame && !scannerSettingsFrame.getAttribute('src')) {
+    scannerSettingsFrame.setAttribute(
+      'src',
+      chrome.runtime.getURL('scanner-setup.html')
+    );
+  }
+  const manifest = chrome.runtime.getManifest();
+  const info = document.getElementById('extensionInfo');
+  if (info)
+    info.textContent = `${manifest.name} · ${manifest.version_name || manifest.version}`;
 }
 
-function applyScannerStatus(status, source = 'cached', captureSource = source) {
+function applyScannerStatus(status, source = 'cached') {
   scannerStatusSource = source;
-  scannerCaptureSource = captureSource;
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   renderScannerStatusUi();
 }
 
 function renderScannerStatusUi() {
-  const descriptor = buildScannerStatusDescriptor(
-    scannerStatusSnapshot,
-    activeMode
-  );
+  const descriptor = buildScannerStatusDescriptor(scannerStatusSnapshot);
+  const state = document.getElementById('scannerSettingsState');
+  if (state)
+    state.textContent = scannerCaptureError
+      ? 'Scan needs review'
+      : getScannerConnectionLabel(scannerStatusSnapshot, scannerStatusSource);
 
-  if (scannerStatusTitle) {
-    scannerStatusTitle.textContent =
-      scannerStatusSource === 'cached' ? 'Cached status' : descriptor.label;
-  }
-  const acknowledgeButton = document.getElementById(
-    'acknowledgeScannerErrorBtn'
+  const captureWarning = document.getElementById('scannerCaptureWarning');
+  if (captureWarning) captureWarning.hidden = !scannerCaptureError;
+  const needsSetup = ['never_configured', 'permission_lost'].includes(
+    scannerStatusSnapshot.state
   );
-  if (acknowledgeButton) acknowledgeButton.hidden = !scannerCaptureError;
-  if (scannerStatusDetail) {
-    const sourceNote =
-      scannerStatusSource === 'cached'
-        ? ' Status is cached; connection is unconfirmed.'
-        : '';
-    const captureNote =
-      scannerStatusSnapshot.lastKnownCaptureAt &&
-      scannerCaptureSource === 'cached'
-        ? ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`
-        : '';
-    const errorNote = scannerCaptureError
-      ? ' A scan could not be saved or delivered. Check pending scans and rescan if needed.'
-      : '';
-    scannerStatusDetail.textContent =
-      descriptor.detail + sourceNote + captureNote + errorNote;
-  }
-  if (scannerStatusPill) {
-    scannerStatusPill.textContent =
-      scannerStatusSource === 'cached' ? 'Unconfirmed' : descriptor.label;
-    scannerStatusPill.className = `scanner-status-pill ${scannerStatusSource === 'cached' ? 'info' : descriptor.tone}`;
-  }
-  if (scannerReconnectBtn) {
-    scannerReconnectBtn.hidden = !descriptor.showReconnect;
-    scannerReconnectBtn.disabled = false;
-    scannerReconnectBtn.textContent = 'Open Setup';
-  }
-  if (scannerWorkflowBanner) {
-    if (descriptor.bannerText) {
-      scannerWorkflowBanner.hidden = false;
-      scannerWorkflowBanner.textContent = descriptor.bannerText;
-      scannerWorkflowBanner.className = `scanner-banner${descriptor.bannerTone === 'error' ? ' error' : ''}`;
-    } else {
-      scannerWorkflowBanner.hidden = true;
-      scannerWorkflowBanner.textContent = '';
-      scannerWorkflowBanner.className = 'scanner-banner';
-    }
+  const showSetup = needsSetup && !continueWithoutScanner;
+  mainWorkflowPanel?.classList.toggle('scanner-setup-required', showSetup);
+  if (scannerSetupPrompt) scannerSetupPrompt.hidden = !showSetup;
+  if (scannerConnectionNote) {
+    scannerConnectionNote.textContent = needsSetup ? '' : descriptor.bannerText;
+    scannerConnectionNote.hidden = !scannerConnectionNote.textContent;
   }
 }
 
 async function loadSettingsPanelState() {
   try {
     const stored = await getLocalStorage([SETTINGS_PANEL_OPEN_KEY]);
-    applySettingsPanelState(!!stored[SETTINGS_PANEL_OPEN_KEY]);
+    applyPopupPanel(stored[SETTINGS_PANEL_OPEN_KEY] ? 'settings' : 'workflow');
   } catch (_) {
-    applySettingsPanelState(false);
+    applyPopupPanel('workflow');
   }
 }
 
-async function setSettingsPanelOpen(isOpen) {
-  applySettingsPanelState(isOpen);
+async function setPopupPanel(panel) {
+  applyPopupPanel(panel);
   try {
-    await setLocalStorage({ [SETTINGS_PANEL_OPEN_KEY]: !!isOpen });
+    await setLocalStorage({ [SETTINGS_PANEL_OPEN_KEY]: panel === 'settings' });
   } catch (_) {
     // Keep the UI responsive even if the preference does not persist.
   }
 }
 
-function applySettingsPanelState(isOpen) {
+function applyPopupPanel(panel) {
+  if (panel === 'settings' && settingsPanel?.hidden) loadScannerSettings();
   if (settingsPanel) {
-    settingsPanel.hidden = !isOpen;
+    settingsPanel.hidden = panel !== 'settings';
   }
   if (mainWorkflowPanel) {
-    mainWorkflowPanel.hidden = isOpen;
+    mainWorkflowPanel.hidden = panel !== 'workflow';
   }
   if (settingsToggleBtn) {
-    settingsToggleBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    settingsToggleBtn.setAttribute(
+      'aria-expanded',
+      String(panel === 'settings')
+    );
   }
+  if (analyticsPanel) analyticsPanel.hidden = panel !== 'analytics';
+  analyticsToggleBtn?.setAttribute(
+    'aria-expanded',
+    String(panel === 'analytics')
+  );
 }
 
 function normalizeAdminDateTimeAutofillSetting(stored) {
@@ -887,7 +903,7 @@ async function loadAnalyticsSummary() {
   } catch (_) {
     if (analyticsSummaryDiv) {
       analyticsSummaryDiv.textContent =
-        'Analytics summary unavailable on this machine.';
+        'Local activity is unavailable on this device.';
     }
   }
 }
@@ -928,59 +944,58 @@ function renderAnalyticsSummary(summary) {
   const pilotQueueUses = rollup.queues?.multipleUsed || 0;
   const pilotExports = rollup.exports?.inventoryCount || 0;
 
-  const deviceName =
-    summary.deviceLabel || summary.deviceId || 'Unlabeled workstation';
+  const deviceLabel = document.getElementById('activityDeviceLabel');
+  if (deviceLabel)
+    deviceLabel.textContent = summary.deviceLabel
+      ? `On this device · ${summary.deviceLabel}`
+      : 'On this device';
+  const metadata = document.getElementById('deviceMetadata');
+  if (metadata)
+    metadata.textContent = `Device ID: ${summary.deviceId || 'Unavailable'}\nTracking began: ${formatAnalyticsDate(summary.firstSeenAt)}\nTracked days: ${formatAnalyticsNumber(summary.daysTracked)}`;
   analyticsSummaryDiv.innerHTML = `
-    <div class="analytics-hero">
-      <div class="analytics-hero-label">Captured Scans Today</div>
-      <div class="analytics-hero-value">${formatAnalyticsNumber(todayScans)}</div>
-      <div class="analytics-hero-subtitle">${formatAnalyticsNumber(todayLiveScans)} live scan(s) and ${formatAnalyticsNumber(todayPopupParses)} popup scan(s) recorded on this workstation today.</div>
+    <div class="activity-today">
+      ${renderAnalyticsMetric('Scans today', todayScans)}
+      ${renderAnalyticsMetric('Forms filled today', todayAutofills)}
     </div>
-    <div class="analytics-grid">
-      <section class="analytics-card">
-        <div class="analytics-card-header">
-          <div class="analytics-card-title">Today</div>
-          <div class="analytics-chip">${escapeAnalyticsHtml(summary.todayKey || 'Today')}</div>
-        </div>
-        <div class="analytics-metrics">
-          ${renderAnalyticsMetric('Chart autofills', todayAutofills)}
-          ${renderAnalyticsMetric('Multiple saves', todayMultipleSaved)}
-          ${renderAnalyticsMetric('Inventory exports', todayInventoryExports)}
-          ${renderAnalyticsMetric('Expiry warnings', todayExpiryWarnings)}
-        </div>
-      </section>
-      <section class="analytics-card">
-        <div class="analytics-card-header">
-          <div class="analytics-card-title">Pilot Total</div>
-          <div class="analytics-chip">${formatAnalyticsNumber(summary.daysTracked || 0)} day(s)</div>
-        </div>
-        <div class="analytics-metrics">
-          ${renderAnalyticsMetric('Captured scans', pilotScans)}
-          ${renderAnalyticsMetric('Chart autofills', pilotAutofills)}
-          ${renderAnalyticsMetric('Queue to chart', pilotQueueUses)}
-          ${renderAnalyticsMetric('Inventory exports', pilotExports)}
-        </div>
-      </section>
-      <section class="analytics-card device">
-        <div class="analytics-card-header">
-          <div class="analytics-card-title">Device</div>
-          <div class="analytics-chip">Local only</div>
-        </div>
-        <div class="analytics-device-name">${escapeAnalyticsHtml(deviceName)}</div>
-        <div class="analytics-device-meta">
-          <span class="analytics-device-pill">${formatAnalyticsNumber(todayScans)} scan(s) today</span>
-          <span class="analytics-device-pill">${formatAnalyticsNumber(summary.daysTracked || 0)} tracked day(s)</span>
-        </div>
-      </section>
+    <div class="activity-secondary">
+      ${renderAnalyticsMetric('Inventory exports today', todayInventoryExports)}
+      ${renderAnalyticsMetric('Expiry warnings today', todayExpiryWarnings)}
     </div>
+    <p class="settings-hint">Counts describe extension activity, not saved clinical records.</p>
+    <details class="activity-section">
+      <summary>Pilot activity <small>Since tracking began</small></summary>
+      <p class="settings-hint">Scans and form fills are counted separately. One scan may support several fills.</p>
+      <div class="activity-secondary">
+        ${renderAnalyticsMetric('Captured scans', pilotScans)}
+        ${renderAnalyticsMetric('Forms filled', pilotAutofills)}
+        ${renderAnalyticsMetric('Inventory exports', pilotExports)}
+      </div>
+    </details>
+    <details class="activity-section">
+      <summary>Technical details</summary>
+      <div class="activity-secondary">
+        ${renderAnalyticsMetric('Scanner captures today', todayLiveScans)}
+        ${renderAnalyticsMetric('Popup entries today', todayPopupParses)}
+        ${renderAnalyticsMetric('Multiple saves today', todayMultipleSaved)}
+        ${renderAnalyticsMetric('Queue to chart, pilot total', pilotQueueUses)}
+        ${renderAnalyticsMetric('Tracked days', summary.daysTracked)}
+      </div>
+    </details>
   `;
+}
+
+function formatAnalyticsDate(value) {
+  const date = new Date(value || '');
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString()
+    : 'Unavailable';
 }
 
 function renderAnalyticsMetric(label, value) {
   return `
-    <div class="analytics-metric">
-      <div class="analytics-metric-label">${escapeAnalyticsHtml(label)}</div>
-      <div class="analytics-metric-value">${formatAnalyticsNumber(value)}</div>
+    <div class="activity-metric">
+      <span>${escapeAnalyticsHtml(label)}</span>
+      <strong class="activity-metric-value">${formatAnalyticsNumber(value)}</strong>
     </div>
   `;
 }
@@ -1604,15 +1619,6 @@ async function setActiveMode(mode, options = {}) {
   if (scannedInput && config.inputPlaceholder) {
     scannedInput.placeholder = config.inputPlaceholder;
   }
-  if (modeHelper) {
-    modeHelper.textContent = config.helper;
-  }
-  if (scanStateTitle) {
-    scanStateTitle.textContent = config.title;
-  }
-  if (scanStateSubtitle) {
-    scanStateSubtitle.textContent = config.subtitle;
-  }
   renderScannerStatusUi();
 
   if (options.persist !== false) {
@@ -1691,23 +1697,6 @@ function getPendingScanLines() {
 function getPreviewBarcodeValue() {
   const lines = getPendingScanLines();
   return lines.length ? lines[lines.length - 1] : '';
-}
-
-function setPendingScanLines(lines) {
-  if (!scannedInput) return;
-  scannedInput.value = (lines || []).join('\n');
-}
-
-function removeLastPendingScanLine() {
-  if (!scannedInput || !scannedInput.value) return;
-  const lines = String(scannedInput.value).split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    if (String(lines[i]).trim()) {
-      lines.splice(i, 1);
-      break;
-    }
-  }
-  setPendingScanLines(lines.map((line) => String(line).trim()).filter(Boolean));
 }
 
 function loadNVCStatus() {
@@ -1792,74 +1781,47 @@ function clearQueueSaveFailure(version) {
   }
 }
 
-async function addPreviewScanToInventory() {
-  if (inventoryAddInFlight) return;
-  const modeSnapshot = activeMode;
-  const inputSnapshot = scannedInput?.value || '';
-  const rawBarcode = getPreviewBarcodeValue();
-  if (!rawBarcode) {
-    writeOutput('Scan a barcode first, then add it to inventory.', 'error');
-    return;
-  }
+function setInventoryEntryOpen(open) {
+  if (!inventoryEntryPanel || !inventoryEntryToggleBtn) return;
+  inventoryEntryPanel.hidden = !open;
+  inventoryEntryToggleBtn.textContent = open ? '×' : '+';
+  inventoryEntryToggleBtn.setAttribute('aria-expanded', String(open));
+  const label = open ? 'Close barcode entry' : 'Add a vaccine as text';
+  inventoryEntryToggleBtn.setAttribute('aria-label', label);
+  inventoryEntryToggleBtn.title = label;
+  if (open) inventoryBarcodeInput?.focus();
+  else inventoryEntryToggleBtn.focus();
+}
 
-  const noticeVersion = queueSaveNoticeVersion;
-  inventoryAddInFlight = true;
-  setButtonBusy(addCurrentBtn, true, 'Adding...');
-  try {
-    const baseData = parseInputData(rawBarcode);
-    const enriched = await enrichParsedData(baseData);
-    await inventoryManager.add(buildQueueRecord(enriched, rawBarcode));
-    clearQueueSaveFailure(noticeVersion);
-    logAnalyticsEvent('queue_saved', {
-      workflow: 'inventory',
-      queue: 'inventory',
-      source: 'popup_manual_current',
-      count: 1,
-      queueSizeAfter: inventoryManager.count,
-      vaccineLabel:
-        enriched.tradename ||
-        enriched.generic_name ||
-        enriched.name ||
-        enriched.lot ||
-        '',
-      manufacturer: enriched.manufacturer || '',
-      expiryFlag:
-        enriched.expiry_flag || getExpiryStatus(enriched.inventory_expiry).flag
-    });
-    if (activeMode === modeSnapshot && scannedInput?.value === inputSnapshot) {
-      removeLastPendingScanLine();
-      activeParseRequestId++;
-      parsedData = null;
-      setButtonBusy(autoFillBtn, false);
-      writeOutput(
-        buildParsedOutputMarkup(enriched),
-        outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry))
-      );
-      queueAutoParse(true);
-    }
-  } catch (error) {
-    showQueueSaveFailure(
-      `Inventory save not confirmed: ${error.message}. Check the tray before retrying.`
-    );
-  } finally {
-    inventoryAddInFlight = false;
-    setButtonBusy(addCurrentBtn, false);
-  }
+function setQueueEntryOpen(open) {
+  if (!queueEntryPanel || !queueEntryToggleBtn) return;
+  queueEntryPanel.hidden = !open;
+  queueEntryToggleBtn.textContent = open ? '×' : '+';
+  queueEntryToggleBtn.setAttribute('aria-expanded', String(open));
+  const label = open ? 'Close barcode entry' : 'Add a vaccine as text';
+  queueEntryToggleBtn.setAttribute('aria-label', label);
+  queueEntryToggleBtn.title = label;
+  if (open) queueBarcodeInput?.focus();
+  else queueEntryToggleBtn.focus();
 }
 
 async function addManualScanToMultipleQueue() {
   if (multipleAddInFlight) return;
   const modeSnapshot = activeMode;
-  const inputSnapshot = testModeBarcode?.value || '';
+  const inputSnapshot = queueBarcodeInput?.value || '';
   const rawBarcode = inputSnapshot.trim();
   if (!rawBarcode) {
-    writeOutput('Paste a barcode into the Manual Add field first.', 'error');
+    writeOutput('Paste a barcode into the Barcode field first.', 'error');
     return;
   }
 
   const noticeVersion = queueSaveNoticeVersion;
+  let closeEntry = false;
   multipleAddInFlight = true;
-  setButtonBusy(testModeAddBtn, true, 'Adding...');
+  setButtonBusy(addQueueBtn, true, 'Adding...');
+  // Hiding the entry cannot cancel a save that has already started.
+  if (queueEntryToggleBtn) queueEntryToggleBtn.disabled = true;
+  if (cancelQueueEntryBtn) cancelQueueEntryBtn.disabled = true;
   try {
     const baseData = parseInputData(rawBarcode);
     if (!baseData.scanned_at) {
@@ -1872,7 +1834,7 @@ async function addManualScanToMultipleQueue() {
     logAnalyticsEvent('queue_saved', {
       workflow: 'multiple',
       queue: 'multiple',
-      source: 'popup_test_mode',
+      source: 'popup_manual_entry',
       count: 1,
       queueSizeAfter: multipleInjectManager.count,
       vaccineLabel:
@@ -1886,14 +1848,15 @@ async function addManualScanToMultipleQueue() {
         enriched.expiry_flag ||
         getExpiryStatus(enriched.inventory_expiry || enriched.expiry).flag
     });
-    const currentInput = testModeBarcode.value === inputSnapshot;
-    if (currentInput) testModeBarcode.value = '';
+    const currentInput = queueBarcodeInput.value === inputSnapshot;
+    if (currentInput) queueBarcodeInput.value = '';
     const label =
       enriched.tradename ||
       enriched.generic_name ||
       enriched.lot ||
       'Unknown vaccine';
     if (activeMode === modeSnapshot && currentInput) {
+      closeEntry = true;
       writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
     }
   } catch (error) {
@@ -1902,30 +1865,38 @@ async function addManualScanToMultipleQueue() {
     );
   } finally {
     multipleAddInFlight = false;
-    setButtonBusy(testModeAddBtn, false);
+    setButtonBusy(addQueueBtn, false);
+    if (queueEntryToggleBtn) queueEntryToggleBtn.disabled = false;
+    if (cancelQueueEntryBtn) cancelQueueEntryBtn.disabled = false;
+    if (closeEntry) setQueueEntryOpen(false);
   }
 }
 
 async function addPendingScansToInventory() {
   if (inventoryAddInFlight) return;
   const modeSnapshot = activeMode;
-  const inputSnapshot = scannedInput?.value || '';
-  const lines = getPendingScanLines();
+  const inputSnapshot = inventoryBarcodeInput?.value || '';
+  const lines = inputSnapshot
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   if (!lines.length) {
-    writeOutput(
-      'Paste or scan one barcode per line before running batch add.',
-      'error'
-    );
+    writeOutput('Paste a barcode into the Barcode field first.', 'error');
     return;
   }
 
   const noticeVersion = queueSaveNoticeVersion;
+  let closeEntry = false;
   inventoryAddInFlight = true;
   setButtonBusy(addBatchBtn, true, 'Adding...');
+  // Keep entry visible until the save finishes; closing it cannot cancel a save.
+  if (inventoryEntryToggleBtn) inventoryEntryToggleBtn.disabled = true;
+  if (cancelInventoryEntryBtn) cancelInventoryEntryBtn.disabled = true;
   const records = [];
   let addedCount = 0;
   let lastRecord = null;
   const errors = [];
+  const failedLines = [];
 
   try {
     for (let index = 0; index < lines.length; index += 1) {
@@ -1938,6 +1909,7 @@ async function addPendingScansToInventory() {
         addedCount += 1;
       } catch (error) {
         errors.push(`Line ${index + 1}: ${error.message}`);
+        failedLines.push(rawBarcode);
       }
     }
 
@@ -1962,13 +1934,11 @@ async function addPendingScansToInventory() {
           getExpiryStatus(lastRecord?.inventory_expiry).flag
       });
     }
-    const currentInput =
-      activeMode === modeSnapshot && scannedInput?.value === inputSnapshot;
+    const currentInput = inventoryBarcodeInput?.value === inputSnapshot;
     if (currentInput) {
-      setPendingScanLines([]);
-      activeParseRequestId++;
-      parsedData = null;
-      setButtonBusy(autoFillBtn, false);
+      // Only failed lines remain, so retrying does not add confirmed rows twice.
+      inventoryBarcodeInput.value = failedLines.join('\n');
+      closeEntry = activeMode === modeSnapshot && !errors.length;
     }
 
     if (errors.length) {
@@ -1982,7 +1952,7 @@ async function addPendingScansToInventory() {
       });
     }
 
-    if (!currentInput) return;
+    if (activeMode !== modeSnapshot || !currentInput) return;
     if (addedCount) {
       const message = errors.length
         ? `Added ${addedCount} scan(s). ${errors.length} line(s) failed.`
@@ -1993,11 +1963,14 @@ async function addPendingScansToInventory() {
     }
   } catch (error) {
     showQueueSaveFailure(
-      `Inventory batch save not confirmed: ${error.message}. Check the tray before retrying.`
+      `Inventory save not confirmed: ${error.message}. Check the queue before retrying.`
     );
   } finally {
     inventoryAddInFlight = false;
     setButtonBusy(addBatchBtn, false);
+    if (inventoryEntryToggleBtn) inventoryEntryToggleBtn.disabled = false;
+    if (cancelInventoryEntryBtn) cancelInventoryEntryBtn.disabled = false;
+    if (closeEntry) setInventoryEntryOpen(false);
   }
 }
 

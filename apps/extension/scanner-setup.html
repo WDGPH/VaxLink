@@ -1,7 +1,8 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VaxLink Scanner Setup</title>
     <style>
       :root {
@@ -10,7 +11,6 @@
         --ink: #102135;
         --subtle: #5d6b7a;
         --line: #d4dce6;
-        --accent: #0f8b8d;
         --danger: #b42318;
         --warning: #9a3412;
         --success: #10683e;
@@ -57,23 +57,12 @@
         font-size: 14px;
       }
 
-      .grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 14px;
-        align-items: start;
-      }
-
       .card {
         border: 1px solid var(--line);
         border-radius: 8px;
         background: var(--panel);
         box-shadow: 0 10px 22px rgba(16, 33, 53, 0.08);
         padding: 14px;
-      }
-
-      .card.wide {
-        grid-column: 1 / -1;
       }
 
       h2 {
@@ -92,8 +81,7 @@
         color: #174d5f;
       }
 
-      select,
-      input {
+      select {
         width: 100%;
         border: 1px solid var(--line);
         border-radius: 8px;
@@ -168,41 +156,49 @@
         color: var(--danger);
       }
 
-      .kv {
-        display: grid;
-        grid-template-columns: 120px 1fr;
-        gap: 8px 12px;
+      .embedded body {
+        min-width: 0;
+        background: transparent;
+      }
+      .embedded .shell {
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        display: flow-root;
+      }
+      .embedded header,
+      .embedded .connection-heading {
+        display: none;
+      }
+      .embedded .card {
+        padding: 0;
+        border: 0;
+        box-shadow: none;
+        background: transparent;
+      }
+      .embedded #connectionStatus {
+        margin: 0;
+        padding: 0;
+        min-height: 0;
+        border: 0;
+        background: transparent;
+      }
+      details {
+        margin-top: 14px;
         font-size: 13px;
-        line-height: 1.35;
       }
-
-      .kv dt {
-        font-weight: 800;
-        color: #476173;
+      summary {
+        cursor: pointer;
+        font-weight: 700;
       }
-
-      .kv dd {
-        margin: 0;
-        color: #17344d;
-        word-break: break-word;
+      details[open] > summary {
+        margin-bottom: 12px;
       }
-
-      pre {
-        margin: 0;
-        padding: 10px;
-        min-height: 92px;
-        max-height: 180px;
-        overflow: auto;
-        border-radius: 8px;
-        border: 1px solid #dce7ef;
-        background: #f8fbfd;
-        color: #15354b;
-        font-size: 12px;
-        line-height: 1.4;
-        white-space: pre-wrap;
-        word-break: break-word;
+      #scannerIdentity {
+        margin: 8px 0 0;
+        font-size: 13px;
+        color: var(--subtle);
       }
-
       .hint {
         margin: 8px 0 0;
         color: var(--subtle);
@@ -217,85 +213,40 @@
         <div>
           <h1>Scanner Setup</h1>
           <p class="lead">
-            Pair a scanner through Web Serial once. VaxLink keeps the connection
-            in a background browser process, including while Windows is locked,
-            and stores locked scans in Multiple Inject.
+            Pair your scanner once. Scan capture continues after this view
+            closes, including while Windows is locked.
           </p>
         </div>
       </header>
 
-      <section class="grid">
-        <div class="card">
-          <h2>Connection</h2>
-          <label for="profileSelect">Scanner Profile</label>
+      <section class="card">
+        <h2 class="connection-heading">Connection</h2>
+        <div id="connectionStatus" class="status" role="status">
+          Checking scanner connection…
+        </div>
+        <p id="scannerIdentity" hidden></p>
+        <div class="actions">
+          <button id="requestPortBtn">Pair scanner</button>
+          <button id="connectGrantedBtn" class="secondary">Reconnect</button>
+          <button id="disconnectBtn" class="warning" disabled>
+            Disconnect
+          </button>
+        </div>
+        <details>
+          <summary>Setup guidance</summary>
+          <label for="profileSelect">Scanner profile</label>
           <select id="profileSelect"></select>
           <p id="profileNote" class="hint"></p>
-          <div class="actions">
-            <button id="requestPortBtn">Select Scanner</button>
-            <button id="connectGrantedBtn" class="secondary">
-              Reconnect Granted Port
-            </button>
-            <button id="disconnectBtn" class="warning" disabled>
-              Disconnect
-            </button>
+        </details>
+        <details id="scannerDiagnostics">
+          <summary>Scanner diagnostics</summary>
+          <div id="connectionDetails" class="status" role="status"></div>
+          <p id="scannerUsbIdentity" class="hint" hidden></p>
+          <h2>Scan routing</h2>
+          <div id="routeStatus" class="status" role="status">
+            No scan result yet.
           </div>
-          <div id="connectionStatus" class="status">
-            Web Serial support is being checked...
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>Device</h2>
-          <dl class="kv">
-            <dt>Profile</dt>
-            <dd id="deviceProfile">Not connected</dd>
-            <dt>Vendor ID</dt>
-            <dd id="deviceVendor">Unknown</dd>
-            <dt>Product ID</dt>
-            <dd id="deviceProduct">Unknown</dd>
-            <dt>State</dt>
-            <dd id="deviceState">Disconnected</dd>
-          </dl>
-        </div>
-
-        <div class="card">
-          <h2>Latest Scan</h2>
-          <pre id="decodedOutput">No scan received yet.</pre>
-        </div>
-
-        <div class="card">
-          <h2>Raw Bytes</h2>
-          <pre id="rawBytesOutput">No bytes received yet.</pre>
-        </div>
-
-        <div class="card wide">
-          <h2>Keyboard Leakage Test</h2>
-          <label for="leakageInput"
-            >Focus this field, then scan one barcode</label
-          >
-          <input
-            id="leakageInput"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <p class="hint">
-            A correctly configured serial scanner should produce a Web Serial
-            scan without typing into this field.
-          </p>
-          <div id="leakageStatus" class="status">
-            No leakage test has run yet.
-          </div>
-        </div>
-
-        <div class="card wide">
-          <h2>Routing</h2>
-          <div id="routeStatus" class="status">
-            While unlocked, scans route to the open chart. While Windows is
-            locked, every scan is saved to the Multiple Inject queue for review
-            after unlock.
-          </div>
-        </div>
+        </details>
       </section>
     </main>
 

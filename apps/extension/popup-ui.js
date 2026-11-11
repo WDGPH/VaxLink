@@ -38,24 +38,46 @@ export function formatNVCRefreshMessage(status) {
 
 export function renderNVCStatus(status, container) {
   if (!container || !status) return;
+  const state = getNVCStatusLabel(status);
+  const stateSummary =
+    container.ownerDocument?.getElementById('nvcSettingsState');
+  const versionSummary =
+    container.ownerDocument?.getElementById('nvcSettingsVersion');
+  if (stateSummary) stateSummary.textContent = state;
   const publication =
     status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
-      ? status.releaseDate
+      ? new Date(status.releaseDate).toLocaleDateString('en-CA', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          timeZone: 'UTC'
+        })
       : 'Unavailable';
+  if (versionSummary) {
+    versionSummary.textContent = [
+      status.releaseVersion
+        ? `Version ${status.releaseVersion}`
+        : 'Version unavailable',
+      publication !== 'Unavailable' ? publication : ''
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
   const rows = [
     ['Last downloaded', formatDateTime(status.updatedAt)],
     ['Last checked by VaxLink', formatDateTime(status.lastCheckAt)],
     ['Last refresh attempt', formatDateTime(status.lastAttemptAt)]
   ];
   container.innerHTML = `
-    <div>${escapeHtml(describeNVCHealth(status))}</div>
     <div class="nvc-status-heading">
-      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `NVC v${status.releaseVersion}` : 'NVC version unavailable')}</span>
-      ${status.lotCount == null ? '' : `<span class="nvc-status-count">${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</span>`}
+      <span class="nvc-status-version">${escapeHtml(status.releaseVersion ? `v${status.releaseVersion}` : 'NVC version unavailable')}</span>
+      <span>${escapeHtml(state)}</span>
     </div>
     <dl class="nvc-status-release"><div><dt>Published:</dt><dd>${escapeHtml(publication)}</dd></div></dl>
     <details class="nvc-status-sync">
-      <summary>Refresh details</summary>
+      <summary>Technical details</summary>
+      <p>${escapeHtml(describeNVCHealth(status))}</p>
+      ${status.lotCount == null ? '' : `<p>${Number(status.lotCount).toLocaleString()} distinct lot codes in the NVC catalogue</p>`}
       <dl class="nvc-status-details">${rows
         .map(
           ([label, value]) =>
@@ -64,6 +86,37 @@ export function renderNVCStatus(status, container) {
         .join('')}</dl>
       <div class="nvc-status-footer">Auto-check: every ${Math.round((status.autoSyncIntervalMinutes || 0) / 60)}h</div>
     </details>`;
+}
+
+export function getNVCStatusLabel(status, now = Date.now()) {
+  if (!status?.usable)
+    return status?.state === 'refreshing' ? 'Checking' : 'Unavailable';
+  if (status.state === 'refreshing') return 'Ready · checking';
+  if (status.freshnessDegraded || status.lastError)
+    return 'Ready · check failed';
+  const age = now - Date.parse(status.lastCheckAt || '');
+  const interval = (status.autoSyncIntervalMinutes || 1440) * 60000;
+  return Number.isFinite(age) && age >= 0 && age < interval
+    ? 'Up to date'
+    : 'Ready · check due';
+}
+
+export function describePanoramaIntegration(chart) {
+  const states = {
+    ready:
+      'Panorama integration is ready in the selected tab. This does not confirm a saved record.',
+    stale:
+      'The selected Panorama tab has an older extension. Reload it when safe to do so.',
+    not_ready:
+      'Panorama integration is still initializing in the selected tab. Wait, then check again.',
+    missing:
+      'Panorama integration was not found in the selected tab. Open a supported Panorama page, then reopen VaxLink.',
+    unknown:
+      'Panorama integration could not be confirmed in the selected tab. Reopen VaxLink on the chart, then check again.'
+  };
+  return Object.hasOwn(states, chart?.state)
+    ? states[chart.state]
+    : states.unknown;
 }
 
 export function setButtonBusy(button, busy, busyText) {
