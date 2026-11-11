@@ -83,9 +83,14 @@ requests to the background; it does not run the ongoing scanner reader.
 National Vaccine Catalogue shows its version, publication date, and last checked
 date, with a Refresh button. Loading and refresh errors stay visible.
 
-Autofill has separate switches for scan date/time, Reason for Immunization,
-and Consent for Service. Reason and consent each fall back to the old combined
-preference until staff set them separately.
+Autofill has four separate switches: administration date, administration time,
+Reason for Immunization, and Consent for Service. Each field inherits its old
+combined preference until staff set it separately. Date and time use the local
+time when form filling starts, for both live scans and tray items. A fill keeps
+that timestamp through retries and rerenders. The scan timestamp remains scan
+history and is not used as the administration timestamp. The Multiple
+Immunizations entry grid fills only its date field; detail forms can fill both
+fields. Disabled fields keep their existing values.
 
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
@@ -129,19 +134,22 @@ it in a queue.
 
 ## Key storage keys
 
-| Key                                  | Writers            | Purpose                                       |
-| ------------------------------------ | ------------------ | --------------------------------------------- |
-| `multiple_inject_queue_v1`           | background         | Multiple Immunizations queue rows             |
-| `inventory_scan_batch_v1`            | background         | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`      | background         | Single scans held for later chart delivery    |
-| `vaxlink_scanner_capture_error_v1`   | background         | Capture warning awaiting acknowledgement      |
-| `vaxlink_scanner_status_snapshot_v1` | background         | Last saved scanner status and capture history |
-| `nvc_bundle_override`                | background         | Cached NVC catalogue                          |
-| `vaxlink_reason_autofill_v1`         | popup              | Reason for Immunization autofill preference   |
-| `vaxlink_consent_autofill_v1`        | popup              | Consent for Service autofill preference       |
-| `vaxlink_reason_consent_autofill_v1` | legacy popup       | Default for unset reason and consent switches |
-| `vaxlink_workflow_mode_v1`           | popup + content    | Current workflow mode                         |
-| `vaxlink_analytics_v1`               | background + popup | Local event log and summaries                 |
+| Key                                         | Writers            | Purpose                                       |
+| ------------------------------------------- | ------------------ | --------------------------------------------- |
+| `multiple_inject_queue_v1`                  | background         | Multiple Immunizations queue rows             |
+| `inventory_scan_batch_v1`                   | background         | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`             | background         | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`          | background         | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1`        | background         | Last saved scanner status and capture history |
+| `nvc_bundle_override`                       | background         | Cached NVC catalogue                          |
+| `vaxlink_administered_date_autofill_v1`     | popup              | Date Administered autofill preference         |
+| `vaxlink_administered_time_autofill_v1`     | popup              | Time Administered autofill preference         |
+| `vaxlink_administered_datetime_autofill_v1` | legacy popup       | Default for unset date and time switches      |
+| `vaxlink_reason_autofill_v1`                | popup              | Reason for Immunization autofill preference   |
+| `vaxlink_consent_autofill_v1`               | popup              | Consent for Service autofill preference       |
+| `vaxlink_reason_consent_autofill_v1`        | legacy popup       | Default for unset reason and consent switches |
+| `vaxlink_workflow_mode_v1`                  | popup + content    | Current workflow mode                         |
+| `vaxlink_analytics_v1`                      | background + popup | Local event log and summaries                 |
 
 Queue appends, popup edits, HUD removals, and dose consumption share the
 background writer. Each change reads the latest rows after earlier writes finish,

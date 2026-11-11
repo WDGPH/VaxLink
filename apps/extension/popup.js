@@ -52,7 +52,8 @@ let mainWorkflowPanel;
 let exportTodayAnalyticsBtn;
 let exportAllAnalyticsBtn;
 let resetAnalyticsBtn;
-let adminDateTimeAutofillToggle;
+let adminDateAutofillToggle;
+let adminTimeAutofillToggle;
 let scannerSetupPrompt;
 let scannerConnectionNote;
 let continueWithoutScanner = false;
@@ -78,7 +79,6 @@ let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'single';
-let adminDateTimeAutofillEnabled = true;
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerStatusSource = 'cached';
 let scannerCaptureError = false;
@@ -89,7 +89,10 @@ const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
-const ADMIN_DATETIME_AUTOFILL_KEY = 'vaxlink_administered_datetime_autofill_v1';
+const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
+  'vaxlink_administered_datetime_autofill_v1';
+const ADMIN_DATE_AUTOFILL_KEY = 'vaxlink_administered_date_autofill_v1';
+const ADMIN_TIME_AUTOFILL_KEY = 'vaxlink_administered_time_autofill_v1';
 const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
 const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
@@ -140,9 +143,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportTodayAnalyticsBtn = document.getElementById('exportTodayAnalyticsBtn');
   exportAllAnalyticsBtn = document.getElementById('exportAllAnalyticsBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
-  adminDateTimeAutofillToggle = document.getElementById(
-    'adminDateTimeAutofillToggle'
-  );
+  adminDateAutofillToggle = document.getElementById('adminDateAutofillToggle');
+  adminTimeAutofillToggle = document.getElementById('adminTimeAutofillToggle');
   scannerSetupPrompt = document.getElementById('scannerSetupPrompt');
   scannerConnectionNote = document.getElementById('scannerConnectionNote');
   reasonAutofillToggle = document.getElementById('reasonAutofillToggle');
@@ -189,8 +191,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   renderInventoryCount(inventoryManager.count);
   await loadWorkflowMode();
   await loadSettingsPanelState();
-  await loadAdminDateTimeAutofillSetting();
-  await loadReasonConsentAutofillSettings();
+  await loadAutofillSettings();
   await loadAnalyticsSummary();
   await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
@@ -271,13 +272,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             : inventoryEntryToggleBtn;
       target?.focus();
     });
-  if (adminDateTimeAutofillToggle) {
-    adminDateTimeAutofillToggle.addEventListener('change', () => {
-      void setAdminDateTimeAutofillSetting(
-        !!adminDateTimeAutofillToggle.checked
-      );
-    });
-  }
+  adminDateAutofillToggle?.addEventListener('change', () => {
+    void setAutofillSetting(
+      ADMIN_DATE_AUTOFILL_KEY,
+      adminDateAutofillToggle.checked
+    );
+  });
+  adminTimeAutofillToggle?.addEventListener('change', () => {
+    void setAutofillSetting(
+      ADMIN_TIME_AUTOFILL_KEY,
+      adminTimeAutofillToggle.checked
+    );
+  });
   document
     .getElementById('acknowledgeScannerErrorBtn')
     ?.addEventListener('click', () => {
@@ -714,74 +720,39 @@ function applyPopupPanel(panel) {
   );
 }
 
-function normalizeAdminDateTimeAutofillSetting(stored) {
-  return !(stored && stored[ADMIN_DATETIME_AUTOFILL_KEY] === false);
-}
-
-function applyAdminDateTimeAutofillSetting(enabled) {
-  adminDateTimeAutofillEnabled = !!enabled;
-  if (adminDateTimeAutofillToggle) {
-    adminDateTimeAutofillToggle.checked = adminDateTimeAutofillEnabled;
-  }
-}
-
-async function loadAdminDateTimeAutofillSetting() {
-  try {
-    const stored = await getLocalStorage([ADMIN_DATETIME_AUTOFILL_KEY]);
-    applyAdminDateTimeAutofillSetting(
-      normalizeAdminDateTimeAutofillSetting(stored)
-    );
-  } catch (_) {
-    applyAdminDateTimeAutofillSetting(true);
-  }
-}
-
-async function setAdminDateTimeAutofillSetting(enabled) {
-  applyAdminDateTimeAutofillSetting(enabled);
-  try {
-    await setLocalStorage({
-      [ADMIN_DATETIME_AUTOFILL_KEY]: adminDateTimeAutofillEnabled
-    });
-    writeOutput(
-      adminDateTimeAutofillEnabled
-        ? 'Date Administered auto-fill is enabled.'
-        : 'Date Administered auto-fill is disabled.',
-      'info'
-    );
-  } catch (error) {
-    writeOutput(
-      error.message || 'Could not update Date Administered auto-fill setting.',
-      'error'
-    );
-  }
-}
-
-// The old combined switch remains the default until each field is set separately.
-function normalizeReasonConsentAutofillSetting(stored, key) {
-  return (
-    (stored?.[key] ?? stored?.[LEGACY_REASON_CONSENT_AUTOFILL_KEY]) !== false
-  );
-}
-
-async function loadReasonConsentAutofillSettings() {
+// Each old combined switch remains the default until its fields are set separately.
+async function loadAutofillSettings() {
+  const preferences = [
+    [
+      adminDateAutofillToggle,
+      ADMIN_DATE_AUTOFILL_KEY,
+      LEGACY_ADMIN_DATETIME_AUTOFILL_KEY
+    ],
+    [
+      adminTimeAutofillToggle,
+      ADMIN_TIME_AUTOFILL_KEY,
+      LEGACY_ADMIN_DATETIME_AUTOFILL_KEY
+    ],
+    [
+      reasonAutofillToggle,
+      REASON_AUTOFILL_KEY,
+      LEGACY_REASON_CONSENT_AUTOFILL_KEY
+    ],
+    [
+      consentAutofillToggle,
+      CONSENT_AUTOFILL_KEY,
+      LEGACY_REASON_CONSENT_AUTOFILL_KEY
+    ]
+  ];
   let stored = {};
   try {
-    stored = await getLocalStorage([
-      LEGACY_REASON_CONSENT_AUTOFILL_KEY,
-      REASON_AUTOFILL_KEY,
-      CONSENT_AUTOFILL_KEY
-    ]);
+    stored = await getLocalStorage(
+      preferences.flatMap(([, key, legacyKey]) => [key, legacyKey])
+    );
   } catch (_) {}
-  if (reasonAutofillToggle)
-    reasonAutofillToggle.checked = normalizeReasonConsentAutofillSetting(
-      stored,
-      REASON_AUTOFILL_KEY
-    );
-  if (consentAutofillToggle)
-    consentAutofillToggle.checked = normalizeReasonConsentAutofillSetting(
-      stored,
-      CONSENT_AUTOFILL_KEY
-    );
+  for (const [toggle, key, legacyKey] of preferences) {
+    if (toggle) toggle.checked = (stored[key] ?? stored[legacyKey]) !== false;
+  }
 }
 
 async function setAutofillSetting(key, enabled) {
@@ -1362,28 +1333,6 @@ function buildAutofillPayloadFromQueueRecord(record) {
   };
 }
 
-function toIsoTimestamp(value) {
-  if (!value) return '';
-  const parsed = new Date(String(value).trim());
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toISOString();
-}
-
-function buildAutoFillPayload(data, fallbackTimestamp = '') {
-  const payload = { ...(data || {}) };
-  if (adminDateTimeAutofillEnabled) {
-    const administeredAt =
-      toIsoTimestamp(payload.administered_at) ||
-      toIsoTimestamp(payload.scanned_at) ||
-      toIsoTimestamp(fallbackTimestamp) ||
-      new Date().toISOString();
-    payload.administered_at = administeredAt;
-  } else {
-    delete payload.administered_at;
-  }
-  return payload;
-}
-
 async function loadWorkflowMode() {
   try {
     const stored = await getLocalStorage([
@@ -1521,8 +1470,8 @@ function loadNVCStatus() {
   });
 }
 
-async function sendAutoFillToActiveTab(data, options = {}) {
-  const payload = buildAutoFillPayload(data, options.fallbackTimestamp || '');
+async function sendAutoFillToActiveTab(data) {
+  const payload = { ...(data || {}) };
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (chrome.runtime.lastError) {

@@ -1011,13 +1011,22 @@
             <details id="autofillSettingsSection" class="settings-card">
               <summary>
                 <strong>Autofill</strong>
-                <small>Date, reason and consent preferences</small>
+                <small>Date, time, reason and consent preferences</small>
               </summary>
-              <label class="settings-check" for="adminDateTimeAutofillToggle">
-                <input id="adminDateTimeAutofillToggle" type="checkbox" />
-                <span>Use scan time for Date Administered</span>
+              <label class="settings-check" for="adminDateAutofillToggle">
+                <input id="adminDateAutofillToggle" type="checkbox" />
+                <span>Auto-fill Date Administered</span>
               </label>
-              <p class="settings-hint">Sets administration date and time.</p>
+              <p class="settings-hint">
+                Sets administration date to the autofill date.
+              </p>
+              <label class="settings-check" for="adminTimeAutofillToggle">
+                <input id="adminTimeAutofillToggle" type="checkbox" />
+                <span>Auto-fill Time Administered</span>
+              </label>
+              <p class="settings-hint">
+                Sets administration time to the autofill time.
+              </p>
               <label class="settings-check" for="reasonAutofillToggle">
                 <input id="reasonAutofillToggle" type="checkbox" />
                 <span>Auto-fill Reason for Immunization</span>
