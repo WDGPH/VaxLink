@@ -864,9 +864,21 @@
       .activity-table td:last-child {
         padding-right: 0;
       }
-      .activity-table tbody th {
+      .activity-table tbody th,
+      .activity-table tfoot th {
         font-weight: 400;
         color: var(--subtle);
+      }
+      .activity-table .activity-group th {
+        padding: 12px 0 3px;
+        border-bottom: 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: #14505f;
+      }
+      .activity-table tfoot th,
+      .activity-table tfoot td {
+        border-bottom: 0;
       }
       .activity-actions {
         display: grid;

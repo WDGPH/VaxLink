@@ -871,16 +871,31 @@ function renderAnalyticsSummary(summary) {
   const today = summary.today || {};
   const todayMetrics = metrics(today, Object.keys(today).length ? 1 : 0);
   const allMetrics = metrics(summary.rollup || {}, summary.daysTracked);
+  const renderRow = (label) => `
+    <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
+  `;
+  const groups = [
+    [
+      'Scanning',
+      ['Scans', 'Scanner captures', 'Manual entries', 'Expiry warnings']
+    ],
+    ['Charting', ['Forms filled', 'Tray to chart']],
+    ['Trays & exports', ['Immunization tray adds', 'Inventory exports']]
+  ];
   analyticsSummaryDiv.innerHTML = `
     <table class="activity-table" aria-label="Activity statistics">
       <thead><tr><th scope="col">Stat</th><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
-      <tbody>${Object.entries(todayMetrics)
+      ${groups
         .map(
-          ([label, value]) => `
-        <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(value)}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
+          ([title, labels]) => `
+        <tbody>
+          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>
+          ${labels.map(renderRow).join('')}
+        </tbody>
       `
         )
-        .join('')}</tbody>
+        .join('')}
+      <tfoot>${renderRow('Days tracked')}</tfoot>
     </table>
   `;
 }
