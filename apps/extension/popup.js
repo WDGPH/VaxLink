@@ -884,7 +884,7 @@ function renderAnalyticsSummary(summary) {
   ];
   analyticsSummaryDiv.innerHTML = `
     <table class="activity-table" aria-label="Activity statistics">
-      <thead><tr><th scope="col">Stat</th><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
+      <thead><tr><td></td><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
       ${groups
         .map(
           ([title, labels]) => `
