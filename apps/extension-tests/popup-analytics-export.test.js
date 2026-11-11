@@ -129,7 +129,7 @@ test('Today JSON uses the local day and All time retains every stored day', asyn
     );
     assert.match(
       nodes.analyticsSummary.innerHTML,
-      /Scans today<\/span>\s*<strong[^>]*>3<\/strong>/
+      /Scans<\/th><td>3<\/td><td>10<\/td>/
     );
     await listeners['exportAllAnalyticsBtn:click']();
     const all = JSON.parse(await downloads[1].blob.text());

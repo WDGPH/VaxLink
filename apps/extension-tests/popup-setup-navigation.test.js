@@ -140,11 +140,11 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     await Promise.all(requests);
     assert.match(
       nodes.analyticsSummary.innerHTML,
-      /Scans today<\/span>\s*<strong[^>]*>10<\/strong>/
+      /Scans<\/th><td>10<\/td><td>10<\/td>/
     );
     assert.match(
       nodes.analyticsSummary.innerHTML,
-      /Forms filled today<\/span>\s*<strong[^>]*>5<\/strong>/
+      /Forms filled<\/th><td>5<\/td><td>5<\/td>/
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);

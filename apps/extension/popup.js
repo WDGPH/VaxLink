@@ -395,7 +395,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         queue: 'multiple',
         source: 'popup_button'
       });
-      writeOutput('Multiple Immunizations queue cleared.', 'info');
+      writeOutput('Multiple Immunizations tray cleared.', 'info');
     });
   }
 
@@ -508,7 +508,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         queue: 'inventory',
         source: 'popup_button'
       });
-      writeOutput('Inventory queue cleared.', 'info');
+      writeOutput('Inventory tray cleared.', 'info');
     });
   }
 
@@ -845,73 +845,43 @@ async function loadAnalyticsSummary() {
 
 function renderAnalyticsSummary(summary) {
   if (!summary || !analyticsSummaryDiv) return;
+  const metrics = (day, daysTracked) => {
+    const scannerCaptures = ['single', 'multiple', 'inventory'].reduce(
+      (total, workflow) => total + (day.workflows?.[workflow]?.liveScans || 0),
+      0
+    );
+    const manualEntries = ['single', 'multiple', 'inventory'].reduce(
+      (total, workflow) =>
+        total + (day.workflows?.[workflow]?.popupParses || 0),
+      0
+    );
+    return {
+      Scans: scannerCaptures + manualEntries,
+      'Forms filled': day.autofill?.success || 0,
+      'Inventory exports': day.exports?.inventoryCount || 0,
+      'Expiry warnings':
+        (day.expiry?.expired || 0) + (day.expiry?.expiringSoon || 0),
+      'Scanner captures': scannerCaptures,
+      'Manual entries': manualEntries,
+      'Immunization tray adds': day.queues?.multipleSaved || 0,
+      'Tray to chart': day.queues?.multipleUsed || 0,
+      'Days tracked': daysTracked
+    };
+  };
   const today = summary.today || {};
-  const rollup = summary.rollup || {};
-  const todayLiveScans =
-    (today.workflows?.single?.liveScans || 0) +
-    (today.workflows?.multiple?.liveScans || 0) +
-    (today.workflows?.inventory?.liveScans || 0);
-  const todayPopupParses =
-    (today.workflows?.single?.popupParses || 0) +
-    (today.workflows?.multiple?.popupParses || 0) +
-    (today.workflows?.inventory?.popupParses || 0);
-  const todayScans = todayLiveScans + todayPopupParses;
-  const todayAutofills = today.autofill?.success || 0;
-  const todayMultipleSaved = today.queues?.multipleSaved || 0;
-  const todayInventoryExports = today.exports?.inventoryCount || 0;
-  const todayExpiryWarnings =
-    (today.expiry?.expired || 0) + (today.expiry?.expiringSoon || 0);
-
-  const pilotLiveScans =
-    (rollup.workflows?.single?.liveScans || 0) +
-    (rollup.workflows?.multiple?.liveScans || 0) +
-    (rollup.workflows?.inventory?.liveScans || 0);
-  const pilotPopupParses =
-    (rollup.workflows?.single?.popupParses || 0) +
-    (rollup.workflows?.multiple?.popupParses || 0) +
-    (rollup.workflows?.inventory?.popupParses || 0);
-  const pilotScans = pilotLiveScans + pilotPopupParses;
-  const pilotAutofills = rollup.autofill?.success || 0;
-  const pilotQueueUses = rollup.queues?.multipleUsed || 0;
-  const pilotExports = rollup.exports?.inventoryCount || 0;
-
+  const todayMetrics = metrics(today, Object.keys(today).length ? 1 : 0);
+  const allMetrics = metrics(summary.rollup || {}, summary.daysTracked);
   analyticsSummaryDiv.innerHTML = `
-    <div class="activity-today">
-      ${renderAnalyticsMetric('Scans today', todayScans)}
-      ${renderAnalyticsMetric('Forms filled today', todayAutofills)}
-    </div>
-    <div class="activity-secondary">
-      ${renderAnalyticsMetric('Inventory exports today', todayInventoryExports)}
-      ${renderAnalyticsMetric('Expiry warnings today', todayExpiryWarnings)}
-    </div>
-    <details class="activity-section">
-      <summary>Pilot activity <small>Since tracking began</small></summary>
-      <p class="settings-hint">Scans and form fills are counted separately. One scan may support several fills.</p>
-      <div class="activity-secondary">
-        ${renderAnalyticsMetric('Captured scans', pilotScans)}
-        ${renderAnalyticsMetric('Forms filled', pilotAutofills)}
-        ${renderAnalyticsMetric('Inventory exports', pilotExports)}
-      </div>
-    </details>
-    <details class="activity-section">
-      <summary>Details</summary>
-      <div class="activity-secondary">
-        ${renderAnalyticsMetric('Scanner captures today', todayLiveScans)}
-        ${renderAnalyticsMetric('Popup entries today', todayPopupParses)}
-        ${renderAnalyticsMetric('Multiple saves today', todayMultipleSaved)}
-        ${renderAnalyticsMetric('Queue to chart, pilot total', pilotQueueUses)}
-        ${renderAnalyticsMetric('Tracked days', summary.daysTracked)}
-      </div>
-    </details>
-  `;
-}
-
-function renderAnalyticsMetric(label, value) {
-  return `
-    <div class="activity-metric">
-      <span>${escapeAnalyticsHtml(label)}</span>
-      <strong class="activity-metric-value">${formatAnalyticsNumber(value)}</strong>
-    </div>
+    <table class="activity-table" aria-label="Activity statistics">
+      <thead><tr><th scope="col">Stat</th><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
+      <tbody>${Object.entries(todayMetrics)
+        .map(
+          ([label, value]) => `
+        <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(value)}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
+      `
+        )
+        .join('')}</tbody>
+    </table>
   `;
 }
 
@@ -1682,13 +1652,13 @@ async function addManualScanToMultipleQueue() {
     if (activeMode === modeSnapshot && currentInput) {
       closeEntry = true;
       writeOutput(
-        `✓ Added to Multiple Immunizations queue: ${label}`,
+        `✓ Added to Multiple Immunizations tray: ${label}`,
         'success'
       );
     }
   } catch (error) {
     showQueueSaveFailure(
-      `Multiple Immunizations save not confirmed: ${error.message}. Check the queue before retrying.`
+      `Multiple Immunizations save not confirmed: ${error.message}. Check the tray before retrying.`
     );
   } finally {
     multipleAddInFlight = false;
@@ -1790,7 +1760,7 @@ async function addPendingScansToInventory() {
     }
   } catch (error) {
     showQueueSaveFailure(
-      `Inventory save not confirmed: ${error.message}. Check the queue before retrying.`
+      `Inventory save not confirmed: ${error.message}. Check the tray before retrying.`
     );
   } finally {
     inventoryAddInFlight = false;
@@ -1855,7 +1825,7 @@ async function handleUseMultipleInjectRecord(record) {
           getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
       });
       writeOutput(
-        'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The queue item will update after the lot is resolved.',
+        'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The tray item will update after the lot is resolved.',
         'info'
       );
       return;
@@ -1920,7 +1890,7 @@ async function handleUseMultipleInjectRecord(record) {
     writeOutput(
       record.lookup_error
         ? `Barcode fields filled. ${record.lookup_error}. Verify vaccine details on the chart.`
-        : `${label} auto-filled from Multiple Immunizations queue.${dosesMessage}`,
+        : `${label} auto-filled from Multiple Immunizations tray.${dosesMessage}`,
       record.lookup_error ? 'warning' : 'success'
     );
   } catch (error) {

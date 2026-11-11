@@ -97,7 +97,7 @@ function mutateQueue(storageKey, operation, payload = {}) {
             new Error(
               chrome.runtime.lastError?.message ||
                 response?.error ||
-                'Queue update failed'
+                'Tray update failed'
             )
           );
         } else {

@@ -399,7 +399,7 @@ function appendQueueRecordViaBackground(storageKey, record) {
           return;
         }
         if (!response || !response.success) {
-          reject(new Error(response?.error || 'Queue append failed'));
+          reject(new Error(response?.error || 'Tray save failed'));
           return;
         }
         resolve(response.record || null);
@@ -3157,7 +3157,7 @@ function mutateQueueViaBackground(storageKey, operation, payload = {}) {
             new Error(
               chrome.runtime.lastError?.message ||
                 response?.error ||
-                'Queue update failed'
+                'Tray update failed'
             )
           );
         } else {
@@ -3436,7 +3436,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._queueEmpty) {
     showRoutineToast(
       `<div class="vl-toast info show">
-      <div class="vl-toast-title">Queue empty</div>
+      <div class="vl-toast-title">Tray empty</div>
       <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
     </div>`,
       durationMs
@@ -3447,8 +3447,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._stepMatchMissing) {
     showRoutineToast(
       `<div class="vl-toast info show">
-      <div class="vl-toast-title">No queued match for this agent</div>
-      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the queue. VaxLink left the queue unchanged.</div>
+      <div class="vl-toast-title">No tray match for this agent</div>
+      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the tray. VaxLink left the tray unchanged.</div>
     </div>`,
       durationMs + 2000
     );
@@ -3575,7 +3575,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     showRoutineToast(
       `<div class="vl-toast duplicate show">
       <div class="vl-toast-title">Duplicate scan ignored</div>
-      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the queue</div>
+      <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the tray</div>
       ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     </div>`,
       durationMs
@@ -3591,7 +3591,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         : 'valid';
   const isExpired = flag === 'expired';
   const queuedNote = data._queuedCount
-    ? `<div class="vl-toast-detail">Added to queue (${Number(data._queuedCount)} queued)</div>`
+    ? `<div class="vl-toast-detail">Added to tray (${Number(data._queuedCount)} saved)</div>`
     : '';
 
   const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
@@ -4015,7 +4015,7 @@ function initHud() {
   hudClearBtn = document.createElement('button');
   hudClearBtn.className = 'vl-hud-btn vl-hud-clear-btn';
   hudClearBtn.textContent = 'Clear';
-  hudClearBtn.title = 'Clear the multiple-inject queue';
+  hudClearBtn.title = 'Clear the immunization tray';
   hudClearBtn.addEventListener('click', () => {
     // Two-step confirm so a stray click cannot wipe a clinic's scans.
     if (hudClearBtn.dataset.confirming === 'true') {
@@ -4249,7 +4249,7 @@ function renderHudQueueList(rows, visible) {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'vl-hud-item-remove';
     removeBtn.textContent = '×';
-    removeBtn.title = `Remove ${name} from queue`;
+    removeBtn.title = `Remove ${name} from tray`;
     removeBtn.setAttribute('aria-label', removeBtn.title);
     removeBtn.addEventListener('click', () => {
       void removeHudQueueRow(row.id);

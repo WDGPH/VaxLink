@@ -798,16 +798,6 @@
         cursor: pointer;
       }
 
-      #resetAnalyticsBtn {
-        width: auto;
-        margin-top: 12px;
-        padding: 7px 10px;
-        font-size: 12px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        background: #fff;
-        color: var(--ink);
-      }
       #connectionStatus {
         font-size: 13px;
         line-height: 1.45;
@@ -852,72 +842,36 @@
       }
 
       .analytics-summary {
-        display: grid;
-        gap: 16px;
-        margin-top: 16px;
+        margin-bottom: 14px;
       }
-
-      .activity-today {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 20px;
-        padding: 0 0 16px;
+      .activity-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .activity-table th,
+      .activity-table td {
+        padding: 9px 6px;
         border-bottom: 1px solid var(--line);
+        text-align: right;
       }
-
-      .activity-metric {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 12px;
-        font-size: 12px;
+      .activity-table th:first-child {
+        padding-left: 0;
+        text-align: left;
+      }
+      .activity-table th:last-child,
+      .activity-table td:last-child {
+        padding-right: 0;
+      }
+      .activity-table tbody th {
+        font-weight: 400;
         color: var(--subtle);
       }
-
-      .activity-metric-value {
-        color: var(--ink);
-        font-weight: 600;
-      }
-
-      .activity-today .activity-metric {
-        display: block;
-      }
-
-      .activity-today .activity-metric-value {
-        display: block;
-        margin-top: 8px;
-        font-size: 30px;
-      }
-
-      .activity-secondary {
+      .activity-actions {
         display: grid;
-        gap: 10px;
-      }
-
-      .activity-section {
-        padding-top: 12px;
-        border-top: 1px solid var(--line);
-        font-size: 12px;
-      }
-
-      .activity-section summary {
-        cursor: pointer;
-        color: var(--ink);
-      }
-
-      .activity-section summary small {
-        display: block;
-        margin: 4px 0 0 14px;
-        color: var(--subtle);
-        font-size: 11px;
-      }
-
-      .activity-section[open] summary {
-        margin-bottom: 12px;
-      }
-
-      .activity-section .settings-hint {
-        margin-bottom: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
       }
 
       #analyticsPanel button,
@@ -963,10 +917,10 @@
         color: #5f7283;
       }
 
-      #exportTodayAnalyticsBtn,
-      #exportAllAnalyticsBtn {
-        background: #0e7490;
-        color: #fff;
+      #analyticsPanel .activity-actions button {
+        width: 100%;
+        padding: 8px 6px;
+        line-height: 1.35;
       }
     </style>
   </head>
@@ -1114,20 +1068,20 @@
             </details>
           </div>
           <div id="analyticsPanel" class="analytics" hidden>
-            <p id="activityDeviceLabel" class="settings-hint">On this device</p>
             <div id="analyticsSummary" class="analytics-summary">
               Loading activity...
             </div>
-            <details class="technical-details">
-              <summary>Export JSON</summary>
-              <div class="actions">
-                <div class="action-row">
-                  <button id="exportTodayAnalyticsBtn">Today</button>
-                  <button id="exportAllAnalyticsBtn">All time</button>
-                </div>
-              </div>
-            </details>
-            <button id="resetAnalyticsBtn" type="button">Reset activity</button>
+            <div class="activity-actions">
+              <button id="exportTodayAnalyticsBtn" type="button">
+                Export Today's Activity
+              </button>
+              <button id="exportAllAnalyticsBtn" type="button">
+                Export All Activity
+              </button>
+              <button id="resetAnalyticsBtn" type="button">
+                Reset All Activity
+              </button>
+            </div>
           </div>
           <div id="mainWorkflowPanel">
             <div
@@ -1210,7 +1164,7 @@
             <div id="multipleModeSection" class="mode-panel" hidden>
               <div class="inventory">
                 <div class="queue-heading">
-                  <h3 class="result-heading">Queue</h3>
+                  <h3 class="result-heading">Tray</h3>
                   <span
                     id="multipleQueueCount"
                     class="queue-count"
@@ -1220,7 +1174,7 @@
                   <button
                     id="clearMultipleBtn"
                     type="button"
-                    aria-label="Clear queue"
+                    aria-label="Clear tray"
                   >
                     Clear
                   </button>
@@ -1250,7 +1204,7 @@
                     <button id="cancelQueueEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addQueueBtn" type="button">Add to Queue</button>
+                    <button id="addQueueBtn" type="button">Add to Tray</button>
                   </div>
                 </div>
                 <div id="multipleQueueList" class="inventory-list"></div>
@@ -1260,7 +1214,7 @@
             <div id="inventoryModeSection" class="mode-panel" hidden>
               <div class="inventory">
                 <div class="queue-heading">
-                  <h3 class="result-heading">Queue</h3>
+                  <h3 class="result-heading">Tray</h3>
                   <span
                     id="inventoryQueueCount"
                     class="queue-count"
@@ -1270,7 +1224,7 @@
                   <button
                     id="clearInventoryBtn"
                     type="button"
-                    aria-label="Clear inventory queue"
+                    aria-label="Clear inventory tray"
                   >
                     Clear
                   </button>
@@ -1300,7 +1254,7 @@
                     <button id="cancelInventoryEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addBatchBtn" type="button">Add to Queue</button>
+                    <button id="addBatchBtn" type="button">Add to Tray</button>
                   </div>
                 </div>
                 <div id="inventoryList" class="inventory-list"></div>

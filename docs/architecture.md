@@ -82,7 +82,8 @@ requests to the background; it does not run the ongoing scanner reader.
 
 NVC Catalogue shows availability and update information and provides a manual
 refresh. Autofill holds the existing Panorama preferences. Local Activity is
-available from the header and contains the activity reset. JSON exports cover
+available from the header and shows a table with Today and All time columns. All statistics stay visible,
+with JSON export and reset buttons in one row. JSON exports cover
 today in local time or all activity since the last reset. Its counts describe
 extension activity, not confirmation that Panorama saved a clinical record.
 
@@ -92,7 +93,7 @@ the Scanner section expanded and focused. The small close button allows manual
 input and saved queues without scanner setup. This choice lasts for the current
 popup and does not change scanner capture or routing.
 
-The Multiple Immunizations and Inventory queue cards use **+** to open barcode text
+The Multiple Immunizations and Inventory trays use **+** to open barcode text
 entry in packaged and unpacked installs. They use the existing parser, catalogue
 lookup, and background queue writer. Inventory accepts one barcode per line and
 keeps CSV export. Entry closes after a confirmed save when the input has not
