@@ -961,7 +961,6 @@ function renderAnalyticsSummary(summary) {
       ${renderAnalyticsMetric('Inventory exports today', todayInventoryExports)}
       ${renderAnalyticsMetric('Expiry warnings today', todayExpiryWarnings)}
     </div>
-    <p class="settings-hint">Counts describe extension activity, not saved clinical records.</p>
     <details class="activity-section">
       <summary>Pilot activity <small>Since tracking began</small></summary>
       <p class="settings-hint">Scans and form fills are counted separately. One scan may support several fills.</p>
