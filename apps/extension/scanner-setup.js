@@ -7,10 +7,8 @@ import {
   getScannerConnectionLabel
 } from './scanner/scanner-daemon-shared.js';
 import {
-  SERIAL_SCANNER_PROFILES,
   SCANNER_PORT_INFO_STORAGE_KEY,
   SCANNER_PROFILE_STORAGE_KEY,
-  formatUsbId,
   getSerialScannerProfile,
   portMatchesProfile
 } from './scanner/serial-profiles.js';
@@ -22,6 +20,7 @@ import {
 
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let statusChangeVersion = 0;
+let configuredProfileId;
 
 const els = {};
 const embedded = window.parent !== window;
@@ -29,32 +28,21 @@ if (embedded) document.documentElement.classList.add('embedded');
 
 document.addEventListener('DOMContentLoaded', () => {
   [
-    'profileSelect',
-    'profileNote',
     'requestPortBtn',
     'connectGrantedBtn',
     'disconnectBtn',
     'connectionStatus',
     'scannerIdentity',
-    'connectionDetails',
-    'scannerUsbIdentity',
-    'routeStatus'
+    'captureWarning'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
 
-  renderProfiles();
   bindEvents();
   initializePage();
 });
 
 function bindEvents() {
-  els.profileSelect?.addEventListener('change', () => {
-    const profile = getSelectedProfile();
-    renderProfileNote(profile);
-    chrome.storage.local.set({ [SCANNER_PROFILE_STORAGE_KEY]: profile.id });
-  });
-
   els.requestPortBtn?.addEventListener('click', () => {
     void requestAndOpenPort();
   });
@@ -77,9 +65,11 @@ chrome.runtime.onMessage.addListener((request) => {
     applyDaemonStatus(request.status);
   }
   if (request?.action === SCANNER_DAEMON_ACTIONS.SCAN_ECHO && request.scan) {
-    renderDaemonRouteResult(request.response || {});
-    if (!embedded && els.routeStatus.classList.contains('error'))
-      document.getElementById('scannerDiagnostics').open = true;
+    if (
+      request.response?.success === false ||
+      request.response?.response?.success === false
+    )
+      els.captureWarning.hidden = embedded;
   }
   return false;
 });
@@ -100,7 +90,7 @@ function sendScannerDaemonCommand(action, payload = {}) {
   });
 }
 
-function applyDaemonStatus(status, source = 'live', captureSource = source) {
+function applyDaemonStatus(status, source = 'live') {
   scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   const profile = getSerialScannerProfile(
     scannerStatusSnapshot.profileId || getSelectedProfile()?.id
@@ -117,7 +107,10 @@ function applyDaemonStatus(status, source = 'live', captureSource = source) {
       : 'info';
   setStatus(
     els.connectionStatus,
-    getScannerConnectionLabel(status, source),
+    getScannerConnectionLabel(status, source) +
+      (source === 'live' && scannerStatusSnapshot.lastError
+        ? `: ${scannerStatusSnapshot.lastError}`
+        : ''),
     tone
   );
   const identityKnown = !!scannerStatusSnapshot.profileId;
@@ -125,72 +118,12 @@ function applyDaemonStatus(status, source = 'live', captureSource = source) {
   els.scannerIdentity.textContent = identityKnown
     ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label} (Web Serial)`
     : '';
-  let detail = '';
-  if (
-    source === 'live' &&
-    (scannerStatusSnapshot.captureCount > 0 ||
-      scannerStatusSnapshot.lastCaptureAt)
-  )
-    detail = `Hardware captures in this session: ${scannerStatusSnapshot.captureCount}; latest ${scannerStatusSnapshot.lastCaptureAt || 'time unavailable'}.`;
-  else if (connected)
-    detail = 'No hardware scan has reached VaxLink in this session.';
-  if (scannerStatusSnapshot.lastError)
-    detail += ` ${scannerStatusSnapshot.lastError}`;
-  if (scannerStatusSnapshot.lastKnownCaptureAt && captureSource === 'cached')
-    detail += ` Last known capture (cached): ${scannerStatusSnapshot.lastKnownCaptureAt}.`;
-  setStatus(els.connectionDetails, detail.trim(), tone);
-  els.connectionDetails.hidden = !detail.trim();
-  const info = scannerStatusSnapshot.portInfo;
-  els.scannerUsbIdentity.hidden = !info;
-  els.scannerUsbIdentity.textContent = info
-    ? `${connected ? 'USB device' : 'Saved USB device'}: vendor ${formatUsbId(info.usbVendorId)}, product ${formatUsbId(info.usbProductId)}`
-    : '';
   setButtons({ canConnect: !connected, canDisconnect: connected });
   els.requestPortBtn.hidden = connected;
   els.connectGrantedBtn.hidden =
     connected ||
     (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !identityKnown);
   els.disconnectBtn.hidden = !connected;
-}
-
-function renderDaemonRouteResult(response) {
-  if (response?.duplicate_ignored) {
-    setStatus(els.routeStatus, 'Duplicate scan ignored.', 'info');
-    return;
-  }
-  if (response?.locked && response.queuedToWorkflow === false) {
-    setStatus(
-      els.routeStatus,
-      `Scan saved to pending scans (${response.pendingCount || 0}).`,
-      'success'
-    );
-    return;
-  }
-  if (response?.locked) {
-    setStatus(
-      els.routeStatus,
-      `Scan saved while locked to the Multiple Inject queue (${response.queueSizeAfter || 0}).`,
-      'success'
-    );
-    return;
-  }
-  if (response?.routed) {
-    renderChartRouteResult(response);
-    return;
-  }
-  if (response?.queuedToWorkflow) {
-    setStatus(
-      els.routeStatus,
-      `Scan saved to the ${response.workflow || 'multiple'} queue (${response.queueSizeAfter || 0}).`,
-      'success'
-    );
-    return;
-  }
-  setStatus(
-    els.routeStatus,
-    response?.error || 'Scan captured by daemon.',
-    response?.success === false ? 'error' : 'info'
-  );
 }
 
 function initializePage() {
@@ -213,27 +146,15 @@ function initializePage() {
       const portInfo = normalizeScannerPortInfo(
         stored && stored[SCANNER_PORT_INFO_STORAGE_KEY]
       );
-      els.profileSelect.value = profile.id;
-      renderProfileNote(profile);
+      configuredProfileId = profile.id;
       if (portInfo) {
         els.scannerIdentity.hidden = false;
         els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
       }
       void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
         .then((response) => {
-          applyDaemonStatus(
-            response.status,
-            response.source,
-            response.captureSource
-          );
-          if (response.captureError && !embedded) {
-            document.getElementById('scannerDiagnostics').open = true;
-            setStatus(
-              els.routeStatus,
-              'A scan could not be saved or delivered. Check pending scans and rescan if needed.',
-              'error'
-            );
-          }
+          applyDaemonStatus(response.status, response.source);
+          els.captureWarning.hidden = embedded || !response.captureError;
         })
         .catch((error) =>
           setStatus(els.connectionStatus, error.message, 'error')
@@ -257,30 +178,14 @@ function initializePage() {
     );
   });
 
-  setStatus(
-    els.connectionStatus,
-    'Ready. Select the scanner once; the background daemon will keep it connected after this tab closes.',
-    'info'
-  );
+  setStatus(els.connectionStatus, 'Checking scanner connection…', 'info');
   setButtons({ canConnect: true, canDisconnect: false });
 }
 
-function renderProfiles() {
-  els.profileSelect.innerHTML = SERIAL_SCANNER_PROFILES.map(
-    (profile) =>
-      `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.label)}</option>`
-  ).join('');
-  renderProfileNote(getSelectedProfile());
-}
-
-function renderProfileNote(profile) {
-  if (els.profileNote) {
-    els.profileNote.textContent = profile.setupNote || '';
-  }
-}
-
 function getSelectedProfile() {
-  return getSerialScannerProfile(els.profileSelect?.value);
+  return getSerialScannerProfile(
+    scannerStatusSnapshot.profileId || configuredProfileId
+  );
 }
 
 async function requestAndOpenPort() {
@@ -367,51 +272,6 @@ async function disconnectActivePort(options = {}) {
     );
 }
 
-function renderChartRouteResult(response) {
-  const chartResult = response?.response || {};
-  if (chartResult.success) {
-    if (chartResult.duplicate_ignored) {
-      setStatus(
-        els.routeStatus,
-        `Duplicate scan ignored by chart tab ${response.tabId}.`,
-        'warning'
-      );
-      return;
-    }
-    setStatus(
-      els.routeStatus,
-      `Scan routed to chart tab ${response.tabId}.`,
-      'success'
-    );
-    return;
-  }
-  if (chartResult.pending) {
-    setStatus(
-      els.routeStatus,
-      `Scan reached chart tab ${response.tabId}. Chart action is required before autofill can finish.`,
-      'warning'
-    );
-    return;
-  }
-  if (chartResult.command_handled) {
-    setStatus(
-      els.routeStatus,
-      `VaxLink scanner command handled by tab ${response.tabId}.`,
-      'success'
-    );
-    return;
-  }
-  const message =
-    chartResult.error ||
-    chartResult.status ||
-    'Chart received the scan, but autofill did not complete.';
-  setStatus(
-    els.routeStatus,
-    `Scan reached chart tab ${response.tabId}, but ${message}`,
-    'error'
-  );
-}
-
 function setButtons({ canConnect, canDisconnect }) {
   if (els.requestPortBtn) els.requestPortBtn.disabled = !canConnect;
   if (els.connectGrantedBtn) els.connectGrantedBtn.disabled = !canConnect;
@@ -422,13 +282,4 @@ function setStatus(el, message, type = 'info') {
   if (!el) return;
   el.textContent = message;
   el.className = `status ${type}`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }

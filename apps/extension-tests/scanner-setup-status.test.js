@@ -1,22 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('scanner diagnostics preserve capture evidence and connection acknowledgements cannot claim live status', async () => {
+test('scanner errors stay visible and command acknowledgements cannot claim live connection', async () => {
   const profileId = 'zebra-ds8178-usb-cdc';
   const port = { getInfo: () => ({ usbVendorId: 1504, usbProductId: 1 }) };
   const nodes = Object.fromEntries(
     [
-      'profileSelect',
-      'profileNote',
       'requestPortBtn',
       'connectGrantedBtn',
       'disconnectBtn',
       'connectionStatus',
       'scannerIdentity',
-      'connectionDetails',
-      'scannerUsbIdentity',
-      'scannerDiagnostics',
-      'routeStatus'
+      'captureWarning'
     ].map((id) => [
       id,
       {
@@ -103,17 +98,12 @@ test('scanner diagnostics preserve capture evidence and connection acknowledgeme
     assert.equal(nodes.connectionStatus.textContent, 'Connection unknown');
     assert.equal(nodes.connectGrantedBtn.hidden, false);
     assert.equal(
-      nodes.scannerDiagnostics.open,
-      true,
+      nodes.captureWarning.hidden,
+      false,
       'standalone capture warnings must be visible'
     );
     live('error');
-    assert.match(
-      nodes.connectionDetails.textContent,
-      /captures in this session: 2/
-    );
-    assert.match(nodes.connectionDetails.textContent, /2026-11-11T15:20:00/);
-    assert.match(nodes.connectionDetails.textContent, /Cable unavailable/);
+    assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
     for (const action of ['requestPortBtn', 'connectGrantedBtn']) {
       for (const updateBeforeAcknowledgement of [false, true]) {
         live('waiting_for_device');

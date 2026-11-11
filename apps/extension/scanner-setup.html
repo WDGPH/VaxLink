@@ -25,7 +25,7 @@
         min-width: 720px;
         color: var(--ink);
         background: var(--bg);
-        font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
+        font-family: 'Segoe UI', Arial, sans-serif;
       }
 
       .shell {
@@ -71,26 +71,6 @@
         color: #12364a;
       }
 
-      label {
-        display: block;
-        margin: 0 0 6px;
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 0.2px;
-        text-transform: uppercase;
-        color: #174d5f;
-      }
-
-      select {
-        width: 100%;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 9px 10px;
-        font-size: 13px;
-        color: #0e2b41;
-        background: #fbfdff;
-      }
-
       .actions {
         margin-top: 12px;
         display: flex;
@@ -99,6 +79,7 @@
       }
 
       button {
+        font-family: inherit;
         width: auto;
         border: 0;
         border-radius: 8px;
@@ -183,27 +164,10 @@
         border: 0;
         background: transparent;
       }
-      details {
-        margin-top: 14px;
-        font-size: 13px;
-      }
-      summary {
-        cursor: pointer;
-        font-weight: 700;
-      }
-      details[open] > summary {
-        margin-bottom: 12px;
-      }
       #scannerIdentity {
         margin: 8px 0 0;
         font-size: 13px;
         color: var(--subtle);
-      }
-      .hint {
-        margin: 8px 0 0;
-        color: var(--subtle);
-        font-size: 12px;
-        line-height: 1.45;
       }
     </style>
   </head>
@@ -232,21 +196,10 @@
             Disconnect
           </button>
         </div>
-        <details>
-          <summary>Setup guidance</summary>
-          <label for="profileSelect">Scanner profile</label>
-          <select id="profileSelect"></select>
-          <p id="profileNote" class="hint"></p>
-        </details>
-        <details id="scannerDiagnostics">
-          <summary>Scanner diagnostics</summary>
-          <div id="connectionDetails" class="status" role="status"></div>
-          <p id="scannerUsbIdentity" class="hint" hidden></p>
-          <h2>Scan routing</h2>
-          <div id="routeStatus" class="status" role="status">
-            No scan result yet.
-          </div>
-        </details>
+        <div id="captureWarning" class="status error" role="alert" hidden>
+          A scan could not be saved or delivered. Check pending scans and the
+          chart before rescanning.
+        </div>
       </section>
     </main>
 
