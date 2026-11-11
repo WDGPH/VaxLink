@@ -3415,8 +3415,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._commandMode) {
     const modeLabels = {
-      single: 'Single Inject',
-      multiple: 'Multiple Inject',
+      single: 'Single Immunization',
+      multiple: 'Multiple Immunizations',
       inventory: 'Inventory'
     };
     const sourceDetail =

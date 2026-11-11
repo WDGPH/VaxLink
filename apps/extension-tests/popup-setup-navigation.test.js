@@ -17,6 +17,10 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       'openScannerSettingsBtn',
       'continueWithoutScannerBtn',
       'settingsPanel',
+      'workflowHeader',
+      'panelHeader',
+      'panelTitle',
+      'closePanelBtn',
       'settingsToggleBtn',
       'analyticsPanel',
       'analyticsToggleBtn',
@@ -69,7 +73,7 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       deviceId: 'SAMPLE-DEVICE-ID',
       deviceLabel: 'Sample workstation',
       days: {
-        [new Date().toISOString().slice(0, 10)]: {
+        [new Intl.DateTimeFormat('en-CA').format(new Date())]: {
           workflows: {
             single: { liveScans: 2, popupParses: 1 },
             multiple: { liveScans: 3 },
@@ -152,28 +156,31 @@ test('Settings keeps scanner controls in place and offers a specific Panorama su
       listeners['openScannerSettingsBtn:click']();
       assert.equal(nodes.settingsPanel.hidden, false);
       assert.equal(nodes.mainWorkflowPanel.hidden, true);
-      assert.equal(nodes.settingsToggleBtn.attributes['aria-expanded'], 'true');
-      assert.equal(nodes.analyticsPanel.hidden, true);
+      assert.equal(nodes.workflowHeader.hidden, true);
+      assert.equal(nodes.panelHeader.hidden, false);
+      assert.equal(nodes.panelTitle.textContent, 'Settings');
+      assert.equal(
+        nodes.closePanelBtn.attributes['aria-label'],
+        'Close Settings'
+      );
+      listeners['closePanelBtn:click']();
+      assert.equal(nodes.settingsPanel.hidden, true);
+      assert.equal(nodes.mainWorkflowPanel.hidden, false);
+      assert.equal(nodes.panelHeader.hidden, true);
+      assert.equal(nodes.workflowHeader.hidden, false);
       listeners['analyticsToggleBtn:click']();
       assert.equal(nodes.settingsPanel.hidden, true);
       assert.equal(nodes.analyticsPanel.hidden, false);
-      assert.equal(nodes.mainWorkflowPanel.hidden, true);
+      assert.equal(nodes.panelTitle.textContent, 'Local Activity');
       assert.equal(
-        nodes.settingsToggleBtn.attributes['aria-expanded'],
-        'false'
+        nodes.closePanelBtn.attributes['aria-label'],
+        'Close Local Activity'
       );
       assert.equal(
         nodes.analyticsToggleBtn.attributes['aria-expanded'],
         'true'
       );
-      listeners['settingsToggleBtn:click']();
-      assert.equal(nodes.settingsPanel.hidden, false);
-      assert.equal(nodes.analyticsPanel.hidden, true);
-      listeners['settingsToggleBtn:click']();
-      assert.equal(nodes.settingsPanel.hidden, true);
-      assert.equal(nodes.mainWorkflowPanel.hidden, false);
-      listeners['analyticsToggleBtn:click']();
-      listeners['analyticsToggleBtn:click']();
+      listeners['closePanelBtn:click']();
       assert.equal(nodes.analyticsPanel.hidden, true);
       assert.equal(nodes.mainWorkflowPanel.hidden, false);
     }

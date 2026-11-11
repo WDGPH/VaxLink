@@ -52,8 +52,7 @@ let analyticsPanel;
 let mainWorkflowPanel;
 let saveAnalyticsLabelBtn;
 let exportTodayAnalyticsBtn;
-let exportPilotAnalyticsBtn;
-let exportAnalyticsCsvBtn;
+let exportAllAnalyticsBtn;
 let resetAnalyticsBtn;
 let adminDateTimeAutofillToggle;
 let scannerSettingsFrame;
@@ -146,8 +145,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   mainWorkflowPanel = document.getElementById('mainWorkflowPanel');
   saveAnalyticsLabelBtn = document.getElementById('saveAnalyticsLabelBtn');
   exportTodayAnalyticsBtn = document.getElementById('exportTodayAnalyticsBtn');
-  exportPilotAnalyticsBtn = document.getElementById('exportPilotAnalyticsBtn');
-  exportAnalyticsCsvBtn = document.getElementById('exportAnalyticsCsvBtn');
+  exportAllAnalyticsBtn = document.getElementById('exportAllAnalyticsBtn');
   resetAnalyticsBtn = document.getElementById('resetAnalyticsBtn');
   adminDateTimeAutofillToggle = document.getElementById(
     'adminDateTimeAutofillToggle'
@@ -156,7 +154,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   scannerSettingsFrame?.addEventListener('load', () => {
     const content = scannerSettingsFrame.contentDocument?.querySelector('main');
     if (!content) return;
-    // Keep Settings on the popup's scrollbar as connection and health text changes.
+    // Keep Settings on the popup's scrollbar as scanner connection text changes.
     new ResizeObserver(() => {
       const height = content.getBoundingClientRect().height;
       if (height > 0)
@@ -262,13 +260,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     void setPopupPanel(nextState ? 'analytics' : 'workflow');
     if (nextState) void loadAnalyticsSummary();
   });
+  document.getElementById('closePanelBtn')?.addEventListener('click', () => {
+    const returnTo = settingsPanel?.hidden
+      ? analyticsToggleBtn
+      : settingsToggleBtn;
+    void setPopupPanel('workflow');
+    returnTo?.focus();
+  });
   document
     .getElementById('openScannerSettingsBtn')
     ?.addEventListener('click', () => {
       const section = document.getElementById('scannerSettingsSection');
       if (section) section.open = true;
       void setPopupPanel('settings');
-      settingsToggleBtn?.focus();
     });
   document
     .getElementById('continueWithoutScannerBtn')
@@ -433,7 +437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         queue: 'multiple',
         source: 'popup_button'
       });
-      writeOutput('Multiple Inject queue cleared.', 'info');
+      writeOutput('Multiple Immunizations queue cleared.', 'info');
     });
   }
 
@@ -504,15 +508,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (exportPilotAnalyticsBtn) {
-    exportPilotAnalyticsBtn.addEventListener('click', async () => {
+  if (exportAllAnalyticsBtn) {
+    exportAllAnalyticsBtn.addEventListener('click', async () => {
       await exportAnalyticsJson('pilot');
-    });
-  }
-
-  if (exportAnalyticsCsvBtn) {
-    exportAnalyticsCsvBtn.addEventListener('click', async () => {
-      await exportAnalyticsCsv();
     });
   }
 
@@ -668,7 +666,9 @@ function renderMultipleModeCount(count) {
   if (multipleQueueCount) multipleQueueCount.textContent = String(normalized);
   if (multipleModeBtn)
     multipleModeBtn.textContent =
-      normalized > 0 ? `Multiple Inject (${normalized})` : 'Multiple Inject';
+      normalized > 0
+        ? `Multiple Immunizations (${normalized})`
+        : 'Multiple Immunizations';
 }
 
 function writeOutput(message, type = 'info') {
@@ -748,6 +748,7 @@ async function loadSettingsPanelState() {
 
 async function setPopupPanel(panel) {
   applyPopupPanel(panel);
+  if (panel !== 'workflow') document.getElementById('closePanelBtn')?.focus();
   try {
     await setLocalStorage({ [SETTINGS_PANEL_OPEN_KEY]: panel === 'settings' });
   } catch (_) {
@@ -756,6 +757,16 @@ async function setPopupPanel(panel) {
 }
 
 function applyPopupPanel(panel) {
+  const workflowHeader = document.getElementById('workflowHeader');
+  const panelHeader = document.getElementById('panelHeader');
+  const panelTitle = document.getElementById('panelTitle');
+  const closeButton = document.getElementById('closePanelBtn');
+  const title = panel === 'settings' ? 'Settings' : 'Local Activity';
+  if (workflowHeader) workflowHeader.hidden = panel !== 'workflow';
+  if (panelHeader) panelHeader.hidden = panel === 'workflow';
+  if (panelTitle) panelTitle.textContent = title;
+  closeButton?.setAttribute('aria-label', `Close ${title}`);
+  closeButton?.setAttribute('title', `Close ${title}`);
   if (panel === 'settings' && settingsPanel?.hidden) loadScannerSettings();
   if (settingsPanel) {
     settingsPanel.hidden = panel !== 'settings';
@@ -1045,104 +1056,6 @@ async function exportAnalyticsJson(scope) {
   }
 }
 
-async function exportAnalyticsCsv() {
-  try {
-    const store = await getLocalAnalyticsStore();
-    store.lastExportAt = new Date().toISOString();
-    await setLocalAnalyticsStore(store);
-    const csv = buildAnalyticsCsv(
-      buildAnalyticsExportFromStore(store, 'pilot')
-    );
-    const filename = `vaxlink-analytics-daily-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-    downloadTextFile(filename, csv, 'text/csv;charset=utf-8');
-    await loadAnalyticsSummary();
-    writeOutput(`Analytics CSV export ready: ${filename}`, 'success');
-  } catch (error) {
-    writeOutput(error.message || 'Could not export analytics CSV', 'error');
-  }
-}
-
-function buildAnalyticsCsv(data) {
-  const headers = [
-    'day',
-    'popup_opens',
-    'single_live_scans',
-    'single_popup_parses',
-    'multiple_live_scans',
-    'multiple_popup_parses',
-    'inventory_live_scans',
-    'inventory_popup_parses',
-    'total_captured_scans',
-    'parse_success',
-    'parse_error',
-    'lookup_success',
-    'lookup_error',
-    'autofill_success',
-    'autofill_failure',
-    'multiple_saved',
-    'multiple_used',
-    'inventory_saved',
-    'inventory_exports',
-    'inventory_export_rows',
-    'expired_seen',
-    'expiring_soon_seen'
-  ];
-  const rows = [headers.join(',')];
-  const days =
-    data && data.days
-      ? Object.entries(data.days).sort((a, b) => a[0].localeCompare(b[0]))
-      : [];
-
-  days.forEach(([dayKey, day]) => {
-    const totalCapturedScans =
-      (day.workflows?.single?.liveScans || 0) +
-      (day.workflows?.single?.popupParses || 0) +
-      (day.workflows?.multiple?.liveScans || 0) +
-      (day.workflows?.multiple?.popupParses || 0) +
-      (day.workflows?.inventory?.liveScans || 0) +
-      (day.workflows?.inventory?.popupParses || 0);
-    rows.push(
-      [
-        csvEscape(dayKey),
-        csvEscape(day.popupOpens || 0),
-        csvEscape(day.workflows?.single?.liveScans || 0),
-        csvEscape(day.workflows?.single?.popupParses || 0),
-        csvEscape(day.workflows?.multiple?.liveScans || 0),
-        csvEscape(day.workflows?.multiple?.popupParses || 0),
-        csvEscape(day.workflows?.inventory?.liveScans || 0),
-        csvEscape(day.workflows?.inventory?.popupParses || 0),
-        csvEscape(totalCapturedScans),
-        csvEscape(day.parsing?.success || 0),
-        csvEscape(day.parsing?.error || 0),
-        csvEscape(day.lookup?.success || 0),
-        csvEscape(day.lookup?.error || 0),
-        csvEscape(day.autofill?.success || 0),
-        csvEscape(day.autofill?.failure || 0),
-        csvEscape(day.queues?.multipleSaved || 0),
-        csvEscape(day.queues?.multipleUsed || 0),
-        csvEscape(day.queues?.inventorySaved || 0),
-        csvEscape(day.exports?.inventoryCount || 0),
-        csvEscape(day.exports?.inventoryRows || 0),
-        csvEscape(day.expiry?.expired || 0),
-        csvEscape(day.expiry?.expiringSoon || 0)
-      ].join(',')
-    );
-  });
-
-  return rows.join('\r\n');
-}
-
-function csvEscape(value) {
-  const text = String(value ?? '');
-  // Neutralize spreadsheet formula injection (cells starting with = + - @);
-  // plain numbers are exempt so counters stay numeric in Excel.
-  const guarded =
-    /^[=+\-@\t\r]/.test(text) && !/^-?\d+(\.\d+)?$/.test(text)
-      ? `'${text}`
-      : text;
-  return `"${guarded.replace(/"/g, '""')}"`;
-}
-
 async function getLocalAnalyticsStore() {
   const stored = await getLocalStorage([ANALYTICS_STORAGE_KEY]);
   return normalizeAnalyticsStore(stored[ANALYTICS_STORAGE_KEY]);
@@ -1273,12 +1186,19 @@ function ensureAnalyticsDay(store, dayKey) {
   return store.days[dayKey];
 }
 
+function analyticsDayKey(value = new Date()) {
+  const date = new Date(value);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 function buildLocalAnalyticsEvent(eventType, payload = {}) {
   const ts = new Date().toISOString();
   return {
     eventType,
     ts,
-    day: ts.slice(0, 10),
+    day: analyticsDayKey(ts),
     workflow: normalizeAnalyticsWorkflow(payload.workflow),
     queue: payload.queue ? normalizeAnalyticsQueue(payload.queue) : '',
     source: String(payload.source || '')
@@ -1393,7 +1313,7 @@ async function recordLocalAnalyticsEvent(eventType, payload = {}) {
 
 function buildAnalyticsSummaryFromStore(store) {
   const normalized = normalizeAnalyticsStore(store);
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = analyticsDayKey();
   const today = normalized.days[todayKey] || {};
   const rollup = aggregateAnalyticsDaysLocal(Object.values(normalized.days));
   return {
@@ -1411,7 +1331,7 @@ function buildAnalyticsSummaryFromStore(store) {
 
 function buildAnalyticsExportFromStore(store, scope) {
   const normalized = normalizeAnalyticsStore(store);
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = analyticsDayKey();
   const selectedKeys = Object.keys(normalized.days)
     .sort()
     .filter((key) => (scope === 'today' ? key === todayKey : true));
@@ -1856,11 +1776,14 @@ async function addManualScanToMultipleQueue() {
       'Unknown vaccine';
     if (activeMode === modeSnapshot && currentInput) {
       closeEntry = true;
-      writeOutput(`✓ Added to Multiple Inject queue: ${label}`, 'success');
+      writeOutput(
+        `✓ Added to Multiple Immunizations queue: ${label}`,
+        'success'
+      );
     }
   } catch (error) {
     showQueueSaveFailure(
-      `Multiple Inject save not confirmed: ${error.message}. Check the queue before retrying.`
+      `Multiple Immunizations save not confirmed: ${error.message}. Check the queue before retrying.`
     );
   } finally {
     multipleAddInFlight = false;
@@ -2092,7 +2015,7 @@ async function handleUseMultipleInjectRecord(record) {
     writeOutput(
       record.lookup_error
         ? `Barcode fields filled. ${record.lookup_error}. Verify vaccine details on the chart.`
-        : `${label} auto-filled from Multiple Inject queue.${dosesMessage}`,
+        : `${label} auto-filled from Multiple Immunizations queue.${dosesMessage}`,
       record.lookup_error ? 'warning' : 'success'
     );
   } catch (error) {

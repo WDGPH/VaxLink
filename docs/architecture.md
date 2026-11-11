@@ -70,28 +70,31 @@ scan input and preview, workflow selection, queue and inventory controls, CSV
 export, and scanner status. The popup sends fill requests to
 the selected Panorama integration.
 
-The header provides separate Settings and Local Activity controls. Settings has
+The header provides separate Settings and Local Activity controls. Each view
+uses the top bar for its title and a close button that returns to the workflow.
+Settings has
 four sections: Scanner, NVC Catalogue, Autofill, and Support & Diagnostics.
-Scanner controls and diagnostics are embedded in Settings and also available on
-the standalone Scanner Setup page. They show connection and capture status,
-including whether an observation is live or cached, and provide pairing,
-reconnection and routing feedback. The setup page
-does not run the ongoing scanner reader. The embedded page uses the popup's
-scrollbar and expands with its disclosed details.
+Scanner connection controls are embedded in Settings and also available on
+the standalone Scanner Setup page. They show connection status and the saved
+scanner name, with pairing, reconnect, and disconnect controls. Cached status
+cannot confirm a live connection. Actual connection errors remain visible.
+The setup page does not run the ongoing scanner reader. The embedded page
+expands to its content and uses the popup's scrollbar.
 
 NVC Catalogue shows availability and update information and provides a manual
 refresh. Autofill holds the existing Panorama preferences. Support & Diagnostics
 shows the extension version and offers a read-only check of the selected
 Panorama tab. Workstation label, device details, and reset controls stay in this
-section. Local Activity remains available from the header; its counts are
+section. Local Activity remains available from the header. JSON exports cover
+today in local time or all activity since the last reset. Its counts are
 extension activity, not confirmation that Panorama saved a clinical record.
 
-Injection and Inventory show a plain Setup Scanner prompt when no scanner
-is configured or permission needs to be granted again. It opens Settings; staff
-can continue without a scanner to use manual input and saved queues. This choice
+Immunization and Inventory show a Setup Scanner button when no scanner
+is configured or permission needs to be granted again. It opens Settings; the
+small close button allows manual input and saved queues without scanner setup. This choice
 lasts for the current popup and does not change scanner capture or routing.
 
-The Multiple Inject and Inventory queue cards use **+** to open barcode text
+The Multiple Immunizations and Inventory queue cards use **+** to open barcode text
 entry in packaged and unpacked installs. They use the existing parser, catalogue
 lookup, and background queue writer. Inventory accepts one barcode per line and
 keeps CSV export. Entry closes after a confirmed save when the input has not
@@ -123,7 +126,7 @@ it in a queue.
 
 | Key                                  | Writers            | Purpose                                       |
 | ------------------------------------ | ------------------ | --------------------------------------------- |
-| `multiple_inject_queue_v1`           | background         | Multiple Inject queue rows                    |
+| `multiple_inject_queue_v1`           | background         | Multiple Immunizations queue rows             |
 | `inventory_scan_batch_v1`            | background         | Inventory tray rows                           |
 | `vaxlink_pending_scan_inbox_v1`      | background         | Single scans held for later chart delivery    |
 | `vaxlink_scanner_capture_error_v1`   | background         | Capture warning awaiting acknowledgement      |
@@ -188,7 +191,7 @@ without an open chart. Staff review vaccine details before saving in Panorama.
 
 ## Pending scanner scans
 
-Single Inject saves each scan before attempting delivery once to the captured
+Single Immunization saves each scan before attempting delivery once to the captured
 active tab and observed form context. Navigation, form replacement, a newer
 fill, or manual takeover invalidates that context. This detects observable
 changes; it cannot identify a patient change that preserves the same URL and

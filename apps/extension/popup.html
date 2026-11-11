@@ -12,6 +12,13 @@
         --ring: rgba(15, 139, 141, 0.22);
       }
 
+      button,
+      input,
+      select,
+      textarea {
+        font-family: inherit;
+      }
+
       * {
         box-sizing: border-box;
       }
@@ -23,7 +30,7 @@
         width: 440px;
         min-height: 100%;
         color: var(--ink);
-        font-family: 'Segoe UI', 'Trebuchet MS', sans-serif;
+        font-family: 'Segoe UI', Arial, sans-serif;
         background: var(--panel);
       }
 
@@ -191,7 +198,7 @@
         border-radius: 14px;
         padding: 10px 11px;
         resize: vertical;
-        font-family: 'Consolas', 'Courier New', monospace;
+        font-family: inherit;
         font-size: 12px;
         line-height: 1.45;
         color: #0e2b41;
@@ -246,21 +253,13 @@
       .scanner-setup-prompt {
         flex: 1;
         display: flex;
-        flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 12px;
+        gap: 8px;
         padding: 48px 16px;
         text-align: center;
       }
 
-      .scanner-setup-prompt h3 {
-        margin: 0;
-        font-size: 18px;
-        font-weight: 600;
-      }
-
-      .scanner-setup-prompt p,
       #scannerConnectionNote {
         margin: 0;
         font-size: 12px;
@@ -277,12 +276,13 @@
       }
 
       #continueWithoutScannerBtn {
-        padding: 4px;
+        width: 24px;
+        height: 24px;
+        padding: 0;
         border: 0;
         color: var(--subtle);
-        font-size: 12px;
+        font-size: 18px;
         font-weight: 400;
-        text-decoration: underline;
       }
 
       .scanner-setup-required .scanner-input,
@@ -786,9 +786,21 @@
         display: none;
       }
 
-      .settings-title {
-        margin: 0 0 2px;
-        font-size: 17px;
+      #workflowHeader[hidden],
+      #panelHeader[hidden] {
+        display: none;
+      }
+      #panelHeader .title {
+        font-size: 20px;
+      }
+      #closePanelBtn {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        background: transparent;
+        color: var(--subtle);
+        font-size: 22px;
+        font-weight: 400;
       }
 
       .technical-details {
@@ -949,13 +961,8 @@
       }
 
       #exportTodayAnalyticsBtn,
-      #exportPilotAnalyticsBtn {
+      #exportAllAnalyticsBtn {
         background: #0e7490;
-        color: #fff;
-      }
-
-      #exportAnalyticsCsvBtn {
-        background: #164e63;
         color: #fff;
       }
     </style>
@@ -963,7 +970,7 @@
   <body>
     <div class="shell">
       <div class="panel">
-        <div class="brand">
+        <div id="workflowHeader" class="brand">
           <div class="brand-row">
             <div class="brand-copy">
               <img
@@ -1016,20 +1023,32 @@
             </div>
           </div>
         </div>
+        <div id="panelHeader" class="brand" hidden>
+          <div class="brand-row">
+            <h2 id="panelTitle" class="title">Settings</h2>
+            <button
+              id="closePanelBtn"
+              type="button"
+              aria-label="Close Settings"
+              title="Close Settings"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
         <div class="content">
           <div id="queueSaveNotice" class="output error" role="status" hidden>
             <span id="queueSaveNoticeText"></span>
             <button id="dismissQueueSaveNotice" type="button">Dismiss</button>
           </div>
           <div id="settingsPanel" class="settings-panel" hidden>
-            <h3 class="settings-title">Settings</h3>
             <details id="scannerSettingsSection" class="settings-card">
               <summary>
                 <strong>Scanner</strong>
                 <span id="scannerSettingsState" class="settings-state"
                   >Checking</span
                 >
-                <small>Pairing, connection and diagnostics</small>
+                <small>Pairing and connection</small>
               </summary>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
@@ -1118,23 +1137,17 @@
             </details>
           </div>
           <div id="analyticsPanel" class="analytics" hidden>
-            <h3 class="settings-title">Local Activity</h3>
             <p id="activityDeviceLabel" class="settings-hint">On this device</p>
             <div id="analyticsSummary" class="analytics-summary">
               Loading activity...
             </div>
             <details class="technical-details">
-              <summary>Export activity data</summary>
+              <summary>Export JSON</summary>
               <div class="actions">
                 <div class="action-row">
-                  <button id="exportTodayAnalyticsBtn">
-                    Export Today JSON
-                  </button>
-                  <button id="exportPilotAnalyticsBtn">
-                    Export Pilot JSON
-                  </button>
+                  <button id="exportTodayAnalyticsBtn">Today</button>
+                  <button id="exportAllAnalyticsBtn">All time</button>
                 </div>
-                <button id="exportAnalyticsCsvBtn">Export Daily CSV</button>
               </div>
             </details>
           </div>
@@ -1151,7 +1164,7 @@
                 role="tab"
                 aria-selected="true"
               >
-                Single Inject
+                Single Immunization
               </button>
               <button
                 id="multipleModeBtn"
@@ -1160,7 +1173,7 @@
                 role="tab"
                 aria-selected="false"
               >
-                Multiple Inject
+                Multiple Immunizations
               </button>
               <button
                 id="inventoryModeBtn"
@@ -1178,13 +1191,16 @@
               class="scanner-setup-prompt"
               hidden
             >
-              <h3>Setup Scanner</h3>
-              <p>Connect your scanner in Settings to get started.</p>
               <button id="openScannerSettingsBtn" type="button">
-                Open Settings
+                Setup Scanner
               </button>
-              <button id="continueWithoutScannerBtn" type="button">
-                Continue without scanner
+              <button
+                id="continueWithoutScannerBtn"
+                type="button"
+                aria-label="Continue without scanner"
+                title="Continue without scanner"
+              >
+                &times;
               </button>
             </section>
             <p id="scannerConnectionNote" role="status" hidden></p>
