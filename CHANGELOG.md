@@ -8,6 +8,29 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [2.0.0-alpha](https://github.com/WDGPH/VaxLink/compare/v1.2.0-alpha...v2.0.0-alpha) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* InputHealth chart integration is removed. Barcode parsing, NVC lookup, scanner capture, queues and inventory remain available without a chart.
+
+### Added
+
+* add read-only workstation health ([#92](https://github.com/WDGPH/VaxLink/issues/92)) ([dff18c0](https://github.com/WDGPH/VaxLink/commit/dff18c0b054ae0d95e0bd1d29c2350a18e6af510))
+* limit chart autofill to Panorama ([#88](https://github.com/WDGPH/VaxLink/issues/88)) ([6792e2d](https://github.com/WDGPH/VaxLink/commit/6792e2d456fcef85950ce1e7071143335342f5a1))
+
+
+### Fixed
+
+* finish popup adds without overwriting new input ([#100](https://github.com/WDGPH/VaxLink/issues/100)) ([dd8eb57](https://github.com/WDGPH/VaxLink/commit/dd8eb57a9d29d3c945ec4c115744e0f4e08ed5d3))
+* open scanner pairing in a standard browser window ([#104](https://github.com/WDGPH/VaxLink/issues/104)) ([06a84e8](https://github.com/WDGPH/VaxLink/commit/06a84e8226746d1503a2a9f27e70f5a972dd4498))
+* preserve pending scans and inspect scanner status safely ([#89](https://github.com/WDGPH/VaxLink/issues/89)) ([d186b36](https://github.com/WDGPH/VaxLink/commit/d186b36b9523c68fbf557fbe3c1c39159cd40a37))
+* reject invalid expiry dates and count calendar days ([#98](https://github.com/WDGPH/VaxLink/issues/98)) ([21f59ce](https://github.com/WDGPH/VaxLink/commit/21f59ce835910ea3cefe36fcb01f261e4fa38324))
+* retain uncertain scanner delivery for deliberate recovery ([#97](https://github.com/WDGPH/VaxLink/issues/97)) ([28520b0](https://github.com/WDGPH/VaxLink/commit/28520b0a4ee97eef8547652b6ddd221aa3743284))
+* serialize shared queue edits with scanner captures ([#99](https://github.com/WDGPH/VaxLink/issues/99)) ([005f123](https://github.com/WDGPH/VaxLink/commit/005f123b2d51529d429f2ad13fefeea71d0e8d8a))
+* stop autofill after form changes or manual takeover ([#96](https://github.com/WDGPH/VaxLink/issues/96)) ([0e4e0fb](https://github.com/WDGPH/VaxLink/commit/0e4e0fb6300edc8cc49144b45c3a46e3d2a7d2c0))
+
 ## [1.2.0-alpha](https://github.com/WDGPH/VaxLink/compare/v1.1.5...v1.2.0-alpha) (2026-11-07)
 
 
