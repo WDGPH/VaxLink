@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pair scanner · VaxLink</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px;
+        color: #102135;
+        background: #ffffff;
+        font:
+          14px/1.5 'Segoe UI',
+          Arial,
+          sans-serif;
+      }
+      h1 {
+        margin: 0 0 12px;
+        color: #0b3d4f;
+        font-size: 22px;
+      }
+      p {
+        margin: 0 0 16px;
+      }
+      #pairingStatus[data-error='true'] {
+        color: #b42318;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+      }
+      button {
+        padding: 10px 16px;
+        border: 1px solid #d4dce6;
+        border-radius: 8px;
+        background: #ffffff;
+        color: #102135;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #chooseScannerBtn {
+        background: #0b7892;
+        border-color: #0b7892;
+        color: #ffffff;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      button:focus-visible {
+        outline: 2px solid #0f8b8d;
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Pair scanner</h1>
+      <p>Choose your scanner from the device list.</p>
+      <p id="pairingStatus" role="status" hidden></p>
+      <div class="actions">
+        <button id="chooseScannerBtn" type="button">Choose scanner</button>
+        <button id="closePairingBtn" type="button">Close</button>
+      </div>
+    </main>
+    <script type="module" src="scanner-pairing.js"></script>
+  </body>
+</html>

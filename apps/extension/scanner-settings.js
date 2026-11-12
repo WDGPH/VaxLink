@@ -14,8 +14,7 @@ import {
 } from './scanner/serial-profiles.js';
 import {
   getGrantedSerialScannerPorts,
-  isWebSerialSupported,
-  requestSerialScannerPort
+  isWebSerialSupported
 } from './scanner/serial-provider.js';
 
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
@@ -51,7 +50,7 @@ export function initializeScannerSettings() {
 
 function bindEvents() {
   els.requestPortBtn?.addEventListener('click', () => {
-    void requestAndOpenPort();
+    openPairingWindow();
   });
 
   els.connectGrantedBtn?.addEventListener('click', () => {
@@ -178,36 +177,27 @@ function getSelectedProfile() {
   );
 }
 
-async function requestAndOpenPort() {
+function openPairingWindow() {
   const profile = getSelectedProfile();
-  try {
-    setButtons({ canConnect: false, canDisconnect: false });
-    setStatus(
-      els.connectionStatus,
-      'Waiting for browser scanner selection...',
-      'info'
-    );
-    const port = await requestSerialScannerPort(profile);
-    const portInfo = normalizeScannerPortInfo(port.getInfo());
-    els.scannerIdentity.hidden = false;
-    els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
-    const versionAtRequest = statusChangeVersion;
-    await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
-      profileId: profile.id,
-      preferredPortInfo: portInfo,
-      enableAutostart: true,
-      trigger: 'setup_permission_granted'
-    });
-    // The command acknowledges the request using a saved snapshot. A live
-    // update must confirm connection, and a late acknowledgement must not
-    // replace an update received while the request was pending.
-    if (statusChangeVersion === versionAtRequest)
-      setStatus(els.connectionStatus, 'Scanner selected. Connecting…', 'info');
-  } catch (error) {
-    const message = error.message || 'Scanner selection failed.';
-    setStatus(els.connectionStatus, message, 'error');
-    setButtons({ canConnect: true, canDisconnect: false });
-  }
+  // Chrome anchors extension device choosers to its extensions toolbar.
+  // A popup window lacks that toolbar, so use a standard browser window.
+  chrome.windows.create(
+    {
+      url: chrome.runtime.getURL(`scanner-pairing.html?profile=${profile.id}`),
+      type: 'normal',
+      width: 500,
+      height: 440,
+      focused: true
+    },
+    () => {
+      if (chrome.runtime.lastError)
+        setStatus(
+          els.connectionStatus,
+          chrome.runtime.lastError.message,
+          'error'
+        );
+    }
+  );
 }
 
 async function reconnectGrantedPort() {

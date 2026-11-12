@@ -28,9 +28,7 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       delimiters: ['\r\n', '\n', '\r'],
       idleFlushMs: 150,
       maxFrameLength: 512
-    },
-    setupNote:
-      'Use the DS8178 cradle in USB CDC / virtual COM mode, not HID keyboard emulation.'
+    }
   },
   {
     id: 'generic-usb-cdc',
@@ -55,9 +53,7 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       delimiters: ['\r\n', '\n', '\r'],
       idleFlushMs: 150,
       maxFrameLength: 512
-    },
-    setupNote:
-      'Use when the scanner exposes a browser-visible virtual COM port.'
+    }
   }
 ]);
 

@@ -33,6 +33,7 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     'navigator'
   );
   let listener, releaseCommand, commandStarted;
+  const pairingWindows = [];
   globalThis.document = {
     getElementById: (id) => nodes[id]
   };
@@ -42,11 +43,17 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       serial: {
         addEventListener() {},
         getPorts: async () => [port],
-        requestPort: async () => port
+        requestPort: () => assert.fail('Pair must use the pairing window')
       }
     }
   });
   globalThis.chrome = {
+    windows: {
+      create(options, done) {
+        pairingWindows.push(options);
+        done();
+      }
+    },
     storage: {
       local: {
         get(_keys, done) {
@@ -55,6 +62,7 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       }
     },
     runtime: {
+      getURL: (path) => `chrome-extension://vaxlink-test/${path}`,
       onMessage: {
         addListener(handler) {
           listener = handler;
@@ -95,32 +103,41 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     assert.equal(nodes.connectGrantedBtn.hidden, false);
     live('error');
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
-    for (const action of ['requestPortBtn', 'connectGrantedBtn']) {
-      for (const updateBeforeAcknowledgement of [false, true]) {
-        live('waiting_for_device');
-        const started = new Promise((resolve) => {
-          commandStarted = resolve;
-        });
-        nodes[action].listeners.click();
-        await started;
-        if (updateBeforeAcknowledgement) live('connected');
-        releaseCommand({
-          success: true,
-          status: { state: 'connected', profileId }
-        });
-        // The command's controlled promise has resolved. Let its UI continuation run.
-        await Promise.resolve();
-        assert.equal(
-          nodes.connectionStatus.className,
-          updateBeforeAcknowledgement ? 'status success' : 'status info'
-        );
-        assert.match(
-          nodes.connectionStatus.textContent,
-          updateBeforeAcknowledgement
-            ? /^Connected$/
-            : /Connecting|Checking connection/
-        );
+    nodes.requestPortBtn.listeners.click();
+    assert.deepEqual(pairingWindows, [
+      {
+        url: `chrome-extension://vaxlink-test/scanner-pairing.html?profile=${profileId}`,
+        type: 'normal',
+        width: 500,
+        height: 440,
+        focused: true
       }
+    ]);
+    assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
+    for (const updateBeforeAcknowledgement of [false, true]) {
+      live('waiting_for_device');
+      const started = new Promise((resolve) => {
+        commandStarted = resolve;
+      });
+      nodes.connectGrantedBtn.listeners.click();
+      await started;
+      if (updateBeforeAcknowledgement) live('connected');
+      releaseCommand({
+        success: true,
+        status: { state: 'connected', profileId }
+      });
+      // The command's controlled promise has resolved. Let its UI continuation run.
+      await Promise.resolve();
+      assert.equal(
+        nodes.connectionStatus.className,
+        updateBeforeAcknowledgement ? 'status success' : 'status info'
+      );
+      assert.match(
+        nodes.connectionStatus.textContent,
+        updateBeforeAcknowledgement
+          ? /^Connected$/
+          : /Connecting|Checking connection/
+      );
     }
   } finally {
     delete globalThis.document;
