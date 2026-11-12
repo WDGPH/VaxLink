@@ -80,6 +80,15 @@ reconnect, and disconnect controls. Cached status cannot confirm a live
 connection. Actual connection errors remain visible. The popup sends connection
 requests to the background; it does not run the ongoing scanner reader.
 
+Pair opens a small temporary standard browser window (`scanner-pairing.html` and
+`scanner-pairing.js`). Chromium needs its extensions toolbar to display the device
+chooser; a popup window does not provide it. Staff click Choose scanner in the
+standard window to grant Web Serial access. The window sends the
+selected port identity to the background reader and closes when the connection
+request is accepted. This acknowledgement does not confirm a live connection.
+Cancellation leaves the window open for another choice. Scanner settings and
+live connection status remain in the popup.
+
 National Vaccine Catalogue shows its version, publication date, and last checked
 date, with a Refresh button. Loading and refresh errors stay visible.
 
