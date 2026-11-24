@@ -7,6 +7,7 @@ Coding agents should read [AGENTS.md](https://github.com/WDGPH/VaxLink/blob/alph
 - `apps/extension/` — Chrome extension (Manifest V3), no build step, plain JS
 - `apps/extension-tests/` — extension test suite (kept outside `apps/extension/` so the Chrome Web Store zip stays clean)
 - `scripts/` — shell utilities
+- `docs/` — source for the staff and maintainer guides
 - `skills/` — Claude Code skill definitions for common extension workflows
 
 ## Chrome Extension
@@ -89,8 +90,41 @@ and `docs:` remain valid without forcing a release. See the
 ## Pull Requests
 
 - Let `scripts/package-extension.sh` set the extension name for each channel. Release-please manages versions separately on `alpha` and `main`; do not change them by hand.
-- Run `npm test` for extension changes and `uv sync --locked --group docs` followed by `uv run --locked --group docs mkdocs build --strict` for documentation changes before opening a PR.
+- Run `npm test` for extension changes. Run the strict build below for documentation changes.
 
-Documentation ownership and notification setup are described in the
-[README](https://github.com/WDGPH/VaxLink#documentation-site). Keep source navigation and Markdown
-extensions here; the documentation hub owns published styling and release URLs.
+## Documentation
+
+This repository owns the Markdown, navigation, Markdown extensions and locked
+build dependencies. The PHIZ documentation hub in `WDGPH/docs` owns the published
+theme and release URLs. [VaxLink documentation](https://docs.phiz.ca/vaxlink/)
+
+Check and preview the docs locally:
+
+```bash
+uv sync --locked --group docs
+uv run --locked --group docs python -m mkdocs build --strict
+uv run --locked --group docs python -m mkdocs serve
+```
+
+Open the address printed by MkDocs. The local preview uses Material. The
+`docs.yml` workflow runs the strict build on pushes to `main` and `alpha` and on
+pull requests. The hub handles publication.
+
+### Hub notifications and versions
+
+Set `DOCS_HUB_NOTIFY_ENABLED` to `true` to enable notifications. Set
+`DOCS_HUB_TRIGGER_TOKEN` to a GitHub token with Actions write access to
+`WDGPH/docs`. Only notification steps use that token.
+
+- Main pushes request the hub's `publish.yml` workflow for `WDGPH/VaxLink` with
+  `deploy=true`. The hub's deployment gate still controls publication.
+- Stable version tags added or deleted request the hub's `refresh-releases.yml`
+  workflow. Release Please also requests it when it creates a stable release.
+- Run **Notify documentation hub** on `main` if the automatic request was missed.
+  The manual run requests both workflows.
+
+The hub's latest manual follows `main`. Its `versions.lock.json` pins the
+release commits used for versioned manuals. When an older stable tag is
+corrected or deleted, run **Notify documentation hub** on `main`, then review the
+hub's release-lock PR and build. Keep historical manuals tied to their release
+sources. The first release with a MkDocs manual was `v1.1.2`.

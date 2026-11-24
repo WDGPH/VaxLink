@@ -422,7 +422,7 @@ Staff verify and save the immunization in Panorama.
   pushes to `alpha`/`main` and pull requests.
 - `.github/workflows/docs-hub-notify.yml` — opt-in notifications for `main` and
   stable-tag changes. The PHIZ documentation hub owns publication and styling;
-  see the [repository README](https://github.com/WDGPH/VaxLink#documentation-site)
+  see the [contributor guide](https://github.com/WDGPH/VaxLink/blob/alpha/CONTRIBUTING.md#documentation)
   for setup and historical release reconciliation.
 
 ## Constraints
