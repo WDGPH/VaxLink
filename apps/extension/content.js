@@ -282,6 +282,7 @@ async function reportPanoramaScannerVerification(owner, verified, data) {
           lot: data.lot,
           gtin: data.gtin,
           din: data.din,
+          drug_code: data.drug_code,
           tradename: data.tradename,
           generic_name: data.generic_name,
           name: data.name,
@@ -289,8 +290,11 @@ async function reportPanoramaScannerVerification(owner, verified, data) {
           antigen: data.antigen,
           manufacturer: data.manufacturer,
           inventory_expiry: data.inventory_expiry,
-          barcode_expiry: data.barcode_expiry || data.expiry,
-          nvc_lot_expiry: data.nvc_lot_expiry
+          barcode_expiry: data.barcode_expiry,
+          expiry: data.expiry,
+          nvc_lot_expiry: data.nvc_lot_expiry,
+          nvc_lot_matched: data.nvc_lot_matched,
+          nvc_catalogue_version: data.nvc_catalogue_version
         }
       : undefined;
   try {

@@ -772,7 +772,8 @@ function recentLotExpiry(vaccine) {
   const date = [
     vaccine.inventory_expiry,
     vaccine.barcode_expiry,
-    vaccine.nvc_lot_expiry
+    vaccine.nvc_lot_expiry,
+    vaccine.expiry
   ]
     .map(globalThis.VaxLinkExpiryDate.parseDateToLocal)
     .find(Boolean);
@@ -814,7 +815,9 @@ async function rememberVerifiedChartLot(data) {
     'manufacturer',
     'inventory_expiry',
     'barcode_expiry',
-    'nvc_lot_expiry'
+    'nvc_lot_expiry',
+    'expiry',
+    'nvc_catalogue_version'
   ]) {
     const value = data[field];
     if (typeof value === 'string' && value.trim() && value.length <= 200)
@@ -822,13 +825,10 @@ async function rememberVerifiedChartLot(data) {
   }
   if (
     !vaccine.lot ||
-    !(
-      vaccine.tradename ||
-      vaccine.generic_name ||
-      (vaccine.name && vaccine.name !== vaccine.din)
-    )
+    !globalThis.vaxlinkVaccineLabel({ ...vaccine, drug_code: data.drug_code })
   )
     return;
+  if (data.nvc_lot_matched === true) vaccine.nvc_lot_matched = true;
 
   const expiry = recentLotExpiry(vaccine);
   if (expiry) vaccine.inventory_expiry = expiry;
@@ -933,6 +933,7 @@ function mutateQueue(
 
         const record = buildQueueRecordFromParsed(vaccine, '', {
           dose_tracking: toImmunization ? 'single_use' : 'manual',
+          ...(vaccine.expiry && { expiry: vaccine.expiry }),
           ...(toImmunization &&
             expired && { reference_only: true, expiry_flag: 'expired' })
         });

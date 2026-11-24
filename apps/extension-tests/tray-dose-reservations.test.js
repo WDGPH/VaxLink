@@ -242,3 +242,60 @@ test('only the verified last tray use renews one bounded session history entry',
   assert.equal(history[0].lot, 'LOT');
   assert.equal('remaining_doses' in history[0], false);
 });
+
+test('recent lots preserve legacy expiry and lookup confirmation for named vaccines', async () => {
+  const historyKey = 'vaxlink_recent_chart_lots_v1';
+  const sessionStorage = new Map();
+  const { change } = tray(
+    [
+      {
+        id: 'lot-alias',
+        name: 'Same',
+        lot: ' SAME ',
+        dose_tracking: 'single_use'
+      },
+      {
+        id: 'gtin-alias',
+        name: '1234',
+        gtin: '1234',
+        lot: 'Other',
+        dose_tracking: 'single_use'
+      },
+      {
+        id: 'named',
+        name: 'Sample vaccine',
+        lot: 'NAMED',
+        expiry: '12/31/2099',
+        nvc_lot_matched: true,
+        nvc_catalogue_version: 'test-version',
+        dose_tracking: 'single_use'
+      }
+    ],
+    { sessionStorage }
+  );
+  for (const id of ['lot-alias', 'gtin-alias', 'named']) {
+    const token = randomUUID();
+    assert.equal(
+      (await change(chart(1), 'reserve_dose', id, token)).reserved,
+      true
+    );
+    assert.equal((await change(chart(1), 'consume', id, token)).success, true);
+  }
+
+  const history = sessionStorage.get(historyKey);
+  assert.deepEqual(
+    Array.from(history, (vaccine) => vaccine.lot),
+    ['NAMED']
+  );
+  const { record } = await change(
+    popup,
+    'add_from_history',
+    history[0].id,
+    undefined,
+    { confirmed: true }
+  );
+  assert.equal(record.inventory_expiry, '2099-12-31');
+  assert.equal(record.expiry, '12/31/2099');
+  assert.equal(record.nvc_lot_matched, true);
+  assert.equal(record.nvc_catalogue_version, 'test-version');
+});
