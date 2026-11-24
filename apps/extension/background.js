@@ -771,8 +771,12 @@ function mutateQueue(
 
         if (operation === 'reserve_dose') {
           if (
-            typeof current?.lot !== 'string' ||
-            !current.lot.trim() ||
+            ![
+              current?.lot,
+              current?.tradename,
+              current?.name,
+              current?.generic_name
+            ].some((value) => typeof value === 'string' && value.trim()) ||
             rows.findLastIndex((row) => row?.id === payload.id) !== index
           )
             throw new Error(

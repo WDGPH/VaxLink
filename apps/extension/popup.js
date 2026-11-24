@@ -1,5 +1,4 @@
 import './shared/vaccine-label.js';
-import './shared/tray-doses.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
@@ -27,8 +26,6 @@ import {
   buildScannerStatusDescriptor,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
-
-const { getTrayRemainingDoses } = globalThis.VaxLinkTrayDoses;
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -960,58 +957,6 @@ function normalizeWorkflowMode(stored) {
   return 'single';
 }
 
-function buildAutofillPayloadFromQueueRecord(record) {
-  if (!record) return null;
-  const totalDoses =
-    Number.isFinite(Number(record.total_doses)) &&
-    Number(record.total_doses) > 0
-      ? Number(record.total_doses)
-      : '';
-  const remainingDoses =
-    Number.isFinite(Number(record.remaining_doses)) &&
-    Number(record.remaining_doses) > 0
-      ? Number(record.remaining_doses)
-      : Number.isFinite(totalDoses)
-        ? totalDoses
-        : '';
-  return {
-    scanned_at: record.scanned_at || '',
-    gtin: record.gtin || '',
-    lot: record.lot || '',
-    serial: record.serial || '',
-    expiry:
-      record.expiry || record.barcode_expiry || record.inventory_expiry || '',
-    inventory_expiry: record.inventory_expiry || record.barcode_expiry || '',
-    nvc_lot_expiry: record.nvc_lot_expiry || '',
-    expiry_flag: record.expiry_flag || '',
-    expiry_days_remaining: record.expiry_days_remaining ?? '',
-    expiry_source:
-      record.expiry_source || (record.barcode_expiry ? 'barcode' : 'none'),
-    tradename: record.tradename || '',
-    generic_name: record.generic_name || '',
-    disease: record.disease || '',
-    antigen: record.antigen || '',
-    manufacturer: record.manufacturer || '',
-    route: record.route || '',
-    strength: record.strength || '',
-    dose_value: record.dose_value || '',
-    dose_unit: record.dose_unit || '',
-    din: record.din || '',
-    drug_code: record.drug_code || record.din || '',
-    total_doses: totalDoses,
-    remaining_doses: remainingDoses,
-    dose_tracking: record.dose_tracking || 'manual',
-    lookup_error: record.lookup_error || '',
-    lookup_error_category: record.lookup_error_category || '',
-    nvc_catalogue_version: record.nvc_catalogue_version || '',
-    nvc_lot_matched: record.nvc_lot_matched === true,
-    reference_only: record.reference_only === true,
-    barcode_expiry: record.barcode_expiry || '',
-    name:
-      record.name || record.generic_name || record.tradename || record.din || ''
-  };
-}
-
 async function loadWorkflowMode() {
   try {
     const stored = await getLocalStorage([
@@ -1463,112 +1408,54 @@ async function addPendingScansToInventory() {
   }
 }
 
+let trayUseInFlight = false;
+
 async function handleUseMultipleInjectRecord(record) {
-  if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) {
-    writeOutput('This vaccine is expired. Use an in-date vaccine.', 'error');
-    return;
-  }
-  const data = buildAutofillPayloadFromQueueRecord(record);
-  if (!data) {
-    writeOutput('Saved vaccine could not be loaded.', 'error');
-    return;
-  }
-  data._vaxlinkQueueContext = {
-    storageKey: MULTIPLE_INJECT_QUEUE_KEY,
-    recordId: record.id,
-    workflow: 'multiple',
-    queue: 'multiple',
-    source: 'queue'
-  };
-
-  parsedData = data;
-  writeOutput(
-    buildParsedOutputMarkup(data),
-    outputTypeForExpiry(getExpiryStatus(data.inventory_expiry || data.expiry))
-  );
-
+  if (trayUseInFlight || activeMode !== 'multiple') return;
+  if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) return;
+  trayUseInFlight = true;
   try {
-    logAnalyticsEvent('autofill_attempt', {
-      workflow: 'multiple',
-      source: 'queue',
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || '',
-      expiryFlag:
-        record.expiry_flag ||
-        getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true
     });
-    const response = await sendAutoFillToActiveTab(data);
-    if (response && response.pending) {
-      writeOutput(
-        response.reason === 'funding_choice_required'
-          ? 'Choose the funding category in Panorama to continue.'
-          : 'VaxLink is checking the lot and chart fields in Panorama.',
-        'info'
+    if (!tab?.id) throw new Error('Open a Panorama immunization form.');
+    const chart = await chrome.tabs
+      .sendMessage(
+        tab.id,
+        { action: 'getPanoramaIntegration', forTrayUse: true },
+        { frameId: 0 }
+      )
+      .catch(() => null);
+    if (!chart?.ready || !chart.formContext?.ready || !chart.contextToken) {
+      throw new Error(
+        'Open a supported Panorama form that is ready for entry.'
       );
-      return;
     }
-    const remainingDoses = getTrayRemainingDoses(record);
-    const nextRecord = await multipleInjectManager.consumeById(record.id);
-    if (nextRecord) {
-      multipleInjectManager.setActiveUse(nextRecord.id);
-    } else {
-      multipleInjectManager.setActiveUse('');
-    }
-    const updatedRemaining =
-      remainingDoses === null
-        ? null
-        : nextRecord
-          ? getTrayRemainingDoses(nextRecord)
-          : 0;
-    logAnalyticsEvent('queue_used', {
-      workflow: 'multiple',
-      queue: 'multiple',
-      source: 'queue',
-      count: 1,
-      queueSizeAfter: multipleInjectManager.count,
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || '',
-      expiryFlag:
-        record.expiry_flag ||
-        getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-    });
-    logAnalyticsEvent('autofill_result', {
-      workflow: 'multiple',
-      source: 'queue',
-      success: true,
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || '',
-      expiryFlag:
-        record.expiry_flag ||
-        getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-    });
-    const label =
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      'Saved vaccine';
-    const dosesMessage =
-      updatedRemaining !== null &&
-      updatedRemaining > 0 &&
-      updatedRemaining !== 1
-        ? ` ${updatedRemaining} dose(s) remaining in this vial.`
-        : '';
-    writeOutput(
-      record.lookup_error
-        ? `Barcode fields filled. ${record.lookup_error}. Verify vaccine details on the chart.`
-        : `${label} auto-filled from Multiple Immunizations tray.${dosesMessage}`,
-      record.lookup_error ? 'warning' : 'success'
+    const result = await chrome.tabs.sendMessage(
+      tab.id,
+      {
+        action: 'useTrayVaccine',
+        recordId: record.id,
+        contextToken: chart.contextToken
+      },
+      { frameId: 0 }
     );
+    if (result?.status === 'expired') return;
+    if (!result?.success && !result?.pending)
+      throw new Error(result?.error || 'Check the chart before trying again.');
+
+    const message =
+      result.reason === 'funding_choice_required'
+        ? 'Choose the funding category in Panorama to continue.'
+        : result.pending
+          ? 'VaxLink is waiting for Panorama. Check the chart before continuing.'
+          : 'Vaccine details filled. Review the chart before saving.';
+    writeOutput(message, result.pending ? 'info' : 'success');
   } catch (error) {
-    logAnalyticsEvent('autofill_result', {
-      workflow: 'multiple',
-      source: 'queue',
-      success: false,
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || ''
-    });
-    writeOutput(error.message || 'Could not auto-fill fields', 'error');
+    writeOutput(escapeHtml(error.message), 'error');
+  } finally {
+    trayUseInFlight = false;
   }
 }
 

@@ -351,8 +351,13 @@ test('popup focus preserves the deliberate chart context and retires the automat
   f.windowListeners.get('blur').forEach((listener) => listener());
   assert.equal(f.isScannerDeliveryContextCurrent(automatic, kind), false);
   assert.equal(f.isScannerDeliveryContextCurrent(explicit, kind, true), true);
-  interaction(f);
+  f.context.document.visibilityState = 'hidden';
+  f.documentListeners.get('visibilitychange').forEach((listener) => listener());
+  f.context.document.visibilityState = 'visible';
   assert.equal(f.isScannerDeliveryContextCurrent(explicit, kind, true), false);
+  const changed = f.getScannerDeliveryContext(kind, true);
+  interaction(f);
+  assert.equal(f.isScannerDeliveryContextCurrent(changed, kind, true), false);
 });
 
 test('context changes rotate the token and cannot revive an in-transit scan', () => {

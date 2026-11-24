@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createContentHarness } from './helpers/clinic-sim.js';
+import {
+  createBackgroundHarness,
+  createContentHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 const id =
   'recordImmsForm:immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu';
@@ -219,6 +223,67 @@ test('an older Trade-only row waits for the current select to retain its choice'
   assert.equal(replacement.value, '');
   assert.equal(fill(), true);
   assert.equal(f.context.hasPanoramaLotOrTradeSelection(data), true);
+});
+
+test('an older finite Trade-only row reserves before entry and consumes only after Trade readback', async () => {
+  const f = fixture();
+  const key = 'multiple_inject_queue_v1';
+  const worker = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [key]: [{ id: 'old-trade', tradename: 'Priorix', remaining_doses: 1 }]
+    }
+  });
+  const operations = [];
+  const url = f.context.location.href;
+  f.context.chrome.runtime.sendMessage = (message, reply) => {
+    if (!reply) return;
+    if (message.action === 'mutateQueue') operations.push(message);
+    void worker
+      .sendMessage(message, {
+        id: 'vaxlink-test',
+        frameId: 0,
+        documentId: 'trade-chart',
+        url,
+        tab: { id: 45, url }
+      })
+      .then(reply);
+  };
+  f.context.getPanoramaFormContext = () => ({
+    kind: 'provider_single',
+    ready: true
+  });
+  f.context.showVaxlinkToast = () => {};
+  const trade = f.select('Priorix');
+  trade.id =
+    'recordImmsForm:immsDetailssection_createImms_tradenameinput:selectOneMenu_input';
+  f.state.trade = [trade];
+  f.context.isPanoramaImmunizationPage = () => true;
+  f.context.hasPanoramaAgentSelection = () => true;
+  let verified;
+  f.context.schedulePanoramaLotOrTradeSelection = (
+    data,
+    _delay,
+    { finalizeOnResolved }
+  ) => {
+    assert.equal(worker.storageData.get(key)[0].dose_reservations.length, 1);
+    assert.equal(finalizeOnResolved, true);
+    assert.equal(f.context.hasPanoramaLotOrTradeSelection(data), true);
+    verified = data;
+  };
+  const token = f.context.getScannerDeliveryContext('provider_single', true);
+  assert.equal(
+    (await f.context.useTrayVaccine('old-trade', token)).status,
+    'pending'
+  );
+  assert.equal(worker.storageData.get(key).length, 1);
+  await f.context.finalizeDeferredPanoramaAutofill(verified);
+  assert.equal(trade.value, 'lot-option');
+  assert.deepEqual(
+    operations.map(({ operation }) => operation),
+    ['reserve_dose', 'consume']
+  );
+  assert.equal(operations[0].payload.token, operations[1].payload.token);
+  assert.equal(worker.storageData.get(key).length, 0);
 });
 
 test('only current product readback permits Date and another refresh stops Time', () => {

@@ -116,3 +116,67 @@ test('Local Activity preserves product names and skips lot aliases from saved ro
   assert.equal(data.rollup.vaccines['Legacy vaccine'], 2);
   assert.doesNotMatch(JSON.stringify(data), /TRAININGLOT|LEGACY-LOT/);
 });
+
+test('a failed tray debit leaves one failed outcome and no verified use', async () => {
+  const sender = {
+    id: 'vaxlink-test',
+    frameId: 0,
+    documentId: 'owned-chart',
+    url: chartUrl,
+    tab: { id: 44, url: chartUrl }
+  };
+  const worker = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { [key]: [{ id: 'vial', lot: 'LOT', remaining_doses: 2 }] },
+    failStorageSet(values) {
+      return values[key]?.[0]?.remaining_doses === 1;
+    }
+  });
+  const { context } = createContentHarness();
+  const form = { isConnected: true };
+  let data;
+  const messages = [];
+  Object.assign(context, {
+    getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
+    getPanoramaMultiStepIndicatorKey: () => '',
+    showVaxlinkToast() {},
+    autoFillPanorama(owned) {
+      data = owned;
+      data._vaxlinkOwner.writeAttempted = true;
+      return { status: 'pending' };
+    }
+  });
+  context.chrome.runtime.sendMessage = (message, reply) => {
+    messages.push(message);
+    void worker.sendMessage(message, sender).then(reply);
+  };
+  const contextToken = context.getScannerDeliveryContext(
+    'provider_single',
+    true
+  );
+  assert.equal(
+    (await context.useTrayVaccine('vial', contextToken)).status,
+    'pending'
+  );
+  await Promise.all([
+    context.finalizeDeferredPanoramaAutofill(data),
+    context.finalizeDeferredPanoramaAutofill({ ...data })
+  ]);
+  const row = worker.storageData.get(key)[0];
+  assert.equal(row.remaining_doses, 2);
+  assert.equal(row.dose_reservations[0].review, true);
+  assert.equal(
+    messages.filter(({ operation }) => operation === 'consume').length,
+    1
+  );
+  assert.deepEqual(
+    messages
+      .filter(({ eventType }) => eventType === 'autofill_result')
+      .map(({ payload }) => payload.success),
+    [false]
+  );
+  assert.equal(
+    messages.some(({ eventType }) => eventType === 'queue_used'),
+    false
+  );
+});

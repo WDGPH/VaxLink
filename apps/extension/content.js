@@ -216,6 +216,7 @@ function logAnalyticsEvent(eventType, payload = {}) {
 
 let trayUseContext = null;
 let trayUseContextGeneration = 0;
+const activeTrayReservations = new Set();
 
 function getScannerDeliveryContext(kind, explicit = false) {
   const current = explicit ? trayUseContext : scannerDeliveryContext;
@@ -290,6 +291,32 @@ function setupMessageListener() {
         buildAtLoad: contentBuildAtLoad
       });
       return true;
+    }
+    if (request.action === 'useTrayVaccine') {
+      if (
+        sender.id !== chrome.runtime.id ||
+        sender.url !== chrome.runtime.getURL('popup.html') ||
+        window.top !== window.self
+      )
+        return false;
+      useTrayVaccine(request.recordId, request.contextToken)
+        .then((result) =>
+          sendResponse({
+            ...result,
+            success: isAutofillSuccess(result),
+            pending: isAutofillPending(result)
+          })
+        )
+        .catch((error) =>
+          sendResponse({ success: false, error: error.message })
+        );
+      return true;
+    }
+    if (request.action === 'isDoseReservationActive') {
+      if (sender.id !== chrome.runtime.id || window.top !== window.self)
+        return false;
+      sendResponse({ active: activeTrayReservations.has(request.token) });
+      return false;
     }
     if (request.action === 'showScannerBarcodeFeedback') {
       if (!isScannerDeliveryContextCurrent(request.contextToken)) return false;
@@ -1096,8 +1123,12 @@ function initHandsFreeScanner() {
   }
   window.addEventListener('blur', invalidateAutomaticPanoramaContext);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible')
+    if (document.visibilityState === 'visible') return;
+    if (panoramaAutofillOwner?.trayDose) cancelPanoramaAutofill();
+    else {
+      trayUseContextGeneration += 1;
       invalidateAutomaticPanoramaContext();
+    }
   });
 }
 
@@ -2781,6 +2812,7 @@ function isPanoramaAutofillCurrent(data) {
     owner.step === getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) &&
     owner.kind === getPanoramaFormContext({ checkReadiness: false }).kind &&
     (!owner.automatic || isPanoramaChartActive()) &&
+    (!owner.trayDose || document.visibilityState === 'visible') &&
     (owner.writeAttempted ||
       owner.startBy === null ||
       Date.now() < owner.startBy);
@@ -2798,7 +2830,10 @@ function updatePanoramaWorkflowMode(mode) {
 function cancelPanoramaAutofill({ focusOnly = false } = {}) {
   panoramaContextGeneration += 1;
   if (!focusOnly) trayUseContextGeneration += 1;
-  if (panoramaAutofillOwner) panoramaAutofillOwner.cancelled = true;
+  if (panoramaAutofillOwner) {
+    panoramaAutofillOwner.cancelled = true;
+    void stopTrayDose(panoramaAutofillOwner);
+  }
   if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
 }
 
@@ -2921,7 +2956,7 @@ function schedulePanoramaLotOrTradeSelection(
   let lastFundingChangeAt = -Infinity;
   let usableMiss;
 
-  let finalizeOnResolved = options.finalizeOnResolved === true;
+  const finalizeOnResolved = options.finalizeOnResolved === true;
 
   const stop = () => {
     if (stopped) return;
@@ -2933,6 +2968,15 @@ function schedulePanoramaLotOrTradeSelection(
     }
   };
   stopPanoramaLotTradeWatcher = stop;
+
+  const stopUnverified = () => {
+    const owner = data._vaxlinkOwner;
+    if (owner?.trayDose) {
+      owner.cancelled = true;
+      void stopTrayDose(owner);
+    }
+    stop();
+  };
 
   function finishLotMiss() {
     const owner = data._vaxlinkOwner;
@@ -2953,6 +2997,8 @@ function schedulePanoramaLotOrTradeSelection(
           _lotNeedsReview: cleanup === 'review'
         });
       }
+      stopUnverified();
+      return;
     }
     stop();
   }
@@ -2960,7 +3006,7 @@ function schedulePanoramaLotOrTradeSelection(
   const attempt = (now) => {
     if (blockIneligibleChartUse(data)) {
       if (finalizeOnResolved) recordDeferredAutofillResult(data, false);
-      stop();
+      stopUnverified();
       return;
     }
     if (isPrimeFacesAjaxBusy() || isPanoramaLotListAwaitingRefresh(data)) {
@@ -3089,10 +3135,7 @@ function schedulePanoramaLotOrTradeSelection(
     // A successful repair starts a new stability wait on the current form.
     stableSince ??= now;
     if (now - stableSince >= stableGapMs) {
-      if (finalizeOnResolved) {
-        finalizeOnResolved = false;
-        void finalizeDeferredPanoramaAutofill(data);
-      }
+      if (finalizeOnResolved) void finalizeDeferredPanoramaAutofill(data);
       // Panorama's dependent refreshes (trade/dose/route after lot selection,
       // consent re-enabling) can still land after we stop and clear a value we
       // already set. These late passes re-assert only what changed — every fill
@@ -3155,7 +3198,7 @@ function schedulePanoramaLotOrTradeSelection(
           showVaxlinkToast({ ...data, ...feedback });
         }
       }
-      stop();
+      stopUnverified();
       return;
     }
     if (now < scheduledAt) {
@@ -3175,7 +3218,7 @@ function schedulePanoramaLotOrTradeSelection(
     } catch (error) {
       if (finalizeOnResolved && isPanoramaAutofillCurrent(data))
         recordDeferredAutofillResult(data, false);
-      stop();
+      stopUnverified();
       vlog(error.message);
     }
     if (!stopped) armNextCheck();
@@ -3416,13 +3459,14 @@ function fillPanoramaImmunizationFields(data) {
 
   const waitingForSelection =
     !panoramaDetailAgentMatches(data) || !panoramaDetailProductMatches(data);
+  const pending = waitingForSelection || !!data._vaxlinkQueueContext?.dose;
   if (agentRequested || tradeRequested || hasPanoramaDeferredDetailData(data)) {
     schedulePanoramaLotOrTradeSelection(data, agentMatches ? 200 : 100, {
-      finalizeOnResolved: waitingForSelection
+      finalizeOnResolved: pending
     });
   }
 
-  return waitingForSelection
+  return pending
     ? createAutofillResult('pending', {
         reason: 'waiting_for_required_selection',
         fillCount
@@ -3624,6 +3668,152 @@ function mutateQueueViaBackground(storageKey, operation, payload = {}) {
   });
 }
 
+async function useTrayVaccine(recordId, contextToken) {
+  if (
+    typeof recordId !== 'string' ||
+    !recordId.trim() ||
+    activeWorkflowMode === 'inventory'
+  )
+    throw new Error('Choose an available dose in the chart tray.');
+  const context = getPanoramaFormContext();
+  if (
+    !isScannerDeliveryContextCurrent(contextToken, context.kind, true) ||
+    !context.ready ||
+    context.kind === 'multiple_grid' ||
+    document.visibilityState !== 'visible'
+  )
+    throw new Error('Open a supported Panorama form that is ready for entry.');
+  return fillReservedTrayRecord(
+    recordId,
+    beginPanoramaAutofill({}),
+    'queue',
+    context.kind
+  );
+}
+
+async function fillReservedTrayRecord(
+  recordId,
+  ownerData,
+  source,
+  requiredKind
+) {
+  if (!isPanoramaAutofillCurrent(ownerData)) {
+    throw new Error(
+      'Panorama changed. Check the chart and choose the vaccine again.'
+    );
+  }
+  const owner = ownerData._vaxlinkOwner;
+  if (owner.trayDose)
+    return createAutofillResult('failed', {
+      error: 'This chart already has a tray fill.'
+    });
+  const dose = { recordId, token: crypto.randomUUID(), owner };
+  owner.trayDose = dose;
+  activeTrayReservations.add(dose.token);
+  let keepReservation = false;
+  try {
+    const { record, reserved } = await mutateQueueViaBackground(
+      MULTIPLE_INJECT_QUEUE_KEY,
+      'reserve_dose',
+      { id: recordId, token: dose.token }
+    );
+    dose.reserved = reserved;
+    if (!reserved) activeTrayReservations.delete(dose.token);
+    if (!isPanoramaAutofillCurrent(ownerData)) {
+      throw new Error(
+        'Panorama changed. Check the chart and choose the vaccine again.'
+      );
+    }
+    if (requiredKind) {
+      const current = getPanoramaFormContext();
+      if (!current.ready || current.kind !== requiredKind)
+        throw new Error(
+          'Panorama changed. Check the chart and choose the vaccine again.'
+        );
+    }
+
+    if (
+      requiredKind === 'multiple_detail' &&
+      !queueRecordMatchesPanoramaAgentText(
+        record,
+        getPanoramaCurrentAgentSelectionText()
+      )
+    ) {
+      throw new Error(
+        'Choose a vaccine that matches the Agent on this Panorama step.'
+      );
+    }
+    const data = buildAutofillPayloadFromQueueRecord(record);
+    if (
+      !data ||
+      (!String(data.lot || '').trim() &&
+        !getPanoramaTradeCandidates(data).length)
+    )
+      throw new Error(
+        'The saved vaccine has no Lot or Trade that Panorama can verify.'
+      );
+    const blocked = blockIneligibleChartUse(data);
+    if (blocked) return blocked;
+    dose.record = record;
+    data._vaxlinkOwner = owner;
+    data._vaxlinkQueueContext = {
+      storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+      recordId,
+      workflow: 'multiple',
+      queue: 'multiple',
+      source,
+      dose
+    };
+    logAnalyticsEvent('autofill_attempt', {
+      workflow: 'multiple',
+      source,
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
+      manufacturer: record.manufacturer || '',
+      expiryFlag: record.expiry_flag || ''
+    });
+    const result = autoFillPanorama(data);
+    keepReservation = isAutofillPending(result);
+    if (!keepReservation) recordDeferredAutofillResult(data, false);
+    return result;
+  } finally {
+    if (!keepReservation) {
+      if (dose.reserved) await stopTrayDose(owner);
+      else activeTrayReservations.delete(dose.token);
+    }
+  }
+}
+
+async function stopTrayDose(owner) {
+  const dose = owner?.trayDose;
+  if (
+    !dose?.reserved ||
+    owner.detailOutcome === 'verifying' ||
+    dose.stopping ||
+    !activeTrayReservations.has(dose.token)
+  )
+    return;
+  owner.cancelled = true;
+  dose.stopping = true;
+  try {
+    await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'stop_dose', {
+      id: dose.recordId,
+      token: dose.token,
+      written: owner.writeAttempted === true
+    });
+    if (!owner.writeAttempted) return;
+  } catch (error) {
+    console.warn('VaxLink could not confirm the tray stop:', error);
+  } finally {
+    activeTrayReservations.delete(dose.token);
+  }
+  if (!toastWarningSlot?.innerHTML) {
+    showVaxlinkToast({
+      _entryWarning:
+        'Check the original chart before using the held tray dose again.'
+    });
+  }
+}
+
 async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
   const storageKey = String(queueContext?.storageKey || '').trim();
   const recordId = String(queueContext?.recordId || '').trim();
@@ -3631,12 +3821,24 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     return null;
   }
 
-  const result = await mutateQueueViaBackground(storageKey, 'consume', {
-    id: recordId
-  });
-  const record = result.consumed;
+  const dose = queueContext.dose;
+  let record;
+  let nextRows;
+  if (dose && !dose.reserved) {
+    // A pin or older unknown count remains unchanged even if another popup
+    // gives that row a count while this fill is in progress.
+    record = dose.record;
+    nextRows = (await getLocalStorage([storageKey]))[storageKey] || [];
+  } else {
+    const result = await mutateQueueViaBackground(storageKey, 'consume', {
+      id: recordId,
+      ...(dose && { token: dose.token })
+    });
+    record = result.consumed;
+    nextRows = result.rows;
+    if (dose && record) activeTrayReservations.delete(dose.token);
+  }
   if (!record) return null;
-  const nextRows = result.rows;
 
   const workflow = queueContext.workflow || 'multiple';
   const source = queueContext.source || 'queue';
@@ -3698,7 +3900,11 @@ async function finalizeDeferredPanoramaAutofill(data) {
   const verified = !queueContext || !!consumed;
   owner.detailOutcome = verified ? 'verified' : 'failed';
   logDeferredAutofillResult(data, verified, consumed?.record);
-  if (verified && isPanoramaAutofillCurrent(data)) showVaxlinkToast(data);
+  if (owner.detailOutcome === 'failed') {
+    await stopTrayDose(owner);
+  } else if (isPanoramaAutofillCurrent(data)) {
+    showVaxlinkToast(data);
+  }
 }
 
 function autoFillPanorama(data) {
@@ -4051,6 +4257,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           toastRoutineSlot.innerHTML = '';
           if (blockIneligibleChartUse(data)) {
             recordDeferredAutofillResult(data, false);
+            void stopTrayDose(data._vaxlinkOwner);
             return;
           }
           logAnalyticsEvent('funding_choice_made', { workflow });
@@ -4059,6 +4266,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           const result = autoFillPanorama(next);
           if (!isAutofillPending(result) && isPanoramaAutofillCurrent(next)) {
             recordDeferredAutofillResult(next, false);
+            void stopTrayDose(next._vaxlinkOwner);
           }
         });
       });
@@ -4866,64 +5074,17 @@ async function applyNextQueueItem(options = {}) {
       }
     }
 
-    const record = rows[recordIndex];
-    const data = buildAutofillPayloadFromQueueRecord(record);
-    if (!data) return 'no_data';
-    if (blockIneligibleChartUse(data)) return 'expired';
-    data._vaxlinkOwner = ownerData._vaxlinkOwner;
-    data._vaxlinkQueueContext = {
-      storageKey: MULTIPLE_INJECT_QUEUE_KEY,
-      recordId: record.id,
-      workflow: 'multiple',
-      queue: 'multiple',
-      source: 'hud'
-    };
-
-    let nextRows = rows;
-
-    logAnalyticsEvent('autofill_attempt', {
-      workflow: 'multiple',
-      source: 'hud',
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || '',
-      expiryFlag: record.expiry_flag || ''
-    });
-
-    const autofillResult = autoFillPanorama(data);
-    const success = isAutofillSuccess(autofillResult);
-    const pending = isAutofillPending(autofillResult);
-    if (success) {
-      ({ rows: nextRows } = await mutateQueueViaBackground(
-        MULTIPLE_INJECT_QUEUE_KEY,
-        'consume',
-        { id: record.id }
-      ));
-    }
-    if (!pending)
-      logAnalyticsEvent('autofill_result', {
-        workflow: 'multiple',
-        source: 'hud',
-        success,
-        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-        manufacturer: record.manufacturer || '',
-        expiryFlag: record.expiry_flag || ''
-      });
-    if (success) {
-      logAnalyticsEvent('queue_used', {
-        workflow: 'multiple',
-        queue: 'multiple',
-        source: 'hud',
-        count: 1,
-        queueSizeAfter: nextRows.length
-      });
-    }
-
-    if (success) {
-      showVaxlinkToast(data);
+    const result = await fillReservedTrayRecord(
+      rows[recordIndex].id,
+      ownerData,
+      'hud'
+    );
+    if (result.status === 'expired') return 'expired';
+    if (isAutofillSuccess(result)) {
       updateHudState();
       return 'success';
     }
-    if (pending) {
+    if (isAutofillPending(result)) {
       updateHudState();
       return 'pending';
     }

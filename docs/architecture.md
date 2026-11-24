@@ -69,48 +69,9 @@ the Multiple detail step. Conflicting headings or controls and unavailable
 fields explain why a form is unready. Reading the same form repeatedly keeps
 its delivery token. A new form, workflow or step retires the old token.
 
-A fill keeps its original chart through retries. A manual field interaction
-or changed form stops the fill. Automatic entry also stops when its tab loses
-focus. The worker and chart use the same deadline for the first field
-interaction, so a late lookup cannot start filling after the worker times out.
-
-Vaccine rules match the Panorama Agent for the formulation. For example, MMR
-and MMR with varicella use different Agents, as do adult and pediatric
-hepatitis B products. Where Panorama provides a native select, VaxLink reads
-its selected value because the visible widget label can lag a refresh. The Lot
-must match the current chart widget. An exact Lot takes priority, and a
-punctuation-only difference is allowed only when it identifies one choice.
-VaxLink reads the current selection after Panorama handles the field event.
-For older saved records with a Trade name and no Lot, the current Trade
-selection provides that readback.
-
-Date, Time, Reason, and Consent run after VaxLink has read back the requested
-Agent and Lot or Trade. A field event can change the product again, so each
-later write checks that selection on the current form.
-
-One watcher rechecks the current controls when Panorama updates the page and
-on quiet pages. An Agent or funding change can leave the old Lot list in
-place; the watcher can recognize a refresh even when the select stays in
-place. A repair restarts the stability wait. The watcher ends after ten
-seconds and gives an owned, settled form two opportunities for late detail
-repairs.
-
-Existing Date, Time, Reason, and Consent choices remain in place when the
-setting is enabled. This includes a grid Date set by Panorama while it handles
-the Agent. The Consent default uses the visible menu when one is present.
-The watcher gives that menu time to settle after a field changes and limits
-the number of selection attempts.
-
-The script receives routed scans, shows the floating VaxLink controls, and fills
-the immunization form. Each fill keeps the document, form, URL, workflow, and
-visible immunization step that started it. A newer fill, navigation, form
-replacement, workflow change, or meaningful manual interaction with that form
-stops its delayed writes. Clearly linked PrimeFaces dropdowns count as part of
-the form; unrelated controls do not. Automatic attempts keep a cancelled owner
-until an explicit fill or a new context starts work again. This does not detect
-a patient change that preserves the same document, URL, and form without a
-visible step change.
-It reads workflow settings from local storage.
+The [Panorama autofill sequence](#panorama-autofill-sequence) explains how the
+integration verifies the product, stops when chart ownership changes, and
+consumes a confirmed tray dose.
 
 ### User controls: popup
 
@@ -335,13 +296,31 @@ operations.
 
 ## Panorama autofill sequence
 
-Fill order must be: `agent → lot → (deferred) date/time`. Panorama
-auto-populates dependent fields (trade name, route, dose, manufacturer) after
-lot selection. Lot writes and deferred date/time use the existing bounded retries and
-`!isPrimeFacesAjaxBusy()` guard. This isolated-world check alone does not prove
-that all page activity has finished. Lot matching uses `normalizePanoramaLotToken` to
-handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
-`dateAdministedDate`) — keep those as-is.
+VaxLink fills Agent and then checks the Lot list for the selected funding
+category. It uses an existing choice. Automatic funding can select a sole
+match and asks staff when both categories match. When automatic choice is off,
+staff choose before the search and can try the other category after a miss.
+VaxLink verifies the selected Lot on the current widget. For older saved
+rows without a Lot, it verifies the Trade. Panorama supplies dependent product
+fields after selection. VaxLink fills the enabled Date, Time, Reason and
+Consent details only after the product is confirmed and preserves entered
+values. A bounded watcher handles both visible updates and quiet pages.
+Browser-isolated checks for page activity are one input to this verification.
+
+The fill stays with the original document, form, workflow and step. A staff
+interaction or a changed form stops further writes. A scanner-triggered fill
+also stops when its tab loses focus, and a delayed first write must meet the
+worker's deadline. An explicit tray choice can continue when the toolbar popup
+takes focus while the chart remains visible.
+
+For a counted tray dose, the chart obtains a reservation before it writes to
+Panorama. Once the watched product and detail fields stay settled, one
+finalization on the current owner asks the background to consume the reservation.
+The queue writer matches the token to the chart document in storage, releases
+the reservation, and decrements the count or removes the last dose in one
+write. If that write fails, the tray reports no verified use. A later repair
+can restore a blank detail on the same chart without another tray write.
+Staff verify and save the immunization in Panorama.
 
 ## CI
 
