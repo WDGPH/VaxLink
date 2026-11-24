@@ -201,7 +201,7 @@ async function stopScanner(action) {
           ? 'Scanner forgotten. Browser permission removed.'
           : 'Scanner forgotten. Remove any remaining scanner permission in your browser’s site settings.',
         'info',
-        8000
+        result.permissionRemoved ? 8000 : 0
       );
     }
   } catch (error) {

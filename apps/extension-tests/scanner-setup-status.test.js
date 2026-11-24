@@ -173,6 +173,16 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     t.mock.timers.tick(8000);
     assert.equal(nodes.scannerActionNotice.hidden, true);
 
+    const permissionRemains = nodes.forgetScannerBtn.listeners.click();
+    releaseCommand({ success: true, permissionRemoved: false });
+    await permissionRemains;
+    t.mock.timers.tick(8000);
+    assert.equal(nodes.scannerActionNotice.hidden, false);
+    assert.match(
+      nodes.scannerActionNotice.textContent,
+      /browser’s site settings/
+    );
+
     const failed = nodes.forgetScannerBtn.listeners.click();
     releaseCommand({ success: false, error: 'Could not clear scanner' });
     await failed;
