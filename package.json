@@ -1,6 +1,6 @@
 {
   "name": "vaxlink",
-  "version": "2.0.0-rc1",
+  "version": "2.0.0-rc2",
   "private": true,
   "type": "module",
   "scripts": {

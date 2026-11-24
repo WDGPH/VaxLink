@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "VaxLink Development",
   "version": "1.1.5",
-  "version_name": "2.0.0-rc1",
+  "version_name": "2.0.0-rc2",
   "description": "Parse GS1 vaccine barcodes and auto-fill Panorama",
   "permissions": ["storage", "alarms", "offscreen", "idle"],
   "minimum_chrome_version": "114",
