@@ -160,9 +160,9 @@
       }
 
       .mode-tab.active {
-        background: linear-gradient(135deg, #0e7490 0%, #0f8b8d 100%);
+        background: var(--tray-accent);
         color: #fff;
-        box-shadow: 0 8px 18px rgba(14, 116, 144, 0.18);
+        box-shadow: 0 8px 18px rgba(14, 101, 117, 0.18);
       }
 
       .mode-panel[hidden],
@@ -190,7 +190,7 @@
         font-family: inherit;
         font-size: 12px;
         line-height: 1.45;
-        color: #0e2b41;
+        color: var(--ink);
         background: #fbfdff;
         transition:
           border-color 120ms ease,
@@ -209,7 +209,7 @@
         border-radius: 12px;
         padding: 9px 10px;
         font-size: 12px;
-        color: #0e2b41;
+        color: var(--ink);
         background: #fbfdff;
       }
 
@@ -225,7 +225,7 @@
         border-radius: 12px;
         padding: 9px 10px;
         font-size: 12px;
-        color: #0e2b41;
+        color: var(--ink);
         background: #fbfdff;
       }
 
@@ -497,7 +497,7 @@
       .tray-drag:focus-visible,
       .tray-pin:hover,
       .tray-pin[aria-pressed='true'] {
-        color: #0e6878;
+        color: var(--tray-accent);
       }
       .tray-drag:active {
         cursor: grabbing;
@@ -570,7 +570,7 @@
         border: 1px solid #b8d5db;
         border-radius: 6px;
         background: #f4fafb;
-        color: #0e7186;
+        color: var(--tray-accent);
         font-weight: 700;
         text-decoration: none;
       }
@@ -689,7 +689,7 @@
       }
 
       .queue-entry-actions button {
-        background: #0e8495;
+        background: var(--tray-accent);
         color: #fff;
         width: auto;
         padding: 8px 12px;
@@ -818,7 +818,7 @@
         color: #9a3412;
       }
       #requestPortBtn {
-        background: #0e7490;
+        background: var(--tray-accent);
         color: #fff;
       }
 
@@ -924,7 +924,7 @@
       .settings-check input[type='checkbox'] {
         width: auto;
         margin: 0;
-        accent-color: #0e7490;
+        accent-color: var(--tray-accent);
         transform: translateY(1px);
       }
 

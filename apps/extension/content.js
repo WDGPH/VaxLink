@@ -4564,7 +4564,7 @@ function ensureToastHost() {
     .vl-toast.valid   { background: #047857; }
     .vl-toast.expiring { background: #b45309; }
     .vl-toast.expired  { background: #b91c1c; }
-    .vl-toast.info     { background: #0e7490; }
+    .vl-toast.info     { background: #0e6575; }
     .vl-toast.duplicate { background: #52525b; }
     .vl-toast.persistent { pointer-events: auto; }
     .vl-toast-dismiss {
@@ -5006,9 +5006,7 @@ function initHud() {
       flex-direction: column;
       align-items: stretch;
       gap: 10px;
-      background:
-        radial-gradient(circle at top left, rgba(125, 211, 252, .22), transparent 42%),
-        linear-gradient(180deg, rgba(15, 58, 79, .96) 0%, rgba(12, 44, 61, .96) 100%);
+      background: #102d41;
       color: #f4fbff;
       padding: 12px;
       border-radius: 20px;
@@ -5032,8 +5030,8 @@ function initHud() {
       width: 8px;
       height: 8px;
       border-radius: 999px;
-      background: linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%);
-      box-shadow: 0 0 0 4px rgba(103, 232, 249, .12);
+      background: #0f8b8d;
+      box-shadow: 0 0 0 4px rgba(15, 139, 141, .12);
       flex: 0 0 auto;
     }
     .vl-hud-queue {
@@ -5155,9 +5153,7 @@ function initHud() {
       width: 36px;
       height: 36px;
       border-radius: 999px;
-      background:
-        radial-gradient(circle at top left, rgba(125, 211, 252, .22), transparent 42%),
-        linear-gradient(180deg, rgba(15, 58, 79, .96) 0%, rgba(12, 44, 61, .96) 100%);
+      background: #102d41;
       border: 1px solid rgba(173, 216, 230, .2);
       box-shadow: 0 8px 18px rgba(3, 20, 30, .3);
       cursor: grab;
@@ -5177,8 +5173,8 @@ function initHud() {
       width: 10px;
       height: 10px;
       border-radius: 999px;
-      background: linear-gradient(180deg, #67e8f9 0%, #22d3ee 100%);
-      box-shadow: 0 0 0 4px rgba(103, 232, 249, .18);
+      background: #0f8b8d;
+      box-shadow: 0 0 0 4px rgba(15, 139, 141, .18);
     }
   `;
   hudShadow.appendChild(style);
