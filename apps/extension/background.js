@@ -1135,14 +1135,35 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     throw new Error('VaxLink GS1 parser is not loaded');
   }
 
-  const parsed = parser.parseGS1Barcode(scan.rawText);
+  const immunization = mode === 'multiple' && options.inventoryCapture !== true;
+  let parsed;
+  let status;
+  try {
+    parsed =
+      immunization && parser.isRetailBarcode(scan.rawText)
+        ? {}
+        : parser.parseGS1Barcode(scan.rawText);
+    if (immunization && !String(parsed.lot || '').trim())
+      status = 'missing_lot';
+  } catch (error) {
+    if (!immunization) throw error;
+    status = 'parse_error';
+  }
+  if (status) {
+    void logAnalyticsEvent(
+      status === 'missing_lot' ? 'barcode_missing_lot' : status,
+      { workflow: mode, source: scan.source }
+    ).catch(() => {});
+    return { rejection: { status } };
+  }
+
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   parsed.barcode_expiry = parsed.expiry || '';
   if (parsed.lot) {
     const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
       gtin: parsed.gtin,
-      waitForDownload: mode !== 'inventory'
+      waitForDownload: immunization
     });
     parsed.nvc_catalogue_version = vaccineInfo.catalogueVersion;
     if (!vaccineInfo.error) {
@@ -1283,9 +1304,29 @@ async function routeScanToActiveSupportedTab(rawScan) {
       'multiple',
       {
         context: buildLockedScanQueueContext(lockSession),
-        preserveEveryScan: true
+        preserveEveryScan: true,
+        inventoryCapture: workflowMode === 'inventory'
       }
     );
+    if (lockedQueueResult.rejection) {
+      // Staff cannot see chart feedback while locked. Keep the rejected barcode for review.
+      const pendingCount = await enqueuePendingScan({
+        ...scan,
+        pending_workflow: workflowMode,
+        ...buildLockedScanQueueContext(lockSession)
+      });
+      return {
+        routed: false,
+        queued: true,
+        queuedToWorkflow: false,
+        locked: true,
+        lockSessionId: lockSession.id,
+        pinnedTabId: lockSession.tabId,
+        workflow: workflowMode,
+        pendingCount,
+        response: lockedQueueResult.rejection
+      };
+    }
     return {
       routed: false,
       queued: true,
@@ -1307,6 +1348,27 @@ async function routeScanToActiveSupportedTab(rawScan) {
       scan,
       workflowMode
     );
+    if (workflowQueueResult.rejection) {
+      if (destination && contextToken) {
+        chrome.tabs.sendMessage(
+          destination.id,
+          {
+            action: 'showScannerBarcodeFeedback',
+            contextToken,
+            feedback: workflowQueueResult.rejection
+          },
+          { frameId: 0 },
+          () => void chrome.runtime.lastError
+        );
+      }
+      return {
+        routed: false,
+        queued: false,
+        queuedToWorkflow: false,
+        workflow: workflowMode,
+        response: workflowQueueResult.rejection
+      };
+    }
     return {
       routed: false,
       queued: !workflowQueueResult.record?.duplicate_ignored,
@@ -1391,7 +1453,7 @@ function createAnalyticsDay(dayKey) {
       multiple: createAnalyticsWorkflowStats(),
       inventory: createAnalyticsWorkflowStats()
     },
-    parsing: { success: 0, error: 0 },
+    parsing: { success: 0, error: 0, missingLot: 0 },
     lookup: { success: 0, error: 0 },
     autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
     queues: {
@@ -1521,6 +1583,9 @@ function applyAnalyticsEvent(day, event) {
       if (event.source && String(event.source).startsWith('popup')) {
         day.workflows[workflow].popupParses += count;
       }
+      break;
+    case 'barcode_missing_lot':
+      day.parsing.missingLot = (day.parsing.missingLot || 0) + count;
       break;
     case 'parse_error':
       day.parsing.error += count;

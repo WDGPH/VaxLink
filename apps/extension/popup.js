@@ -512,12 +512,20 @@ function handleRuntimeMessage(request) {
     applyScannerStatus(request.status);
     return false;
   }
-  if (
-    request?.action === 'scannerDaemon.scanEcho' &&
-    request.response?.success === false
-  ) {
-    scannerCaptureError = true;
-    renderScannerStatusUi();
+  if (request?.action === 'scannerDaemon.scanEcho') {
+    if (request.response?.success === false) {
+      scannerCaptureError = true;
+      renderScannerStatusUi();
+    } else {
+      const status = request.response?.response?.status;
+      if (status === 'missing_lot' || status === 'parse_error')
+        showBarcodeHelp(status);
+      if (status === 'expired')
+        writeOutput(
+          'This vaccine is expired. Use an in-date vaccine.',
+          'error'
+        );
+    }
   }
   return false;
 }
@@ -1026,6 +1034,36 @@ function toggleModeButton(button, isActive) {
   button.setAttribute('aria-selected', isActive ? 'true' : 'false');
 }
 
+function showBarcodeHelp(status) {
+  const message =
+    status === 'missing_lot'
+      ? 'This barcode has no lot number.'
+      : 'This barcode could not be read.';
+  writeOutput(
+    `${message} Scan the 2D barcode with the lot number on the package, vial, or prefilled syringe.`,
+    'error'
+  );
+}
+
+function parseImmunizationInput(raw, workflow, source) {
+  let status;
+  try {
+    const parsed = globalThis.VaxLinkGS1Parser.isRetailBarcode(raw)
+      ? {}
+      : parseInputData(raw);
+    if (String(parsed.lot || '').trim()) return parsed;
+    status = 'missing_lot';
+  } catch (_) {
+    status = 'parse_error';
+  }
+  logAnalyticsEvent(status === 'missing_lot' ? 'barcode_missing_lot' : status, {
+    workflow,
+    source
+  });
+  showBarcodeHelp(status);
+  return null;
+}
+
 function queueAutoParse(immediate = false) {
   if (autoParseTimer) {
     clearTimeout(autoParseTimer);
@@ -1041,7 +1079,11 @@ function queueAutoParse(immediate = false) {
     const parseRequestId = ++activeParseRequestId;
     setButtonBusy(autoFillBtn, true);
     try {
-      parsedData = parseInputData(barcode);
+      parsedData =
+        activeMode === 'single'
+          ? parseImmunizationInput(barcode, activeMode, 'popup_input')
+          : parseInputData(barcode);
+      if (!parsedData) return;
       if (!parsedData.scanned_at) {
         parsedData.scanned_at = new Date().toISOString();
       }
@@ -1212,7 +1254,12 @@ async function addManualScanToMultipleQueue() {
   if (queueEntryToggleBtn) queueEntryToggleBtn.disabled = true;
   if (cancelQueueEntryBtn) cancelQueueEntryBtn.disabled = true;
   try {
-    const baseData = parseInputData(rawBarcode);
+    const baseData = parseImmunizationInput(
+      rawBarcode,
+      'multiple',
+      'popup_manual_entry'
+    );
+    if (!baseData) return;
     if (!baseData.scanned_at) {
       baseData.scanned_at = new Date().toISOString();
     }

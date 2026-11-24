@@ -270,6 +270,13 @@ function setupMessageListener() {
       });
       return true;
     }
+    if (request.action === 'showScannerBarcodeFeedback') {
+      if (!isScannerDeliveryContextCurrent(request.contextToken)) return false;
+      const status = request.feedback?.status;
+      if (status === 'missing_lot' || status === 'parse_error')
+        showVaxlinkToast({ _barcodeFeedback: status });
+      return false;
+    }
     if (request.action === 'vaxlinkScanCaptured') {
       if (sender.id !== chrome.runtime.id) return false;
       if (window.top !== window.self) {
@@ -628,17 +635,17 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   const fillData =
     activeWorkflowMode === 'single' ? beginPanoramaAutofill({}) : null;
 
+  const immunization = activeWorkflowMode !== 'inventory';
   let parsed;
   try {
-    parsed = parseGS1BarcodeFromScanner(trimmed);
-    logAnalyticsEvent('parse_success', {
-      workflow: activeWorkflowMode,
-      source,
-      expiryFlag: getExpiryStatus(parsed.expiry).flag
-    });
+    parsed =
+      immunization && globalThis.VaxLinkGS1Parser.isRetailBarcode(trimmed)
+        ? {}
+        : parseGS1BarcodeFromScanner(trimmed);
   } catch (error) {
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
     playAudioCue('error');
+    if (immunization) showVaxlinkToast({ _barcodeFeedback: 'parse_error' });
     logAnalyticsEvent('parse_error', {
       workflow: activeWorkflowMode,
       source
@@ -650,6 +657,24 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       error: error.message || 'Scan was not valid GS1'
     };
   }
+  if (immunization && !String(parsed.lot || '').trim()) {
+    logAnalyticsEvent('barcode_missing_lot', {
+      workflow: activeWorkflowMode,
+      source
+    });
+    showVaxlinkToast({ _barcodeFeedback: 'missing_lot' });
+    return {
+      accepted: true,
+      success: false,
+      status: 'missing_lot',
+      error: 'The barcode has no lot number'
+    };
+  }
+  logAnalyticsEvent('parse_success', {
+    workflow: activeWorkflowMode,
+    source,
+    expiryFlag: getExpiryStatus(parsed.expiry).flag
+  });
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
   parsed.barcode_expiry = parsed.expiry || '';
 
@@ -3457,6 +3482,21 @@ function showVaxlinkToast(data, durationMs = 4000) {
       toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
     }
   };
+
+  if (data._barcodeFeedback) {
+    const title =
+      data._barcodeFeedback === 'missing_lot'
+        ? 'This barcode has no lot number'
+        : 'This barcode could not be read';
+    showRoutineToast(
+      `<div class="vl-toast info show">
+        <div class="vl-toast-title">${title}</div>
+        <div class="vl-toast-detail">Scan the 2D barcode with the lot number on the package, vial, or prefilled syringe.</div>
+      </div>`,
+      durationMs
+    );
+    return;
+  }
 
   if (data._commandMode) {
     const modeLabels = {

@@ -195,3 +195,29 @@ test('a new capture failure during acknowledgement keeps the warning', async () 
   });
   assert.equal(status.captureError, true);
 });
+
+test('unreadable and lotless captures never enter the Immunization tray', async () => {
+  for (const idleState of ['active', 'locked']) {
+    const harness = createBackgroundHarness(null, {
+      idleState,
+      storage: { vaxlink_workflow_mode_v1: 'multiple' }
+    });
+    const scans = ['036000291452', '(01)00036000291452', 'not a barcode'];
+    for (const barcode of scans) {
+      const response = await captured(harness, barcode);
+      assert.equal(
+        response.response?.status,
+        barcode === 'not a barcode' ? 'parse_error' : 'missing_lot'
+      );
+      assert.equal(response.queuedToWorkflow, false);
+    }
+    assert.equal(harness.storageData.has('multiple_inject_queue_v1'), false);
+    assert.deepEqual(
+      Array.from(
+        harness.storageData.get(pending) || [],
+        ({ rawText }) => rawText
+      ),
+      idleState === 'locked' ? scans : []
+    );
+  }
+});
