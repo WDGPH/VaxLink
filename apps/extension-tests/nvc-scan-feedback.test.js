@@ -84,7 +84,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     lookup_error_category: 'not_found'
   });
   assert.match(routine.innerHTML, /Lot not found in Panorama training/);
-  assert.match(routine.innerHTML, /The Lot field still needs review/);
+  assert.match(routine.innerHTML, /Check the Agent and Lot on the chart/);
   assert.match(
     routine.innerHTML,
     /missing from the National Vaccine Catalogue/

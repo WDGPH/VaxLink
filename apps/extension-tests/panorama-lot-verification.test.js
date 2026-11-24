@@ -391,7 +391,7 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   assert.equal(cleanup(), 'review');
   assert.equal(field.value, 'lot-option');
   owner.lotSelectionWidgetId = id;
-  assert.equal(cleanup(), 'cleared');
+  assert.equal(cleanup(), 'changed');
   assert.equal(field.value, '');
   assert.deepEqual(events, ['input', 'change']);
 
@@ -406,13 +406,67 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   owner.filledAgent = 'owned agent';
   owner.lotSelectionWidgetId = undefined;
   field.value = 'lot-option';
-  assert.equal(cleanup({ resetAgent: false }), 'cleared');
+  assert.equal(cleanup({ resetAgent: false }), 'changed');
   assert.equal(field.value, '');
   assert.equal(
     agent.value,
     'lot-option',
     'the Agent stays for the alternate search'
   );
+  assert.equal(cleanup(), 'changed');
+  assert.equal(
+    agent.value,
+    '',
+    'a terminal miss clears an owned Agent even with an empty Lot'
+  );
+  owner.initialAgent = 'owned agent';
+  agent.value = 'lot-option';
+  assert.equal(cleanup(), 'empty');
+  assert.equal(
+    agent.value,
+    'lot-option',
+    'a pre-existing Agent stays selected'
+  );
+});
+
+test('a carried sole Lot is cleared after a refresh unless staff take over', async () => {
+  for (const scenario of ['sole', 'takeover', 'ambiguous', 'repeated']) {
+    const f = fixture();
+    const field = f.select('WRONG', 'lot-option');
+    f.state.controls = [f.root, field];
+    const data = f.context.beginPanoramaAutofill({ lot: 'INTENDED' });
+    data._vaxlinkOwner.initialLot = 'WRONG';
+    data._vaxlinkOwner.gridDetail = {};
+    f.context.matchesGridDetail = () => true;
+    if (scenario === 'ambiguous')
+      field.options.push({ value: 'other', text: 'ANOTHER' });
+    const ticks = [];
+    f.context.setTimeout = (cb) => ticks.push(cb);
+    const confirmation = f.context.cleanUpPanoramaLotMiss(data, false);
+    if (scenario === 'ambiguous') {
+      assert.equal(await confirmation, 'review');
+      assert.equal(field.value, 'lot-option');
+      continue;
+    }
+    assert.equal(field.value, '');
+    const refreshed = f.select('WRONG', 'lot-option');
+    f.state.controls = [f.root, refreshed];
+    if (scenario === 'takeover') f.context.cancelPanoramaAutofill();
+    ticks.shift()();
+    await new Promise(setImmediate);
+    if (scenario === 'takeover') {
+      assert.equal(await confirmation, 'review');
+      assert.equal(refreshed.value, 'lot-option');
+      continue;
+    }
+    assert.equal(refreshed.value, '');
+    if (scenario === 'repeated') refreshed.value = 'lot-option';
+    ticks.shift()();
+    assert.equal(
+      await confirmation,
+      scenario === 'repeated' ? 'review' : 'cleared'
+    );
+  }
 });
 
 test('explicit grid Use assigns only the chosen dose and leaves it for Details', async () => {
@@ -505,6 +559,8 @@ test('Enter Details carries only the exact grid row and foreground route', async
     'duplicate_agent',
     'duplicate_during_transition',
     'different_lot',
+    'sole_lot',
+    'navigate_during_cleanup',
     'manual_takeover_while_waiting',
     'lock_cycle',
     'carry_off'
@@ -546,6 +602,8 @@ test('Enter Details carries only the exact grid row and foreground route', async
     let agent = '';
     let productFill;
     const warnings = [];
+    const readLot = context.getPanoramaDisplayedLot;
+    const soleLot = f.select('DIFFERENT', 'lot-option');
     Object.assign(context, {
       getPanoramaFormContext: () => ({ kind, ready: true }),
       getPanoramaMultipleGridRows: () => rows,
@@ -564,10 +622,10 @@ test('Enter Details carries only the exact grid row and foreground route', async
           value: scenario === 'different_date' ? '2026/11/23' : date
         }
       }),
-      getPanoramaDisplayedLot: () =>
+      getPanoramaDisplayedLot: (widget) =>
         ['different_lot', 'manual_takeover_while_waiting'].includes(scenario)
           ? 'DIFFERENT'
-          : '',
+          : readLot(widget),
 
       autoFillPanorama(data) {
         productFill = data;
@@ -576,7 +634,13 @@ test('Enter Details carries only the exact grid row and foreground route', async
       showVaxlinkToast(data) {
         if (data._entryWarning) warnings.push(data._entryWarning);
       },
-      setTimeout: () => 1,
+      setTimeout(callback, delay) {
+        if (delay === 700) {
+          if (scenario === 'navigate_during_cleanup') state.step = '2-of-2';
+          queueMicrotask(callback);
+        }
+        return 1;
+      },
       clearTimeout() {},
       MutationObserver: class {
         observe() {}
@@ -614,6 +678,8 @@ test('Enter Details carries only the exact grid row and foreground route', async
       await context.advanceGridHandoff();
     }
     kind = 'multiple_detail';
+    if (['sole_lot', 'navigate_during_cleanup'].includes(scenario))
+      state.controls = [f.root, soleLot];
     state.step = scenario === 'duplicate_agent' ? '1-of-2' : '1-of-1';
     rows = [];
     if (scenario === 'manual_use') {
@@ -638,11 +704,16 @@ test('Enter Details carries only the exact grid row and foreground route', async
     await advancement;
     await new Promise(setImmediate);
     assert.equal(
-      warnings.length,
-      scenario === 'different_lot' ? 1 : 0,
+      warnings.some((warning) => warning.includes('selected a different lot')),
+      ['different_lot', 'sole_lot'].includes(scenario),
       scenario
     );
-    if (warnings.length) assert.match(warnings[0], /selected a different lot/);
+    if (
+      !['different_lot', 'sole_lot', 'navigate_during_cleanup'].includes(
+        scenario
+      )
+    )
+      assert.deepEqual(warnings, [], scenario);
     if (scenario === 'normal' || scenario === 'manual_use') {
       assert.ok(productFill, scenario);
       assert.equal(
@@ -661,7 +732,11 @@ test('Enter Details carries only the exact grid row and foreground route', async
       context.clearGridCarry();
       await new Promise(setImmediate);
     }
-    assert.equal(saved().dose_reservations, undefined, scenario);
+    if (['sole_lot', 'navigate_during_cleanup'].includes(scenario)) {
+      assert.equal(soleLot.value, '');
+      if (scenario === 'sole_lot') assert.match(warnings.at(-1), /cleared/);
+      assert.equal(saved().dose_reservations[0].review, true);
+    } else assert.equal(saved().dose_reservations, undefined, scenario);
   }
 });
 

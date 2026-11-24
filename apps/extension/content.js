@@ -2254,20 +2254,33 @@ function getPanoramaDisplayedLot(widget) {
   );
 }
 
-function clearPanoramaSelection(field) {
+function clearPanoramaSelection(field, allowNoPlaceholder = false) {
   const blanks = [...(field?.options || [])].filter(
     (option) => !option.disabled && option.value === ''
   );
-  if (blanks.length !== 1 || !canFillPanoramaControl(field) || !field.value)
-    return false;
+  if (
+    blanks.length > 1 ||
+    (!blanks.length && !allowNoPlaceholder) ||
+    !canFillPanoramaControl(field) ||
+    !field.value
+  )
+    return;
   assertPanoramaAutofillWrite();
-  field.value = '';
+  if (blanks.length) field.value = '';
+  else field.selectedIndex = -1;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
   if (field.isConnected)
     field.dispatchEvent(new Event('change', { bubbles: true }));
   assertPanoramaAutofillWrite();
-  return field.isConnected && !field.value;
+  if (field.isConnected && !field.value && field.id?.endsWith('_input')) {
+    const label = document.getElementById(
+      field.id.replace(/_input$/, '_label')
+    );
+    if (getPanoramaAutofillForm()?.contains(label))
+      label.textContent = field.options[field.selectedIndex]?.text || '';
+  }
+  return true;
 }
 
 function clearPanoramaNonMatchingLot(data, { resetAgent = true } = {}) {
@@ -2278,17 +2291,28 @@ function clearPanoramaNonMatchingLot(data, { resetAgent = true } = {}) {
   );
   const visible = getPanoramaNonemptyLotLabel(widget?.label?.textContent);
   const selected = selectedValue || visible;
-  if (!selected) return 'empty';
   const lot = normalizePanoramaLotToken(data.lot);
   const ownedAgent =
     owner.filledAgent &&
     getPanoramaCurrentAgentSelectionText(owner.form) === owner.filledAgent;
+  const available = panoramaLotSelectOptions(widget?.select).filter(
+    (option) => !option.disabled && getPanoramaNonemptyLotLabel(option.text)
+  );
+  const carriedSoleLot =
+    widget?.select?.value &&
+    owner.gridDetail &&
+    matchesGridDetail(owner.gridDetail) &&
+    available.length === 1 &&
+    available[0].value === widget.select.value;
   if (
     !lot ||
     !isPanoramaAutofillCurrent(data) ||
     isPrimeFacesAjaxBusy() ||
-    owner.initialLot ||
-    (owner.lotSelectionWidgetId !== widget.id && !ownedAgent) ||
+    (owner.initialLot && !carriedSoleLot) ||
+    (selected &&
+      !carriedSoleLot &&
+      owner.lotSelectionWidgetId !== widget?.id &&
+      !ownedAgent) ||
     (visible && visible !== selectedValue) ||
     normalizePanoramaLotToken(selected) === lot ||
     normalizePanoramaLotToken(selected.replace(/^N-/, '')) === lot
@@ -2297,25 +2321,96 @@ function clearPanoramaNonMatchingLot(data, { resetAgent = true } = {}) {
 
   // Panorama may reselect its only Lot. Reset an Agent only if this fill
   // selected it on an empty form and the same owned Agent is still current.
-  if (resetAgent && ownedAgent && !owner.initialAgent) {
+  if (resetAgent && ownedAgent && !owner.initialAgent && !owner.detailAgent) {
     const fields = getPanoramaDetailAgentFields(owner.form).filter(
       (field) => field.tagName === 'SELECT'
     );
     if (fields.length === 1 && clearPanoramaSelection(fields[0])) {
-      return !getPanoramaCurrentAgentSelectionText(owner.form) &&
-        !getPanoramaDisplayedLot(getPanoramaLotWidget())
-        ? 'cleared'
-        : 'review';
+      if (selected && widget) owner.lotSelectionWidgetId = widget.id;
+      if (getPanoramaCurrentAgentSelectionText(owner.form)) return 'changed';
+      const remainingLot = getPanoramaDisplayedLot(getPanoramaLotWidget());
+      if (!remainingLot) return 'changed';
+      if (remainingLot !== selected) return 'review';
+    } else {
+      return 'review';
     }
-    if (getPanoramaLotWidget()?.select !== widget.select) return 'review';
+    if (getPanoramaLotWidget()?.select !== widget?.select) return 'changed';
   }
-  if (!clearPanoramaSelection(widget.select)) return 'review';
-  const current = getPanoramaLotWidget();
-  if (current?.id !== widget.id) return 'review';
-  if (current.select === widget.select && current.label)
-    current.label.textContent =
-      widget.select.options[widget.select.selectedIndex]?.text || '';
-  return getPanoramaDisplayedLot(current) ? 'review' : 'cleared';
+  if (!selected) return 'empty';
+  if (!clearPanoramaSelection(widget.select, true)) return 'review';
+  return 'changed';
+}
+
+function cleanUpPanoramaLotMiss(data, resetAgent) {
+  const originalLot = getPanoramaDisplayedLot(getPanoramaLotWidget());
+  const originalAgent = getPanoramaCurrentAgentSelectionText(
+    data._vaxlinkOwner.form
+  );
+  const result = runPanoramaAutofill(data, () =>
+    clearPanoramaNonMatchingLot(data, { resetAgent })
+  );
+  return result === 'changed'
+    ? confirmPanoramaLotCleanup(data, originalLot, originalAgent, resetAgent)
+    : result || 'review';
+}
+
+// PrimeFaces can put its default selection back in a replacement widget.
+// Retry the same cleanup once, then read the current controls before reporting.
+async function confirmPanoramaLotCleanup(
+  data,
+  originalLot,
+  originalAgent,
+  resetAgent
+) {
+  const owner = data._vaxlinkOwner;
+  const delivery =
+    owner.scannerDelivery ||
+    (owner.scannerRoute && { scannerRoute: owner.scannerRoute });
+  const expectBlankAgent =
+    resetAgent &&
+    !owner.initialAgent &&
+    !owner.detailAgent &&
+    originalAgent &&
+    originalAgent === owner.filledAgent;
+  for (const retry of [true, false]) {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    if (!isPanoramaAutofillCurrent(data)) return 'review';
+    if (delivery && !(await checkPanoramaScannerRoute(delivery))) {
+      stopPanoramaFillOwner(owner);
+      return 'review';
+    }
+    if (
+      !isPanoramaAutofillCurrent(data) ||
+      (owner.gridDetail && !matchesGridDetail(owner.gridDetail))
+    )
+      return 'review';
+    if (isPrimeFacesAjaxBusy()) continue;
+    const widget = getPanoramaLotWidget();
+    if (
+      !widget?.select?.isConnected ||
+      (expectBlankAgent &&
+        !getPanoramaDetailAgentFields(owner.form).some(
+          (field) => field.tagName === 'SELECT' && field.isConnected
+        ))
+    )
+      continue;
+    const selected = getPanoramaDisplayedLot(widget);
+    const agent = getPanoramaCurrentAgentSelectionText(owner.form);
+    if (!selected && agent === (expectBlankAgent ? '' : originalAgent)) {
+      if (!retry) return 'cleared';
+      continue;
+    }
+    if (
+      !retry ||
+      (selected && selected !== originalLot) ||
+      (agent !== originalAgent && !(expectBlankAgent && !agent))
+    )
+      return 'review';
+    runPanoramaAutofill(data, () =>
+      clearPanoramaNonMatchingLot(data, { resetAgent })
+    );
+  }
+  return 'review';
 }
 
 function fillPanoramaLotFromSelect(widget, lotValue) {
@@ -2913,38 +3008,53 @@ function schedulePanoramaLotOrTradeSelection(
       : null;
   }
 
-  function finishLotMiss() {
-    if (!getPanoramaLotFundingChoices(getPanoramaLotWidget(), data.lot).length)
+  function finishLotMiss(unreadable = false) {
+    if (
+      !unreadable &&
+      !getPanoramaLotFundingChoices(getPanoramaLotWidget(), data.lot).length
+    )
       recordFundingComparison(data, 'unmatched');
     const owner = data._vaxlinkOwner;
     const choice = data._fundedRadioChoice;
-    if (choice) {
+    if (choice && !unreadable) {
       owner.fundingBucketsChecked.add(choice);
       chartActivity?.record(trace, 'lot_miss', { funding: choice });
     }
     const tryOther =
+      !unreadable &&
       choice &&
       owner.fundingBucketsChecked.size < PANORAMA_FUNDING_CHOICES.length;
-    const cleanup = clearPanoramaNonMatchingLot(data, {
-      resetAgent: !tryOther
-    });
-    chartActivity?.record(trace, 'lot_cleanup', { result: cleanup });
-    if (!isPanoramaAutofillCurrent(data)) {
+    const cleanup = cleanUpPanoramaLotMiss(data, !tryOther);
+    const reason = unreadable
+      ? 'deadline'
+      : tryOther
+        ? 'funding'
+        : choice
+          ? 'funding_exhausted'
+          : 'lot_not_matched';
+    stop(null);
+    if (typeof cleanup === 'string') report(cleanup);
+    else void cleanup.then(report, () => report('review'));
+
+    function report(cleanup) {
+      chartActivity?.record(trace, 'lot_cleanup', { result: cleanup });
+      if (!isPanoramaAutofillCurrent(data)) {
+        stopUnverified();
+        return;
+      }
+      chartActivity?.record(trace, 'stop', { reason });
+      const feedback = { ...data, _lotNeedsReview: cleanup === 'review' };
+      if (tryOther) {
+        showVaxlinkToast({ ...feedback, _fundingChoiceRequired: 'other' });
+        return;
+      }
+      recordDeferredAutofillResult(data, false);
+      showVaxlinkToast({
+        ...feedback,
+        _fillFeedback: reason
+      });
       stopUnverified();
-      return;
     }
-    const feedback = { ...data, _lotNeedsReview: cleanup === 'review' };
-    if (tryOther) {
-      showVaxlinkToast({ ...feedback, _fundingChoiceRequired: 'other' });
-      stop('funding');
-      return;
-    }
-    recordDeferredAutofillResult(data, false);
-    showVaxlinkToast({
-      ...feedback,
-      _fillFeedback: choice ? 'funding_exhausted' : 'lot_not_matched'
-    });
-    stopUnverified(choice ? 'funding_exhausted' : 'lot_not_matched');
   }
 
   const status = (requested, checked, matched) =>
@@ -3265,6 +3375,19 @@ function schedulePanoramaLotOrTradeSelection(
                 finishLotMiss();
                 return null;
               }
+            }
+            // An unreadable list cannot establish a funding miss. At timeout
+            // still undo the Agent this fill selected on an empty Single form.
+            if (
+              ready &&
+              hasLot &&
+              !productVerified &&
+              !owner.initialAgent &&
+              owner.filledAgent &&
+              !owner.detailAgent
+            ) {
+              finishLotMiss(true);
+              return null;
             }
             return productVerified
               ? {
@@ -3868,8 +3991,6 @@ async function fillReservedTrayRecord(
     if (owner.gridDetail) {
       if (!matchesGridDetail(owner.gridDetail))
         throw new Error('The matching Enter Details step is no longer open.');
-      if (hasDifferentGridDetailLot(owner.gridDetail))
-        throw new Error(DIFFERENT_GRID_DETAIL_LOT);
     }
     if (
       requiredKind === 'multiple_detail' &&
@@ -3895,6 +4016,24 @@ async function fillReservedTrayRecord(
     if (blocked) return blocked;
     dose.record = record;
     data._vaxlinkOwner = owner;
+    if (owner.gridDetail && hasDifferentGridDetailLot(owner.gridDetail)) {
+      // This step opened from an Agent VaxLink assigned on the grid. Only
+      // the sole enabled Lot can be attributed to Panorama's default.
+      owner.initialLot = getPanoramaDisplayedLot(getPanoramaLotWidget());
+      owner.activity ??= chartActivity?.begin('multiple', 'detail');
+      const result = await cleanUpPanoramaLotMiss(data, false);
+      if (!isPanoramaAutofillCurrent(data))
+        return createAutofillResult('failed');
+      chartActivity?.record(owner.activity, 'lot_cleanup', { result });
+      chartActivity?.record(owner.activity, 'stop', {
+        reason: 'lot_not_matched'
+      });
+      if (result === 'cleared')
+        throw new Error(
+          'Panorama selected a different lot. VaxLink cleared it. Check the chart before continuing.'
+        );
+      throw new Error(DIFFERENT_GRID_DETAIL_LOT);
+    }
     data._vaxlinkQueueContext = {
       storageKey: MULTIPLE_INJECT_QUEUE_KEY,
       recordId,
@@ -4352,7 +4491,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     : '';
 
   const lotReviewMarkup = data._lotNeedsReview
-    ? '<div class="vl-toast-detail">The Lot field still needs review. Clear any entry that does not match the scanned lot.</div>'
+    ? '<div class="vl-toast-detail">Check the Agent and Lot on the chart. Clear any entry that does not match the scanned vaccine.</div>'
     : '';
 
   if (data._fillFeedback) {
@@ -5679,10 +5818,6 @@ async function advanceGridHandoff() {
       if (!earlier.entry) continue;
       void releaseGridAssignment(earlier.entry);
       earlier.entry = null;
-    }
-    if (hasDifferentGridDetailLot(entry)) {
-      showVaxlinkToast({ _entryWarning: DIFFERENT_GRID_DETAIL_LOT });
-      return;
     }
 
     const data = beginPanoramaAutofill({}, true, { automatic: true });

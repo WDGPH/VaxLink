@@ -137,7 +137,11 @@ VaxLink keeps an existing category and waits for the Lot list to change after
 a category change. After a miss in one category, staff can try the other.
 
 If the Lot cannot be matched, VaxLink only clears a different selection it can
-attribute to the current fill. It leaves a staff selection for review. When the
+attribute to the current fill. On a carried detail step this includes the only
+enabled Lot for the assigned Agent. After a final miss on a Single form it
+clears an Agent it selected on a blank form, even if the Lot is already empty.
+It rechecks the current controls after clearing and can clear the same restored
+selection once. Staff selections and persistent mismatches need review. When the
 product matches but another field does not settle, the chart names the fields
 staff need to check.
 
