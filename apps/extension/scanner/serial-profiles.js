@@ -1,6 +1,4 @@
 export const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
-export const SCANNER_PORT_INFO_STORAGE_KEY =
-  'vaxlink_serial_scanner_port_info_v1';
 
 export const ZEBRA_USB_VENDOR_ID = 0x05e0;
 

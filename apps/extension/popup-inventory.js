@@ -242,11 +242,6 @@ export class ScanQueueManager {
     return this.rows.find((row) => row && row.id === id) || null;
   }
 
-  setActiveUse(id) {
-    this.activeUseId = id || '';
-    this.render();
-  }
-
   exportCsv() {
     if (!this.rows.length) {
       return null;

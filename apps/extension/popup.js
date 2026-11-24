@@ -986,7 +986,7 @@ function renderAnalyticsSummary(summary) {
   const todayMetrics = metrics(summary.today || {});
   const allMetrics = metrics(summary.rollup || {});
   const renderRow = (label) => `
-    <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
+    <tr><th scope="row">${escapeHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
   `;
   const groups = [
     [
@@ -1012,8 +1012,8 @@ function renderAnalyticsSummary(summary) {
       ${groups
         .map(
           ([title, labels]) => `
-        <tbody aria-label="${escapeAnalyticsHtml(title)}">
-          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>
+        <tbody aria-label="${escapeHtml(title)}">
+          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeHtml(title)}</th></tr>
           ${labels.map(renderRow).join('')}
         </tbody>
       `
@@ -1027,15 +1027,6 @@ function formatAnalyticsNumber(value) {
   if (typeof value === 'string') return value;
   const num = Number(value) || 0;
   return num.toLocaleString();
-}
-
-function escapeAnalyticsHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function downloadTextFile(filename, text, mimeType) {
