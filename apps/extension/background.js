@@ -2,6 +2,7 @@ const VAXLINK_BG_DEBUG = false;
 importScripts('build-info.js');
 importScripts('shared/gs1-parser.js');
 importScripts('shared/expiry-date.js');
+importScripts('shared/workflow.js');
 importScripts('shared/vaccine-label.js');
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-daemon-protocol.js');
@@ -89,10 +90,13 @@ let scannerStatusWriteQueue = Promise.resolve();
 let scannerControlQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
 let iconInitPromise = null;
-const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
-const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
-const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
-const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const {
+  WORKFLOW_MODE_KEY,
+  LEGACY_POPUP_MODE_KEY,
+  SINGLE_SCAN_AUTOFILL_KEY,
+  GRID_SCAN_AUTOFILL_KEY,
+  normalizeWorkflowMode
+} = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
@@ -1326,24 +1330,6 @@ function normalizeScanEvent(scan) {
   };
 }
 
-function normalizeWorkflowMode(stored) {
-  const direct = stored && stored[WORKFLOW_MODE_KEY];
-  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
-    return direct;
-  }
-
-  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
-  if (legacyPopup === 'inventory') return 'inventory';
-  if (legacyPopup === 'inject') return 'single';
-
-  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
-  if (legacyRemote === 'tray') return 'multiple';
-  if (legacyRemote === 'autofill') return 'single';
-
-  if (stored && stored[LEGACY_HANDS_FREE_KEY]) return 'single';
-  return 'single';
-}
-
 function getQueueStorageKeyForWorkflow(mode) {
   if (mode === 'multiple') return MULTIPLE_INJECT_QUEUE_KEY;
   if (mode === 'inventory') return INVENTORY_BATCH_KEY;
@@ -1680,19 +1666,30 @@ async function routeScanToActiveSupportedTab(rawScan) {
   const storedWorkflow = await getStorage([
     WORKFLOW_MODE_KEY,
     LEGACY_POPUP_MODE_KEY,
-    LEGACY_REMOTE_MODE_KEY,
-    LEGACY_HANDS_FREE_KEY
+    SINGLE_SCAN_AUTOFILL_KEY,
+    GRID_SCAN_AUTOFILL_KEY
   ]);
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
   const chart = await contextPromise;
   const contextToken = chart?.contextToken || null;
+  const immunization = workflowMode === 'immunization';
+  const readyKind =
+    chart?.ready && chart.formContext?.ready ? chart.formContext.kind : null;
+  const direct =
+    immunization &&
+    storedWorkflow[SINGLE_SCAN_AUTOFILL_KEY] !== false &&
+    ['provider_single', 'non_provider_single'].includes(readyKind);
+  const sendToGrid =
+    immunization &&
+    storedWorkflow[GRID_SCAN_AUTOFILL_KEY] !== false &&
+    readyKind === 'multiple_grid';
 
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
-    if (workflowMode === 'single') {
+    if (immunization) {
       const pendingCount = await enqueuePendingScan({
         ...scan,
-        pending_workflow: 'single',
+        pending_workflow: workflowMode,
         ...buildLockedScanQueueContext(lockSession)
       });
       return {
@@ -1702,17 +1699,16 @@ async function routeScanToActiveSupportedTab(rawScan) {
         locked: true,
         lockSessionId: lockSession.id,
         pinnedTabId: lockSession.tabId,
-        workflow: 'single',
+        workflow: workflowMode,
         pendingCount
       };
     }
     const lockedQueueResult = await saveScannerScanToWorkflowQueue(
       scan,
-      'multiple',
+      workflowMode,
       {
         context: buildLockedScanQueueContext(lockSession),
-        preserveEveryScan: true,
-        inventoryCapture: workflowMode === 'inventory'
+        preserveEveryScan: true
       }
     );
     if (lockedQueueResult.rejection) {
@@ -1741,19 +1737,23 @@ async function routeScanToActiveSupportedTab(rawScan) {
       locked: true,
       lockSessionId: lockSession.id,
       pinnedTabId: lockSession.tabId,
-      workflow: 'multiple',
+      workflow: workflowMode,
       storageKey: lockedQueueResult.storageKey,
       queueSizeAfter: lockedQueueResult.record?.queueSizeAfter || 0
     };
   }
-  // Queue workflows are owned by the background daemon. Do not route these
-  // scans through a chart first: the chart content script may still have a
-  // stale mode during popup/storage synchronization, which previously made a
-  // Multiple scan behave like Single or disappear into a failed chart fill.
-  if (workflowMode === 'multiple' || workflowMode === 'inventory') {
+  let reviewState;
+  if (idleState === 'unavailable') reviewState = 'lock_unavailable';
+  else if (idleState === 'unknown') reviewState = 'lock_unknown';
+  else if (chart?.stale) reviewState = 'stale_chart';
+  else if (destination && !scannerRouteMatches(scannerRoute))
+    reviewState = 'inactive_chart';
+
+  // No selected chart receives a replay. A grid gets only the row just saved.
+  if (!immunization || (!direct && !reviewState)) {
     const workflowQueueResult = await saveScannerScanToWorkflowQueue(
       scan,
-      workflowMode
+      immunization ? 'multiple' : 'inventory'
     );
     if (workflowQueueResult.rejection) {
       if (
@@ -1782,22 +1782,38 @@ async function routeScanToActiveSupportedTab(rawScan) {
         response: workflowQueueResult.rejection
       };
     }
+    const saved = workflowQueueResult.record;
+    const queued = !saved?.duplicate_ignored;
+    let response;
+    if (
+      sendToGrid &&
+      queued &&
+      saved?.id &&
+      (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
+    ) {
+      response = await sendScanToTab(destination.id, {
+        action: 'vaxlinkGridScanCaptured',
+        recordId: saved.id,
+        contextToken,
+        scannerRoute: {
+          ...scannerRoute,
+          startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+        }
+      }).catch(() => null);
+    }
     return {
-      routed: false,
-      queued: !workflowQueueResult.record?.duplicate_ignored,
-      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
-      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
-      workflow: workflowQueueResult.workflow,
+      routed: response?.status === 'grid_added',
+      queued,
+      queuedToWorkflow: queued,
+      duplicate_ignored: saved?.duplicate_ignored === true,
+      workflow: workflowMode,
       storageKey: workflowQueueResult.storageKey,
-      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
+      queueSizeAfter: saved?.queueSizeAfter || 0,
+      response
     };
   }
 
-  let reviewState = 'checking_chart';
-  if (idleState === 'unavailable') reviewState = 'lock_unavailable';
-  else if (idleState === 'unknown') reviewState = 'lock_unknown';
-  else if (chart?.stale) reviewState = 'stale_chart';
-  else if (!chart?.ready) reviewState = 'inactive_chart';
+  reviewState ??= 'checking_chart';
   const held = {
     ...scan,
     intendedTabId: destination?.id ?? null,
@@ -1877,7 +1893,7 @@ async function routeScanToActiveSupportedTab(rawScan) {
     routed: false,
     queued: true,
     queuedToWorkflow: false,
-    workflow: 'single',
+    workflow: workflowMode,
     pendingCount
   };
 }

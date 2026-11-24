@@ -8,6 +8,7 @@ import {
 
 const EMPTY_BUNDLE = makeTestNvcBundle();
 const MULTIPLE_KEY = 'multiple_inject_queue_v1';
+const INVENTORY_KEY = 'inventory_scan_batch_v1';
 const PENDING_KEY = 'vaxlink_pending_scan_inbox_v1';
 
 function makeScan(capturedAt) {
@@ -19,7 +20,7 @@ function makeScan(capturedAt) {
   };
 }
 
-test('scans captured while Windows is locked are preserved in Multiple Inject', async () => {
+test('locked captures from a saved Multiple preference are held once per barcode', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'multiple' },
@@ -45,17 +46,17 @@ test('scans captured while Windows is locked are preserved in Multiple Inject', 
   assert.equal(first.locked, true);
   assert.equal(first.pinnedTabId, 44);
   assert.equal(
-    second.queueSizeAfter,
+    second.pendingCount,
     2,
     'two deliberate identical scans must both survive lock capture'
   );
 
-  const rows = harness.storageData.get(MULTIPLE_KEY);
+  const rows = harness.storageData.get(PENDING_KEY);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].captured_while_locked, true);
   assert.equal(rows[0].lock_session_tab_id, 44);
   assert.equal(rows[0].lock_session_id, rows[1].lock_session_id);
-  assert.equal(harness.getBadgeText(), '2');
+  assert.equal(harness.storageData.has(MULTIPLE_KEY), false);
 });
 
 test('scans captured while Windows is locked in Single mode remain held', async () => {
@@ -79,13 +80,13 @@ test('scans captured while Windows is locked in Single mode remain held', async 
 
   assert.equal(response.success, true);
   assert.equal(response.locked, true);
-  assert.equal(response.workflow, 'single');
+  assert.equal(response.workflow, 'immunization');
   assert.equal(response.pendingCount, 1);
   assert.equal(harness.storageData.get(MULTIPLE_KEY), undefined);
   assert.equal(harness.storageData.get(PENDING_KEY).length, 1);
   assert.equal(
     harness.storageData.get(PENDING_KEY)[0].pending_workflow,
-    'single'
+    'immunization'
   );
 });
 
@@ -99,10 +100,13 @@ test('an unlocked scan is not mislabeled as a locked queue record', async () => 
 
   assert.equal(response.success, true);
   assert.equal(response.locked, undefined);
-  assert.equal(harness.storageData.get(MULTIPLE_KEY), undefined);
+  assert.equal(
+    harness.storageData.get(MULTIPLE_KEY)[0].captured_while_locked,
+    undefined
+  );
 });
 
-test('unlocked Multiple mode queues in background without delivering to a chart', async () => {
+test('an upgraded Multiple preference goes to the tray unless there is a confirmed chart', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'active',
     storage: { vaxlink_workflow_mode_v1: 'multiple' },
@@ -123,7 +127,7 @@ test('unlocked Multiple mode queues in background without delivering to a chart'
 
   assert.equal(response.success, true);
   assert.equal(response.queuedToWorkflow, true);
-  assert.equal(response.workflow, 'multiple');
+  assert.equal(response.workflow, 'immunization');
   assert.equal(harness.storageData.get(MULTIPLE_KEY).length, 1);
   assert.equal(
     harness.tabMessages.some(
@@ -133,7 +137,7 @@ test('unlocked Multiple mode queues in background without delivering to a chart'
   );
 });
 
-test('a rapid locked scanner burst cannot lose queue rows to storage races', async () => {
+test('a rapid locked scanner burst cannot lose held rows to storage races', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'multiple' }
@@ -150,8 +154,24 @@ test('a rapid locked scanner burst cannot lose queue rows to storage races', asy
     responses.every((response) => response.success && response.locked),
     true
   );
-  const rows = harness.storageData.get(MULTIPLE_KEY);
+  const rows = harness.storageData.get(PENDING_KEY);
   assert.equal(rows.length, 20);
   assert.equal(new Set(rows.map((row) => row.lock_session_id)).size, 1);
-  assert.equal(harness.getBadgeText(), '20');
+});
+
+test('Inventory captures stay in Inventory while the machine is locked', async () => {
+  const harness = createBackgroundHarness(EMPTY_BUNDLE, {
+    idleState: 'locked',
+    storage: { vaxlink_workflow_mode_v1: 'inventory' }
+  });
+  const response = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:25:00.000Z')
+  );
+  assert.equal(response.locked, true);
+  assert.equal(response.workflow, 'inventory');
+  assert.equal(
+    harness.storageData.get(INVENTORY_KEY)[0].captured_while_locked,
+    true
+  );
+  assert.equal(harness.storageData.has(PENDING_KEY), false);
 });

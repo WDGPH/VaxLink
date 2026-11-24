@@ -1,3 +1,4 @@
+import './shared/workflow.js';
 import './shared/vaccine-label.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
@@ -33,8 +34,7 @@ let addBatchBtn;
 let exportCsvBtn;
 let clearInventoryBtn;
 let clearMultipleBtn;
-let singleModeBtn;
-let multipleModeBtn;
+let immunizationModeBtn;
 let inventoryModeBtn;
 let singleModeSection;
 let multipleModeSection;
@@ -78,14 +78,17 @@ let queueSaveNoticeVersion = 0;
 let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
-let activeMode = 'single';
+let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
 
-const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
-const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
-const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
-const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
+const {
+  WORKFLOW_MODE_KEY,
+  LEGACY_POPUP_MODE_KEY,
+  SINGLE_SCAN_AUTOFILL_KEY,
+  GRID_SCAN_AUTOFILL_KEY,
+  normalizeWorkflowMode
+} = globalThis.VaxLinkWorkflow;
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
   'vaxlink_administered_datetime_autofill_v1';
@@ -124,8 +127,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   exportCsvBtn = document.getElementById('exportCsvBtn');
   clearInventoryBtn = document.getElementById('clearInventoryBtn');
   clearMultipleBtn = document.getElementById('clearMultipleBtn');
-  singleModeBtn = document.getElementById('singleModeBtn');
-  multipleModeBtn = document.getElementById('multipleModeBtn');
+  immunizationModeBtn = document.getElementById('immunizationModeBtn');
   inventoryModeBtn = document.getElementById('inventoryModeBtn');
   singleModeSection = document.getElementById('singleModeSection');
   multipleModeSection = document.getElementById('multipleModeSection');
@@ -218,11 +220,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (singleModeBtn) {
-    singleModeBtn.addEventListener('click', () => setActiveMode('single'));
-  }
-  if (multipleModeBtn) {
-    multipleModeBtn.addEventListener('click', () => setActiveMode('multiple'));
+  if (immunizationModeBtn) {
+    immunizationModeBtn.addEventListener('click', () =>
+      setActiveMode('immunization')
+    );
   }
   if (inventoryModeBtn) {
     inventoryModeBtn.addEventListener('click', () =>
@@ -265,11 +266,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       continueWithoutScanner = true;
       renderScannerStatusUi();
       const target =
-        activeMode === 'single'
-          ? scannedInput
-          : activeMode === 'multiple'
-            ? queueEntryToggleBtn
-            : inventoryEntryToggleBtn;
+        activeMode === 'immunization'
+          ? queueEntryToggleBtn
+          : inventoryEntryToggleBtn;
       target?.focus();
     });
   document
@@ -310,6 +309,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       consentAutofillToggle.checked
     );
   });
+
+  for (const [id, key] of [
+    ['singleScanAutofillToggle', SINGLE_SCAN_AUTOFILL_KEY],
+    ['gridScanAutofillToggle', GRID_SCAN_AUTOFILL_KEY]
+  ]) {
+    const toggle = document.getElementById(id);
+    toggle?.addEventListener(
+      'change',
+      () => void setAutofillSetting(key, toggle.checked)
+    );
+  }
 
   if (autoFillBtn) {
     autoFillBtn.addEventListener('click', async () => {
@@ -625,11 +635,9 @@ function renderInventoryCount(count) {
 function renderMultipleModeCount(count) {
   const normalized = Math.max(0, Number.parseInt(count, 10) || 0);
   if (multipleQueueCount) multipleQueueCount.textContent = String(normalized);
-  if (multipleModeBtn)
-    multipleModeBtn.textContent =
-      normalized > 0
-        ? `Multiple Immunizations (${normalized})`
-        : 'Multiple Immunizations';
+  if (immunizationModeBtn)
+    immunizationModeBtn.textContent =
+      normalized > 0 ? `Immunization (${normalized})` : 'Immunization';
 }
 
 function writeOutput(message, type = 'info') {
@@ -730,6 +738,11 @@ async function loadAutofillSettings() {
       document.getElementById('autoResolveFundingToggle'),
       AUTO_RESOLVE_FUNDING_KEY
     ],
+    [
+      document.getElementById('singleScanAutofillToggle'),
+      SINGLE_SCAN_AUTOFILL_KEY
+    ],
+    [document.getElementById('gridScanAutofillToggle'), GRID_SCAN_AUTOFILL_KEY],
     [
       adminDateAutofillToggle,
       ADMIN_DATE_AUTOFILL_KEY,
@@ -945,79 +958,30 @@ function usesScannerInput(mode) {
   return !!MODE_CONFIG[mode]?.usesScannerInput;
 }
 
-function normalizeWorkflowMode(stored) {
-  const direct = stored && stored[WORKFLOW_MODE_KEY];
-  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
-    return direct;
-  }
-
-  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
-  if (legacyPopup === 'inventory') {
-    return 'inventory';
-  }
-  if (legacyPopup === 'inject') {
-    return 'single';
-  }
-
-  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
-  if (legacyRemote === 'tray') {
-    return 'multiple';
-  }
-  if (legacyRemote === 'autofill') {
-    return 'single';
-  }
-
-  if (stored && stored[LEGACY_HANDS_FREE_KEY]) {
-    return 'single';
-  }
-
-  return 'single';
-}
-
 async function loadWorkflowMode() {
   try {
     const stored = await getLocalStorage([
       WORKFLOW_MODE_KEY,
-      LEGACY_POPUP_MODE_KEY,
-      LEGACY_REMOTE_MODE_KEY,
-      LEGACY_HANDS_FREE_KEY
+      LEGACY_POPUP_MODE_KEY
     ]);
     await setActiveMode(normalizeWorkflowMode(stored), {
       persist: false,
       track: false
     });
   } catch (_) {
-    await setActiveMode('single', { persist: false, track: false });
+    await setActiveMode('immunization', { persist: false, track: false });
   }
 }
 
 async function setActiveMode(mode, options = {}) {
   const previousMode = activeMode;
-  activeMode = mode === 'multiple' || mode === 'inventory' ? mode : 'single';
-  const config = MODE_CONFIG[activeMode];
-
-  toggleModeButton(singleModeBtn, activeMode === 'single');
-  toggleModeButton(multipleModeBtn, activeMode === 'multiple');
+  activeMode = mode === 'inventory' ? 'inventory' : 'immunization';
+  toggleModeButton(immunizationModeBtn, activeMode === 'immunization');
   toggleModeButton(inventoryModeBtn, activeMode === 'inventory');
-
-  if (singleModeSection) {
-    singleModeSection.hidden = activeMode !== 'single';
-  }
-  if (multipleModeSection) {
-    multipleModeSection.hidden = activeMode !== 'multiple';
-  }
-  if (inventoryModeSection) {
+  if (multipleModeSection)
+    multipleModeSection.hidden = activeMode !== 'immunization';
+  if (inventoryModeSection)
     inventoryModeSection.hidden = activeMode !== 'inventory';
-  }
-  if (scannerInputSection) {
-    scannerInputSection.hidden = !config.usesScannerInput;
-  }
-  if (scannedInputLabel && config.inputLabel) {
-    scannedInputLabel.textContent = config.inputLabel;
-  }
-  if (scannedInput && config.inputPlaceholder) {
-    scannedInput.placeholder = config.inputPlaceholder;
-  }
   renderScannerStatusUi();
 
   if (options.persist !== false) {
@@ -1428,7 +1392,7 @@ async function addPendingScansToInventory() {
 let trayUseInFlight = false;
 
 async function handleUseMultipleInjectRecord(record) {
-  if (trayUseInFlight || activeMode !== 'multiple') return;
+  if (trayUseInFlight || activeMode !== 'immunization') return;
   if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) return;
   trayUseInFlight = true;
   try {
@@ -1444,6 +1408,10 @@ async function handleUseMultipleInjectRecord(record) {
         { frameId: 0 }
       )
       .catch(() => null);
+    if (!chart?.supported)
+      throw new Error(
+        'Open a supported Panorama immunization page. If it’s already open, refresh it and try again.'
+      );
     if (!chart?.ready || !chart.formContext?.ready || !chart.contextToken) {
       throw new Error(
         'Open a supported Panorama form that is ready for entry.'

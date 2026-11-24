@@ -1045,6 +1045,14 @@
                   >Choose funding automatically when one category matches</span
                 >
               </label>
+              <label class="settings-check" for="singleScanAutofillToggle">
+                <input id="singleScanAutofillToggle" type="checkbox" />
+                Fill an open single form from a scan
+              </label>
+              <label class="settings-check" for="gridScanAutofillToggle">
+                <input id="gridScanAutofillToggle" type="checkbox" />
+                Add a scan to the Multiple grid
+              </label>
               <label class="settings-check" for="adminDateAutofillToggle">
                 <input id="adminDateAutofillToggle" type="checkbox" />
                 <span>Set administration date to the autofill date</span>
@@ -1111,22 +1119,13 @@
               aria-label="VaxLink workflow mode"
             >
               <button
-                id="singleModeBtn"
+                id="immunizationModeBtn"
                 class="mode-tab active"
                 type="button"
                 role="tab"
                 aria-selected="true"
               >
-                Single Immunization
-              </button>
-              <button
-                id="multipleModeBtn"
-                class="mode-tab"
-                type="button"
-                role="tab"
-                aria-selected="false"
-              >
-                Multiple Immunizations
+                Immunization
               </button>
               <button
                 id="inventoryModeBtn"
@@ -1166,23 +1165,7 @@
               </p>
               <div id="heldScannerScanList"></div>
             </details>
-            <div id="scannerInputSection" class="scanner-input">
-              <label id="scannedInputLabel" for="scannedData"
-                >Scanned Barcode</label
-              >
-              <textarea
-                id="scannedData"
-                placeholder="Paste barcode text here..."
-              ></textarea>
-            </div>
-
-            <div id="singleModeSection" class="mode-panel">
-              <div class="actions">
-                <button id="autoFillBtn">Fill Chart</button>
-              </div>
-            </div>
-
-            <div id="multipleModeSection" class="mode-panel" hidden>
+            <div id="multipleModeSection" class="mode-panel">
               <div class="inventory">
                 <div class="queue-heading">
                   <h3 class="result-heading">Tray</h3>

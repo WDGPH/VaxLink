@@ -33,8 +33,8 @@ async function popup(failSave = false, mode = 'inventory') {
       'inventoryEntryPanel',
       'inventoryEntryToggleBtn',
       'cancelInventoryEntryBtn',
-      'singleModeBtn',
-      'multipleModeBtn',
+      'inventoryModeBtn',
+      'immunizationModeBtn',
       'output',
       'queueSaveNotice',
       'queueSaveNoticeText',
@@ -135,35 +135,20 @@ async function popup(failSave = false, mode = 'inventory') {
   };
 }
 
-test('a preview refresh cannot cancel an in-flight save or replace the new input', async () => {
+test('switching modes cannot cancel an in-flight save or replace the new draft', async () => {
   const p = await popup();
   p.click('inventoryEntryToggleBtn');
   const adding = p.click('addBatchBtn');
   await p.pending;
-  p.nodes.scannedData.value = barcode('NEXTLOT');
-  await p.click('singleModeBtn');
-  let html = '';
-  const refreshed = new Promise((resolve) => {
-    Object.defineProperty(p.nodes.output, 'innerHTML', {
-      get: () => html,
-      set(value) {
-        html = value;
-        if (value.includes('NEXTLOT') && !value.includes('lookup-loading'))
-          resolve();
-      }
-    });
-  });
-  p.nodes.scannedData.listeners.keydown({ key: 'Enter', preventDefault() {} });
-  await refreshed;
-  const preview = p.nodes.output.innerHTML;
+  await p.click('immunizationModeBtn');
+  p.nodes.queueBarcodeInput.value = barcode('NEXTLOT');
   p.release();
   await adding;
   assert.equal(
     p.background.storageData.get('inventory_scan_batch_v1')[0].lot,
     'TESTLOT'
   );
-  assert.equal(p.nodes.scannedData.value, barcode('NEXTLOT'));
-  assert.equal(p.nodes.output.innerHTML, preview);
+  assert.equal(p.nodes.queueBarcodeInput.value, barcode('NEXTLOT'));
   assert.equal(p.nodes.addBatchBtn.disabled, false);
 });
 
@@ -181,7 +166,10 @@ test('new input survives completion and Add recovers after success or failure', 
       assert.equal(p.nodes[button].disabled, true);
       p.nodes[input].value = barcode('NEXTLOT');
       p.nodes.output.innerHTML = 'Current preview';
-      if (fail) await p.click('singleModeBtn');
+      if (fail)
+        await p.click(
+          mode === 'multiple' ? 'inventoryModeBtn' : 'immunizationModeBtn'
+        );
       p.release();
       await adding;
       assert.equal(p.nodes[input].value, barcode('NEXTLOT'));
@@ -208,7 +196,7 @@ test('a later confirmed save clears the notice, while an older completion preser
   const p = await popup(true);
   const older = p.click('addBatchBtn');
   await p.pending;
-  await p.click('multipleModeBtn');
+  await p.click('immunizationModeBtn');
   p.nodes.queueBarcodeInput.value = barcode('NEXTLOT');
   await p.click('addQueueBtn');
   const warning = p.nodes.queueSaveNoticeText.textContent;

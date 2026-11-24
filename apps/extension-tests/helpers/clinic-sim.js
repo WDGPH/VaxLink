@@ -372,6 +372,7 @@ export function createBackgroundHarness(bundle, options = {}) {
           message.action === 'getPanoramaIntegration' && response.contextToken
             ? {
                 ready: true,
+                formContext: { kind: 'provider_single', ready: true },
                 buildAtLoad: {
                   name: chrome.runtime.getManifest().name,
                   version: chrome.runtime.getManifest().version,

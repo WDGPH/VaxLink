@@ -23,10 +23,13 @@ vlog(
   HANDS_FREE_BUILD
 );
 
-const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
-const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
-const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
-const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const {
+  WORKFLOW_MODE_KEY,
+  LEGACY_POPUP_MODE_KEY,
+  SINGLE_SCAN_AUTOFILL_KEY,
+  GRID_SCAN_AUTOFILL_KEY,
+  normalizeWorkflowMode
+} = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
@@ -45,7 +48,7 @@ const PANORAMA_TRAINING_HOST = 'trpanoramadhir.prod.ehealthontario.ca';
 const MULTIPLE_INSTALLATIONS_WARNING =
   'Two copies of VaxLink are open on this chart. Disable the extra copy in browser extensions, then refresh the chart after checking unsaved work.';
 let registeredChart = null;
-let activeWorkflowMode = 'single';
+let activeWorkflowMode = 'immunization';
 let adminDateAutofillEnabled = true;
 let adminTimeAutofillEnabled = true;
 let reasonAutofillEnabled = true;
@@ -162,35 +165,6 @@ function playAudioCue(kind) {
   }
 }
 
-function normalizeWorkflowMode(stored) {
-  const direct = stored && stored[WORKFLOW_MODE_KEY];
-  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
-    return direct;
-  }
-
-  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
-  if (legacyPopup === 'inventory') {
-    return 'inventory';
-  }
-  if (legacyPopup === 'inject') {
-    return 'single';
-  }
-
-  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
-  if (legacyRemote === 'tray') {
-    return 'multiple';
-  }
-  if (legacyRemote === 'autofill') {
-    return 'single';
-  }
-
-  if (stored && stored[LEGACY_HANDS_FREE_KEY]) {
-    return 'single';
-  }
-
-  return 'single';
-}
-
 function getQueueStorageKeyForWorkflow(mode) {
   if (mode === 'multiple') {
     return MULTIPLE_INJECT_QUEUE_KEY;
@@ -255,6 +229,18 @@ function isScannerDeliveryContextCurrent(token, kind, explicit = false) {
     else scannerDeliveryContext = null;
   }
   return !!current;
+}
+
+function canAutomaticallyFillPanoramaSingle(contextToken) {
+  const context = getPanoramaFormContext();
+  return (
+    panoramaSettingsInitialized &&
+    activeWorkflowMode === 'immunization' &&
+    autofillSettings[SINGLE_SCAN_AUTOFILL_KEY] !== false &&
+    ['provider_single', 'non_provider_single'].includes(context.kind) &&
+    context.ready &&
+    isScannerDeliveryContextCurrent(contextToken, context.kind)
+  );
 }
 
 function isScannerWorkerSender(sender) {
@@ -336,14 +322,22 @@ function setupMessageListener() {
       });
       return true;
     }
-    if (request.action === 'useTrayVaccine') {
-      if (
-        sender.id !== chrome.runtime.id ||
-        sender.url !== chrome.runtime.getURL('popup.html') ||
-        window.top !== window.self
-      )
+    if (
+      ['useTrayVaccine', 'vaxlinkGridScanCaptured'].includes(request.action)
+    ) {
+      const gridScan = request.action === 'vaxlinkGridScanCaptured';
+      const authorized = gridScan
+        ? isScannerWorkerSender(sender)
+        : sender.id === chrome.runtime.id &&
+          sender.url === chrome.runtime.getURL('popup.html');
+      if (!authorized || window.top !== window.self) return false;
+      if (gridScan && !Number.isFinite(request.scannerRoute?.startBy))
         return false;
-      useTrayVaccine(request.recordId, request.contextToken)
+      useTrayVaccine(
+        request.recordId,
+        request.contextToken,
+        gridScan ? request.scannerRoute : null
+      )
         .then((result) =>
           sendResponse({
             ...result,
@@ -364,7 +358,11 @@ function setupMessageListener() {
       return false;
     }
     if (request.action === 'showScannerBarcodeFeedback') {
-      if (!isScannerDeliveryContextCurrent(request.contextToken)) return false;
+      if (
+        !isScannerWorkerSender(sender) ||
+        !isScannerDeliveryContextCurrent(request.contextToken)
+      )
+        return false;
       const { status, lot, expiry } = request.feedback || {};
       if (status === 'expired')
         blockIneligibleChartUse({ lot, expiry, expiry_flag: 'expired' });
@@ -384,8 +382,7 @@ function setupMessageListener() {
       if (
         !Number.isFinite(request.scannerRoute?.startBy) ||
         typeof request.scan?.captureId !== 'string' ||
-        activeWorkflowMode !== 'single' ||
-        !isScannerDeliveryContextCurrent(request.contextToken)
+        !canAutomaticallyFillPanoramaSingle(request.contextToken)
       ) {
         sendResponse({
           accepted: false,
@@ -718,7 +715,7 @@ async function handleHandsFreeScan(
     };
   }
 
-  if (activeWorkflowMode === 'single') {
+  if (activeWorkflowMode === 'immunization') {
     const entryBlocked = panoramaEntryBlockReason();
     if (entryBlocked) {
       warnPanoramaEntryBlocked(entryBlocked);
@@ -742,7 +739,7 @@ async function handleHandsFreeScan(
   if (
     trimmed === lastHandledScanValue &&
     now - lastHandledScanAt < 1500 &&
-    (activeWorkflowMode !== 'single' ||
+    (activeWorkflowMode !== 'immunization' ||
       isPanoramaAutofillCurrent({ _vaxlinkOwner: lastHandledScanOwner }))
   ) {
     return {
@@ -752,12 +749,12 @@ async function handleHandsFreeScan(
       duplicate_ignored: true
     };
   }
-  if (activeWorkflowMode !== 'single') {
+  if (activeWorkflowMode !== 'immunization') {
     lastHandledScanValue = trimmed;
     lastHandledScanAt = now;
   }
   const fillData =
-    activeWorkflowMode === 'single' && !scannerDelivery
+    activeWorkflowMode === 'immunization' && !scannerDelivery
       ? beginPanoramaAutofill({}, true, { automatic: true, startBy })
       : null;
 
@@ -989,7 +986,7 @@ async function handleHandsFreeScan(
       !(await checkPanoramaScannerRoute(scannerDelivery)) ||
       !isPanoramaChartActive() ||
       Date.now() >= startBy ||
-      !isScannerDeliveryContextCurrent(scannerDelivery.contextToken)
+      !canAutomaticallyFillPanoramaSingle(scannerDelivery.contextToken)
     ) {
       return {
         accepted: false,
@@ -1087,121 +1084,46 @@ function initHandsFreeScanner() {
   }
   window.__vaxlinkHandsFreeInitialized = true;
 
-  chrome.storage.local.get(
-    [
-      WORKFLOW_MODE_KEY,
-      LEGACY_POPUP_MODE_KEY,
-      LEGACY_REMOTE_MODE_KEY,
-      LEGACY_HANDS_FREE_KEY,
-      LEGACY_ADMIN_DATETIME_AUTOFILL_KEY,
-      ADMIN_DATE_AUTOFILL_KEY,
-      ADMIN_TIME_AUTOFILL_KEY,
-      LEGACY_REASON_CONSENT_AUTOFILL_KEY,
-      REASON_AUTOFILL_KEY,
-      CONSENT_AUTOFILL_KEY,
-      AUTO_RESOLVE_FUNDING_KEY,
-      AUDIO_FEEDBACK_KEY
-    ],
-    (stored) => {
-      updatePanoramaWorkflowMode(normalizeWorkflowMode(stored));
-      applyAutofillSettings(stored);
-      audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
-      panoramaSettingsInitialized = true;
-      vlog('active workflow mode', activeWorkflowMode);
+  const keys = [
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    SINGLE_SCAN_AUTOFILL_KEY,
+    GRID_SCAN_AUTOFILL_KEY,
+    LEGACY_ADMIN_DATETIME_AUTOFILL_KEY,
+    ADMIN_DATE_AUTOFILL_KEY,
+    ADMIN_TIME_AUTOFILL_KEY,
+    LEGACY_REASON_CONSENT_AUTOFILL_KEY,
+    REASON_AUTOFILL_KEY,
+    CONSENT_AUTOFILL_KEY,
+    AUTO_RESOLVE_FUNDING_KEY,
+    AUDIO_FEEDBACK_KEY
+  ];
+  function applySettings(stored) {
+    updatePanoramaWorkflowMode(normalizeWorkflowMode(stored));
+    applyAutofillSettings(stored);
+    audioFeedbackEnabled = normalizeAudioFeedbackSetting(stored);
+  }
 
-      // On Panorama SPA navigations the page is already fully loaded when this
-      // content script injects, so document.readyState is NOT 'loading'.
-      // initClickReductionFeatures() therefore ran synchronously — BEFORE this
-      // callback fired.  At that point activeWorkflowMode was still the default
-      // 'single', so every mode guard in checkGrid() and the tryAutoDrain
-      // setTimeout evaluated false and bailed.
-      //
-      // Now that the real mode is known, re-kick both paths:
-      //  • maybeAutoFillPanoramaMultipleGrid – fills the agent+date grid
-      //  • tryAutoDrain – fills the single-immunization form after save
-      //
-      // A 250 ms head-start lets PrimeFaces settle; both functions guard
-      // internally (isPrimeFacesAjaxBusy, multiGridFillPending, etc.) and
-      // the MutationObserver catches any subsequent retry-worthy mutations.
-      if (activeWorkflowMode === 'multiple') {
-        setTimeout(() => void maybeAutoFillPanoramaMultipleGrid(), 250);
-        setTimeout(() => tryAutoDrain(), 1200);
-      }
-    }
-  );
+  chrome.storage.local.get(keys, (stored) => {
+    applySettings(stored);
+    panoramaSettingsInitialized = true;
+  });
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    const changedKeys = keys.filter((key) => key in changes);
+    if (!changedKeys.length) return;
+    const next = { ...autofillSettings };
+    for (const key of changedKeys) next[key] = changes[key].newValue;
+    applySettings(next);
+    const owner = panoramaAutofillOwner;
     if (
-      !(WORKFLOW_MODE_KEY in changes) &&
-      !(LEGACY_POPUP_MODE_KEY in changes) &&
-      !(LEGACY_REMOTE_MODE_KEY in changes) &&
-      !(LEGACY_HANDS_FREE_KEY in changes) &&
-      !(LEGACY_ADMIN_DATETIME_AUTOFILL_KEY in changes) &&
-      !(ADMIN_DATE_AUTOFILL_KEY in changes) &&
-      !(ADMIN_TIME_AUTOFILL_KEY in changes) &&
-      !(LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes) &&
-      !(REASON_AUTOFILL_KEY in changes) &&
-      !(CONSENT_AUTOFILL_KEY in changes) &&
-      !(AUTO_RESOLVE_FUNDING_KEY in changes) &&
-      !(AUDIO_FEEDBACK_KEY in changes)
-    ) {
-      return;
-    }
-    const nextState = {
-      [WORKFLOW_MODE_KEY]:
-        WORKFLOW_MODE_KEY in changes
-          ? changes[WORKFLOW_MODE_KEY].newValue
-          : activeWorkflowMode,
-      [LEGACY_POPUP_MODE_KEY]:
-        LEGACY_POPUP_MODE_KEY in changes
-          ? changes[LEGACY_POPUP_MODE_KEY].newValue
-          : undefined,
-      [LEGACY_REMOTE_MODE_KEY]:
-        LEGACY_REMOTE_MODE_KEY in changes
-          ? changes[LEGACY_REMOTE_MODE_KEY].newValue
-          : undefined,
-      [LEGACY_HANDS_FREE_KEY]:
-        LEGACY_HANDS_FREE_KEY in changes
-          ? changes[LEGACY_HANDS_FREE_KEY].newValue
-          : undefined,
-      [LEGACY_ADMIN_DATETIME_AUTOFILL_KEY]:
-        LEGACY_ADMIN_DATETIME_AUTOFILL_KEY in changes
-          ? changes[LEGACY_ADMIN_DATETIME_AUTOFILL_KEY].newValue
-          : autofillSettings[LEGACY_ADMIN_DATETIME_AUTOFILL_KEY],
-      [ADMIN_DATE_AUTOFILL_KEY]:
-        ADMIN_DATE_AUTOFILL_KEY in changes
-          ? changes[ADMIN_DATE_AUTOFILL_KEY].newValue
-          : autofillSettings[ADMIN_DATE_AUTOFILL_KEY],
-      [ADMIN_TIME_AUTOFILL_KEY]:
-        ADMIN_TIME_AUTOFILL_KEY in changes
-          ? changes[ADMIN_TIME_AUTOFILL_KEY].newValue
-          : autofillSettings[ADMIN_TIME_AUTOFILL_KEY],
-      [LEGACY_REASON_CONSENT_AUTOFILL_KEY]:
-        LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes
-          ? changes[LEGACY_REASON_CONSENT_AUTOFILL_KEY].newValue
-          : autofillSettings[LEGACY_REASON_CONSENT_AUTOFILL_KEY],
-      [REASON_AUTOFILL_KEY]:
-        REASON_AUTOFILL_KEY in changes
-          ? changes[REASON_AUTOFILL_KEY].newValue
-          : autofillSettings[REASON_AUTOFILL_KEY],
-      [CONSENT_AUTOFILL_KEY]:
-        CONSENT_AUTOFILL_KEY in changes
-          ? changes[CONSENT_AUTOFILL_KEY].newValue
-          : autofillSettings[CONSENT_AUTOFILL_KEY],
-      [AUTO_RESOLVE_FUNDING_KEY]:
-        AUTO_RESOLVE_FUNDING_KEY in changes
-          ? changes[AUTO_RESOLVE_FUNDING_KEY].newValue
-          : autofillSettings[AUTO_RESOLVE_FUNDING_KEY],
-      [AUDIO_FEEDBACK_KEY]:
-        AUDIO_FEEDBACK_KEY in changes
-          ? changes[AUDIO_FEEDBACK_KEY].newValue
-          : audioFeedbackEnabled
-    };
-    updatePanoramaWorkflowMode(normalizeWorkflowMode(nextState));
-    applyAutofillSettings(nextState);
-    audioFeedbackEnabled = normalizeAudioFeedbackSetting(nextState);
-    vlog('workflow mode changed', activeWorkflowMode);
+      owner?.automatic &&
+      (owner.kind === 'multiple_grid'
+        ? next[GRID_SCAN_AUTOFILL_KEY]
+        : next[SINGLE_SCAN_AUTOFILL_KEY]) === false
+    )
+      cancelPanoramaAutofill();
   });
 
   for (const type of ['pointerdown', 'input', 'change', 'keydown']) {
@@ -2920,6 +2842,7 @@ function updatePanoramaWorkflowMode(mode) {
   cancelPanoramaAutofill();
   panoramaAutofillOwner = null;
   activeWorkflowMode = mode;
+  if (hudInitialized) updateInventoryModeNotice();
 }
 
 function cancelPanoramaAutofill({ focusOnly = false } = {}) {
@@ -3784,7 +3707,7 @@ function mutateQueueViaBackground(storageKey, operation, payload = {}) {
   });
 }
 
-async function useTrayVaccine(recordId, contextToken) {
+async function useTrayVaccine(recordId, contextToken, scannerRoute = null) {
   if (
     typeof recordId !== 'string' ||
     !recordId.trim() ||
@@ -3792,16 +3715,31 @@ async function useTrayVaccine(recordId, contextToken) {
   )
     throw new Error('Choose an available dose in the chart tray.');
   const context = getPanoramaFormContext();
-  if (
-    !isScannerDeliveryContextCurrent(contextToken, context.kind, true) ||
-    !context.ready ||
-    document.visibilityState !== 'visible'
-  )
+  const current = () =>
+    isScannerDeliveryContextCurrent(contextToken, context.kind, !scannerRoute);
+  if (!current() || !context.ready || document.visibilityState !== 'visible')
     throw new Error('Open a supported Panorama form that is ready for entry.');
+  if (
+    scannerRoute &&
+    (context.kind !== 'multiple_grid' ||
+      autofillSettings[GRID_SCAN_AUTOFILL_KEY] === false ||
+      !isPanoramaChartActive() ||
+      Date.now() >= scannerRoute.startBy ||
+      !(await checkPanoramaScannerRoute({ scannerRoute })) ||
+      !current() ||
+      !isPanoramaChartActive())
+  )
+    throw new Error('The grid changed. The vaccine remains in the tray.');
+
+  const data = beginPanoramaAutofill({}, true, {
+    automatic: !!scannerRoute,
+    startBy: scannerRoute?.startBy ?? null
+  });
+  data._vaxlinkOwner.scannerRoute = scannerRoute;
   return fillReservedTrayRecord(
     recordId,
-    beginPanoramaAutofill({}),
-    'queue',
+    data,
+    scannerRoute ? 'web-serial' : 'queue',
     context.kind
   );
 }
@@ -3840,6 +3778,15 @@ async function fillReservedTrayRecord(
         'Panorama changed. Check the chart and choose the vaccine again.'
       );
     }
+    if (
+      owner.scannerRoute &&
+      (!(await checkPanoramaScannerRoute({
+        scannerRoute: owner.scannerRoute
+      })) ||
+        !isPanoramaAutofillCurrent(ownerData) ||
+        autofillSettings[GRID_SCAN_AUTOFILL_KEY] === false)
+    )
+      throw new Error('The grid changed. The vaccine remains in the tray.');
     if (requiredKind) {
       const current = getPanoramaFormContext();
       if (!current.ready || current.kind !== requiredKind)
@@ -4075,8 +4022,9 @@ function handleVaxlinkCommand(value) {
   if (!upper.startsWith('VAXLINK:')) return false;
   const command = upper.slice('VAXLINK:'.length).trim();
   const modeMap = {
-    SINGLE: 'single',
-    MULTIPLE: 'multiple',
+    SINGLE: 'immunization',
+    MULTIPLE: 'immunization',
+    IMMUNIZATION: 'immunization',
     INVENTORY: 'inventory'
   };
   const newMode = modeMap[command];
@@ -4106,6 +4054,7 @@ let toastRoot = null;
 // other (issue #28): warning on top, routine toasts below it.
 let toastWarningSlot = null;
 let toastRoutineSlot = null;
+let toastInventorySlot = null;
 let toastDismissTimer = null;
 
 function ensureToastHost() {
@@ -4195,11 +4144,26 @@ function ensureToastHost() {
   toastRoot.className = 'vl-toast-stack';
   toastWarningSlot = document.createElement('div');
   toastRoutineSlot = document.createElement('div');
+  toastInventorySlot = document.createElement('div');
+  toastRoot.appendChild(toastInventorySlot);
   toastRoot.appendChild(toastWarningSlot);
   toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
   return toastRoot;
+}
+
+function updateInventoryModeNotice() {
+  if (activeWorkflowMode !== 'inventory') {
+    toastInventorySlot?.replaceChildren();
+    return;
+  }
+  if (!document.body || !isHandsFreeSupportedPage()) return;
+  ensureToastHost();
+  toastInventorySlot.innerHTML = `<div class="vl-toast info show" role="status">
+    <div class="vl-toast-title">Inventory mode</div>
+    <div class="vl-toast-detail">Scans go to Inventory. Select Immunization in VaxLink to fill a chart.</div>
+  </div>`;
 }
 
 function showVaxlinkToast(data, durationMs = 4000) {
@@ -4245,10 +4209,16 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
+  if (data._gridAdded) {
+    showRoutineToast(
+      '<div class="vl-toast info show"><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">The vaccine stays in the tray for Enter Details.</div></div>',
+      durationMs
+    );
+    return;
+  }
   if (data._commandMode) {
     const modeLabels = {
-      single: 'Single Immunization',
-      multiple: 'Multiple Immunizations',
+      immunization: 'Immunization',
       inventory: 'Inventory'
     };
     const sourceDetail =
@@ -4580,6 +4550,7 @@ function initHud() {
   if (hudInitialized) return;
   if (!isHandsFreeSupportedPage()) return;
   hudInitialized = true;
+  updateInventoryModeNotice();
 
   hudHost = document.createElement('div');
   hudHost.id = 'vaxlink-hud-host';
@@ -4870,25 +4841,12 @@ function initHud() {
   head.appendChild(hideBtn);
   hudContainer.appendChild(head);
 
-  hudModeToggleBtn = document.createElement('button');
-  hudModeToggleBtn.className = 'vl-hud-btn vl-hud-mode-toggle';
-  hudModeToggleBtn.addEventListener('click', () => {
-    const nextMode = activeWorkflowMode === 'multiple' ? 'single' : 'multiple';
-    void setHudWorkflowMode(nextMode);
-  });
-  hudContainer.appendChild(hudModeToggleBtn);
-
   hudQueueWrap = document.createElement('div');
   hudQueueWrap.className = 'vl-hud-queue hidden';
 
   hudCountEl = document.createElement('span');
   hudCountEl.className = 'vl-hud-count';
   hudCountEl.textContent = '0';
-
-  hudApplyBtn = document.createElement('button');
-  hudApplyBtn.className = 'vl-hud-btn';
-  hudApplyBtn.textContent = 'Apply Next';
-  hudApplyBtn.addEventListener('click', applyNextQueueItem);
 
   hudClearBtn = document.createElement('button');
   hudClearBtn.className = 'vl-hud-btn vl-hud-clear-btn';
@@ -4913,7 +4871,6 @@ function initHud() {
   });
 
   hudQueueWrap.appendChild(hudCountEl);
-  hudQueueWrap.appendChild(hudApplyBtn);
   hudQueueWrap.appendChild(hudClearBtn);
   hudContainer.appendChild(hudQueueWrap);
 
@@ -5029,9 +4986,7 @@ function initHud() {
     if (
       MULTIPLE_INJECT_QUEUE_KEY in changes ||
       WORKFLOW_MODE_KEY in changes ||
-      LEGACY_POPUP_MODE_KEY in changes ||
-      LEGACY_REMOTE_MODE_KEY in changes ||
-      LEGACY_HANDS_FREE_KEY in changes
+      LEGACY_POPUP_MODE_KEY in changes
     ) {
       updateHudState();
     }
@@ -5081,9 +5036,7 @@ function updateHudState() {
     const count = rows.length;
     const shouldShow = isPanoramaRecordImmsPage();
     const showQueueControls =
-      activeWorkflowMode === 'multiple' &&
-      count > 0 &&
-      isPanoramaImmunizationPage();
+      activeWorkflowMode === 'immunization' && count > 0;
 
     if (hudContainer) {
       hudContainer.classList.toggle('hidden', !shouldShow || hudUserHidden);
@@ -5091,15 +5044,11 @@ function updateHudState() {
     if (hudMiniEl) {
       hudMiniEl.classList.toggle('visible', shouldShow && hudUserHidden);
     }
-    setHudModeToggleState(hudModeToggleBtn, activeWorkflowMode);
     if (hudQueueWrap) {
       hudQueueWrap.classList.toggle('hidden', !showQueueControls);
     }
     if (hudCountEl) {
       hudCountEl.textContent = String(count);
-    }
-    if (hudApplyBtn) {
-      hudApplyBtn.disabled = count === 0;
     }
     renderHudQueueList(rows, showQueueControls);
   });
@@ -5144,6 +5093,27 @@ function renderHudQueueList(rows, visible) {
       continue;
     }
 
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'vl-hud-btn';
+    use.textContent = 'Use';
+    use.setAttribute('aria-label', `Use ${label.textContent}`);
+    use.disabled = globalThis.VaxLinkExpiryDate.blocksChartUse(row);
+    use.addEventListener('click', () => {
+      const context = getPanoramaFormContext();
+      const token = getScannerDeliveryContext(context.kind, true);
+      void useTrayVaccine(row.id, token)
+        .then((result) => {
+          if (result.status === 'grid_added')
+            showVaxlinkToast({ _gridAdded: true });
+          else if (!isAutofillPending(result) && !isAutofillSuccess(result))
+            warnPanoramaEntryBlocked(
+              result.error || 'Check the chart before trying again.'
+            );
+        })
+        .catch((error) => warnPanoramaEntryBlocked(error.message));
+    });
+    item.appendChild(use);
     const removeBtn = document.createElement('button');
     removeBtn.className = 'vl-hud-item-remove';
     removeBtn.textContent = '×';
@@ -5867,54 +5837,6 @@ if (document.readyState === 'loading') {
 // Initialize new features after DOM is ready
 // ---------------------------------------------------------------------------
 
-function initClickReductionFeatures() {
-  if (!isHandsFreeSupportedPage()) return;
-
-  if (document.body) {
-    initHud();
-    initPostSaveWatcher();
-    initPanoramaMultipleGridWatcher();
-    initPanoramaMultiStepWatcher();
-    // Initial auto-drain attempt after a short settle delay
-    if (activeWorkflowMode === 'multiple') {
-      setTimeout(() => tryAutoDrain(), 1200);
-    }
-  } else {
-    document.addEventListener('DOMContentLoaded', () => {
-      initHud();
-      initPostSaveWatcher();
-      initPanoramaMultipleGridWatcher();
-      initPanoramaMultiStepWatcher();
-      if (activeWorkflowMode === 'multiple') {
-        setTimeout(() => tryAutoDrain(), 1200);
-      }
-    });
-  }
-}
-
-// Re-run when mode changes so HUD visibility updates
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (WORKFLOW_MODE_KEY in changes) {
-    updateHudState();
-    if (activeWorkflowMode === 'multiple') {
-      setTimeout(() => tryAutoDrain(), 800);
-    }
-  }
-});
-
-if (document.readyState === 'loading') {
-  // Normal page load: DOMContentLoaded fires well after chrome.storage.local.get
-  // resolves, so activeWorkflowMode will be correctly set by the time
-  // initClickReductionFeatures runs.
-  document.addEventListener('DOMContentLoaded', initClickReductionFeatures);
-} else {
-  // Page is already loaded (PrimeFaces SPA navigation, or content script injected
-  // late).  initHandsFreeScanner's chrome.storage.local.get callback is async and
-  // hasn't fired yet, so activeWorkflowMode is still the default 'single'.
-  // Deferring by one task tick gives the storage callback a chance to set the real
-  // mode before initClickReductionFeatures reads it.  The storage callback also
-  // schedules its own re-kick (maybeAutoFillPanoramaMultipleGrid + tryAutoDrain)
-  // as a safety net in case even this deferred call races.
-  setTimeout(initClickReductionFeatures, 0);
-}
+if (document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', initHud);
+else initHud();

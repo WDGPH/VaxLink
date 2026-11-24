@@ -86,31 +86,69 @@ test('single capture is saved before delivery and binds delivery to the captured
   assert.equal(h.storageData.get(inbox).length, 0);
 });
 
-test('unavailable, unsupported, or unacknowledged destinations retain scans', async () => {
-  for (const extra of [
+test('unacknowledged chart attempts retain their scan', async () => {
+  for (const tabResponse of [
+    { supported: true, contextToken: 'document-1', success: true },
+    { supported: true, contextToken: 'document-1', accepted: true }
+  ]) {
+    const h = harness({ tabResponse });
+    await capture(h, 'held');
+    assert.equal(h.storageData.get(inbox)[0].rawText, 'held');
+  }
+});
+
+test('disabled, unidentified and unready forms save to the Immunization tray', async () => {
+  for (const overrides of [
     { tabs: [] },
+    { storage: { vaxlink_single_scan_autofill_v1: false } },
     { tabResponse: { supported: false } },
     {
       tabResponse: {
         supported: true,
         contextToken: 'document-1',
-        success: true
-      }
-    },
-    {
-      tabResponse: {
-        supported: true,
-        contextToken: 'document-1',
-        accepted: true
+        formContext: { kind: 'provider_single', ready: false }
       }
     }
   ]) {
-    const h = harness(extra);
-    await capture(h, 'held');
-    assert.equal(h.storageData.get(inbox).length, 1);
-    assert.equal(h.storageData.get(inbox)[0].rawText, 'held');
-    if (extra.tabResponse?.supported === false)
-      assert.equal(h.tabMessages.length, 1);
+    const h = harness(overrides);
+    const result = await capture(h, '(10)TESTLOT');
+    assert.equal(result.workflow, 'immunization');
+    assert.equal(result.queuedToWorkflow, true);
+    assert.equal(h.storageData.get('multiple_inject_queue_v1').length, 1);
+    assert.equal(h.storageData.has(inbox), false);
+    assert.ok(
+      h.tabMessages.every(
+        ({ message }) => message.action !== 'vaxlinkScanCaptured'
+      )
+    );
+  }
+});
+
+test('a grid receives only the new saved row when automatic grid entry is enabled', async () => {
+  for (const enabled of [false, true]) {
+    const key = 'multiple_inject_queue_v1';
+    const h = harness({
+      storage: {
+        [key]: [{ id: 'older', lot: 'OLDLOT' }],
+        vaxlink_grid_scan_autofill_v1: enabled
+      },
+      tabResponse: {
+        supported: true,
+        contextToken: 'grid-document',
+        formContext: { kind: 'multiple_grid', ready: true },
+        status: 'grid_added'
+      }
+    });
+    const result = await capture(h, '(10)TESTLOT');
+    const rows = h.storageData.get(key);
+    const writes = h.tabMessages.filter(
+      ({ message }) => message.action === 'vaxlinkGridScanCaptured'
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(result.queuedToWorkflow, true);
+    assert.equal(result.routed, enabled);
+    assert.equal(writes.length, Number(enabled));
+    if (enabled) assert.equal(writes[0].message.recordId, rows[1].id);
   }
 });
 
@@ -166,7 +204,7 @@ test('failed removal after acknowledgement retains the captured scan', async () 
 });
 
 test('only the popup can inspect or discard a held scan', async () => {
-  const h = harness({ tabs: [] });
+  const h = harness({ tabs: [], idleState: 'unknown' });
   await capture(h, 'held');
   const listed = await h.sendMessage({ action: 'getHeldScannerScans' }, popup);
   assert.equal(listed.success, true);
@@ -264,6 +302,7 @@ test('late acknowledgement cannot remove a newer identical capture', async () =>
   const old = h.storageData.get(inbox)[0];
   await h.sendMessage({ action: 'discardHeldScannerScan', scan: old }, popup);
   tabs[0].active = false;
+  h.setIdleState('locked');
   await capture(h, 'same');
   const newer = h.storageData.get(inbox)[0];
   assert.notEqual(newer.captureId, old.captureId);

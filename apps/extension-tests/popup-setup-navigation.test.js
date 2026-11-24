@@ -26,8 +26,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       'analyticsSummary',
       'scannerSettingsTitle',
       'mainWorkflowPanel',
-      'singleModeBtn',
-      'multipleModeBtn',
+      'immunizationModeBtn',
       'inventoryModeBtn',
       'output'
     ].map((id) => [
@@ -151,7 +150,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);
-    for (const mode of ['single', 'multiple', 'inventory']) {
+    for (const mode of ['immunization', 'inventory']) {
       await listeners[`${mode}ModeBtn:click`]();
       assert.equal(nodes.scannerSetupPrompt.hidden, false);
       assert.equal(
@@ -204,7 +203,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       previousWrites,
       'continuing does not change scanner or workflow settings'
     );
-    for (const mode of ['single', 'multiple', 'inventory']) {
+    for (const mode of ['immunization', 'inventory']) {
       await listeners[`${mode}ModeBtn:click`]();
       assert.equal(nodes.scannerSetupPrompt.hidden, true);
       assert.equal(

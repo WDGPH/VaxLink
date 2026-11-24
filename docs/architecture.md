@@ -151,7 +151,7 @@ the Scanner section expanded and focused. The small close button allows manual
 input and saved queues without scanner setup. This choice lasts for the current
 popup and does not change scanner capture or routing.
 
-The Multiple Immunizations and Inventory trays use **+** to open barcode text
+The Immunization and Inventory trays use **+** to open barcode text
 entry in packaged and unpacked installs. They use the existing parser, catalogue
 lookup, and background queue writer. Inventory accepts one barcode per line and
 keeps CSV export. Entry closes after a confirmed save when the input has not
@@ -206,7 +206,7 @@ without waiting for Local Activity counts.
 
 | Key                                         | Writers         | Purpose                                       |
 | ------------------------------------------- | --------------- | --------------------------------------------- |
-| `multiple_inject_queue_v1`                  | background      | Multiple Immunizations queue rows             |
+| `multiple_inject_queue_v1`                  | background      | Immunization tray rows                        |
 | `inventory_scan_batch_v1`                   | background      | Inventory tray rows                           |
 | `vaxlink_pending_scan_inbox_v1`             | background      | Scans held for staff review                   |
 | `vaxlink_scanner_capture_error_v1`          | background      | Capture warning awaiting acknowledgement      |
@@ -266,18 +266,30 @@ are reflected in subsequent scans.
 
 ## Chart boundary
 
-Chart delivery supports only HTTPS immunization paths containing `/recordImms/`
-on `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca`,
-and `trpanoramadhir.prod.ehealthontario.ca`. Manifest path matches stay broad
-so navigation within Panorama can initialize the integration; runtime checks
-restrict chart writes. Missing tab metadata requires a read-only response from
-an existing supported integration. It does not permit script injection.
-GS1 parsing, NVC lookup, scanner capture, queues, and inventory remain useful
-without an open chart. Staff review vaccine details before saving in Panorama.
+Chart delivery supports the two HTTPS immunization paths declared in the
+manifest on `www.panorama.prod.ehealthontario.ca`,
+`panorama.prod.ehealthontario.ca`, and
+`trpanoramadhir.prod.ehealthontario.ca`. When tab metadata is unavailable,
+an existing integration can confirm a supported chart. Refresh an
+already-open chart if the integration is missing.
+
+## Workflows
+
+VaxLink reopens the selected workflow. A saved Single or Multiple preference
+opens Immunization. Inventory captures stay in Inventory, and a chart
+notice identifies that mode. Each of the two automatic chart options can
+be switched off independently.
+
+A ready single form can receive the live scan when single-form entry is on.
+A ready Multiple grid can receive the one vaccine just saved to the
+Immunization tray when grid entry is on. If no form can take an automatic
+scan, a safe scan stays in the tray. Opening a chart never uses a previously
+saved row. Staff can add a barcode as text and choose **Use** on an exact
+saved vaccine.
 
 ## Pending scanner scans
 
-Single Immunization saves each scan before sending it once to its original
+VaxLink saves a direct single-form scan before sending it once to its original
 foreground chart. The worker checks the chart build, document context, focus,
 and workstation lock again after waits. The current worker instance and the
 original chart document identify the same delivery.
