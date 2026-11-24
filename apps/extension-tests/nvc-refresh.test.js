@@ -135,7 +135,7 @@ test('invalid data and failed writes preserve accepted catalogue, indexes, and h
     assert.equal(after.usingCache, true);
     assert.match(
       describeNVCHealth(after),
-      /Previously downloaded catalogue remains available/
+      /You can still use the previous catalogue/
     );
     const restarted = createBackgroundHarness(previous, {
       storage: Object.fromEntries(harness.storageData)

@@ -4,7 +4,7 @@ Use training records, known sample barcodes and the clinic’s designated browse
 
 ## Prepare one training run
 
-1. Extract the supplied Alpha ZIP into a dedicated folder. In the designated training profile, open `chrome://extensions`, turn on Developer mode and choose **Load unpacked**. Select the folder containing `manifest.json`. Open a fresh synthetic training chart. Keep additional VaxLink copies disabled until the two-installation check.
+1. Extract the ZIP for the release you are testing into a dedicated folder. In the designated training profile, open `chrome://extensions`, turn on Developer mode and choose **Load unpacked**. Select the folder containing `manifest.json`. Open a fresh synthetic training chart. Keep additional VaxLink copies disabled until the two-installation check.
 2. In **Settings → Debug mode**, turn on **Collect troubleshooting details**. Record the extension version, browser, scanner and cradle. Use fictional training samples for the run.
 3. Keep a short observation sheet with the test name, time, sample order, expected destination and what you saw. The log cannot establish which work Windows or the scanner missed, or whether Panorama saved a record.
 
@@ -32,7 +32,7 @@ Use training records, known sample barcodes and the clinic’s designated browse
 For the update check, record if the browser removed the old chart script. In that case, confirm that the chart received no new fields.
 
 Both installations in the conflict check must support conflict detection.
-When a production release with this change is unavailable, extract the Alpha
+When a production release that detects conflicts is unavailable, extract the Alpha
 package to two different folders and load both in the same training profile.
 Refresh the synthetic chart and verify the two-copy warning. Record the
 channels you actually tested. Disable the extra copy and check unsaved work
@@ -58,64 +58,10 @@ before refreshing again.
 
 Download the Debug mode log before turning collection off, reloading VaxLink, or restarting the browser. Those actions clear the log. If a scenario requires a reload or an installation change, download that part first. Keep the files and send them together with the workstation observations after the last check. Each installation has its own log.
 
-## Earlier package checks
-
-The combined Alpha package at `43a1c8b` contained the runtime at `144c127`. On November 22, 2026, Chromium checks used simulated ports and synthetic chart pages.
-
-- One Inventory CSV raised the screen and JSON export counts by one. A second
-  CSV requested alongside a simulated serial scan added one export and one
-  capture. The new activity JSON omitted the sample lot and barcode.
-- With Debug mode off and then on, two prompts and two choices produced two
-  of each daily count. The enabled session recorded the prompt reason and
-  answer. Turning collection off preserved both totals.
-- Two charts competed for the last dose. Dismissing the prompt before entry
-  released it to the second chart. Interrupting after Agent entry held it for
-  review and blocked reuse on the first chart.
-- Settings required a fresh reader reply for Connected. The scanner checks
-  covered a second popup during a sample test, Disconnect during a delayed
-  open, an unrelated USB removal, an unanswered status request with a cached
-  capture time, and a failed close followed by a successful retry.
-- Controlled Node tests covered a delayed count across reset, a scan saved
-  while counting was blocked, a replaced grid row, and a lock and unlock
-  before a detail transfer. The full extension suite passed all 339 tests.
-
-The original Alpha package at `99301fa` remains the training comparison build.
-
-On November 24, 2026, a workstation tester reported that scanner setup and
-Inventory worked on the Alpha reference package at `aa76ff2`. The package
-matched the build fingerprint in the troubleshooting export. The export
-showed scanner capture with Inventory selected. Check the tray itself when
-confirming Inventory saves. Panorama training was under maintenance during
-that run, so it did not provide a live chart result.
-
-## Local Alpha rewrite checks
-
-On November 24, 2026, Chromium loaded the unpacked Alpha ZIP built from
-`7910434` (runtime fingerprint starting with `64161aeb7347`). The runs
-used simulated serial ports and fictional chart pages.
-
-- Setup closed before the first regular capture. Both exits from the optional
-  test restored the previous capture setting. An unanswered reader showed the
-  last known capture. Disconnect during a delayed open stopped the reader.
-- Concurrent Inventory capture and CSV export each counted once. Turning Debug
-  off and on cleared its details and preserved the daily funding totals.
-- A direct scan stayed held until the chart verified Agent, Lot, Date and Time.
-  An exact Lot without a catalogue Agent stayed held with a visible warning and
-  no field changes.
-- An in-place Lot option refresh permitted the deferred fields. A later Time
-  repair left the verified dose count alone. Enter Details used the exact new
-  grid row and left an older tray item available.
-- Two charts competed for a final dose. Dismissing the first attempt before
-  field entry released it. Interrupting the second after Agent selection held
-  the dose for review.
-
-Physical scanner, Windows lock and sleep, browser switching, and live training
-chart acceptance still require a workstation run on this build.
-
 ## Evidence to record
 
 Record the workstation configuration, test date, sample order, expected and observed destinations, chart fields before and after, and any interruption. Keep patient information out of test records. A passing software simulation covers only the simulated case. Record a clinic hardware pass only after running the procedure on the named configuration.
 
-Use the [workstation setup sheet](../workstation-setup.md) for each new
+Use the [workstation setup sheet](workstation-setup.md) for each new
 package and workstation. Record the exact package used for each result so
 that a result from an earlier build does not carry forward to a later one.

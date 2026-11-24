@@ -3,8 +3,6 @@ import test from 'node:test';
 
 import {
   ScanQueueManager,
-  buildInventorySummary,
-  buildMultipleInjectSummary,
   buildQueueRecord
 } from '../extension/popup-inventory.js';
 
@@ -36,32 +34,6 @@ test('buildQueueRecord preserves popup inventory export fields', () => {
   assert.equal(row.drug_code, 'DIN-001');
   assert.equal(row.expiry_flag, 'valid');
   assert.equal(row.expiry_days_remaining > 0, true);
-});
-
-test('build summary helpers report counts, doses, and expiry flags', () => {
-  const rows = [
-    { remaining_doses: 2, expiry_flag: 'expired' },
-    { remaining_doses: 1, expiry_flag: 'expiring_soon' }
-  ];
-
-  assert.equal(
-    buildMultipleInjectSummary(rows),
-    '2 vaccine(s) saved for later chart fill. 3 dose(s) remaining across all vials. 1 expired, 1 expiring soon.'
-  );
-  assert.equal(
-    buildInventorySummary(rows),
-    '2 scan(s) ready for inventory export. 3 dose(s) remaining across all vials. 1 expired, 1 expiring soon.'
-  );
-});
-
-test('multiple summary identifies scans captured while the workstation was locked', () => {
-  const summary = buildMultipleInjectSummary([
-    { captured_while_locked: true },
-    { captured_while_locked: true },
-    {}
-  ]);
-  assert.match(summary, /3 vaccine\(s\) saved/);
-  assert.match(summary, /2 captured while the workstation was locked/);
 });
 
 test('saved rows offer an NVC draft only for a confirmed catalogue miss', () => {

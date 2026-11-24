@@ -11,9 +11,9 @@ Use the clinic’s designated browser and profile. Open VaxLink and choose the w
 
 With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Held scanner scans** for the next step. Check the original chart before using a scan that may have filled fields.
 
-On a single form, a scan can be pending while VaxLink waits for Panorama to
-settle. VaxLink keeps the barcode until it can verify the fields in that form.
-You still need to check and save the record in Panorama.
+On a single form, a scan may stay pending while Panorama updates. If VaxLink
+cannot confirm the fields, follow the message and check the original chart
+before trying again. Review and save the record in Panorama.
 
 The Inventory tray shows captured lots and recent scans.
 
@@ -36,7 +36,7 @@ If the unit label is hard to scan and your clinic allows a carton scan, keep the
 
 | What staff see                                            | What to check next                                                                                                                                                                                                                                                                             |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Barcode is captured, but the lot or product is incomplete | Compare the label with the decoded fields. Check the catalogue status and last successful check in Settings. An unavailable catalogue cannot confirm a missing lot.                                                                                                                            |
+| Barcode is captured, but the lot or product is incomplete | Compare the label with the decoded fields. Check for a catalogue warning in Settings. An unavailable catalogue cannot confirm a missing lot.                                                                                                                                                   |
 | A working catalogue reports the lot missing               | Check the printed lot and product. If correct, review the catalogue email draft and its recipients before sending.                                                                                                                                                                             |
 | The catalogue finds the lot, but Panorama does not        | Check Agent, formulation and funding. Training can have a limited lot list. For a production miss, contact the local Panorama Resolution Coordinator. In Multiple Immunizations, staff may need to delete the unfinished entry to complete the other entries. Check which entry is open first. |
 | Only some chart fields filled                             | Read the message, check the original chart and complete the missing fields under local procedure. Confirm the correct client, product, lot, funding, administration details and consent before saving.                                                                                         |
@@ -80,6 +80,6 @@ For support, start with the software version, scanner model, training or product
 
 Choose **Disconnect** before moving the USB plug. Wait for the reader to stop. Moving a cable, hub or dock breaks its open connection. After reconnecting, check Settings. The browser may ask you to choose the scanner again.
 
-Open **Scanner setup**, choose **Connect scanner**, then select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
+In **Settings → Scanner**, choose **Setup**, then **Connect scanner** and select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
 
 Use **Forget** when retiring the device. Keep it plugged in so VaxLink can remove the browser permission. If it is already gone, follow the permission instructions in Settings.

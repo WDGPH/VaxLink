@@ -26,7 +26,7 @@ VaxLink uses the staff member’s existing Panorama session. The browser allows 
 
 A vaccine lot alone usually tells you little about a person. A rare product, scan time and workstation label together may identify a client or staff member when compared with appointments or shift records. A patient label scanned by mistake could identify someone directly.
 
-The branch grants chart access on three Ontario hosts: `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca` and `trpanoramadhir.prod.ehealthontario.ca`. Each grant covers immunization-entry pages under `/phsdsm/ImmsWeb/pages/recordImms/` or `/ImmsWeb/pages/recordImms/`. Check your deployment’s address when assessing applicability.
+This version requests chart access on three Ontario hosts: `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca` and `trpanoramadhir.prod.ehealthontario.ca`. Each grant covers immunization-entry pages under `/phsdsm/ImmsWeb/pages/recordImms/` or `/ImmsWeb/pages/recordImms/`. Check your deployment’s address when assessing applicability.
 
 ## How much chart entry can be automated?
 
@@ -43,7 +43,7 @@ These eight switches are under **Settings → Autofill**. All start on in a fres
 | Set Reason for Immunization to "Routine"               | Fills an empty reason where Routine is available. Turn off when the clinician should choose the reason for each entry.                                                                                          |
 | Set Consent for Service to "Consent obtained"          | Can fill the consent field. The clinician still establishes and documents actual consent. Turn off when the clinician must make that entry personally.                                                          |
 
-**Other controls.** The selected Immunization or Inventory workflow determines where scans go. **Scanner setup** lets staff connect a device or test a saved scanner. Test samples stay out of charts and trays. **Reconnect** resumes capture, **Disconnect** stops it, and **Forget scanner** clears the saved selection. A disconnected device may still need its browser permission removed. **Acknowledge scanner warning** dismisses the warning after staff account for the scan. Under **National Vaccine Catalogue**, **Recheck** checks the public reference source and shows its status, version and last successful check. The **Debug mode** setting is described below.
+**Other controls.** The selected Immunization or Inventory workflow determines where scans go. Under **Scanner**, **Setup** lets staff connect a device or test a saved scanner. Test samples stay out of charts and trays. **Reconnect** resumes capture, **Disconnect** stops it, and **Forget** clears the saved selection. A disconnected device may still need its browser permission removed. **Acknowledge** dismisses the warning after staff account for the scan. Under **National Vaccine Catalogue**, **Recheck** checks the public catalogue. Settings shows the catalogue version and release date, plus a warning if the check fails. The **Debug mode** setting is described below.
 
 ## What stays on the workstation?
 
@@ -59,11 +59,11 @@ Local records are kept in the browser profile. VaxLink adds no encryption of its
 
 ## Activity, telemetry and troubleshooting
 
-**Local Activity** collects daily counts in both channels. There is no staff switch to turn those counts off and no automatic upload to the project team. **Reset Activity** clears the stored counts and starts a new device identifier. Collection continues. An earlier download keeps the old identifier and counts.
+**Local Activity** collects daily counts in both channels. There is no staff switch to turn those counts off and no automatic upload to the project team. **Reset** clears the stored counts and starts a new device identifier. Collection continues. An earlier download keeps the old identifier and counts.
 
 ### What staff see in Local Activity
 
-The popup compares **Today** and **All time** on this installation. **Days tracked** counts days with recorded activity.
+The popup compares **Today** and **All time** on this installation.
 
 | Group             | What the numbers mean                                                                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -72,9 +72,9 @@ The popup compares **Today** and **All time** on this installation. **Days track
 | Funding           | Counts prompts shown, choices made and searches with no match. The percentages for one or both categories use only searches that found a matching category.              |
 | Trays and exports | Counts additions to the Immunization tray and Inventory exports. An export can contain several rows.                                                                     |
 
-### What Export Activity adds
+### What the activity export includes
 
-The downloaded JSON file contains all retained days and combined totals. Its date range is independent of which column staff were reading. A generated device ID, any saved workstation label, the number of days, and first-use, last-event and export times can connect several exports to one station.
+The downloaded JSON file contains all retained days, the number of days with activity and combined totals. Its date range is independent of which column staff were reading. A generated device ID, any saved workstation label and first-use, last-event and export times can connect several exports to one station.
 
 | Daily output            | Details in the file                                                                                                                                                                                                                      |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

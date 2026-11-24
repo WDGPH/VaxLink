@@ -81,6 +81,10 @@
         color: var(--ink);
       }
 
+      .brand-accent {
+        color: var(--accent);
+      }
+
       #extensionVersion {
         display: block;
         margin-top: 2px;
@@ -181,13 +185,12 @@
       }
 
       textarea {
+        display: block;
         width: 100%;
-        min-height: 88px;
         border: 1px solid var(--line);
         border-radius: 14px;
-        padding: 10px 11px;
+        padding: 7px 11px;
         resize: vertical;
-        font-family: inherit;
         font-size: 12px;
         line-height: 1.45;
         color: var(--ink);
@@ -325,6 +328,10 @@
         border-radius: 8px;
         color: var(--ink);
         font-size: 12px;
+      }
+
+      #nvcCatalogueDetails {
+        overflow-wrap: anywhere;
       }
 
       #nvcStatus {
@@ -677,10 +684,6 @@
         margin-top: 12px;
       }
 
-      .queue-entry textarea {
-        min-height: 62px;
-      }
-
       .queue-entry-actions {
         display: flex;
         justify-content: flex-end;
@@ -760,22 +763,18 @@
         font-size: 12px;
       }
 
-      #scannerSettingsSection .settings-overview {
-        display: grid;
-        gap: 8px;
-      }
-
-      #scannerSettingsSection
-        .settings-overview:has(#connectionStatus[hidden]) {
-        grid-template-columns: 1fr auto;
+      #scannerSettingsSection .settings-overview,
+      #nvcSettingsSection .settings-overview {
         align-items: center;
       }
 
+      #connectionStatus,
       #scannerActionNotice {
         margin: 6px 0 0;
         color: var(--subtle);
         font-size: 11px;
         line-height: 16px;
+        overflow-wrap: anywhere;
       }
 
       #scannerActionNotice.error {
@@ -835,7 +834,7 @@
       }
 
       .analytics-summary {
-        margin-bottom: 14px;
+        margin-bottom: 10px;
       }
       .activity-table {
         width: 100%;
@@ -845,7 +844,7 @@
       }
       .activity-table th,
       .activity-table td {
-        padding: 4px 6px;
+        padding: 2px 6px;
         text-align: right;
       }
 
@@ -854,9 +853,6 @@
         white-space: nowrap;
       }
 
-      .activity-table thead {
-        border-bottom: 1px solid var(--tray-line);
-      }
       .activity-table th:first-child {
         padding-left: 0;
         text-align: left;
@@ -865,24 +861,17 @@
       .activity-table td:last-child {
         padding-right: 0;
       }
-      .activity-table tbody th,
-      .activity-table tfoot th {
+      .activity-table tbody th {
         font-weight: 400;
         color: var(--subtle);
       }
       .activity-table .activity-group th {
-        padding: 10px 0 4px;
+        padding: 6px 0 2px;
         color: var(--tray-accent);
         font-size: 12px;
         font-weight: 700;
       }
-      .activity-table tfoot th,
-      .activity-table tfoot td {
-        padding-top: 10px;
-        border-top: 1px solid var(--tray-line);
-      }
-      .activity-table tbody tr:not(.activity-group):hover,
-      .activity-table tfoot tr:hover {
+      .activity-table tbody tr:not(.activity-group):hover {
         background: #f1f8fa;
       }
       .activity-actions {
@@ -1067,7 +1056,9 @@
                 alt="VaxLink logo"
               />
               <div>
-                <h2 class="title" id="extensionName">VaxLink</h2>
+                <h2 class="title" id="extensionName">
+                  Vax<span class="brand-accent">Link</span>
+                </h2>
                 <small id="extensionVersion"></small>
               </div>
             </div>
@@ -1132,16 +1123,14 @@
               aria-labelledby="scannerSettingsTitle"
             >
               <div class="settings-overview">
-                <div class="settings-summary">
-                  <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
-                  <div id="connectionStatus" role="status">
-                    Checking scanner connection…
-                  </div>
-                  <p id="scannerIdentity" hidden></p>
-                </div>
+                <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
                 <div class="settings-controls">
-                  <button id="requestPortBtn" type="button">
-                    Scanner setup
+                  <button
+                    id="requestPortBtn"
+                    type="button"
+                    aria-label="Setup scanner"
+                  >
+                    Setup
                   </button>
                   <button id="connectGrantedBtn" type="button" hidden>
                     Reconnect
@@ -1149,19 +1138,32 @@
                   <button id="disconnectBtn" type="button" hidden disabled>
                     Disconnect
                   </button>
-                  <button id="forgetScannerBtn" type="button" hidden disabled>
-                    Forget scanner
+                  <button
+                    id="forgetScannerBtn"
+                    type="button"
+                    aria-label="Forget scanner"
+                    hidden
+                    disabled
+                  >
+                    Forget
                   </button>
                 </div>
               </div>
+              <p id="connectionStatus" role="status">
+                Checking scanner connection…
+              </p>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
                   A scan could not be saved or delivered. Check pending scans
                   and the chart before rescanning.
                 </p>
                 <div class="actions">
-                  <button id="acknowledgeScannerErrorBtn" type="button">
-                    Acknowledge scanner warning
+                  <button
+                    id="acknowledgeScannerErrorBtn"
+                    type="button"
+                    aria-label="Acknowledge scanner warning"
+                  >
+                    Acknowledge
                   </button>
                 </div>
               </div>
@@ -1255,16 +1257,12 @@
               aria-labelledby="nvcSettingsTitle"
             >
               <div class="settings-overview">
-                <div class="settings-summary">
-                  <h3 id="nvcSettingsTitle">National Vaccine Catalogue</h3>
-                  <div id="nvcSettingsState" role="status">Checking</div>
-                  <p id="nvcSettingsVersion">Version unavailable</p>
-                  <p id="nvcLastCheck"></p>
-                </div>
+                <h3 id="nvcSettingsTitle">National Vaccine Catalogue</h3>
                 <div class="settings-controls">
                   <button id="refreshNvcBtn" type="button">Recheck</button>
                 </div>
               </div>
+              <p id="nvcCatalogueDetails" class="settings-hint" hidden></p>
               <div
                 id="nvcStatus"
                 class="settings-hint"
@@ -1279,11 +1277,19 @@
               Loading activity...
             </div>
             <div class="activity-actions">
-              <button id="exportAllAnalyticsBtn" type="button">
-                Export Activity
+              <button
+                id="exportAllAnalyticsBtn"
+                type="button"
+                aria-label="Export activity"
+              >
+                Export
               </button>
-              <button id="resetAnalyticsBtn" type="button">
-                Reset Activity
+              <button
+                id="resetAnalyticsBtn"
+                type="button"
+                aria-label="Reset activity"
+              >
+                Reset
               </button>
             </div>
           </div>
@@ -1294,8 +1300,12 @@
               <p id="unlockInterruption" hidden>
                 Scanner connection was interrupted. Check for missing scans.
               </p>
-              <button id="dismissUnlockReview" type="button">
-                Dismiss summary
+              <button
+                id="dismissUnlockReview"
+                type="button"
+                aria-label="Dismiss lock summary"
+              >
+                Dismiss
               </button>
             </section>
             <div
@@ -1396,14 +1406,20 @@
                   <label for="queueBarcodeInput">Barcode</label>
                   <textarea
                     id="queueBarcodeInput"
-                    rows="2"
+                    rows="1"
                     placeholder="Paste barcode text here..."
                   ></textarea>
                   <div class="queue-entry-actions">
                     <button id="cancelQueueEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addQueueBtn" type="button">Add to Tray</button>
+                    <button
+                      id="addQueueBtn"
+                      type="button"
+                      aria-label="Add to Immunization tray"
+                    >
+                      Add
+                    </button>
                   </div>
                 </div>
                 <div id="multipleQueueList" class="inventory-list"></div>
@@ -1465,14 +1481,20 @@
                   <label for="inventoryBarcodeInput">Barcode</label>
                   <textarea
                     id="inventoryBarcodeInput"
-                    rows="2"
+                    rows="1"
                     placeholder="Paste one barcode per line..."
                   ></textarea>
                   <div class="queue-entry-actions">
                     <button id="cancelInventoryEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addBatchBtn" type="button">Add to Tray</button>
+                    <button
+                      id="addBatchBtn"
+                      type="button"
+                      aria-label="Add to Inventory tray"
+                    >
+                      Add
+                    </button>
                   </div>
                 </div>
                 <div id="inventoryList" class="inventory-list"></div>

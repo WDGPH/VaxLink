@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('scanner errors stay visible and command acknowledgements cannot claim live connection', async () => {
+test('scanner errors stay visible and command acknowledgements cannot claim live connection', async (t) => {
   const profileId = 'zebra-ds8178-usb-cdc';
   const port = { getInfo: () => ({ usbVendorId: 1504, usbProductId: 1 }) };
   const nodes = Object.fromEntries(
@@ -9,8 +9,9 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       'requestPortBtn',
       'connectGrantedBtn',
       'disconnectBtn',
+      'forgetScannerBtn',
       'connectionStatus',
-      'scannerIdentity'
+      'scannerActionNotice'
     ].map((id) => [
       id,
       {
@@ -109,7 +110,7 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     await Promise.resolve();
     assert.match(
       nodes.connectionStatus.textContent,
-      /^Connection unknown: Last known capture/
+      /^Connection unknown · Last known capture/
     );
     assert.equal(nodes.connectGrantedBtn.hidden, false);
     await live('error');
@@ -137,20 +138,16 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     assert.equal(nodes.connectionStatus.textContent, 'Connected');
     for (const [info, label] of [
       [null, ''],
-      [{ usbVendorId: 0x05e0 }, 'Scanner Zebra'],
-      [
-        { usbVendorId: 0x05e0, usbProductId: 0x0001 },
-        'Scanner Zebra [USB 05E0:0001]'
-      ],
-      [
-        { usbVendorId: 0x12ab, usbProductId: 0x00bc },
-        'Scanner [USB 12AB:00BC]'
-      ],
+      [{ usbVendorId: 0x05e0 }, 'Zebra'],
+      [{ usbVendorId: 0x05e0, usbProductId: 0x0001 }, 'Zebra [USB 05E0:0001]'],
+      [{ usbVendorId: 0x12ab, usbProductId: 0x00bc }, '[USB 12AB:00BC]'],
       [{ usbVendorId: 0x10000, usbProductId: -1 }, '']
     ]) {
       await live('connected', info);
-      assert.equal(nodes.scannerIdentity.textContent, label);
-      assert.equal(nodes.scannerIdentity.hidden, !label);
+      assert.equal(
+        nodes.connectionStatus.textContent,
+        label ? `Connected · ${label}` : 'Connected'
+      );
     }
 
     holdNextStatus = true;
@@ -158,10 +155,42 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     await live('connected', { usbVendorId: 0x05e0, usbProductId: 1 });
     releaseStatus();
     await Promise.resolve();
-    assert.equal(nodes.connectionStatus.textContent, 'Connected');
     assert.equal(
-      nodes.scannerIdentity.textContent,
-      'Scanner Zebra [USB 05E0:0001]'
+      nodes.connectionStatus.textContent,
+      'Connected · Zebra [USB 05E0:0001]'
+    );
+
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const forget = nodes.forgetScannerBtn.listeners.click();
+    reader = { status: { state: 'never_configured' }, source: 'live' };
+    releaseCommand({ success: true, permissionRemoved: true });
+    await forget;
+    assert.equal(nodes.scannerActionNotice.hidden, false);
+    assert.equal(
+      nodes.scannerActionNotice.textContent,
+      'Scanner forgotten. Browser permission removed.'
+    );
+    t.mock.timers.tick(8000);
+    assert.equal(nodes.scannerActionNotice.hidden, true);
+
+    const permissionRemains = nodes.forgetScannerBtn.listeners.click();
+    releaseCommand({ success: true, permissionRemoved: false });
+    await permissionRemains;
+    t.mock.timers.tick(8000);
+    assert.equal(nodes.scannerActionNotice.hidden, false);
+    assert.match(
+      nodes.scannerActionNotice.textContent,
+      /browser’s site settings/
+    );
+
+    const failed = nodes.forgetScannerBtn.listeners.click();
+    releaseCommand({ success: false, error: 'Could not clear scanner' });
+    await failed;
+    t.mock.timers.tick(8000);
+    assert.equal(nodes.scannerActionNotice.hidden, false);
+    assert.equal(
+      nodes.scannerActionNotice.textContent,
+      'Could not clear scanner'
     );
   } finally {
     delete globalThis.document;

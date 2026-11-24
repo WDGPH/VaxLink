@@ -2,9 +2,7 @@
 
 ## Current release process
 
-Production releases run from `main`. v1.1.5 was released directly from `main`
-using release-please. Prerelease development now uses `alpha`, created from the
-same v1.1.5 commit; the former `dev` branch is not used.
+Production releases run from `main`. Alpha prereleases run from `alpha`.
 
 1. Merge changes with conventional commit subjects into `main`.
 2. Release-please creates or updates a release PR containing the version changes
@@ -24,17 +22,17 @@ higher than the one already uploaded to that listing.
 
 ## Channels
 
-| Channel    | Status                       | Web Store listing | Packaged manifest name | Popup badge |
-| ---------- | ---------------------------- | ----------------- | ---------------------- | ----------- |
-| Production | Active, releases from `main` | VaxLink           | `VaxLink`              | hidden      |
-| Alpha      | Prereleases from `alpha`     | VaxLink Alpha     | `VaxLink Alpha`        | shown       |
+| Channel    | Status                       | Web Store listing | Packaged manifest name |
+| ---------- | ---------------------------- | ----------------- | ---------------------- |
+| Production | Active, releases from `main` | VaxLink           | `VaxLink`              |
+| Alpha      | Prereleases from `alpha`     | VaxLink Alpha     | `VaxLink Alpha`        |
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
 branch differences; runtime channel behaviour uses that packaged identity. Debug starts on in
 packaged Alpha and off in production and unpacked development unless a saved
 preference overrides it. Use the exact package being evaluated for the
-[workstation acceptance checks](fixes/browser-only-locked-scanner-poc.md).
+[workstation acceptance checks](scanner-acceptance.md).
 
 ### Alpha releases
 
@@ -45,17 +43,13 @@ preference overrides it. Use the exact package being evaluated for the
 3. An authorized publisher verifies the ZIP and uploads it to the separate
    VaxLink Alpha listing for review. Store publication remains manual.
 
-The first 2.0 candidate uses the commit footer `Release-As: 2.0.0-rc1`.
-If you squash the feature PR, keep that footer in the squash commit body.
-Check that the release PR proposes `2.0.0-rc1` before merging it.
-GitHub marks `v2.0.0-rc1` as a prerelease. Further changes to the 2.0.0
-candidate go into the next release PR for `2.0.0-rc2`, then `2.0.0-rc3`.
-Several feature PRs can go into one candidate.
-
-For `v2.0.0-rc1`, upload `vaxlink-alpha-2.0.0-rc1.zip` to VaxLink Alpha.
-Its manifest displays `2.0.0-rc1` and uses `2.0.0.1` for Chrome updates.
-RC2 uses `2.0.0.2`. Each numeric version must exceed the previous upload
-to that listing. Production uses a separate listing and a three-part version.
+Check the proposed candidate number in the release PR before merging. Several
+feature PRs can go into one candidate. The Alpha ZIP name and displayed
+version use the candidate number, such as `vaxlink-alpha-2.0.0-rc1.zip` and
+`2.0.0-rc1`. Chrome uses the candidate number as the fourth numeric part.
+RC1 uses `2.0.0.1` and RC2 uses `2.0.0.2`. The numeric version must exceed the
+previous upload to the Alpha listing. Production has a separate listing and
+uses a three-part version.
 
 Promote reviewed changes through a separate promotion PR based on current `main`.
 Preserve the feature and fix commits so release-please can classify them; do not
@@ -101,7 +95,7 @@ The external pilot FAQ should distinguish these paths: automatic updates apply t
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) with two VaxLink-specific additions:
 
-1. **"Clinic feedback addressed" table** — for any release containing fixes driven by pilot feedback, add a table row per feedback item: the nurse's words (short paraphrase or quote), what changed, and the issue refs. This is the artifact to send back to the nursing team — it closes the loop and shows their feedback lands.
+1. **"Clinic feedback addressed" table** — for any release containing fixes driven by pilot feedback, add a table row per feedback item: the nurse's words (short paraphrase or quote), what changed, and the issue refs. Share the table with the nursing team so they can see which changes shipped.
 2. **Contributors line** per release. Generate code contributors with:
    ```bash
    git shortlog -sn <prev-version-commit>..<this-version-commit>
@@ -116,8 +110,6 @@ Review the generated changelog in the release PR on its target branch (`main` or
 2. Fix commits reference the issue (`(#25)` in the subject or body).
 3. The changelog's feedback table links the quote to the issue and the release that shipped the fix.
 4. After release, comment on each addressed issue with the version that shipped the fix; close it once the clinic confirms.
-
-This gives both directions: from a nurse's complaint to the exact commit, and from any commit back to why it exists.
 
 ## Commit conventions
 
@@ -143,9 +135,9 @@ Examples:
 ### Sanity checks before any store upload
 
 - Open the zip and confirm `manifest.json` has the right `name`/`version_name` for the listing.
-- Load the extracted zip unpacked and open the popup: badge present on alpha, absent on prod.
+- Load the extracted ZIP unpacked and confirm the extension name in Chrome and the version in the popup.
 - No downloaded `nvc_bundle.json`, tests, fixtures, `node_modules`, or development-only files inside the ZIP (the package script excludes them). Verify the checksum against the final ZIP before uploading.
 
 ## Repository security settings
 
-Repository administrators should verify Dependabot vulnerability alerts and security updates, CodeQL default setup, and secret scanning with push protection where available. Their enabled status has not been verified as part of this PR. `.github/dependabot.yml` groups weekly GitHub Actions and documentation tooling version updates. This configuration does not enable repository security controls. These GitHub settings are separate from this repository's files and must be checked in the repository settings page.
+Repository administrators should verify Dependabot vulnerability alerts and security updates, CodeQL default setup, and secret scanning with push protection where available. `.github/dependabot.yml` groups weekly GitHub Actions and documentation tooling version updates. This configuration does not enable repository security controls. These GitHub settings are separate from this repository's files and must be checked in the repository settings page.

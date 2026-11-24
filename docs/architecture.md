@@ -112,7 +112,7 @@ capture with the saved device. **Disconnect** stops capture and keeps the
 selection. **Forget** clears the selection after a confirmed stop and removes
 the browser's grant if it can identify exactly one matching port.
 
-**Scanner setup** opens a temporary standard browser window
+Under **Scanner**, **Setup** opens a temporary standard browser window
 (`scanner-pairing.html` and `scanner-pairing.js`). Chromium needs its extensions
 toolbar to display the device chooser. Opening setup again brings the same
 setup page forward while it is still open. Staff click **Connect scanner** and choose a
@@ -121,15 +121,15 @@ replacing a scanner, the background waits for the existing port to close before
 saving the new device and starting capture. The setup window closes after the
 hidden reader accepts the request. Settings confirms when it is connected.
 
-After connecting a device, reopen Scanner setup and choose **Test saved
+After connecting a device, reopen setup and choose **Test saved
 scanner**. The reader pauses regular capture and checks for a sample barcode.
 It only reports whether a sample arrived. Sample scans stay out of charts and
 trays. **Finish test** and closing the window both restore the previous capture
 setting, even if no sample arrived. If capture was off, the scanner stays
 disconnected.
 
-National Vaccine Catalogue shows its version, publication date, and last checked
-date, with a Refresh button. Loading and refresh errors stay visible.
+National Vaccine Catalogue shows its version and release date. **Recheck**
+checks for updates. Loading and check errors appear in the same card.
 
 Autofill has four separate switches: administration date, administration time,
 Reason for Immunization, and Consent for Service. Each field inherits its old

@@ -3,8 +3,6 @@ import './shared/vaccine-label.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
-  buildInventorySummary,
-  buildMultipleInjectSummary,
   buildQueueRecord,
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
@@ -37,6 +35,7 @@ let inventoryModeBtn;
 let multipleModeSection;
 let inventoryModeSection;
 let nvcStatusDiv;
+let nvcStatusTimer;
 let refreshRecentActivity;
 let outputDiv;
 let analyticsSummaryDiv;
@@ -100,8 +99,6 @@ const AUTO_RESOLVE_FUNDING_KEY = 'vaxlink_auto_resolve_funding_v1';
 document.addEventListener('DOMContentLoaded', async () => {
   const version = document.getElementById('extensionVersion');
   const manifest = chrome.runtime.getManifest();
-  const name = document.getElementById('extensionName');
-  if (name) name.textContent = manifest.name;
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
 
@@ -156,8 +153,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showUseAction: true,
     useButtonLabel: 'Use',
     emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
-    emptyMessage: '',
-    summaryBuilder: buildMultipleInjectSummary
+    emptyMessage: ''
   });
 
   inventoryManager = new ScanQueueManager({
@@ -171,7 +167,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
     emptyMessage: '',
-    summaryBuilder: buildInventorySummary,
     exportFilenamePrefix: 'vaxlink-inventory'
   });
 
@@ -348,27 +343,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (refreshNvcBtn) {
     refreshNvcBtn.addEventListener('click', () => {
-      refreshNvcBtn.disabled = true;
-      writeOutput('Refreshing NVC catalogue...', 'info');
-      if (nvcStatusDiv) {
-        nvcStatusDiv.hidden = false;
-        nvcStatusDiv.textContent = 'NVC is refreshing.';
-      }
-
+      clearTimeout(nvcStatusTimer);
+      setButtonBusy(refreshNvcBtn, true, 'Checking…');
       chrome.runtime.sendMessage({ action: 'refreshNVCBundle' }, (response) => {
-        refreshNvcBtn.disabled = false;
-        loadNVCStatus();
-        if (chrome.runtime.lastError) {
-          writeOutput(
-            `NVC refresh failed: ${chrome.runtime.lastError.message}`,
-            'error'
-          );
-          return;
-        }
-
-        writeOutput(
-          formatNVCRefreshMessage(response),
-          response?.success ? 'success' : 'error'
+        setButtonBusy(refreshNvcBtn, false);
+        const failed = chrome.runtime.lastError;
+        loadNVCStatus(
+          failed
+            ? 'Could not recheck the catalogue. Try again.'
+            : formatNVCRefreshMessage(response),
+          !failed && response?.success === true
         );
       });
     });
@@ -969,7 +953,7 @@ async function loadAnalyticsSummary() {
 
 function renderAnalyticsSummary(summary) {
   if (!summary || !analyticsSummaryDiv) return;
-  const metrics = (day, daysTracked) => {
+  const metrics = (day) => {
     const scannerCaptures = ['single', 'multiple', 'inventory'].reduce(
       (total, workflow) => total + (day.workflows?.[workflow]?.liveScans || 0),
       0
@@ -996,15 +980,13 @@ function renderAnalyticsSummary(summary) {
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
-      'Tray to chart': day.queues?.multipleUsed || 0,
-      'Days tracked': daysTracked
+      'Tray to chart': day.queues?.multipleUsed || 0
     };
   };
-  const today = summary.today || {};
-  const todayMetrics = metrics(today, Object.keys(today).length ? 1 : 0);
-  const allMetrics = metrics(summary.rollup || {}, summary.daysTracked);
+  const todayMetrics = metrics(summary.today || {});
+  const allMetrics = metrics(summary.rollup || {});
   const renderRow = (label) => `
-    <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
+    <tr><th scope="row">${escapeHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
   `;
   const groups = [
     [
@@ -1030,14 +1012,13 @@ function renderAnalyticsSummary(summary) {
       ${groups
         .map(
           ([title, labels]) => `
-        <tbody aria-label="${escapeAnalyticsHtml(title)}">
-          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>
+        <tbody aria-label="${escapeHtml(title)}">
+          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeHtml(title)}</th></tr>
           ${labels.map(renderRow).join('')}
         </tbody>
       `
         )
         .join('')}
-      <tfoot>${renderRow('Days tracked')}</tfoot>
     </table>
   `;
 }
@@ -1046,15 +1027,6 @@ function formatAnalyticsNumber(value) {
   if (typeof value === 'string') return value;
   const num = Number(value) || 0;
   return num.toLocaleString();
-}
-
-function escapeAnalyticsHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function downloadTextFile(filename, text, mimeType) {
@@ -1244,7 +1216,7 @@ function parseImmunizationInput(raw, workflow, source) {
   return null;
 }
 
-function loadNVCStatus() {
+function loadNVCStatus(message, confirmed = false) {
   chrome.runtime.sendMessage({ action: 'getNVCUpdateStatus' }, (status) => {
     if (chrome.runtime.lastError || !status) {
       if (nvcStatusDiv) {
@@ -1254,8 +1226,10 @@ function loadNVCStatus() {
       }
       return;
     }
-    renderNVCStatus(status, nvcStatusDiv);
-    if (status?.state === 'refreshing') setTimeout(loadNVCStatus, 1000);
+    renderNVCStatus(status, nvcStatusDiv, message);
+    clearTimeout(nvcStatusTimer);
+    if (status.state === 'refreshing' || confirmed)
+      nvcStatusTimer = setTimeout(loadNVCStatus, confirmed ? 6000 : 1000);
   });
 }
 

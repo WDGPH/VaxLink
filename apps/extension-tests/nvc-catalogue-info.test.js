@@ -8,8 +8,7 @@ import {
 } from './helpers/clinic-sim.js';
 import {
   formatNVCRefreshMessage,
-  renderNVCStatus,
-  getNVCStatusLabel
+  renderNVCStatus
 } from '../extension/popup-ui.js';
 
 const officialUrl = 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC';
@@ -96,25 +95,18 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   assert.equal(restored.releaseDate, '2026-11-05');
   assert.equal(restored.lotCount, 2);
   assert.notEqual(restored.updatedAt, restored.releaseDate);
-  const version = {};
-  const check = {};
-  const statusNodes = { nvcSettingsVersion: version, nvcLastCheck: check };
+  const details = {};
   const container = {
     ownerDocument: {
-      getElementById: (id) => statusNodes[id] || null
+      getElementById: (id) => (id === 'nvcCatalogueDetails' ? details : null)
     }
   };
   renderNVCStatus(restored, container);
   assert.equal(
-    version.textContent,
-    'Version <img src=x onerror=alert(1)> · November 5, 2026'
+    details.textContent,
+    'Version <img src=x onerror=alert(1)> · Nov 5, 2026'
   );
-  assert.equal(
-    check.textContent,
-    `Last successful check ${new Date(restored.lastCheckAt).toLocaleString()}`
-  );
-  renderNVCStatus({ ...restored, lastCheckAt: null }, container);
-  assert.equal(check.textContent, 'No successful check recorded');
+  assert.equal(details.hidden, false);
   assert.equal(container.textContent, '');
   assert.equal(container.hidden, true);
   const missing = await status(
@@ -123,31 +115,8 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   assert.equal(missing.releaseDate, null);
   assert.equal(missing.releaseVersion, null);
   renderNVCStatus(missing, container);
-  assert.equal(version.textContent, 'Version unavailable');
-});
-
-test('compact catalogue status distinguishes a usable cache from a recent successful check', () => {
-  const now = Date.parse('2026-11-10T12:00:00Z');
-  for (const [status, label] of [
-    [{ usable: false }, 'Unavailable'],
-    [{ usable: false, state: 'refreshing' }, 'Checking'],
-    [{ usable: true }, 'Ready · check due'],
-    [{ usable: true, state: 'refreshing' }, 'Ready · checking'],
-    [
-      { usable: true, lastCheckAt: '2026-11-09T11:00:00Z' },
-      'Ready · check due'
-    ],
-    [{ usable: true, lastCheckAt: '2026-11-10T11:00:00Z' }, 'Up to date'],
-    [
-      {
-        usable: true,
-        lastCheckAt: '2026-11-10T11:00:00Z',
-        freshnessDegraded: true
-      },
-      'Ready · check failed'
-    ]
-  ])
-    assert.equal(getNVCStatusLabel(status, now), label);
+  assert.equal(details.hidden, true);
+  assert.equal(container.hidden, true);
 });
 
 test('popup lookups follow accepted updates and failed refreshes keep accepted metadata', async () => {
@@ -173,7 +142,7 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   const failed = await refresh(bg);
   assert.equal(
     formatNVCRefreshMessage(failed),
-    'Unable to refresh NVC. Previously downloaded catalogue remains available.'
+    'Could not check for updates. You can still use the previous catalogue.'
   );
   const after = await status(bg);
   for (const key of [
@@ -189,12 +158,12 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   renderNVCStatus(after, container);
   assert.match(
     container.textContent,
-    /Previously downloaded catalogue remains available/
+    /You can still use the previous catalogue/
   );
   assert.equal(container.hidden, false);
   assert.equal(
     formatNVCRefreshMessage({ success: false, usable: false }),
-    'Unable to refresh NVC. No usable catalogue is available.'
+    'Could not check for updates. The catalogue is unavailable.'
   );
   const statusArea = { textContent: 'NVC is loading.' };
   const loadStatus = vm.runInNewContext(

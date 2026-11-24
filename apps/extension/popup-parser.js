@@ -4,10 +4,6 @@ import './shared/expiry-date.js';
 const GS1Parser = globalThis.VaxLinkGS1Parser;
 
 export const parseGS1Barcode = GS1Parser.parseGS1Barcode;
-export const findNextAI = GS1Parser.findNextAI;
-export const isLikelyAIStart = GS1Parser.isLikelyAIStart;
-export const canParseTailNoGS = GS1Parser.canParseTailNoGS;
-export const findNextAINoGS = GS1Parser.findNextAINoGS;
 export const formatDate = GS1Parser.formatDate;
 
 export function parseInputData(rawInput) {

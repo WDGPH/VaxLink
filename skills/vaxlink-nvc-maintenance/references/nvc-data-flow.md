@@ -12,6 +12,10 @@
 - Keep barcode parsing separate from bundle enrichment.
 - Use lot lookup to enrich `trade_name`, `manufacturer`, and expiry metadata.
 - Preserve barcode expiry if it is present on the scan.
+- Keep the product code and lot available when deciding the formulation. Labels
+  can omit the formulation, and the same strength can mean different things
+  across brands. Check pediatric, adult and dialysis cases against the catalogue
+  when changing classification rules.
 
 ## Inventory expectations
 

@@ -8,13 +8,10 @@ and fills supported Panorama forms.
 First test VaxLink in the Panorama training environment using synthetic training
 records.
 
-The training hostname is allowed explicitly, alongside
-the two existing production Panorama hosts. No wildcard permission
-for other eHealth Ontario sites or new extension API permissions is added.
+The manifest lists the training site and the two production Panorama hosts explicitly.
 
-Scanner routing, hands-free workflows, and the Panorama HUD still require an
-immunization page with `/recordImms/` in its path. Runtime page detection requires
-HTTPS, matching the manifest. Reload an already-open training page after
+VaxLink needs an HTTPS page with `/recordImms/` in its path to route scans
+to Panorama, fill fields or show the tray on the chart. Reload an already-open training page after
 installing or updating the extension.
 
 Check **Immunization** on single provider-recorded and non-provider-recorded forms and on the multiple

@@ -103,7 +103,6 @@ export class ScanQueueManager {
     useButtonLabel = 'Use for Chart',
     emptySummary = 'No saved scans yet.',
     emptyMessage = 'No saved scans yet.',
-    summaryBuilder = defaultSummaryBuilder,
     exportFilenamePrefix = 'vaxlink-queue'
   }) {
     this.storageKey = storageKey;
@@ -119,10 +118,6 @@ export class ScanQueueManager {
     this.useButtonLabel = useButtonLabel;
     this.emptySummary = emptySummary;
     this.emptyMessage = emptyMessage;
-    this.summaryBuilder =
-      typeof summaryBuilder === 'function'
-        ? summaryBuilder
-        : defaultSummaryBuilder;
     this.exportFilenamePrefix = exportFilenamePrefix;
     this.rows = [];
     this.selectedIds = new Set();
@@ -247,11 +242,6 @@ export class ScanQueueManager {
     return this.rows.find((row) => row && row.id === id) || null;
   }
 
-  setActiveUse(id) {
-    this.activeUseId = id || '';
-    this.render();
-  }
-
   exportCsv() {
     if (!this.rows.length) {
       return null;
@@ -309,7 +299,6 @@ export class ScanQueueManager {
     }
 
     this.summaryEl.hidden = true;
-    this.summaryEl.textContent = this.summaryBuilder(this.rows);
 
     const headings = `<div class="inventory-list-heading" aria-hidden="true"><span>Vaccine</span><span>Qty</span></div>`;
     this.listEl.innerHTML =
@@ -477,56 +466,6 @@ export function buildQueueRecord(data, rawBarcode, { chartDose = false } = {}) {
   );
 }
 
-export function buildMultipleInjectSummary(rows) {
-  const count = rows.length;
-  const lockedCount = rows.filter(
-    (row) => row.captured_while_locked === true
-  ).length;
-  const expiredCount = rows.filter(
-    (row) => row.expiry_flag === 'expired'
-  ).length;
-  const expiringCount = rows.filter(
-    (row) => row.expiry_flag === 'expiring_soon'
-  ).length;
-  const doseTotal = rows.reduce((total, row) => {
-    const remaining = getTrayRemainingDoses(row) ?? 0;
-    return total + (Number.isFinite(remaining) ? remaining : 0);
-  }, 0);
-  let summary = `${count} vaccine(s) saved for later chart fill.`;
-  if (lockedCount > 0) {
-    summary += ` ${lockedCount} captured while the workstation was locked.`;
-  }
-  if (doseTotal > 0) {
-    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
-  }
-  if (expiredCount || expiringCount) {
-    summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
-  }
-  return summary;
-}
-
-export function buildInventorySummary(rows) {
-  const count = rows.length;
-  const expiredCount = rows.filter(
-    (row) => row.expiry_flag === 'expired'
-  ).length;
-  const expiringCount = rows.filter(
-    (row) => row.expiry_flag === 'expiring_soon'
-  ).length;
-  const doseTotal = rows.reduce((total, row) => {
-    const remaining = getTrayRemainingDoses(row) ?? 0;
-    return total + (Number.isFinite(remaining) ? remaining : 0);
-  }, 0);
-  let summary = `${count} scan(s) ready for inventory export.`;
-  if (doseTotal > 0) {
-    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
-  }
-  if (expiredCount || expiringCount) {
-    summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
-  }
-  return summary;
-}
-
 function buildQueueItemMarkup(row, index, options) {
   const title = escapeHtml(
     row.tradename ||
@@ -600,10 +539,6 @@ function buildQueueItemMarkup(row, index, options) {
       ${lookupMessage ? `<div class="inventory-lot-report"><span>${escapeHtml(lookupMessage)}</span>${reportUrl ? `<a href="${escapeHtml(reportUrl)}">Email lot report</a>` : ''}</div>` : ''}
     </div>
   `;
-}
-
-function defaultSummaryBuilder(rows) {
-  return `${rows.length} saved item(s).`;
 }
 
 function formatInventoryTimestamp(value) {
