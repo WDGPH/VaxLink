@@ -12,6 +12,7 @@ inventory management workflow for lot/expiry tracking. The extension
 documentation site.
 
 - 📚 **Documentation:** <https://docs.phiz.ca/vaxlink/>
+- [Privacy assessment guide for adopting clinics](docs/privacy-assessment.md)
 - 🧩 **Extension:** `apps/extension`
 
 ## Repository Layout

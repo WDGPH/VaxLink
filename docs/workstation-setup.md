@@ -29,4 +29,10 @@ Choose **Connect scanner** to open the browser’s device chooser.
 
 ![Scanner setup before pairing, with Connect scanner and Close](images/scanner-setup.png)
 
+## Before clinical use
+
+Confirm the station’s workflow and autofill settings with the clinical and privacy leads. Check the saved choices on the installed profile. The [privacy assessment guide](privacy-assessment.md) describes each switch and both diagnostic downloads.
+
+Start in Inventory with representative products, formulations and package sizes. VaxLink recognizes nirsevimab as the Panorama agent RSVAb. Check each presentation against its label and the catalogue. In training, use synthetic records to try a single entry, several immunizations, an interrupted scan and a missing lot. Verify scan recovery after locking and unlocking the station. Ask an authorized Panorama administrator to confirm production lots and funding choices before clinical rollout.
+
 [Workstation acceptance procedure](fixes/browser-only-locked-scanner-poc.md)

@@ -19,6 +19,12 @@ The Inventory tray shows captured lots and recent scans.
 
 ![Inventory tray with two sample vaccines and an Add again button under Recent Scans](images/inventory-tray.png)
 
+## Choose the product barcode
+
+Look beside the printed lot and expiry for the product barcode, often a small square GS1 DataMatrix. Another square code on the package may open a website. Scan only product labels. Check the product, formulation, lot and expiry shown in Inventory against the unit you will use.
+
+If the unit label is hard to scan and your clinic allows a carton scan, keep the carton with its contents and compare the printed details on both. Enter the quantity separately. Scanning one carton cannot tell you how many doses remain.
+
 ## The scanner beeped but nothing appeared
 
 1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Held scanner scans** in Immunization. The unlock summary shows scans available from the last lock.
@@ -26,7 +32,16 @@ The Inventory tray shows captured lots and recent scans.
 3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
 4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
 
-A catalogue outage can leave barcode details available without a vaccine name. A lot reported as missing was searched for in a usable catalogue. Settings shows when VaxLink last checked the catalogue successfully.
+## The scan appeared, but chart entry is incomplete
+
+| What staff see                                            | What to check next                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Barcode is captured, but the lot or product is incomplete | Compare the label with the decoded fields. Check the catalogue status and last successful check in Settings. An unavailable catalogue cannot confirm a missing lot.                                                                                                                            |
+| A working catalogue reports the lot missing               | Check the printed lot and product. If correct, review the catalogue email draft and its recipients before sending.                                                                                                                                                                             |
+| The catalogue finds the lot, but Panorama does not        | Check Agent, formulation and funding. Training can have a limited lot list. For a production miss, contact the local Panorama Resolution Coordinator. In Multiple Immunizations, staff may need to delete the unfinished entry to complete the other entries. Check which entry is open first. |
+| Only some chart fields filled                             | Read the message, check the original chart and complete the missing fields under local procedure. Confirm the correct client, product, lot, funding, administration details and consent before saving.                                                                                         |
+
+When a lot appears in both funding categories, staff choose the category. A match in one category can guide the search. Staff still determine eligibility under the program’s rules.
 
 ## Use a saved dose
 
@@ -56,6 +71,8 @@ In **Settings → Debug mode**, choose **Download** before closing the browser
 or turning collection off. The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
+
+For support, start with the software version, scanner model, training or production environment, package type, printed lot, catalogue status and exact message. Use a sample record for screenshots. Review any barcode, email recipients and Debug download before sharing through an approved private channel. [Privacy assessment guide](privacy-assessment.md)
 
 ![Local Activity showing today’s and all-time counts for scanning, charting, funding and tray use](images/local-activity.png)
 

@@ -30,7 +30,7 @@ records. After installing or updating the extension, reload the training page
 and open an immunization record. Check single forms, the Multiple Immunizations
 grid and detail step, Inventory, and how held scans appear after unlock.
 
-[Trying VaxLink in a clinic](adoption-and-troubleshooting.md) · [Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
+[Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
 
 In Settings, **Debug mode** keeps troubleshooting details for the current
 browser session. It starts on in packaged Alpha and off in production and
