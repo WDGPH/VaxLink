@@ -95,6 +95,12 @@ place. A repair restarts the stability wait. The watcher ends after ten
 seconds and gives an owned, settled form two opportunities for late detail
 repairs.
 
+Existing Date, Time, Reason, and Consent choices remain in place when the
+setting is enabled. This includes a grid Date set by Panorama while it handles
+the Agent. The Consent default uses the visible menu when one is present.
+The watcher gives that menu time to settle after a field changes and limits
+the number of selection attempts.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

@@ -93,6 +93,8 @@ test('date and time switches preserve legacy choices and leave disabled fields u
     [{ [dateKey]: false, [timeKey]: true }, false, true]
   ]) {
     const f = fixture(settings);
+    if (date) f.fields.date.value = '';
+    if (time) f.fields.time.value = '';
     const data = f.fill({ lot: 'LOT' });
     assert.equal(f.fields.date.value, date ? '2026/06/11' : 'staff date');
     assert.equal(f.fields.time.value, time ? '23:58' : 'staff time');
@@ -128,6 +130,7 @@ test('live and old tray fills use fill time, keep it through retries, and renew 
       : { ...record };
     // Ownership can begin before an awaited lookup. Capture time only when
     // vaccine fields start filling, after that lookup and local midnight.
+    f.fields.date.value = f.fields.time.value = '';
     const owned = f.context.beginPanoramaAutofill(payload);
     f.clock.now = '2026-06-12T04:01:00Z';
     assert.equal(f.context.autoFillPanorama(owned).status, 'success');
@@ -145,6 +148,7 @@ test('live and old tray fills use fill time, keep it through retries, and renew 
       f.context.fillPanoramaDeferredDetailFields(owned)
     );
     assert.equal(f.writes.length, writes, 'correct values are not rewritten');
+    f.fields.date.value = f.fields.time.value = '';
     f.fill(
       fromTray
         ? f.context.buildAutofillPayloadFromQueueRecord(record)
@@ -176,4 +180,40 @@ test('multiple grid uses the current date only when date autofill is enabled and
       assert.equal(f.fields.time.value, 'staff time');
     }
   }
+});
+
+test('prefilled Date and Time satisfy the watcher and remain untouched', () => {
+  const f = fixture();
+  f.fields.date.value = '2026/05/01';
+  f.fields.time.value = '09:10';
+  const data = f.fill({ lot: 'LOT' });
+  assert.equal(f.context.hasPanoramaDeferredDetailFieldsFilled(data), true);
+  assert.deepEqual(f.writes, []);
+  f.fields.time.value = '';
+  f.context.runPanoramaAutofill(data, () =>
+    f.context.fillPanoramaDeferredDetailFields(data)
+  );
+  assert.equal(f.fields.date.value, '2026/05/01');
+  assert.equal(f.fields.time.value, '23:58');
+});
+
+test('date already set by Panorama during the Agent event survives grid entry', () => {
+  const f = fixture();
+  let agentText = '';
+  f.fields.date.value = '';
+  Object.assign(f.context, {
+    getPanoramaMultipleGridRowState: () => ({
+      agentText,
+      dateText: f.fields.date.value
+    }),
+    fillPanoramaMultipleGridAgent() {
+      agentText = 'MMR';
+      f.fields.date.value = '2026/05/01';
+      return true;
+    },
+    getPanoramaMultipleGridDate1Field: () => f.fields.date
+  });
+  assert.equal(f.context.fillPanoramaMultipleGridRow(0, { name: 'MMR' }), true);
+  assert.equal(f.fields.date.value, '2026/05/01');
+  assert.deepEqual(f.writes, []);
 });

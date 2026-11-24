@@ -1453,17 +1453,6 @@ function canFillPanoramaControl(field) {
   return true;
 }
 
-function fillFirstMatchingField(selectors, value, scope, canWrite) {
-  if (value === undefined || value === null || value === '') return false;
-  const fields = getFields(selectors, scope).filter(canFillPanoramaControl);
-  for (const field of fields) {
-    if (fillSelectField(field, value, canWrite)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function getFieldFilledText(field) {
   if (!field) return '';
   if (field.tagName === 'SELECT') {
@@ -1779,41 +1768,50 @@ function getPanoramaAdministeredDateTimeFields(
   };
 }
 
+function panoramaDateTimeHasValue(value) {
+  return /[a-z0-9]/i.test(String(value || ''));
+}
+
 function hasPanoramaDeferredDetailFieldsFilled(data) {
   const scope = data?._vaxlinkOwner?.form;
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data);
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data, {
+    includeDisabled: true
+  });
   const dateMatches =
-    !administered.date ||
-    String(dateField?.value || '').trim() === administered.date;
+    !administered.date || panoramaDateTimeHasValue(dateField?.value);
   const timeMatches =
-    !administered.time ||
-    String(timeField?.value || '').trim() === administered.time;
+    !administered.time || panoramaDateTimeHasValue(timeField?.value);
   const reasonSatisfied =
     !reasonAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaReasonForImmunizationSelectors(),
-      getPanoramaReasonForImmunizationValue(data),
       scope
     );
   const consentSatisfied =
     !consentAutofillEnabled ||
-    panoramaSelectAutofillSatisfied(
-      getPanoramaConsentReasonSelectors(),
-      getPanoramaConsentReasonValue(data),
-      scope
-    );
+    panoramaSelectAutofillSatisfied(getPanoramaConsentReasonSelectors(), scope);
   return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
 }
 
-function fillPanoramaMaskedTextInput(field, nextValue, canWrite = () => true) {
+function fillPanoramaMaskedTextInput(
+  field,
+  nextValue,
+  canWrite = () => true,
+  preserveExisting = false
+) {
   if (!field || !nextValue || !canWrite()) return false;
   const value = String(nextValue).trim();
   if (!value) return false;
   assertPanoramaAutofillWrite();
   field.focus();
   assertPanoramaAutofillWrite();
-  if (field.isConnected === false || !canWrite()) return false;
+  if (
+    field.isConnected === false ||
+    !canWrite() ||
+    (preserveExisting && panoramaDateTimeHasValue(field.value))
+  )
+    return false;
   field.value = '';
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
@@ -1839,18 +1837,18 @@ function fillPanoramaAdministeredDateTimeFields(data, canWrite = () => true) {
   const { dateField } = getPanoramaAdministeredDateTimeFields(data);
   if (
     administered.date &&
-    String(dateField?.value || '').trim() !== administered.date &&
+    !panoramaDateTimeHasValue(dateField?.value) &&
     canWrite() &&
-    fillPanoramaMaskedTextInput(dateField, administered.date, canWrite)
+    fillPanoramaMaskedTextInput(dateField, administered.date, canWrite, true)
   ) {
     fillCount += 1;
   }
   const { timeField } = getPanoramaAdministeredDateTimeFields(data);
   if (
     administered.time &&
-    String(timeField?.value || '').trim() !== administered.time &&
+    !panoramaDateTimeHasValue(timeField?.value) &&
     canWrite() &&
-    fillPanoramaMaskedTextInput(timeField, administered.time, canWrite)
+    fillPanoramaMaskedTextInput(timeField, administered.time, canWrite, true)
   ) {
     fillCount += 1;
   }
@@ -1881,46 +1879,116 @@ function getPanoramaConsentReasonValue(data) {
   return explicit || 'Consent obtained';
 }
 
-function panoramaSelectHasDesiredSelection(selectors, desiredText, scope) {
-  const desiredNorm = normalizeForMatch(desiredText);
-  if (!desiredNorm) return true;
-  return getFields(selectors, scope).some((field) => {
-    if (field.tagName !== 'SELECT') return false;
-    const opt =
-      field.options && field.selectedIndex >= 0
-        ? field.options[field.selectedIndex]
-        : null;
-    return !!opt && normalizeForMatch(opt.text) === desiredNorm;
-  });
+function panoramaSelectAutofillSatisfied(selectors, scope) {
+  return getFields(selectors, scope).every(
+    (field) => !canFillPanoramaControl(field) || !!field.value
+  );
 }
 
-// A reason/consent control counts as "satisfied" (nothing left to do) when it is
-// absent, still disabled (Panorama has not enabled it yet), or already showing the
-// desired option. This keeps the scheduler retrying only while a fillable control
-// is present but not yet set.
-function panoramaSelectAutofillSatisfied(selectors, desiredText, scope) {
-  const fields = getFields(selectors, scope);
-  if (!fields.length) return true;
-  if (!fields.some(canFillPanoramaControl)) return true;
-  return panoramaSelectHasDesiredSelection(selectors, desiredText, scope);
+function getPanoramaDefaultOption(field, desiredText) {
+  const desired = normalizeForMatch(desiredText);
+  const options = [...field.options].filter(
+    (option) =>
+      option.value &&
+      !option.disabled &&
+      normalizeForMatch(option.text) === desired
+  );
+  return options.length === 1 ? options[0] : null;
 }
 
-function fillPanoramaReasonForImmunization(data, canWrite) {
+function fillPanoramaReasonForImmunization(data, canWrite = () => true) {
   if (!reasonAutofillEnabled) return 0;
-  const selectors = getPanoramaReasonForImmunizationSelectors();
-  const value = getPanoramaReasonForImmunizationValue(data);
-  const scope = data?._vaxlinkOwner?.form;
-  if (panoramaSelectHasDesiredSelection(selectors, value, scope)) return 0;
-  return fillFirstMatchingField(selectors, value, scope, canWrite) ? 1 : 0;
+  const fields = getFields(
+    getPanoramaReasonForImmunizationSelectors(),
+    data?._vaxlinkOwner?.form
+  ).filter(canFillPanoramaControl);
+  if (fields.length !== 1 || fields[0].value) return 0;
+  const [field] = fields;
+  const option = getPanoramaDefaultOption(
+    field,
+    getPanoramaReasonForImmunizationValue(data)
+  );
+  if (!option) return 0;
+  return fillSelectField(
+    field,
+    option.value,
+    () => canWrite() && (!field.value || field.value === option.value)
+  )
+    ? 1
+    : 0;
 }
 
-function fillPanoramaConsentReason(data, canWrite) {
+function fillPanoramaConsentReason(data, canWrite = () => true) {
   if (!consentAutofillEnabled) return 0;
-  const selectors = getPanoramaConsentReasonSelectors();
-  const value = getPanoramaConsentReasonValue(data);
-  const scope = data?._vaxlinkOwner?.form;
-  if (panoramaSelectHasDesiredSelection(selectors, value, scope)) return 0;
-  return fillFirstMatchingField(selectors, value, scope, canWrite) ? 1 : 0;
+  const owner = data._vaxlinkOwner;
+  const now = performance.now();
+  if (owner?.consentWrites >= 2 || now < (owner?.consentReadyAt ?? 0)) return 0;
+  const fields = getFields(
+    getPanoramaConsentReasonSelectors(),
+    owner?.form
+  ).filter(canFillPanoramaControl);
+  if (fields.length !== 1 || fields[0].value) return 0;
+  const [field] = fields;
+  const requested = getPanoramaConsentReasonValue(data);
+  const option = getPanoramaDefaultOption(field, requested);
+  if (!option) return 0;
+  const desired = normalizeForMatch(requested);
+  const noteWrite = () => {
+    if (!owner) return;
+    owner.consentWrites = (owner.consentWrites || 0) + 1;
+    owner.consentReadyAt = now + 700;
+  };
+
+  const widget = field.closest('.ui-selectonemenu');
+  if (!widget) {
+    if (!isVisible(field) || !canWrite()) return 0;
+    noteWrite();
+    return fillSelectField(
+      field,
+      option.value,
+      () =>
+        // Focusing a blank select can let Panorama assign its own value.
+        canWrite() && (!field.value || field.value === option.value)
+    )
+      ? 1
+      : 0;
+  }
+
+  // Use the visible menu so PrimeFaces runs its own item selection handler.
+  const widgetId = field.id.replace(/_input$/, '');
+  const findPanel = () =>
+    findPanoramaWidgetPart(
+      document,
+      'consentReadinessReasonSelect:iTermSelectOneMenu',
+      widgetId,
+      'panel'
+    );
+  let panel = findPanel();
+  if (!isVisible(panel)) {
+    const trigger = widget.querySelector('.ui-selectonemenu-trigger');
+    if (
+      !isVisible(trigger) ||
+      now < (owner?.consentOpenAgainAt ?? 0) ||
+      !canWrite()
+    )
+      return 0;
+    if (owner) owner.consentOpenAgainAt = now + 700;
+    assertPanoramaAutofillWrite();
+    trigger.click();
+    panel = findPanel();
+  }
+  if (!isVisible(panel) || field.isConnected === false || field.value) return 0;
+  const items = panoramaLotPanelItems(panel).filter(
+    (item) =>
+      isVisible(item) &&
+      !item.classList.contains('ui-state-disabled') &&
+      normalizeForMatch(panoramaLotPanelItemText(item)) === desired
+  );
+  if (items.length !== 1 || !canWrite()) return 0;
+  assertPanoramaAutofillWrite();
+  noteWrite();
+  items[0].click();
+  return 1;
 }
 
 function isPrimeFacesAjaxBusy() {
@@ -2009,7 +2077,10 @@ function fillPanoramaDeferredDetailFields(data) {
   let count = fillPanoramaAdministeredDateTimeFields(data, canWrite);
   if (reasonAutofillEnabled && canWrite())
     count += fillPanoramaReasonForImmunization(data, canWrite);
-  if (consentAutofillEnabled && canWrite())
+  // A detail write can refresh the consent menu and briefly expose old options.
+  if (count && data._vaxlinkOwner)
+    data._vaxlinkOwner.consentReadyAt = performance.now() + 700;
+  else if (consentAutofillEnabled && canWrite())
     count += fillPanoramaConsentReason(data, canWrite);
   return count;
 }
@@ -2183,8 +2254,8 @@ function getPanoramaLotWidget(form = getPanoramaAutofillForm()) {
   const [root] = roots;
   const select = selects.find((node) => !root || root.contains(node));
   if (!root && !canFillPanoramaControl(select)) return null;
-  const label = root && findPanoramaLotPart(root, suffix, id, 'label');
-  const panel = findPanoramaLotPart(document, suffix, id, 'panel');
+  const label = root && findPanoramaWidgetPart(root, suffix, id, 'label');
+  const panel = findPanoramaWidgetPart(document, suffix, id, 'panel');
   return {
     id,
     root,
@@ -2194,7 +2265,7 @@ function getPanoramaLotWidget(form = getPanoramaAutofillForm()) {
   };
 }
 
-function findPanoramaLotPart(scope, suffix, id, part) {
+function findPanoramaWidgetPart(scope, suffix, id, part) {
   const exact = [...scope.querySelectorAll(`[id$="${suffix}_${part}"]`)].filter(
     (node) => node.id === `${id}_${part}`
   );
@@ -2821,6 +2892,7 @@ function schedulePanoramaLotOrTradeSelection(
           }
         }
       } else if (resolved) {
+        if (hasLot) owner.consentReadyAt = now + 700;
         sharedFundingMisses = 0;
       }
       if (!resolved && !fundedRadioEnsured && !preserveFundingFilter) {
@@ -3191,6 +3263,8 @@ function fillPanoramaImmunizationFields(data) {
       !isPrimeFacesAjaxBusy()
     ) {
       tryFillPanoramaLotOrTrade(data);
+      if (data.lot && panoramaDetailProductMatches(data))
+        owner.consentReadyAt = performance.now() + 700;
     }
     if (panoramaDetailProductMatches(data)) fillCount += 1;
   }
@@ -4806,7 +4880,11 @@ function getPanoramaMultipleGridRowState(rowIndex) {
     agentFocusField,
     agentLabel,
     dateField,
-    agentText: labelText || selectText || focusText,
+    agentText: agentField
+      ? agentField.value
+        ? selectText
+        : ''
+      : labelText || focusText,
     dateText: String(dateField?.value || '').trim()
   };
 }
@@ -4839,25 +4917,38 @@ function fillPanoramaMultipleGridDate1(rowIndex, data) {
   const dateField = getPanoramaMultipleGridDate1Field(rowIndex);
   if (!dateField || !canFillPanoramaControl(dateField)) return false;
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  if (!administered.date) return false;
-  return fillPanoramaMaskedTextInput(dateField, administered.date);
+  if (!administered.date || panoramaDateTimeHasValue(dateField.value))
+    return false;
+  return fillPanoramaMaskedTextInput(
+    dateField,
+    administered.date,
+    undefined,
+    true
+  );
 }
 
 function fillPanoramaMultipleGridRow(rowIndex, data) {
   if (!data || globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return false;
   const rowState = getPanoramaMultipleGridRowState(rowIndex);
-  const agentNeeded = !rowState.agentText;
-  const dateNeeded = !rowState.dateText;
-  let changed = false;
-  if (agentNeeded || dateNeeded) markPanoramaAutofillStarted(data);
-
-  if (agentNeeded) {
-    changed = fillPanoramaMultipleGridAgent(rowIndex, data) || changed;
-  }
-  if (dateNeeded) {
-    changed = fillPanoramaMultipleGridDate1(rowIndex, data) || changed;
-  }
-  return changed;
+  if (!rowState.agentText || !panoramaDateTimeHasValue(rowState.dateText))
+    markPanoramaAutofillStarted(data);
+  const agentChanged =
+    !rowState.agentText && fillPanoramaMultipleGridAgent(rowIndex, data);
+  const current = getPanoramaMultipleGridRowState(rowIndex);
+  const candidates = getPanoramaAgentCandidates(data);
+  const agentMatches =
+    !!current.agentText &&
+    (!candidates.length ||
+      candidates.some((candidate) =>
+        isAgentTextAccepted(candidate, current.agentText)
+      ));
+  // Panorama can populate the grid date while handling the Agent change.
+  const dateChanged =
+    agentMatches &&
+    !panoramaDateTimeHasValue(current.dateText) &&
+    !isPrimeFacesAjaxBusy() &&
+    fillPanoramaMultipleGridDate1(rowIndex, data);
+  return agentChanged || dateChanged;
 }
 
 async function maybeAutoFillPanoramaMultipleGrid() {

@@ -161,6 +161,7 @@ export function createContentHarness(globals = {}) {
   const context = vm.createContext({
     console,
     crypto: globalThis.crypto,
+    performance,
     ...globals,
     location,
     window,
