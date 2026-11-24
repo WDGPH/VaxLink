@@ -395,3 +395,80 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   assert.equal(field.value, '');
   assert.deepEqual(events, ['input', 'change']);
 });
+
+test('explicit grid Use assigns only the chosen dose and leaves it for Details', async () => {
+  const storageKey = 'multiple_inject_queue_v1';
+  for (const [tracking, remaining, replace] of [
+    ['single_use', 1, false],
+    ['counted', 2, false],
+    ['pinned', null, false],
+    ['single_use', 1, true]
+  ]) {
+    const f = fixture();
+    const saved = {
+      id: 'chosen',
+      lot: 'SAMPLE',
+      tradename: 'Priorix',
+      dose_tracking: tracking,
+      remaining_doses: remaining
+    };
+    const worker = createBackgroundHarness(makeTestNvcBundle(), {
+      storage: { [storageKey]: [{ ...saved, id: 'other' }, saved] }
+    });
+    const form = f.context.getPanoramaAutofillForm();
+    const row = {
+      form,
+      isConnected: true,
+      getAttribute: (key) => ({ 'data-ri': '1', 'data-rk': 'row-1' })[key],
+      getBoundingClientRect: shown
+    };
+    let agent = '';
+    const url = f.context.location.href;
+    f.context.chrome.runtime.sendMessage = (message, reply) => {
+      if (!reply) return;
+      void worker
+        .sendMessage(message, {
+          id: 'vaxlink-test',
+          frameId: 0,
+          documentId: 'grid-chart',
+          url,
+          tab: { id: 42, url }
+        })
+        .then(reply);
+    };
+    Object.assign(f.context, {
+      getPanoramaFormContext: () => ({ kind: 'multiple_grid', ready: true }),
+      getPanoramaMultipleGridRows: () => [row],
+      getPanoramaMultipleGridRowState: () => ({
+        agentText: agent,
+        dateText: '2026/11/24'
+      }),
+      fillPanoramaMultipleGridAgent() {
+        assert.equal(
+          worker.storageData.get(storageKey)[0].dose_reservations,
+          undefined
+        );
+        if (tracking !== 'pinned')
+          assert.equal(
+            worker.storageData.get(storageKey)[1].dose_reservations.length,
+            1
+          );
+        f.context.assertPanoramaAutofillWrite();
+        agent = 'MMR';
+        if (replace) row.isConnected = false;
+        return true;
+      },
+      showVaxlinkToast() {}
+    });
+    const token = f.context.getScannerDeliveryContext('multiple_grid', true);
+    const result = await f.context.useTrayVaccine('chosen', token);
+    assert.equal(result.status, replace ? 'failed' : 'grid_added');
+    const rows = worker.storageData.get(storageKey);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1].remaining_doses, remaining);
+    assert.equal(
+      rows[1].dose_reservations?.some((item) => item.review) || false,
+      replace
+    );
+  }
+});

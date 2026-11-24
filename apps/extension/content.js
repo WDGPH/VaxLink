@@ -347,7 +347,8 @@ function setupMessageListener() {
         .then((result) =>
           sendResponse({
             ...result,
-            success: isAutofillSuccess(result),
+            success:
+              isAutofillSuccess(result) || result.status === 'grid_added',
             pending: isAutofillPending(result)
           })
         )
@@ -2905,6 +2906,8 @@ function isPanoramaAutofillCurrent(data) {
     owner.kind === getPanoramaFormContext({ checkReadiness: false }).kind &&
     (!owner.automatic || isPanoramaChartActive()) &&
     (!owner.trayDose || document.visibilityState === 'visible') &&
+    (!owner.gridAssignment ||
+      isGridAssignmentCurrent(owner.gridAssignment, owner.form)) &&
     (owner.writeAttempted ||
       owner.startBy === null ||
       Date.now() < owner.startBy);
@@ -3792,7 +3795,6 @@ async function useTrayVaccine(recordId, contextToken) {
   if (
     !isScannerDeliveryContextCurrent(contextToken, context.kind, true) ||
     !context.ready ||
-    context.kind === 'multiple_grid' ||
     document.visibilityState !== 'visible'
   )
     throw new Error('Open a supported Panorama form that is ready for entry.');
@@ -3824,6 +3826,7 @@ async function fillReservedTrayRecord(
   owner.trayDose = dose;
   activeTrayReservations.add(dose.token);
   let keepReservation = false;
+  let verifiedGridAssignment = false;
   try {
     const { record, reserved } = await mutateQueueViaBackground(
       MULTIPLE_INJECT_QUEUE_KEY,
@@ -3877,6 +3880,17 @@ async function fillReservedTrayRecord(
       source,
       dose
     };
+    if (requiredKind === 'multiple_grid') {
+      const assignment = runPanoramaAutofill(data, () =>
+        assignTrayVaccineToGrid(data)
+      );
+      verifiedGridAssignment = !!assignment;
+      return assignment
+        ? createAutofillResult('grid_added')
+        : createAutofillResult('failed', {
+            error: 'Check the current grid row and choose the vaccine again.'
+          });
+    }
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source,
@@ -3890,13 +3904,13 @@ async function fillReservedTrayRecord(
     return result;
   } finally {
     if (!keepReservation) {
-      if (dose.reserved) await stopTrayDose(owner);
+      if (dose.reserved) await stopTrayDose(owner, verifiedGridAssignment);
       else activeTrayReservations.delete(dose.token);
     }
   }
 }
 
-async function stopTrayDose(owner) {
+async function stopTrayDose(owner, verifiedGridAssignment = false) {
   const dose = owner?.trayDose;
   if (
     !dose?.reserved ||
@@ -3907,13 +3921,14 @@ async function stopTrayDose(owner) {
     return;
   owner.cancelled = true;
   dose.stopping = true;
+  const written = owner.writeAttempted === true && !verifiedGridAssignment;
   try {
     await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'stop_dose', {
       id: dose.recordId,
       token: dose.token,
-      written: owner.writeAttempted === true
+      written
     });
-    if (!owner.writeAttempted) return;
+    if (!written) return;
   } catch (error) {
     console.warn('VaxLink could not confirm the tray stop:', error);
   } finally {
@@ -5481,6 +5496,45 @@ function fillPanoramaMultipleGridRow(rowIndex, data) {
     !isPrimeFacesAjaxBusy() &&
     fillPanoramaMultipleGridDate1(rowIndex, data);
   return agentChanged || dateChanged;
+}
+
+function isGridAssignmentCurrent(assignment, form) {
+  const { row, key, index } = assignment;
+  return (
+    row.isConnected &&
+    form.contains(row) &&
+    row.getAttribute('data-ri') === index &&
+    row.getAttribute('data-rk') === key
+  );
+}
+
+function assignTrayVaccineToGrid(data) {
+  const candidates = getPanoramaAgentCandidates(data);
+  if (!candidates.length) return null;
+  const { _vaxlinkOwner: owner } = data;
+  const row = getPanoramaMultipleGridRows().find((candidate) => {
+    const index = candidate.getAttribute('data-ri');
+    return (
+      /^\d+$/.test(index) &&
+      isVisible(candidate) &&
+      !getPanoramaMultipleGridRowState(index).agentText
+    );
+  });
+  if (!row) return null;
+  const index = row.getAttribute('data-ri');
+  const key = row.getAttribute('data-rk');
+  const assignment = { row, index, key };
+  owner.gridAssignment = assignment;
+  fillPanoramaMultipleGridRow(index, data);
+  if (!isPanoramaAutofillCurrent(data)) return null;
+  const { agentText, dateText } = getPanoramaMultipleGridRowState(index);
+  if (
+    !candidates.some((candidate) => isAgentTextAccepted(candidate, agentText))
+  )
+    return null;
+  assignment.agent = panoramaAgentIdentity(agentText);
+  assignment.date = dateText;
+  return assignment;
 }
 
 async function maybeAutoFillPanoramaMultipleGrid() {

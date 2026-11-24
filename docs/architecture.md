@@ -319,6 +319,11 @@ also stops when its tab loses focus, and a delayed first write must meet the
 worker's deadline. An explicit tray choice can continue when the toolbar popup
 takes focus while the chart remains visible.
 
+Using a saved dose on the Multiple grid reserves it before assigning one
+empty row. VaxLink checks the same row after the Agent event. A verified grid
+assignment leaves the dose in the tray for Details. If the row changes
+during the attempt, check the original chart before trying the held dose again.
+
 For a counted tray dose, the chart obtains a reservation before it writes to
 Panorama. Once the watched product and detail fields stay settled, one
 finalization on the current owner asks the background to consume the reservation.

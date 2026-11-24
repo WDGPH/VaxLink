@@ -1462,6 +1462,13 @@ async function handleUseMultipleInjectRecord(record) {
     if (!result?.success && !result?.pending)
       throw new Error(result?.error || 'Check the chart before trying again.');
 
+    if (result.status === 'grid_added') {
+      writeOutput(
+        'Added to the grid. The vaccine stays in the tray for Enter Details.',
+        'success'
+      );
+      return;
+    }
     const message =
       result.reason === 'funding_choice_required'
         ? 'Choose the funding category in Panorama to continue.'
