@@ -11,9 +11,9 @@ Use the clinic’s designated browser and profile. Open VaxLink and choose the w
 
 With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Held scanner scans** for the next step. Check the original chart before using a scan that may have filled fields.
 
-On a single form, a scan can be pending while VaxLink waits for Panorama to
-settle. VaxLink keeps the barcode until it can verify the fields in that form.
-You still need to check and save the record in Panorama.
+On a single form, a scan may stay pending while Panorama updates. If VaxLink
+cannot confirm the fields, follow the message and check the original chart
+before trying again. Review and save the record in Panorama.
 
 The Inventory tray shows captured lots and recent scans.
 

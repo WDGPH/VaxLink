@@ -3,18 +3,16 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/WDGPH/VaxLink/extension-ci.yml?branch=main&label=tests&logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOmlua3NjYXBlPSJodHRwOi8vd3d3Lmlua3NjYXBlLm9yZy9uYW1lc3BhY2VzL2lua3NjYXBlIiB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsbGVkYnk9InRpdGxlIGRlc2MiPgo8dGl0bGUgaWQ9InRpdGxlIj5WYXhMaW5rIDE2IHB4IHRvb2xiYXIgdGlsZTwvdGl0bGU%2BCjxkZXNjIGlkPSJkZXNjIj5PcHRpY2FsbHkgc2ltcGxpZmllZCBmb3IgYnJvd3NlciBjaHJvbWUgaW4gbGlnaHQgYW5kIGRhcmsgdGhlbWVzLjwvZGVzYz4KPHJlY3QgaWQ9InRpbGUiIHg9IjAiIHk9IjAiIHdpZHRoPSIxNiIgaGVpZ2h0PSIxNiIgcng9IjMuNjUiIGZpbGw9IiMxMDJENDEiLz4KPHBhdGggaWQ9InNjYW4tY29ybmVycyIgZD0iTTIuNSA1LjRWNC4xNUMyLjUgMy4yNCAzLjI0IDIuNSA0LjE1IDIuNUg1LjRNMTAuNiAyLjVIMTEuODVDMTIuNzYgMi41IDEzLjUgMy4yNCAxMy41IDQuMTVWNS40TTIuNSAxMC42VjExLjg1QzIuNSAxMi43NiAzLjI0IDEzLjUgNC4xNSAxMy41SDUuNE0xMC42IDEzLjVIMTEuODVDMTIuNzYgMTMuNSAxMy41IDEyLjc2IDEzLjUgMTEuODVWMTAuNiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRjhGQ0ZDIiBzdHJva2Utd2lkdGg9IjEuMjEiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8cmVjdCBpZD0idmlhbC1jYXAiIHg9IjUuMTUiIHk9IjMuNjUiIHdpZHRoPSI1LjciIGhlaWdodD0iMS43NSIgcng9IjAuNjUiIGZpbGw9IiNGOEZDRkMiLz4KPHJlY3QgaWQ9InZpYWwtYm9keSIgeD0iNC43NSIgeT0iNi42IiB3aWR0aD0iNi41IiBoZWlnaHQ9IjYuNCIgcng9IjEuNTUiIGZpbGw9IiNGOEZDRkMiLz4KPHBhdGggaWQ9ImNoZWNrIiBkPSJtNi41OCA5LjggMS4wMyAxLjA2IDEuODYgLTIuMTUiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwN0Y2MyIgc3Ryb2tlLXdpZHRoPSIxLjI4IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc%2BCg%3D%3D)](https://github.com/WDGPH/VaxLink/actions/workflows/extension-ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WDGPH/VaxLink/blob/main/LICENSE)
 
-A Chrome extension that parses GS1 vaccine barcodes and auto-fills them into
-Panorama immunization records. Built by
-Wellington-Dufferin-Guelph Public Health.
+VaxLink is a Chrome extension that reads vaccine barcodes and helps staff
+enter vaccine details in the open Panorama chart. Wellington-Dufferin-Guelph
+Public Health built it.
 
-VaxLink looks up product barcodes on the workstation and helps staff enter vaccine details in the open Panorama chart. Privacy teams can trace what the clinic browser stores, what enters the clinical record and what staff can share in the [privacy assessment guide](privacy-assessment.md).
+VaxLink looks up product barcodes on the workstation. Privacy teams can trace what the clinic browser stores, what enters the clinical record and what staff can share in the [privacy assessment guide](privacy-assessment.md).
 
 ## What it does
 
-- Parses GS1 Application Identifiers (`01`, `10`, `17`, `21`) from scanned
-  barcode strings
-- Looks up vaccine metadata from the [NVC](https://nvc-cnv.canada.ca) FHIR
-  bundle
+- Reads the product code, lot, expiry date and optional serial number from vaccine barcodes
+- Looks up vaccine information in the [National Vaccine Catalogue](https://nvc-cnv.canada.ca)
 - Selects Panorama agent and lot, lets Panorama derive vaccine details, and
   fills enabled date/time, reason, and consent fields for staff review
 - Flags expiry state (`Expired`, `Expiring soon`, `Valid`)
@@ -52,8 +50,7 @@ details. Local Activity counts are separate.
 
   ***
 
-  Alpha vs. prod channels, versioning, and how `package-extension.sh`
-  stamps channel identity at build time.
+  How to prepare, check and submit Alpha and production releases.
 
   [:octicons-arrow-right-24: Release Process](RELEASING.md)
 
@@ -61,8 +58,7 @@ details. Local Activity counts are separate.
 
   ***
 
-  Repository layout, local dev setup, and the rules around Panorama DOM
-  fixtures.
+  How to set up your development environment and use sample Panorama forms in tests.
 
   [:octicons-arrow-right-24: Contributing](contributing.md)
 
@@ -74,7 +70,7 @@ details. Local Activity counts are separate.
 apps/extension/         Chrome extension (Manifest V3), no build step
 apps/extension-tests/   Extension test suite (kept out of the packaged zip)
 scripts/                Shell utilities (packaging, NVC bundle fetch)
-skills/                 Claude Code skill definitions for extension workflows
+skills/                 Agent guides for extension tasks
 docs/                   This documentation site
 ```
 

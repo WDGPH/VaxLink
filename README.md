@@ -5,11 +5,9 @@
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/WDGPH/VaxLink)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-VaxLink is a Chrome extension that parses GS1 vaccine barcodes and auto-fills
-them into Panorama immunization records, with an
-inventory management workflow for lot/expiry tracking. The extension
-(`apps/extension`) is the main deliverable, supported by a MkDocs
-documentation site.
+VaxLink is a Chrome extension that reads vaccine barcodes and helps staff
+enter vaccine details in Panorama. Staff can also use Inventory to track
+vaccine lots and expiry dates.
 
 - 📚 **Documentation:** <https://docs.phiz.ca/vaxlink/>
 - [Privacy assessment guide for adopting clinics](docs/privacy-assessment.md)
@@ -20,15 +18,15 @@ documentation site.
 - `apps/extension` - Chrome extension (Manifest V3) — the main project
 - `apps/extension-tests` - extension test suite (kept out of the Web Store zip)
 - `scripts` - shell utilities (e.g. `fetch-nvc.sh`, `package-extension.sh`)
-- `skills` - Claude Code skill definitions for common extension workflows
+- `skills` - Agent guides for common extension tasks
 - `docs` - source for the MkDocs documentation site
 
 ## Extension (`apps/extension`)
 
 ### What it does
 
-- Parses GS1 AIs from scanned strings (`01`, `10`, `17`, `21`)
-- Looks up vaccine metadata from the NVC bundle
+- Reads the product code, lot, expiry date and optional serial number from vaccine barcodes
+- Looks up vaccine information in the National Vaccine Catalogue
 - Selects Panorama agent and lot, lets Panorama derive vaccine details, and fills enabled date/time, reason, and consent fields for staff review
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Captures scans through Web Serial, including while the workstation is locked
@@ -64,9 +62,9 @@ held during lock stays available for review after unlock. Follow the
 ### Data update model
 
 - Source: `https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC`
-- Auto-check every 24h (alarms)
-- Manual refresh from popup
-- Keeps the last-known-good catalogue if refresh fails
+- VaxLink checks for updates every 24 hours.
+- Choose **Recheck** in Settings to check sooner.
+- If a check fails, VaxLink keeps using the catalogue it last downloaded successfully.
 
 ### Inventory
 
@@ -80,7 +78,7 @@ cd apps/extension-tests
 npm test
 ```
 
-This covers GS1 barcode parsing, Panorama autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+The tests cover barcode reading, form entry in Panorama, tray order, repeated scans and Inventory exports.
 
 ### Release channels
 
@@ -93,7 +91,7 @@ separate VaxLink Alpha listing. Store uploads remain manual. See the
 ## Notes
 
 - Public access to NVC API does not automatically grant blanket redistribution rights for bundled terminology data. Keep raw bundle files out of public commits unless you have explicit permission.
-- If CHR DOM changes, update selectors in `apps/extension/content.js`.
+- If Panorama changes its form markup, update the selectors in `apps/extension/content.js`.
 
 ## Contributing
 
@@ -130,9 +128,8 @@ Main pushes request `publish.yml` on hub `main` with
 `source_repo=WDGPH/VaxLink` and `deploy=true`; the hub's deployment gate still
 controls publication. Stable `vX.Y.Z` tag pushes and deletions request
 `refresh-releases.yml` with the same source repository. Manual notification
-requests both. There is no polling schedule. Tags created by a workflow using
-`GITHUB_TOKEN` may not trigger another workflow: after such a release, run
-**Notify documentation hub** manually on `main`.
+requests both. Use **Notify documentation hub** on `main` if an automatic
+request was missed.
 
 The hub's `latest` manual follows `main`. Current and historical manuals use
 release commits approved in the hub's `versions.lock.json`; a tag notification

@@ -26,7 +26,7 @@ VaxLink uses the staff member’s existing Panorama session. The browser allows 
 
 A vaccine lot alone usually tells you little about a person. A rare product, scan time and workstation label together may identify a client or staff member when compared with appointments or shift records. A patient label scanned by mistake could identify someone directly.
 
-The branch grants chart access on three Ontario hosts: `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca` and `trpanoramadhir.prod.ehealthontario.ca`. Each grant covers immunization-entry pages under `/phsdsm/ImmsWeb/pages/recordImms/` or `/ImmsWeb/pages/recordImms/`. Check your deployment’s address when assessing applicability.
+This version requests chart access on three Ontario hosts: `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca` and `trpanoramadhir.prod.ehealthontario.ca`. Each grant covers immunization-entry pages under `/phsdsm/ImmsWeb/pages/recordImms/` or `/ImmsWeb/pages/recordImms/`. Check your deployment’s address when assessing applicability.
 
 ## How much chart entry can be automated?
 
