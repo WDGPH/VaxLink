@@ -928,6 +928,23 @@
         transform: translateY(1px);
       }
 
+      .held-instruction {
+        margin: 2px 0 7px 24px;
+      }
+      #heldScannerScanList li {
+        flex-wrap: wrap;
+      }
+      #heldScannerScanList input {
+        flex-basis: 100%;
+        min-width: 0;
+      }
+      #heldScannerScanList strong {
+        display: block;
+      }
+      #heldScannerScanList .tray-menu {
+        margin-left: 0;
+      }
+
       .settings-hint {
         margin: 6px 0 0;
         font-size: 11px;
@@ -945,7 +962,7 @@
         font-size: 12px;
         color: var(--subtle);
       }
-      .tray-history summary {
+      .tray-history > summary {
         display: flex;
         align-items: center;
         gap: 10px;
@@ -957,7 +974,7 @@
         font-weight: 700;
       }
 
-      .tray-history summary::before {
+      .tray-history > summary::before {
         content: '';
         width: 7px;
         height: 7px;
@@ -966,7 +983,7 @@
         transform: rotate(-45deg);
       }
 
-      .tray-history[open] summary::before {
+      .tray-history[open] > summary::before {
         transform: rotate(45deg);
       }
       .tray-history ul {
@@ -993,7 +1010,7 @@
         font-size: 13px;
       }
 
-      .tray-history button {
+      .tray-history li > button {
         width: auto;
         padding: 4px 7px;
         border-radius: 5px;
@@ -1002,7 +1019,7 @@
         white-space: nowrap;
       }
 
-      .tray-history button:hover {
+      .tray-history li > button:hover {
         background: #edf7f6;
       }
 
@@ -1324,14 +1341,12 @@
               </button>
             </section>
             <p id="scannerConnectionNote" role="status" hidden></p>
-            <details id="heldScannerScans" hidden>
+            <details id="heldScannerScans" class="tray-history" hidden>
               <summary id="heldScannerScanCount">Held scanner scans</summary>
-              <p>
-                Delivery was not confirmed. A scan may already have filled a
-                chart. Check the chart before copying its barcode into manual
-                input. Held scans never replay automatically.
+              <p class="held-instruction">
+                Check the original chart before entering a held scan.
               </p>
-              <div id="heldScannerScanList"></div>
+              <ul id="heldScannerScanList"></ul>
             </details>
             <div id="multipleModeSection" class="mode-panel">
               <div class="inventory">

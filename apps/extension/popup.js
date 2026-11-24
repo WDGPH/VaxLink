@@ -9,7 +9,11 @@ import {
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
-import { getExpiryStatus, parseInputData } from './popup-parser.js';
+import {
+  getExpiryStatus,
+  parseGS1Barcode,
+  parseInputData
+} from './popup-parser.js';
 import {
   escapeHtml,
   renderNVCStatus,
@@ -497,28 +501,85 @@ async function renderHeldScannerScans() {
       `Held scanner scans (${result.scans.length})`;
     list.replaceChildren();
     for (const scan of result.scans) {
-      const row = document.createElement('div');
-      const label = document.createElement('p');
-      label.textContent = scan.capturedAt || 'Capture time unknown';
-      const review = document.createElement('p');
-      review.textContent =
+      const row = document.createElement('li');
+      const label = document.createElement('div');
+      const title = document.createElement('strong');
+      let lot;
+      try {
+        lot = parseGS1Barcode(scan.rawText).lot;
+      } catch {
+        // A held capture may contain a partial barcode.
+      }
+      title.textContent = lot ? `Lot ${lot}` : 'Scanner capture';
+      const captured = new Date(scan.capturedAt);
+      const time =
+        scan.capturedAt && Number.isFinite(captured.getTime())
+          ? captured.toLocaleString(undefined, {
+              dateStyle: 'short',
+              timeStyle: 'medium'
+            })
+          : 'Time unknown';
+      const reason =
         {
-          unknown_agent: 'Agent could not be identified. Verify the vaccine.',
-          stale_chart:
-            'Refresh the original chart after checking unsaved work.',
-          inactive_chart: 'Check the original chart before entering this scan.',
-          lock_unavailable: 'VaxLink could not check the workstation lock.',
-          lock_unknown: 'The workstation lock status was unknown.'
+          unknown_agent: 'Agent unknown',
+          stale_chart: 'Chart needs refresh',
+          inactive_chart: 'Chart unavailable',
+          lock_unavailable: 'Lock check unavailable',
+          lock_unknown: 'Lock state unknown',
+          check_chart: 'Delivery unconfirmed',
+          checking_chart: 'Awaiting verification'
         }[scan.reviewState] ||
-        'Check the original chart before entering this scan.';
+        (scan.lock_session_id ? 'Captured while locked' : '');
+      label.append(title, [time, reason].filter(Boolean).join(' · '));
 
-      const barcode = document.createElement('textarea');
+      const barcode = document.createElement('input');
       barcode.readOnly = true;
+      barcode.hidden = true;
       barcode.value = scan.rawText || '';
-      barcode.setAttribute(
+      barcode.setAttribute('aria-label', 'Full held barcode');
+      const copy = document.createElement('button');
+      copy.textContent = 'Copy barcode';
+      const menu = document.createElement('details');
+      menu.className = 'tray-menu';
+      const summary = document.createElement('summary');
+      summary.textContent = '⋯';
+      summary.setAttribute(
         'aria-label',
-        'Held barcode; select and copy for manual input'
+        `Actions for ${title.textContent}, ${time}`
       );
+      const options = document.createElement('div');
+      options.className = 'tray-menu-options';
+      const show = document.createElement('button');
+      show.textContent = 'Show full barcode';
+      function showBarcode() {
+        barcode.hidden = false;
+        show.textContent = 'Hide full barcode';
+        menu.open = false;
+        barcode.focus();
+        barcode.select();
+      }
+      show.addEventListener('click', () => {
+        if (barcode.hidden) return showBarcode();
+        barcode.hidden = true;
+        show.textContent = 'Show full barcode';
+        menu.open = false;
+        summary.focus();
+      });
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(scan.rawText);
+          copy.textContent = 'Copied';
+        } catch {
+          showBarcode();
+          copy.textContent = 'Copy manually';
+        }
+      });
+      menu.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          menu.open = false;
+          summary.focus();
+        }
+      });
       const discard = document.createElement('button');
       discard.textContent = 'Discard held scan';
       discard.addEventListener('click', async () => {
@@ -537,7 +598,9 @@ async function renderHeldScannerScans() {
           discard.disabled = false;
         }
       });
-      row.append(label, review, barcode, discard);
+      options.append(show, discard);
+      menu.append(summary, options);
+      row.append(label, copy, menu, barcode);
       list.append(row);
     }
   } catch (error) {

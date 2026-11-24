@@ -18,7 +18,7 @@ You still need to check and save the record in Panorama.
 ## The scanner beeped but nothing appeared
 
 1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Held scanner scans** in Immunization. The unlock summary shows scans available from the last lock.
-2. If the chart may have changed, check its fields and saved record in Panorama. For a held barcode that still needs entry, copy it into the **Barcode** field in VaxLink. Once you have accounted for the barcode, select **Discard held scan**.
+2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard held scan** once you have accounted for that capture.
 3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
 4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
 
