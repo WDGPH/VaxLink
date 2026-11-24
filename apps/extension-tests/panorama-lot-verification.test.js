@@ -656,6 +656,161 @@ test('Enter Details carries only the exact grid row and foreground route', async
       assert.equal(productFill, undefined, scenario);
       assert.equal(saved().remaining_doses, 2, scenario);
     }
+    if (scenario === 'different_date') {
+      assert.equal(saved().dose_reservations[0].token, token);
+      context.clearGridCarry();
+      await new Promise(setImmediate);
+    }
     assert.equal(saved().dose_reservations, undefined, scenario);
+  }
+});
+
+test('Enter Details keeps skipped and ambiguous doses available while later matches can fill', async () => {
+  const storageKey = 'multiple_inject_queue_v1';
+  const date = '2026/11/24';
+  for (const scenario of [
+    'skipped_step',
+    'shorter_list',
+    'ambiguous_agent',
+    'reordered_rows'
+  ]) {
+    const { context, state } = fixture();
+    const url = context.location.href;
+    const form = context.getPanoramaAutofillForm();
+    const tab = { id: 42, url, active: true };
+    const agents = [
+      'MMR',
+      'HPV',
+      scenario === 'ambiguous_agent' ? 'HPV' : 'HB'
+    ];
+    const records = agents.map((agent, index) => ({
+      id: String(index),
+      lot: `SAMPLE-${index}`,
+      generic_name: agent,
+      remaining_doses: 2
+    }));
+    const worker = createBackgroundHarness(makeTestNvcBundle(), {
+      tabs: [tab],
+      storage: { [storageKey]: records }
+    });
+    const saved = () => worker.storageData.get(storageKey);
+    const sender = {
+      id: 'vaxlink-test',
+      frameId: 0,
+      documentId: 'grid-chart',
+      url,
+      tab
+    };
+    context.chrome.runtime.sendMessage = (message, reply) => {
+      const result = worker.sendMessage(message, sender);
+      if (reply) void result.then(reply);
+      return result;
+    };
+
+    const gridAgents = ['', '', ''];
+    const gridRows = records.map(({ id }) => ({
+      form,
+      isConnected: true,
+      getAttribute: (key) => ({ 'data-ri': id, 'data-rk': `row-${id}` })[key],
+      getBoundingClientRect: shown
+    }));
+    let kind = 'multiple_grid';
+    let visibleRows = gridRows;
+    let detailAgent = agents[0];
+    let detailDate = date;
+    let detailReady = true;
+    const fills = [];
+    Object.assign(context, {
+      getPanoramaFormContext: () => ({ kind, ready: detailReady }),
+      getPanoramaMultipleGridRows: () => visibleRows,
+      getPanoramaMultipleGridRowState: (index) => ({
+        agentText: gridAgents[index],
+        dateText: date
+      }),
+      fillPanoramaMultipleGridAgent(index, data) {
+        context.assertPanoramaAutofillWrite();
+        gridAgents[index] = data.generic_name;
+        return true;
+      },
+      getPanoramaCurrentAgentSelectionText: () => detailAgent,
+      getPanoramaAdministeredDateTimeFields: () => ({
+        dateField: { value: detailDate }
+      }),
+      getPanoramaDisplayedLot: () => '',
+      autoFillPanorama(data) {
+        fills.push(data);
+        return { status: 'pending' };
+      },
+      showVaxlinkToast() {},
+      setTimeout: () => 1,
+      clearTimeout() {},
+      MutationObserver: class {
+        observe() {}
+        disconnect() {}
+      }
+    });
+
+    for (const { id } of records) {
+      const result = await context.useTrayVaccine(
+        id,
+        context.getScannerDeliveryContext(kind, true)
+      );
+      assert.equal(result.status, 'grid_added', scenario);
+    }
+    context.startGridHandoff({
+      isTrusted: true,
+      target: { closest: () => ({ textContent: 'Enter Details', form }) }
+    });
+    if (scenario === 'shorter_list') {
+      visibleRows = [gridRows[0], gridRows[2]];
+      await context.advanceGridHandoff();
+    }
+    kind = 'multiple_detail';
+    state.step = '1-of-3';
+    await context.advanceGridHandoff();
+    assert.deepEqual(
+      fills.map(({ lot }) => lot),
+      ['SAMPLE-0'],
+      scenario
+    );
+    await context.finalizeDeferredPanoramaAutofill(fills[0]);
+
+    state.step = scenario === 'skipped_step' ? '3-of-3' : '2-of-2';
+    detailAgent = agents[2];
+    detailDate = '';
+    detailReady = false;
+    await context.advanceGridHandoff();
+    detailReady = true;
+    await context.advanceGridHandoff();
+    assert.equal(fills.length, 1, scenario);
+
+    detailDate = date;
+    const routeCheck = context.advanceGridHandoff();
+    detailDate = '';
+    await routeCheck;
+    assert.equal(fills.length, 1, scenario);
+
+    detailDate = date;
+    await context.advanceGridHandoff();
+    if (scenario === 'ambiguous_agent') {
+      assert.equal(fills.length, 1, scenario);
+    } else {
+      assert.deepEqual(
+        fills.map(({ lot }) => lot),
+        ['SAMPLE-0', 'SAMPLE-2'],
+        scenario
+      );
+      await context.finalizeDeferredPanoramaAutofill(fills[1]);
+    }
+    await new Promise(setImmediate);
+    assert.deepEqual(
+      saved().map(({ remaining_doses }) => remaining_doses),
+      [1, 2, scenario === 'ambiguous_agent' ? 2 : 1],
+      scenario
+    );
+    assert.ok(
+      saved().every(({ dose_reservations }) => !dose_reservations),
+      scenario
+    );
   }
 });

@@ -75,10 +75,12 @@ consumes a confirmed tray dose.
 
 A verified grid assignment keeps its exact saved dose, row, Agent, date and
 foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
-that assignment when the matching detail step opens. Changing the grid row,
-the Lot or the active route stops automatic carry. Staff can still select a
-dose deliberately on the detail step. The grid assignment itself does not
-use a dose.
+that assignment when the matching detail step opens. If Panorama skips a
+step, its dose stays in the tray. Later steps can still use their assignments
+when the Agent and date match a single grid row in the original order.
+Changing the grid row, the Lot or the active route stops automatic carry.
+Staff can still select a dose deliberately on the detail step. The grid
+assignment itself does not use a dose.
 
 ### User controls: popup
 

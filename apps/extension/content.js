@@ -5520,14 +5520,35 @@ function currentGridDetailStep() {
   return { step, total };
 }
 
-function matchesGridDetail(entry) {
-  const form = getPanoramaAutofillForm();
+function readGridDetailIdentity(form) {
   const { dateField } = getPanoramaAdministeredDateTimeFields({
     _vaxlinkOwner: { form }
   });
-  return (
-    panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)) ===
-      entry.agent && dateField?.value.trim() === entry.date
+  return {
+    agent: panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)),
+    date: dateField?.value.trim()
+  };
+}
+
+function matchesGridDetail(entry) {
+  const { agent, date } = readGridDetailIdentity(getPanoramaAutofillForm());
+  return agent === entry.agent && date === entry.date;
+}
+
+function findGridDetailRow(handoff, form, step, total) {
+  const { agent, date } = readGridDetailIdentity(form);
+  if (!agent || !date) return;
+  // A shorter Details list can omit original rows. A match must still be
+  // in an original position that fits the displayed step and remaining count.
+  const firstIndex = step - 1;
+  const lastIndex = firstIndex + handoff.rows.length - total;
+  return handoff.rows.find(
+    (row, index) =>
+      row.entry &&
+      row.agent === agent &&
+      row.date === date &&
+      index >= firstIndex &&
+      index <= lastIndex
   );
 }
 
@@ -5548,9 +5569,14 @@ async function releaseGridDetailStep() {
   const handoff = gridDetailHandoff;
   if (!handoff) return;
   const { step, total } = currentGridDetailStep();
-  if (total !== handoff.rows.length) return;
-  const row = handoff.rows[step - 1];
+  if (!(step > 0 && step <= total && total <= handoff.rows.length)) return;
   handoff.attempted = step;
+  const row = findGridDetailRow(
+    handoff,
+    getPanoramaAutofillForm(),
+    step,
+    total
+  );
   if (!row?.entry) return;
   const entry = row.entry;
   row.entry = null;
@@ -5571,60 +5597,89 @@ async function advanceGridHandoff() {
     return;
   }
   if (context.kind === 'multiple_grid') {
-    const visible = visiblePopulatedGridRows();
-    // Panorama can remove the old grid while building the detail form.
-    if (
-      visible.length &&
-      (visible.length !== handoff.rows.length ||
-        handoff.rows.some(
-          (row, index) => !sameGridAssignment(row, visible[index])
-        ))
-    )
-      clearGridCarry();
+    // Panorama can remove grid rows while building the detail form. Any
+    // remaining rows must still appear in their original order.
+    let originalIndex = 0;
+    for (const row of visiblePopulatedGridRows()) {
+      while (
+        originalIndex < handoff.rows.length &&
+        !sameGridAssignment(row, handoff.rows[originalIndex])
+      )
+        originalIndex += 1;
+      if (originalIndex === handoff.rows.length) {
+        clearGridCarry();
+        return;
+      }
+      originalIndex += 1;
+    }
     return;
   }
   if (context.kind !== 'multiple_detail') return;
 
   const { step, total } = currentGridDetailStep();
-  const row = handoff.rows[step - 1];
   const form = getPanoramaAutofillForm();
   if (
-    !row ||
-    total !== handoff.rows.length ||
     step < handoff.step ||
-    step > handoff.step + 1 ||
+    total > handoff.rows.length ||
     (form !== handoff.form && (!form?.id || form.id !== handoff.form.id))
   ) {
     clearGridCarry();
     return;
   }
-  if (step > handoff.step && handoff.step) {
-    const previous = handoff.rows[handoff.step - 1];
-    if (previous.entry) void releaseGridAssignment(previous.entry);
-    previous.entry = null;
-  }
+  if (!(step > 0 && step <= total)) return;
   handoff.step = step;
   clearTimeout(handoff.opening);
-  if (!row.entry || !context.ready || handoff.attempted === step) return;
-  handoff.attempted = step;
+  if (!context.ready || handoff.attempted === step) return;
+  const row = findGridDetailRow(handoff, form, step, total);
+  if (!row) return;
   const entry = row.entry;
+  const checking = handoff.checking;
+  if (
+    checking?.row === row &&
+    checking.form === form &&
+    checking.step === step &&
+    checking.total === total
+  )
+    return;
+  const check = { row, form, step, total };
+  handoff.checking = check;
+
+  let handled = false;
   try {
     const route = await entry.route;
-    if (!route || !(await checkPanoramaScannerRoute({ scannerRoute: route })))
+    const active =
+      route && (await checkPanoramaScannerRoute({ scannerRoute: route }));
+    if (gridDetailHandoff !== handoff || handoff.checking !== check) return;
+    if (!active) {
+      clearGridCarry();
       return;
+    }
     const current = getPanoramaFormContext();
     const detail = currentGridDetailStep();
     if (
-      gridDetailHandoff !== handoff ||
       row.entry !== entry ||
       current.kind !== 'multiple_detail' ||
       !current.ready ||
+      !isPanoramaChartActive() ||
+      location.href !== handoff.url ||
       getPanoramaAutofillForm() !== form ||
       detail.step !== step ||
       detail.total !== total ||
+      handoff.attempted === step ||
       !matchesGridDetail(entry)
     )
       return;
+
+    // Release omitted or skipped rows only once the later row is confirmed.
+    // Their doses stay available because no product was written for them.
+    handoff.attempted = step;
+    handled = true;
+    for (const earlier of handoff.rows) {
+      if (earlier === row) break;
+      if (!earlier.entry) continue;
+      void releaseGridAssignment(earlier.entry);
+      earlier.entry = null;
+    }
     if (hasDifferentGridDetailLot(entry)) {
       showVaxlinkToast({ _entryWarning: DIFFERENT_GRID_DETAIL_LOT });
       return;
@@ -5645,7 +5700,8 @@ async function advanceGridHandoff() {
   } catch (error) {
     showVaxlinkToast({ _entryWarning: error.message });
   } finally {
-    if (row.entry === entry) {
+    if (handoff.checking === check) handoff.checking = null;
+    if (handled && row.entry === entry) {
       row.entry = null;
       await releaseGridAssignment(entry);
     }
