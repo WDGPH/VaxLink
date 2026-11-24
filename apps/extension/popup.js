@@ -162,6 +162,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   queueEntryToggleBtn = document.getElementById('queueEntryToggleBtn');
   cancelQueueEntryBtn = document.getElementById('cancelQueueEntryBtn');
   multipleQueueCount = document.getElementById('multipleQueueCount');
+  const moveToInventory = document.getElementById('moveToInventoryBtn');
+  const moveToImmunization = document.getElementById('moveToImmunizationBtn');
   inventoryBarcodeInput = document.getElementById('inventoryBarcodeInput');
   inventoryEntryPanel = document.getElementById('inventoryEntryPanel');
   inventoryEntryToggleBtn = document.getElementById('inventoryEntryToggleBtn');
@@ -173,6 +175,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     summaryEl: document.getElementById('multipleQueueSummary'),
     listEl: document.getElementById('multipleQueueList'),
     clearButton: clearMultipleBtn,
+    transferButton: moveToInventory,
+    onCount: renderMultipleModeCount,
     onUseRecord: handleUseMultipleInjectRecord,
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     showUseAction: true,
@@ -187,6 +191,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     summaryEl: document.getElementById('inventorySummary'),
     listEl: document.getElementById('inventoryList'),
     clearButton: clearInventoryBtn,
+    transferButton: moveToImmunization,
+    onCount: renderInventoryCount,
     exportButton: exportCsvBtn,
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
@@ -196,8 +202,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   await Promise.all([multipleInjectManager.load(), inventoryManager.load()]);
-  renderMultipleModeCount(multipleInjectManager.count);
-  renderInventoryCount(inventoryManager.count);
+  bindTrayTransfer(moveToInventory, multipleInjectManager, 'Inventory');
+  bindTrayTransfer(moveToImmunization, inventoryManager, 'Immunization');
   await loadWorkflowMode();
   await loadSettingsPanelState();
   await loadAutofillSettings();
@@ -684,15 +690,6 @@ function handlePopupStorageChanged(changes, area) {
     void loadUnlockReview();
   if (area === 'local' && HELD_SCANS_KEY in changes)
     void renderHeldScannerScans();
-  if (area === 'local' && INVENTORY_BATCH_KEY in changes) {
-    const rows = changes[INVENTORY_BATCH_KEY]?.newValue;
-    renderInventoryCount(Array.isArray(rows) ? rows.length : 0);
-  }
-  if (area !== 'local' || !(MULTIPLE_INJECT_QUEUE_KEY in changes)) return;
-  const rows = Array.isArray(changes[MULTIPLE_INJECT_QUEUE_KEY]?.newValue)
-    ? changes[MULTIPLE_INJECT_QUEUE_KEY].newValue
-    : [];
-  renderMultipleModeCount(rows.length);
 }
 
 function renderInventoryCount(count) {
@@ -1274,10 +1271,39 @@ function setQueueEntryOpen(open) {
   else queueEntryToggleBtn.focus();
 }
 
-function confirmExpiredTrayAdd(lot) {
+function bindTrayTransfer(button, source, destination) {
+  button?.addEventListener('click', async () => {
+    const rows = source.getSelectedRows();
+    if (!rows.length || button.dataset.moving) return;
+    button.dataset.moving = 'true';
+    try {
+      const expired =
+        destination === 'Immunization' &&
+        rows.some(globalThis.VaxLinkExpiryDate.isExpiredVaccine);
+      if (
+        expired &&
+        !(await confirmExpiredTrayAdd(
+          'Expired lots move for reference. VaxLink will block chart entry.'
+        ))
+      )
+        return;
+      const count = await source.transfer(
+        rows.map(({ id }) => id),
+        expired
+      );
+      writeOutput(`Moved ${count} scans to ${destination}.`, 'success');
+    } catch (error) {
+      writeOutput(escapeHtml(error.message), 'error');
+    } finally {
+      delete button.dataset.moving;
+    }
+  });
+}
+
+function confirmExpiredTrayAdd(message) {
   const dialog = document.getElementById('expiredTrayDialog');
-  document.getElementById('expiredTrayMessage').textContent =
-    `Lot ${lot} has expired. You can save it for reference. VaxLink will block chart entry.`;
+  if (dialog.open) return Promise.resolve(false);
+  document.getElementById('expiredTrayMessage').textContent = message;
   dialog.returnValue = '';
   return new Promise((resolve) => {
     dialog.addEventListener(
@@ -1319,7 +1345,13 @@ async function addManualScanToMultipleQueue() {
     const enriched = await enrichParsedData(baseData, 'multiple');
     const record = buildQueueRecord(enriched, rawBarcode, { chartDose: true });
     const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(record);
-    if (expired && !(await confirmExpiredTrayAdd(record.lot))) return;
+    if (
+      expired &&
+      !(await confirmExpiredTrayAdd(
+        `Lot ${record.lot} has expired. You can save it for reference. VaxLink will block chart entry.`
+      ))
+    )
+      return;
     await multipleInjectManager.add(record, { confirmExpired: expired });
     clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {

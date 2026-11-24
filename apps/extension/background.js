@@ -679,7 +679,13 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
     }
   }
 
-  rows.push(record);
+  // A slow lookup can finish after later captures. Keep the order of existing rows.
+  const capturedAt = Date.parse(record.scanned_at);
+  const laterIndex = rows.findIndex(
+    (row) => Date.parse(row?.scanned_at) > capturedAt
+  );
+  if (laterIndex < 0) rows.push(record);
+  else rows.splice(laterIndex, 0, record);
   await setStorage({ [storageKey]: rows });
   return {
     ...record,
@@ -796,6 +802,7 @@ function mutateQueue(
           'consume',
           'setDoseCount',
           'setDosePinned',
+          'reorder',
           ...DOSE_RESERVATION_OPERATIONS
         ].includes(operation) &&
         (typeof payload.id !== 'string' || !payload.id.trim())
@@ -816,6 +823,61 @@ function mutateQueue(
       }
       const stored = await getStorage([storageKey]);
       let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      if (operation === 'transfer') {
+        if (
+          !Array.isArray(payload.ids) ||
+          !payload.ids.length ||
+          payload.ids.some((id) => typeof id !== 'string' || !id.trim()) ||
+          new Set(payload.ids).size !== payload.ids.length
+        )
+          throw new Error('Choose the scans to move.');
+
+        const ids = new Set(payload.ids);
+        const moving = rows.filter((row) => ids.has(row?.id));
+        if (
+          moving.length !== ids.size ||
+          new Set(moving.map((row) => row.id)).size !== ids.size
+        )
+          throw new Error('The source tray changed. Choose the scans again.');
+        if (moving.some((row) => doseReservations(row).length))
+          throw new Error(
+            'Review the reserved dose on the original chart before moving it.'
+          );
+
+        const toImmunization = storageKey === INVENTORY_BATCH_KEY;
+        const destination = toImmunization
+          ? MULTIPLE_INJECT_QUEUE_KEY
+          : INVENTORY_BATCH_KEY;
+        const transferred = moving.map((row) => {
+          const moved = { ...row, id: crypto.randomUUID() };
+          if (!toImmunization) return moved;
+          if (typeof row.lot !== 'string' || !row.lot.trim())
+            throw new Error(
+              'A scan needs a lot number to move to Immunization.'
+            );
+          if (globalThis.VaxLinkExpiryDate.isExpiredVaccine(row)) {
+            if (payload.confirmExpired !== true)
+              throw new Error(
+                'Confirm before moving expired lots to Immunization.'
+              );
+            moved.reference_only = true;
+            moved.expiry_flag = 'expired';
+          }
+          return defaultChartDose(moved);
+        });
+
+        const destinationStored = await getStorage([destination]);
+        const destinationRows = Array.isArray(destinationStored[destination])
+          ? destinationStored[destination]
+          : [];
+        rows = rows.filter((row) => !ids.has(row?.id));
+        // Write both trays together while the scan writer is still held.
+        await setStorage({
+          [storageKey]: rows,
+          [destination]: [...destinationRows, ...transferred]
+        });
+        return { rows, moved: transferred.length };
+      }
       const index = rows.findIndex((row) => row?.id === payload.id);
       const current = rows[index];
       const reservations = doseReservations(current);
@@ -963,6 +1025,29 @@ function mutateQueue(
         rows = [];
       } else if (operation === 'remove') {
         rows = rows.filter((row) => row?.id !== payload.id);
+      } else if (operation === 'reorder') {
+        if (
+          typeof payload.targetId !== 'string' ||
+          !payload.targetId.trim() ||
+          payload.targetId === payload.id ||
+          typeof payload.after !== 'boolean'
+        )
+          throw new Error('Choose where to move the scan.');
+        const target = rows.findIndex((row) => row?.id === payload.targetId);
+        if (
+          index < 0 ||
+          target < 0 ||
+          rows.findLastIndex((row) => row?.id === payload.id) !== index ||
+          rows.findLastIndex((row) => row?.id === payload.targetId) !== target
+        )
+          throw new Error('The tray changed. Try the move again.');
+        rows = rows.slice();
+        const [moved] = rows.splice(index, 1);
+        rows.splice(
+          target - Number(index < target) + Number(payload.after),
+          0,
+          moved
+        );
       } else if (operation === 'update') {
         rows = rows.map((row) => {
           if (row?.id !== payload.id) return row;
@@ -4170,12 +4255,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'mutateQueue') {
     const popup = sender.url === chrome.runtime.getURL('popup.html');
     if (
-      ['setDoseCount', 'setDosePinned'].includes(request.operation) &&
+      ['setDoseCount', 'setDosePinned', 'reorder', 'transfer'].includes(
+        request.operation
+      ) &&
       !popup
     ) {
       sendResponse({
         success: false,
-        error: 'Dose changes require the popup.'
+        error: 'These tray changes require the popup.'
       });
       return false;
     }

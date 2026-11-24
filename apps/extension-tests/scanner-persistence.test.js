@@ -247,3 +247,21 @@ test('an expired scanner capture stays out of Immunization but Inventory can ret
     assert.equal(stock.raw_barcode, expired);
   }
 });
+test('the tray keeps capture order when a scan finishes processing later', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  await harness.captureScannerScan({
+    rawText: '10SECOND',
+    capturedAt: '2026-07-28T12:00:01Z'
+  });
+  await harness.captureScannerScan({
+    rawText: '10FIRST',
+    capturedAt: '2026-07-28T12:00:00Z'
+  });
+  assert.deepEqual(
+    Array.from(
+      harness.storageData.get('multiple_inject_queue_v1'),
+      (item) => item.lot
+    ),
+    ['FIRST', 'SECOND']
+  );
+});

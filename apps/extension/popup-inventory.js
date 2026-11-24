@@ -115,6 +115,8 @@ export class ScanQueueManager {
     summaryEl,
     listEl,
     clearButton,
+    transferButton = null,
+    onCount = () => {},
     exportButton = null,
     onUseRecord = null,
     onNotice = () => {},
@@ -129,6 +131,8 @@ export class ScanQueueManager {
     this.summaryEl = summaryEl;
     this.listEl = listEl;
     this.clearButton = clearButton;
+    this.transferButton = transferButton;
+    this.onCount = onCount;
     this.exportButton = exportButton;
     this.onUseRecord = typeof onUseRecord === 'function' ? onUseRecord : null;
     this.showUseAction = !!showUseAction;
@@ -142,26 +146,58 @@ export class ScanQueueManager {
         : defaultSummaryBuilder;
     this.exportFilenamePrefix = exportFilenamePrefix;
     this.rows = [];
+    this.selectedIds = new Set();
+    this.draggedId = '';
+    this.rowRevision = 0;
     this.activeUseId = '';
     this.handleStorageChanged = this.handleStorageChanged.bind(this);
     chrome.storage.onChanged.addListener(this.handleStorageChanged);
   }
 
   async load() {
+    const revision = this.rowRevision;
     const stored = await getLocalStorage([this.storageKey]);
-    const rows =
-      stored && Array.isArray(stored[this.storageKey])
-        ? stored[this.storageKey]
-        : [];
-    this.rows = rows.filter((row) => row && typeof row === 'object');
+    if (revision === this.rowRevision) this.setRows(stored?.[this.storageKey]);
+  }
+
+  setRows(rows) {
+    this.rowRevision += 1;
+    this.rows = Array.isArray(rows)
+      ? rows.filter((row) => row && typeof row === 'object')
+      : [];
+    for (const id of this.selectedIds)
+      if (!this.getById(id)) this.selectedIds.delete(id);
+    if (this.activeUseId && !this.getById(this.activeUseId))
+      this.activeUseId = '';
     this.render();
   }
 
-  async mutateRows(operation, payload = {}) {
+  async mutate(operation, payload) {
+    const revision = this.rowRevision;
     const result = await mutateQueue(this.storageKey, operation, payload);
-    this.rows = result.rows;
-    this.render();
-    return result.record;
+    // A later capture can already be visible when a mutation reply arrives.
+    if (revision === this.rowRevision) this.setRows(result.rows);
+    return result;
+  }
+
+  async mutateRows(operation, payload = {}) {
+    return (await this.mutate(operation, payload)).record;
+  }
+
+  getSelectedRows() {
+    return this.rows.filter(({ id }) => this.selectedIds.has(id));
+  }
+
+  async transfer(ids, confirmExpired) {
+    return (await this.mutate('transfer', { ids, confirmExpired })).moved;
+  }
+
+  async reorder(id, targetId, after) {
+    await this.mutateRows('reorder', { id, targetId, after });
+    // Restore the keyboard handle if the list was replaced by the save.
+    [...(this.listEl?.querySelectorAll('[data-reorder-id]') || [])]
+      .find((handle) => handle.dataset.reorderId === id)
+      ?.focus({ preventScroll: true });
   }
 
   async add(record, { confirmExpired } = {}) {
@@ -298,6 +334,7 @@ export class ScanQueueManager {
       .map((row, index) =>
         buildQueueItemMarkup(row, index, {
           isActive: row.id && row.id === this.activeUseId,
+          selected: this.selectedIds.has(row.id),
           showUseAction: this.showUseAction,
           useButtonLabel: this.useButtonLabel
         })
@@ -368,11 +405,63 @@ export class ScanQueueManager {
       }
     }
 
+    for (const input of this.listEl.querySelectorAll('[data-select-id]')) {
+      input.addEventListener('change', () => {
+        const id = input.dataset.selectId;
+        if (input.checked) this.selectedIds.add(id);
+        else this.selectedIds.delete(id);
+        this.updateControls();
+      });
+    }
+    for (const handle of this.listEl.querySelectorAll('[data-reorder-id]')) {
+      const id = handle.dataset.reorderId;
+      handle.addEventListener('dragstart', (event) => {
+        this.draggedId = id;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', id);
+      });
+      handle.addEventListener('dragend', () => {
+        this.draggedId = '';
+      });
+      handle.addEventListener('keydown', (event) => {
+        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+        event.preventDefault();
+        const after = event.key === 'ArrowDown';
+        const index = this.rows.findIndex((row) => row.id === id);
+        const target = this.rows[index + (after ? 1 : -1)];
+        if (index >= 0 && target?.id)
+          void this.reorder(id, target.id, after).catch((error) =>
+            this.onNotice(error.message)
+          );
+      });
+    }
+    for (const item of this.listEl.querySelectorAll('[data-tray-row-id]')) {
+      item.addEventListener('dragover', (event) => {
+        if (this.draggedId && this.draggedId !== item.dataset.trayRowId)
+          event.preventDefault();
+      });
+      item.addEventListener('drop', (event) => {
+        const id = this.draggedId;
+        this.draggedId = '';
+        const target = item.dataset.trayRowId;
+        if (!id || id === target) return;
+        event.preventDefault();
+        const bounds = item.getBoundingClientRect();
+        const after = event.clientY > bounds.top + bounds.height / 2;
+        void this.reorder(id, target, after).catch((error) =>
+          this.onNotice(error.message)
+        );
+      });
+    }
+
     this.updateControls();
   }
 
   updateControls() {
     const hasItems = this.rows.length > 0;
+    this.onCount(this.rows.length);
+    if (this.transferButton)
+      this.transferButton.disabled = this.selectedIds.size === 0;
     if (this.exportButton) {
       this.exportButton.disabled = !hasItems;
     }
@@ -385,17 +474,7 @@ export class ScanQueueManager {
     if (area !== 'local' || !(this.storageKey in changes)) {
       return;
     }
-    const nextRows = Array.isArray(changes[this.storageKey]?.newValue)
-      ? changes[this.storageKey].newValue
-      : [];
-    this.rows = nextRows.filter((row) => row && typeof row === 'object');
-    if (
-      this.activeUseId &&
-      !this.rows.some((row) => row.id === this.activeUseId)
-    ) {
-      this.activeUseId = '';
-    }
-    this.render();
+    this.setRows(changes[this.storageKey]?.newValue);
   }
 }
 
@@ -499,10 +578,18 @@ function buildQueueItemMarkup(row, index, options) {
       : '';
 
   return `
-    <div class="inventory-item${options.isActive ? ' active' : ''}">
+    <div class="inventory-item${options.isActive ? ' active' : ''}" data-tray-row-id="${id}">
       <div class="inventory-item-top">
         <div>
-          <div class="inventory-item-title">${title}</div>
+          <div class="inventory-item-title">
+            ${
+              id
+                ? `<input type="checkbox" data-select-id="${id}" aria-label="Select ${title}, lot ${lot}" ${options.selected ? 'checked' : ''}>
+            <button type="button" draggable="true" data-reorder-id="${id}" aria-label="Reorder ${title}, lot ${lot}. Drag or press up or down." title="Drag or use the up and down arrow keys">↕</button>`
+                : ''
+            }
+            ${title}
+          </div>
           <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}${row.reference_only ? ' | Reference only' : ''}</div>
         </div>
         <div class="inventory-item-actions">

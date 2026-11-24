@@ -356,3 +356,99 @@ test('an expired manual dose requires confirmation and remains reference only', 
   });
   assert.equal(store.get(QUEUE_KEY)[0].reference_only, true);
 });
+
+test('selection and reorder use stable IDs when a concurrent scan changes the displayed rows', async () => {
+  store.set(QUEUE_KEY, [row('a'), row('b'), row('c')]);
+  const manager = makeManager();
+  await manager.load();
+  manager.selectedIds.add('b');
+  manager.selectedIds.add('c');
+
+  const newer = [row('a'), row('b'), row('c'), row('scanner')];
+  store.set(QUEUE_KEY, newer);
+  manager.handleStorageChanged({ [QUEUE_KEY]: { newValue: newer } }, 'local');
+  assert.deepEqual(
+    manager.getSelectedRows().map(({ id }) => id),
+    ['b', 'c']
+  );
+
+  await manager.reorder('c', 'a', false);
+  assert.deepEqual(
+    Array.from(store.get(QUEUE_KEY), ({ id }) => id),
+    ['c', 'a', 'b', 'scanner']
+  );
+  assert.deepEqual(
+    manager.getSelectedRows().map(({ id }) => id),
+    ['c', 'b']
+  );
+});
+
+test('moving expired stock requires confirmation and preserves quantities and unrelated rows', async () => {
+  const inventory = 'inventory_scan_batch_v1';
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [inventory]: [
+        row('exp', {
+          barcode_expiry: '2000-11-23',
+          total_doses: 4,
+          remaining_doses: 3
+        }),
+        row('spare')
+      ],
+      [QUEUE_KEY]: [row('existing')]
+    }
+  });
+  const move = (ids, confirmExpired) =>
+    harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey: inventory,
+        operation: 'transfer',
+        payload: { ids, confirmExpired }
+      },
+      popupSender
+    );
+
+  assert.match((await move(['exp', 'gone'], true)).error, /changed/);
+  assert.match((await move(['exp'], false)).error, /Confirm/);
+  assert.equal(harness.storageData.get(inventory).length, 2);
+  assert.equal((await move(['exp'], true)).moved, 1);
+  assert.equal(harness.storageData.get(inventory)[0].id, 'spare');
+  const [existing, added] = harness.storageData.get(QUEUE_KEY);
+  assert.equal(existing.id, 'existing');
+  assert.notEqual(added.id, 'exp');
+  assert.equal(added.total_doses, 4);
+  assert.equal(added.remaining_doses, 3);
+  assert.equal(added.reference_only, true);
+});
+
+test('moving a selected set with a reserved dose preserves every source row', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [QUEUE_KEY]: [
+        row('allowed'),
+        row('reserved', {
+          dose_reservations: [
+            {
+              token: '4ee10f3c-e9df-4100-a10d-364c8dc83f0c',
+              tabId: 44,
+              documentId: 'current-chart'
+            }
+          ]
+        })
+      ]
+    }
+  });
+  const result = await harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'transfer',
+      payload: { ids: ['allowed', 'reserved'] }
+    },
+    popupSender
+  );
+  assert.match(result.error, /reserved dose/);
+  assert.equal(harness.storageData.get(QUEUE_KEY).length, 2);
+  assert.equal(harness.storageData.has('inventory_scan_batch_v1'), false);
+});

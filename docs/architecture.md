@@ -294,6 +294,14 @@ scan, a safe scan stays in the tray. Opening a chart never uses a previously
 saved row. Staff can add a barcode as text and choose **Use** on an exact
 saved vaccine.
 
+Select saved rows to move them between Immunization and Inventory. Drag a row's
+reorder handle or use its Up and Down arrow keys. Selection stays attached to
+row IDs when a scan arrives. Transfers preserve counts, get new row IDs and
+require confirmation for expired stock moving to Immunization for reference.
+The background writes both tray changes together and blocks transfer of a
+reserved dose. A scan that finishes lookup late can be inserted ahead of later
+captures without changing the order of existing rows.
+
 ## Pending scanner scans
 
 VaxLink saves a direct single-form scan before sending it once to its original
