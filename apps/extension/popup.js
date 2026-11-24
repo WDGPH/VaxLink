@@ -557,6 +557,18 @@ async function renderHeldScannerScans() {
       const row = document.createElement('div');
       const label = document.createElement('p');
       label.textContent = scan.capturedAt || 'Capture time unknown';
+      const review = document.createElement('p');
+      review.textContent =
+        {
+          unknown_agent: 'Agent could not be identified. Verify the vaccine.',
+          stale_chart:
+            'Refresh the original chart after checking unsaved work.',
+          inactive_chart: 'Check the original chart before entering this scan.',
+          lock_unavailable: 'VaxLink could not check the workstation lock.',
+          lock_unknown: 'The workstation lock status was unknown.'
+        }[scan.reviewState] ||
+        'Check the original chart before entering this scan.';
+
       const barcode = document.createElement('textarea');
       barcode.readOnly = true;
       barcode.value = scan.rawText || '';
@@ -582,7 +594,7 @@ async function renderHeldScannerScans() {
           discard.disabled = false;
         }
       });
-      row.append(label, barcode, discard);
+      row.append(label, review, barcode, discard);
       list.append(row);
     }
   } catch (error) {

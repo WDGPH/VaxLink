@@ -257,6 +257,50 @@ function isScannerDeliveryContextCurrent(token, kind, explicit = false) {
   return !!current;
 }
 
+function isScannerWorkerSender(sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    !sender.tab &&
+    (!sender.url || sender.url === chrome.runtime.getURL('background.js'))
+  );
+}
+
+async function checkPanoramaScannerRoute(delivery, verified = false) {
+  try {
+    const payload = verified
+      ? { scannerRoute: delivery.scannerRoute }
+      : delivery;
+    const result = await chrome.runtime.sendMessage({
+      action: 'checkScannerChart',
+      ...payload
+    });
+    return result?.success === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function reportPanoramaScannerVerification(owner, verified) {
+  if (
+    !owner?.scannerDelivery ||
+    owner.scannerVerificationSent ||
+    (!verified && owner.detailOutcome === 'verifying')
+  )
+    return false;
+  owner.scannerVerificationSent = true;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      action: 'verifyScannerChartFields',
+      ...owner.scannerDelivery,
+      verified
+    });
+    return verified && result?.success === true;
+  } catch (_) {
+    // The saved inbox row remains for staff to check.
+    return false;
+  }
+}
+
 function setupMessageListener() {
   if (window.__vaxlinkMessageListenerInitialized) {
     return;
@@ -328,7 +372,7 @@ function setupMessageListener() {
       return false;
     }
     if (request.action === 'vaxlinkScanCaptured') {
-      if (sender.id !== chrome.runtime.id) return false;
+      if (!isScannerWorkerSender(sender)) return false;
       if (window.top !== window.self) {
         return false;
       }
@@ -337,7 +381,9 @@ function setupMessageListener() {
         return true;
       }
       if (
-        !Number.isFinite(request.startBy) ||
+        !Number.isFinite(request.scannerRoute?.startBy) ||
+        typeof request.scan?.captureId !== 'string' ||
+        activeWorkflowMode !== 'single' ||
         !isScannerDeliveryContextCurrent(request.contextToken)
       ) {
         sendResponse({
@@ -351,7 +397,12 @@ function setupMessageListener() {
         handleHandsFreeScan(
           request.scan?.rawText || '',
           request.scan?.source || 'scanner-channel',
-          request.startBy
+          request.scannerRoute.startBy,
+          {
+            captureId: request.scan.captureId,
+            contextToken: request.contextToken,
+            scannerRoute: request.scannerRoute
+          }
         )
       )
         .then((result) => {
@@ -362,6 +413,7 @@ function setupMessageListener() {
             pending: !!result?.pending,
             status: result?.status || (result?.success ? 'success' : 'failed'),
             error: result?.error || '',
+            chartNeedsReview: result?.chartNeedsReview === true,
             queued: !!result?.queued,
             duplicate_ignored: !!result?.duplicate_ignored,
             command_handled: !!result?.command_handled,
@@ -625,7 +677,8 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
 async function handleHandsFreeScan(
   scanValue,
   source = 'unknown',
-  startBy = null
+  startBy = null,
+  scannerDelivery = null
 ) {
   if (!isHandsFreeSupportedPage()) {
     return {
@@ -643,6 +696,15 @@ async function handleHandsFreeScan(
       success: false,
       status: 'empty_scan',
       error: 'Scan event missing raw text'
+    };
+  }
+
+  if (startBy !== null && (!isPanoramaChartActive() || Date.now() >= startBy)) {
+    return {
+      accepted: false,
+      success: false,
+      status: 'cancelled',
+      error: 'Autofill stopped: chart lost focus or entry timed out'
     };
   }
 
@@ -666,15 +728,6 @@ async function handleHandsFreeScan(
         error: entryBlocked
       };
     }
-  }
-
-  if (startBy !== null && (!isPanoramaChartActive() || Date.now() >= startBy)) {
-    return {
-      accepted: false,
-      success: false,
-      status: 'cancelled',
-      error: 'Autofill stopped: chart lost focus or entry timed out'
-    };
   }
 
   const scanCapturedAt = new Date().toISOString();
@@ -703,7 +756,7 @@ async function handleHandsFreeScan(
     lastHandledScanAt = now;
   }
   const fillData =
-    activeWorkflowMode === 'single'
+    activeWorkflowMode === 'single' && !scannerDelivery
       ? beginPanoramaAutofill({}, true, { automatic: true, startBy })
       : null;
 
@@ -805,7 +858,12 @@ async function handleHandsFreeScan(
     });
   }
 
-  if (fillData && !isPanoramaAutofillCurrent(fillData)) {
+  if (
+    (fillData && !isPanoramaAutofillCurrent(fillData)) ||
+    (scannerDelivery &&
+      (!isPanoramaChartActive() ||
+        !isScannerDeliveryContextCurrent(scannerDelivery.contextToken)))
+  ) {
     return {
       accepted: false,
       success: false,
@@ -914,6 +972,38 @@ async function handleHandsFreeScan(
     }
   }
 
+  if (scannerDelivery) {
+    if (parsed.lot && !getPanoramaAgentCandidates(parsed).length) {
+      const warning =
+        'VaxLink could not identify the Agent for this lot. The scan was held. Verify the vaccine before entering it.';
+      warnPanoramaEntryBlocked(warning);
+      return {
+        accepted: false,
+        success: false,
+        status: 'unknown_agent',
+        error: warning
+      };
+    }
+    if (
+      !(await checkPanoramaScannerRoute(scannerDelivery)) ||
+      !isPanoramaChartActive() ||
+      Date.now() >= startBy ||
+      !isScannerDeliveryContextCurrent(scannerDelivery.contextToken)
+    ) {
+      return {
+        accepted: false,
+        success: false,
+        status: 'cancelled',
+        error: 'Chart context changed. The scan was held.'
+      };
+    }
+    const owned = beginPanoramaAutofill(parsed, true, {
+      automatic: true,
+      startBy
+    });
+    owned._vaxlinkOwner.scannerDelivery = scannerDelivery;
+  }
+
   parsed._vaxlinkResultSource = source;
   logAnalyticsEvent('autofill_attempt', {
     workflow: activeWorkflowMode,
@@ -950,6 +1040,8 @@ async function handleHandsFreeScan(
     accepted: true,
     success,
     pending,
+    chartNeedsReview:
+      !success && !pending && parsed._vaxlinkOwner?.writeAttempted === true,
     status: autofillResult?.status || 'failed',
     error:
       autofillResult?.error ||
@@ -2830,11 +2922,15 @@ function updatePanoramaWorkflowMode(mode) {
 function cancelPanoramaAutofill({ focusOnly = false } = {}) {
   panoramaContextGeneration += 1;
   if (!focusOnly) trayUseContextGeneration += 1;
-  if (panoramaAutofillOwner) {
-    panoramaAutofillOwner.cancelled = true;
-    void stopTrayDose(panoramaAutofillOwner);
-  }
+  stopPanoramaFillOwner(panoramaAutofillOwner);
   if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
+}
+
+function stopPanoramaFillOwner(owner) {
+  if (!owner) return;
+  owner.cancelled = true;
+  void stopTrayDose(owner);
+  void reportPanoramaScannerVerification(owner, false);
 }
 
 function handlePanoramaAutofillUserInteraction(event) {
@@ -2952,6 +3048,7 @@ function schedulePanoramaLotOrTradeSelection(
   let timerAt = Infinity;
   let observer;
   let stopped = false;
+  let checkingRoute = false;
   let triedManualFilter = false;
   let lastFundingChangeAt = -Infinity;
   let usableMiss;
@@ -2971,10 +3068,7 @@ function schedulePanoramaLotOrTradeSelection(
 
   const stopUnverified = () => {
     const owner = data._vaxlinkOwner;
-    if (owner?.trayDose) {
-      owner.cancelled = true;
-      void stopTrayDose(owner);
-    }
+    if (owner?.trayDose || owner?.scannerDelivery) stopPanoramaFillOwner(owner);
     stop();
   };
 
@@ -3146,7 +3240,15 @@ function schedulePanoramaLotOrTradeSelection(
     }
   };
 
-  const runDeferredPass = () => {
+  const runDeferredPass = async () => {
+    const owner = data._vaxlinkOwner;
+    if (!isPanoramaAutofillCurrent(data)) return;
+    if (
+      owner.scannerDelivery &&
+      (owner.detailOutcome !== 'verified' ||
+        !(await checkPanoramaScannerRoute(owner.scannerDelivery, true)))
+    )
+      return;
     if (globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return;
     try {
       runPanoramaAutofill(data, () => fillPanoramaDeferredDetailFields(data));
@@ -3155,7 +3257,7 @@ function schedulePanoramaLotOrTradeSelection(
     }
   };
   function armNextCheck() {
-    if (stopped) return;
+    if (stopped || checkingRoute) return;
     const earliest = Math.max(firstCheckAt, lastCheckAt + minCheckGapMs);
     const requested = domHint
       ? earliest
@@ -3170,12 +3272,23 @@ function schedulePanoramaLotOrTradeSelection(
     timer = setTimeout(check, Math.max(0, desiredAt - performance.now()));
   }
 
-  function check() {
+  async function check() {
     const scheduledAt = timerAt;
     timerAt = Infinity;
     if (stopped || !isPanoramaAutofillCurrent(data)) {
       stop();
       return;
+    }
+    const owner = data._vaxlinkOwner;
+    if (owner.scannerDelivery) {
+      checkingRoute = true;
+      const active = await checkPanoramaScannerRoute(owner.scannerDelivery);
+      checkingRoute = false;
+      if (stopped) return;
+      if (!active || !isPanoramaAutofillCurrent(data)) {
+        stopUnverified();
+        return;
+      }
     }
     const now = performance.now();
     if (now >= deadline) {
@@ -3891,13 +4004,18 @@ async function finalizeDeferredPanoramaAutofill(data) {
   owner.detailOutcome = 'verifying';
 
   const queueContext = data._vaxlinkQueueContext;
+  let verified = false;
   let consumed;
-  try {
-    consumed = await consumeQueueRecordAfterDeferredAutofill(queueContext);
-  } catch (error) {
-    console.warn('VaxLink deferred queue finalize failed:', error);
+  if (owner.scannerDelivery) {
+    verified = await reportPanoramaScannerVerification(owner, true);
+  } else {
+    try {
+      consumed = await consumeQueueRecordAfterDeferredAutofill(queueContext);
+      verified = !queueContext || !!consumed;
+    } catch (error) {
+      console.warn('VaxLink deferred queue finalize failed:', error);
+    }
   }
-  const verified = !queueContext || !!consumed;
   owner.detailOutcome = verified ? 'verified' : 'failed';
   logDeferredAutofillResult(data, verified, consumed?.record);
   if (owner.detailOutcome === 'failed') {
@@ -4257,7 +4375,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           toastRoutineSlot.innerHTML = '';
           if (blockIneligibleChartUse(data)) {
             recordDeferredAutofillResult(data, false);
-            void stopTrayDose(data._vaxlinkOwner);
+            stopPanoramaFillOwner(data._vaxlinkOwner);
             return;
           }
           logAnalyticsEvent('funding_choice_made', { workflow });
@@ -4266,7 +4384,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           const result = autoFillPanorama(next);
           if (!isAutofillPending(result) && isPanoramaAutofillCurrent(next)) {
             recordDeferredAutofillResult(next, false);
-            void stopTrayDose(next._vaxlinkOwner);
+            stopPanoramaFillOwner(next._vaxlinkOwner);
           }
         });
       });

@@ -208,7 +208,7 @@ without waiting for Local Activity counts.
 | ------------------------------------------- | --------------- | --------------------------------------------- |
 | `multiple_inject_queue_v1`                  | background      | Multiple Immunizations queue rows             |
 | `inventory_scan_batch_v1`                   | background      | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`             | background      | Single scans held for later chart delivery    |
+| `vaxlink_pending_scan_inbox_v1`             | background      | Scans held for staff review                   |
 | `vaxlink_scanner_capture_error_v1`          | background      | Capture warning awaiting acknowledgement      |
 | `vaxlink_scanner_status_snapshot_v1`        | background      | Last saved scanner status and capture history |
 | `nvc_bundle_override`                       | background      | Cached NVC catalogue                          |
@@ -277,18 +277,21 @@ without an open chart. Staff review vaccine details before saving in Panorama.
 
 ## Pending scanner scans
 
-Single Immunization saves each scan before attempting delivery once to the captured
-active tab and observed form context. Navigation, form replacement, a newer
-fill, or manual takeover invalidates that context. This detects observable
-changes; it cannot identify a patient change that preserves the same URL and
-form without a visible context change.
+Single Immunization saves each scan before sending it once to its original
+foreground chart. The worker checks the chart build, document context, focus,
+and workstation lock again after waits. The current worker instance and the
+original chart document identify the same delivery.
 
-A successful acknowledgement means the scan was handled or autofill started.
-It does not prove that later field updates completed or that Panorama saved a
-clinical record. Failed or uncertain deliveries remain held and never replay
-automatically, including after unlock. The popup lists held barcodes and capture
-times for deliberate copying into manual input or discard. Staff must check the
-chart first because an uncertain scan may already have populated fields.
+A pending acknowledgement means the chart started handling the scan. VaxLink
+keeps the saved barcode until the same chart verifies its fields. A timeout,
+stale build, lost focus, unavailable lock check, or unverified result leaves a
+held scan for staff review. If VaxLink cannot identify the Agent for a scanned
+lot, it holds the barcode before any field interaction and shows a warning.
+
+Staff can check the original chart and copy or discard a held barcode in the
+popup. Held scans never replay automatically, including after unlock. Field
+verification reflects what the browser observed. Staff still verify and save
+the record in Panorama.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan

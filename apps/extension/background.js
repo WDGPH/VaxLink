@@ -81,6 +81,10 @@ const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
+let scannerChartFocusGeneration = 0;
+const scannerRoutingEpoch = buildAnalyticsId();
+const activeScannerDeliveries = new Map();
+const SCANNER_CHART_RESPONSE_MS = 10000;
 let scannerStatusWriteQueue = Promise.resolve();
 let scannerControlQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
@@ -1112,17 +1116,21 @@ async function showScannerPairingWindow() {
 }
 
 function queryMachineIdleState() {
-  if (!chrome.idle || typeof chrome.idle.queryState !== 'function') {
-    return Promise.resolve('active');
-  }
   return new Promise((resolve) => {
-    chrome.idle.queryState(15, (state) => {
-      if (chrome.runtime.lastError) {
-        resolve('active');
-        return;
-      }
-      resolve(normalizeMachineIdleState(state));
-    });
+    if (!chrome.idle?.queryState) return resolve('unavailable');
+    const timer = setTimeout(() => resolve('unavailable'), 1000);
+    try {
+      chrome.idle.queryState(15, (state) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError) return resolve('unavailable');
+        resolve(
+          ['active', 'idle', 'locked'].includes(state) ? state : 'unknown'
+        );
+      });
+    } catch (_) {
+      clearTimeout(timer);
+      resolve('unavailable');
+    }
   });
 }
 
@@ -1167,8 +1175,14 @@ async function updateScannerLockState(state) {
 }
 
 function initializeScannerLockMonitoring() {
+  const invalidateChartRoute = () => {
+    scannerChartFocusGeneration += 1;
+  };
+  chrome.tabs.onActivated?.addListener(invalidateChartRoute);
+  chrome.windows?.onFocusChanged?.addListener(invalidateChartRoute);
   if (chrome.idle?.onStateChanged) {
     chrome.idle.onStateChanged.addListener((state) => {
+      if (state === 'locked') invalidateChartRoute();
       void updateScannerLockState(state).catch((error) => {
         console.warn('Could not update scanner lock state:', error);
       });
@@ -1178,7 +1192,10 @@ function initializeScannerLockMonitoring() {
 
 function synchronizeScannerLockState() {
   void queryMachineIdleState()
-    .then(updateScannerLockState)
+    .then((state) => {
+      if (['active', 'idle', 'locked'].includes(state))
+        return updateScannerLockState(state);
+    })
     .catch((error) =>
       console.warn('Could not initialize scanner lock state:', error)
     );
@@ -1206,6 +1223,59 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
+async function getFocusedScannerTab() {
+  try {
+    const window = await chrome.windows.getLastFocused({ populate: true });
+    if (!window.focused || window.state === 'minimized') return null;
+    return (
+      window.tabs?.find((tab) => tab.active && tabMayBeSupportedChart(tab)) ||
+      null
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+function scannerRouteMatches(route) {
+  return (
+    route?.epoch === scannerRoutingEpoch &&
+    route.generation === scannerChartFocusGeneration
+  );
+}
+
+async function getActiveScannerChartRoute(tabId, route) {
+  const snapshot = {
+    epoch: scannerRoutingEpoch,
+    generation: scannerChartFocusGeneration
+  };
+  const [idle, tab] = await Promise.all([
+    queryMachineIdleState(),
+    getFocusedScannerTab()
+  ]);
+  if (idle === 'unknown' || idle === 'unavailable')
+    return {
+      success: false,
+      reason: idle === 'unavailable' ? 'lock_unavailable' : 'lock_unknown'
+    };
+  if (
+    idle === 'locked' ||
+    tab?.id !== tabId ||
+    !scannerRouteMatches(snapshot) ||
+    (route && !scannerRouteMatches(route))
+  )
+    return { success: false, reason: 'inactive_chart' };
+  return { success: true, scannerRoute: snapshot };
+}
+
+function matchesScannerChartBuild(build) {
+  return (
+    !!build &&
+    ['version', 'versionName', 'name', 'fingerprint'].every(
+      (key) => (build[key] || '') === (workstationBuildAtLoad[key] || '')
+    )
+  );
+}
+
 function getScannerDestinationContext(tabId) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), 1000);
@@ -1213,57 +1283,31 @@ function getScannerDestinationContext(tabId) {
       tabId,
       { action: 'getPanoramaIntegration' },
       { frameId: 0 },
-      (response) => {
+      (reply) => {
         clearTimeout(timer);
-        resolve(
-          !chrome.runtime.lastError &&
-            response?.supported === true &&
-            typeof response.contextToken === 'string'
-            ? response.contextToken
-            : null
-        );
+        if (chrome.runtime.lastError || reply?.supported !== true)
+          return resolve(null);
+        const contextToken =
+          typeof reply.contextToken === 'string' ? reply.contextToken : null;
+        resolve({
+          contextToken,
+          ready: !!contextToken && reply.ready === true,
+          stale: !matchesScannerChartBuild(reply.buildAtLoad),
+          formContext: reply.formContext
+        });
       }
     );
   });
 }
 
-function tabAcceptedScannerScan(response) {
-  return (
-    response?.accepted === true &&
-    (response.success === true ||
-      response.pending === true ||
-      response.duplicate_ignored === true ||
-      response.command_handled === true)
-  );
-}
-
-function sendScanToTab(tabId, scan, contextToken) {
-  return new Promise((resolve, reject) => {
-    // The chart and worker share the deadline so a late lookup cannot start
-    // writing after the worker has already held the scan for review.
-    const waitMs = 10000;
-    const startBy = Date.now() + waitMs;
-    const timer = setTimeout(
-      () => reject(new Error('Chart acknowledgement timed out')),
-      waitMs
-    );
-    chrome.tabs.sendMessage(
-      tabId,
-      { action: 'vaxlinkScanCaptured', scan, contextToken, startBy },
-      { frameId: 0 },
-      (response) => {
-        clearTimeout(timer);
-        if (chrome.runtime.lastError || !tabAcceptedScannerScan(response)) {
-          reject(
-            new Error(
-              chrome.runtime.lastError?.message ||
-                response?.error ||
-                'Chart did not accept scan'
-            )
-          );
-        } else resolve(response);
-      }
-    );
+function sendScanToTab(tabId, message) {
+  return new Promise((resolve) => {
+    // Resolve once. A late reply cannot replace an uncertain outcome.
+    const timer = setTimeout(() => resolve(null), SCANNER_CHART_RESPONSE_MS);
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
+      clearTimeout(timer);
+      resolve(chrome.runtime.lastError ? null : response);
+    });
   });
 }
 
@@ -1529,6 +1573,7 @@ async function getHeldScannerScans() {
 }
 
 function discardHeldScannerScan(scan) {
+  activeScannerDeliveries.delete(scan?.captureId);
   return mutatePendingInbox(async () => {
     const rows = await getHeldScannerScans();
     // New captures have unique IDs. Legacy rows stay held; discard only one
@@ -1545,18 +1590,93 @@ function discardHeldScannerScan(scan) {
   });
 }
 
+function updateScannerDelivery(delivery, reviewState) {
+  return mutatePendingInbox(async () => {
+    const rows = [...(await getHeldScannerScans())];
+    const index = rows.findIndex(
+      (row) =>
+        row.captureId === delivery.captureId &&
+        row.intendedTabId === delivery.intendedTabId &&
+        row.contextToken === delivery.contextToken &&
+        row.reviewState === 'checking_chart'
+    );
+    if (index < 0) return false;
+    if (
+      reviewState === 'verified' &&
+      delivery.scannerRoute &&
+      !scannerRouteMatches(delivery.scannerRoute)
+    )
+      return false;
+    if (reviewState === 'verified') rows.splice(index, 1);
+    else rows[index] = { ...rows[index], reviewState };
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: rows });
+    return true;
+  });
+}
+
+async function checkScannerDelivery(request, sender) {
+  const delivery = activeScannerDeliveries.get(request.captureId);
+  if (
+    !delivery ||
+    delivery.intendedTabId !== sender.tab.id ||
+    delivery.contextToken !== request.contextToken ||
+    delivery.scannerRoute.epoch !== request.scannerRoute?.epoch ||
+    delivery.scannerRoute.generation !== request.scannerRoute?.generation ||
+    delivery.scannerRoute.startBy !== request.scannerRoute?.startBy ||
+    typeof sender.documentId !== 'string' ||
+    !sender.documentId ||
+    (delivery.documentId && delivery.documentId !== sender.documentId)
+  )
+    return { success: false };
+  const route = await getActiveScannerChartRoute(
+    sender.tab.id,
+    delivery.scannerRoute
+  );
+  if (
+    activeScannerDeliveries.get(request.captureId) !== delivery ||
+    (delivery.documentId && delivery.documentId !== sender.documentId)
+  )
+    return { success: false };
+  if (!route.success) {
+    activeScannerDeliveries.delete(request.captureId);
+    await updateScannerDelivery(delivery, route.reason).catch(() => {});
+    return route;
+  }
+  delivery.documentId = sender.documentId;
+  return { success: true, delivery };
+}
+
+async function verifyScannerChartFields(request, sender) {
+  const delivery = activeScannerDeliveries.get(request.captureId);
+  // Verification can arrive before the original tab response reaches the worker.
+  const reply = await delivery?.reply;
+  if (reply?.accepted !== true || reply.pending !== true) return false;
+  const check = await checkScannerDelivery(request, sender);
+  if (!check.success || check.delivery !== delivery) return false;
+  activeScannerDeliveries.delete(request.captureId);
+  return updateScannerDelivery(
+    delivery,
+    request.verified ? 'verified' : 'check_chart'
+  );
+}
+
 async function routeScanToActiveSupportedTab(rawScan) {
   const scan = {
     ...normalizeScanEvent(rawScan),
     captureId: buildAnalyticsId()
   };
   // Pin the destination before storage waits; focus changes never redirect it.
-  const activeTabs = await queryTabs({ active: true, currentWindow: true });
-  const destination = activeTabs.find(tabMayBeSupportedChart);
-  const contextPromise = destination
-    ? getScannerDestinationContext(destination.id)
-    : Promise.resolve(null);
-  const idleState = await queryMachineIdleState();
+  const scannerRoute = {
+    epoch: scannerRoutingEpoch,
+    generation: scannerChartFocusGeneration
+  };
+  const idlePromise = queryMachineIdleState();
+  const destination = await getFocusedScannerTab();
+  const contextPromise =
+    destination && scannerRouteMatches(scannerRoute)
+      ? getScannerDestinationContext(destination.id)
+      : Promise.resolve(null);
+  const idleState = await idlePromise;
   const storedWorkflow = await getStorage([
     WORKFLOW_MODE_KEY,
     LEGACY_POPUP_MODE_KEY,
@@ -1564,7 +1684,8 @@ async function routeScanToActiveSupportedTab(rawScan) {
     LEGACY_HANDS_FREE_KEY
   ]);
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
-  const contextToken = await contextPromise;
+  const chart = await contextPromise;
+  const contextToken = chart?.contextToken || null;
 
   if (shouldQueueScannerScan(idleState)) {
     const lockSession = await beginLockedScannerSession();
@@ -1635,7 +1756,13 @@ async function routeScanToActiveSupportedTab(rawScan) {
       workflowMode
     );
     if (workflowQueueResult.rejection) {
-      if (destination && contextToken) {
+      if (
+        destination &&
+        contextToken &&
+        chart.ready &&
+        !chart.stale &&
+        (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
+      ) {
         chrome.tabs.sendMessage(
           destination.id,
           {
@@ -1666,21 +1793,84 @@ async function routeScanToActiveSupportedTab(rawScan) {
     };
   }
 
+  let reviewState = 'checking_chart';
+  if (idleState === 'unavailable') reviewState = 'lock_unavailable';
+  else if (idleState === 'unknown') reviewState = 'lock_unknown';
+  else if (chart?.stale) reviewState = 'stale_chart';
+  else if (!chart?.ready) reviewState = 'inactive_chart';
   const held = {
     ...scan,
     intendedTabId: destination?.id ?? null,
-    contextToken
+    contextToken,
+    reviewState
   };
   const pendingCount = await enqueuePendingScan(held);
-  // Messaging must not occupy the inbox writer: other captures and deliberate
-  // discards can proceed while this one waits for its answer.
-  if (destination && contextToken) {
-    try {
-      const response = await sendScanToTab(destination.id, scan, contextToken);
-      await discardHeldScannerScan(held);
-      return { routed: true, queued: false, tabId: destination.id, response };
-    } catch (_) {
-      // The chart may already contain values. Retain the scan without replay.
+  if (reviewState === 'checking_chart') {
+    const active = await getActiveScannerChartRoute(
+      destination.id,
+      scannerRoute
+    );
+    if (!active.success) {
+      await updateScannerDelivery(held, active.reason);
+    } else {
+      const route = {
+        ...scannerRoute,
+        startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+      };
+      const delivery = {
+        captureId: held.captureId,
+        intendedTabId: destination.id,
+        contextToken,
+        scannerRoute: route
+      };
+      activeScannerDeliveries.set(held.captureId, delivery);
+      // Messaging must not occupy the inbox writer while a chart responds.
+      try {
+        delivery.reply = sendScanToTab(destination.id, {
+          action: 'vaxlinkScanCaptured',
+          scan,
+          contextToken,
+          scannerRoute: route
+        });
+        const response = await delivery.reply;
+        if (
+          response?.accepted === true &&
+          response.pending === true &&
+          delivery.documentId
+        ) {
+          return {
+            routed: true,
+            queued: true,
+            tabId: destination.id,
+            response
+          };
+        }
+        activeScannerDeliveries.delete(held.captureId);
+        const noWrite =
+          response?.accepted === true &&
+          (response.command_handled === true ||
+            response.duplicate_ignored === true ||
+            ['parse_error', 'missing_lot', 'expired'].includes(
+              response.status
+            ));
+        if (noWrite && (await updateScannerDelivery(delivery, 'verified')))
+          return {
+            routed: true,
+            queued: false,
+            tabId: destination.id,
+            response
+          };
+        const reason =
+          response?.status === 'unknown_agent'
+            ? 'unknown_agent'
+            : response?.accepted === false && !response.chartNeedsReview
+              ? 'inactive_chart'
+              : 'check_chart';
+        await updateScannerDelivery(held, reason);
+      } catch (_) {
+        activeScannerDeliveries.delete(held.captureId);
+        await updateScannerDelivery(held, 'check_chart').catch(() => {});
+      }
     }
   }
   return {
@@ -3683,14 +3873,21 @@ async function getWorkstationHealth(tabId) {
   return result;
 }
 
-function canChangeQueue(sender) {
-  if (sender.id !== chrome.runtime.id) return false;
-  if (sender.url === chrome.runtime.getURL('popup.html')) return true;
+function isChartMessageSender(sender) {
   return (
+    sender.id === chrome.runtime.id &&
     sender.frameId === 0 &&
     Number.isInteger(sender.tab?.id) &&
     isSupportedChartUrl(sender.url) &&
     (!sender.tab.url || isSupportedChartUrl(sender.tab.url))
+  );
+}
+
+function canChangeQueue(sender) {
+  return (
+    isChartMessageSender(sender) ||
+    (sender.id === chrome.runtime.id &&
+      sender.url === chrome.runtime.getURL('popup.html'))
   );
 }
 
@@ -3977,6 +4174,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           error: error?.message || 'Queue append failed'
         })
       );
+    return true;
+  }
+
+  if (
+    request.action === 'checkScannerChart' ||
+    request.action === 'verifyScannerChartFields'
+  ) {
+    if (!isChartMessageSender(sender)) {
+      sendResponse({ success: false });
+      return false;
+    }
+    if (request.action === 'verifyScannerChartFields') {
+      if (typeof request.verified !== 'boolean') {
+        sendResponse({ success: false });
+        return false;
+      }
+      verifyScannerChartFields(request, sender).then(
+        (success) => sendResponse({ success }),
+        () => sendResponse({ success: false })
+      );
+    } else {
+      const check = request.captureId
+        ? checkScannerDelivery(request, sender).then(({ success, reason }) => ({
+            success,
+            reason
+          }))
+        : getActiveScannerChartRoute(sender.tab.id, request.scannerRoute);
+      check.then(sendResponse, () => sendResponse({ success: false }));
+    }
     return true;
   }
 

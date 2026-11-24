@@ -102,7 +102,7 @@ function fixture() {
       assert.ok(callback, 'expected a pending check');
       state.timers = state.timers.filter((timer) => timer !== callback);
       state.now = callback.at;
-      callback();
+      return callback();
     },
     setMode: context.updatePanoramaWorkflowMode
   };
@@ -304,6 +304,63 @@ test('late corrective passes do not write after manual takeover', () => {
 });
 
 // The form can change before an automatic observer has started its next fill.
+test('a scanner receipt claims one outcome and late repair checks its foreground route', async () => {
+  const f = fixture();
+  const messages = [];
+  const outcomes = [];
+  let acknowledge;
+  let started;
+  const receiptStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  let routeActive = true;
+  f.context.showVaxlinkToast = () => {};
+  f.context.logAnalyticsEvent = (event, values) => {
+    if (event === 'autofill_result') outcomes.push(values.success);
+  };
+  f.context.chrome.runtime.sendMessage = async (message) => {
+    messages.push(message);
+    if (message.action === 'verifyScannerChartFields') {
+      started();
+      return new Promise((resolve) => {
+        acknowledge = resolve;
+      });
+    }
+    return { success: routeActive };
+  };
+  const fill = f.beginPanoramaAutofill({});
+  fill._vaxlinkOwner.scannerDelivery = {
+    captureId: 'scanner-capture',
+    contextToken: 'owned-form',
+    scannerRoute: { epoch: 'epoch', generation: 1, startBy: 5000 }
+  };
+  f.state.resolved = true;
+  f.schedulePanoramaLotOrTradeSelection(fill, 0, { finalizeOnResolved: true });
+  await f.runTimer();
+  await f.runTimer();
+  await f.runTimer();
+  await receiptStarted;
+  await f.context.finalizeDeferredPanoramaAutofill({ ...fill });
+  assert.equal(
+    messages.filter(({ action }) => action === 'verifyScannerChartFields')
+      .length,
+    1
+  );
+  acknowledge({ success: true });
+  await new Promise(setImmediate);
+  assert.deepEqual(outcomes, [true]);
+
+  await f.runTimer();
+  assert.equal(f.state.fills, 1);
+  const late = messages.at(-1);
+  assert.equal(late.action, 'checkScannerChart');
+  assert.equal(late.captureId, undefined);
+  routeActive = false;
+  await f.runTimer();
+  assert.equal(f.state.fills, 1);
+  assert.deepEqual(outcomes, [true]);
+});
+
 test('manual takeover applies to a replacement form and before the first fill', () => {
   for (const oldOwner of [false, true]) {
     const f = fixture();

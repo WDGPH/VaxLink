@@ -269,6 +269,8 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   const sessionData = options.sessionStorage || new Map();
   const tabRemovedListeners = [];
+  const tabActivatedListeners = [];
+  const windowFocusListeners = [];
   const changedListeners = [];
   const messageListeners = [];
   const startupListeners = [];
@@ -323,12 +325,30 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     idle: {
       queryState(_intervalSeconds, callback) {
-        queueMicrotask(() => callback(idleState));
+        queueMicrotask(() => {
+          if (options.idleError)
+            chrome.runtime.lastError = { message: options.idleError };
+          try {
+            callback(idleState);
+          } finally {
+            chrome.runtime.lastError = null;
+          }
+        });
       },
       onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
     },
-    windows: options.windows,
+    windows: {
+      async getLastFocused() {
+        return {
+          focused: options.windowFocused !== false,
+          tabs: options.tabs || []
+        };
+      },
+      onFocusChanged: { addListener: (fn) => windowFocusListeners.push(fn) },
+      ...options.windows
+    },
     tabs: {
+      onActivated: { addListener: (fn) => tabActivatedListeners.push(fn) },
       onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
       async get(tabId) {
         const tab = options.tabs?.find(({ id }) => id === tabId);
@@ -348,9 +368,22 @@ export function createBackgroundHarness(bundle, options = {}) {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };
-        if (options.delayTabMessage?.(tabId, message, () => callback(response)))
+        const reply =
+          message.action === 'getPanoramaIntegration' && response.contextToken
+            ? {
+                ready: true,
+                buildAtLoad: {
+                  name: chrome.runtime.getManifest().name,
+                  version: chrome.runtime.getManifest().version,
+                  versionName: chrome.runtime.getManifest().version_name,
+                  fingerprint: options.buildId || null
+                },
+                ...response
+              }
+            : response;
+        if (options.delayTabMessage?.(tabId, message, () => callback(reply)))
           return;
-        queueMicrotask(() => callback(response));
+        queueMicrotask(() => callback(reply));
       },
       ...options.tabsApi
     },
@@ -516,6 +549,10 @@ export function createBackgroundHarness(bundle, options = {}) {
     startup: () => startupListeners.forEach((fn) => fn()),
     install: () => installListeners.forEach((fn) => fn()),
     removeTab: (id) => tabRemovedListeners.forEach((fn) => fn(id)),
+    activateTab: (tabId) => {
+      for (const tab of options.tabs || []) tab.active = tab.id === tabId;
+      for (const listener of tabActivatedListeners) listener({ tabId });
+    },
     storageData,
     alarms,
     consoleLines,

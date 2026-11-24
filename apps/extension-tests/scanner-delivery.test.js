@@ -28,7 +28,8 @@ const options = (extra = {}) => ({
     supported: true,
     contextToken: 'document-1',
     accepted: true,
-    success: true
+    success: true,
+    command_handled: true
   },
   ...extra
 });
@@ -81,7 +82,7 @@ test('single capture is saved before delivery and binds delivery to the captured
   );
   assert.equal(h.tabMessages[1].tabId, tab.id);
   assert.equal(h.tabMessages[1].message.contextToken, 'document-1');
-  assert.ok(h.tabMessages[1].message.startBy > Date.now());
+  assert.ok(h.tabMessages[1].message.scannerRoute.startBy > Date.now());
   assert.equal(h.storageData.get(inbox).length, 0);
 });
 
@@ -221,33 +222,30 @@ test('failed initial persistence never sends the scan', async () => {
   );
 });
 
-test('delivery stays pinned to the tab active at capture', async () => {
-  const save = gate();
-  let held = false;
-  const tabs = [{ ...tab }, { ...tab, id: 45, active: false }];
-  const h = harness({
-    tabs,
-    delayStorageSet(values, resume) {
-      if (inbox in values && !held) {
+test('delivery stays held when the original tab loses focus, even if staff return', async () => {
+  for (const returnToOriginal of [false, true]) {
+    const save = gate();
+    let held = false;
+    const tabs = [{ ...tab }, { ...tab, id: 45, active: false }];
+    const h = harness({
+      tabs,
+      delayStorageSet(values, resume) {
+        if (!(inbox in values) || held) return false;
         held = true;
         save.hold(resume);
         return true;
       }
-      return false;
-    }
-  });
-  const result = capture(h, 'pinned');
-  await save.started;
-  tabs[0].active = false;
-  tabs[1].active = true;
-  save.release();
-  await result;
-  assert.equal(
-    h.tabMessages.find(
-      ({ message }) => message.action === 'vaxlinkScanCaptured'
-    ).tabId,
-    44
-  );
+    });
+    const result = capture(h, 'pinned');
+    await save.started;
+    h.activateTab(45);
+    if (returnToOriginal) h.activateTab(44);
+    save.release();
+    await result;
+    assert.equal(h.tabMessages.length, 1);
+    assert.equal(h.storageData.get(inbox)[0].intendedTabId, 44);
+    assert.equal(h.storageData.get(inbox)[0].reviewState, 'inactive_chart');
+  }
 });
 
 test('late acknowledgement cannot remove a newer identical capture', async () => {
@@ -350,4 +348,88 @@ test('only the hidden scanner host can submit a physical capture', async () => {
   }
   assert.deepEqual(h.tabMessages, []);
   assert.equal(h.storageData.has(inbox), false);
+});
+
+test('a pending response clears only after the matching chart document verifies once', async () => {
+  const delivery = gate();
+  const h = harness({
+    tabResponse: {
+      supported: true,
+      contextToken: 'document-1',
+      accepted: true,
+      pending: true
+    },
+    delayTabMessage(_id, message, resume) {
+      if (message.action !== 'vaxlinkScanCaptured') return false;
+      delivery.hold(resume);
+      return true;
+    }
+  });
+  const sender = {
+    id: 'vaxlink-test',
+    tab,
+    frameId: 0,
+    url: tab.url,
+    documentId: 'original-document'
+  };
+  const captured = capture(h, 'pending');
+  await delivery.started;
+  const { scan, contextToken, scannerRoute } = h.tabMessages[1].message;
+  const claim = { captureId: scan.captureId, contextToken, scannerRoute };
+  assert.equal(
+    (await h.sendMessage({ action: 'checkScannerChart', ...claim }, sender))
+      .success,
+    true
+  );
+  const verification = {
+    action: 'verifyScannerChartFields',
+    ...claim,
+    verified: true
+  };
+  delivery.release();
+  assert.equal((await captured).queued, true);
+  assert.equal(h.storageData.get(inbox)[0].reviewState, 'checking_chart');
+  for (const [request, from] of [
+    [verification, { ...sender, documentId: 'replacement' }],
+    [{ ...verification, contextToken: 'old' }, sender],
+    [
+      {
+        ...verification,
+        scannerRoute: { ...scannerRoute, epoch: 'old-worker' }
+      },
+      sender
+    ],
+    [verification, { ...sender, frameId: 1 }]
+  ]) {
+    assert.equal((await h.sendMessage(request, from)).success, false);
+    assert.equal(h.storageData.get(inbox).length, 1);
+  }
+  const copies = await Promise.all([
+    h.sendMessage(verification, sender),
+    h.sendMessage(verification, sender)
+  ]);
+  assert.equal(copies.filter((result) => result.success).length, 1);
+  assert.equal(h.storageData.get(inbox).length, 0);
+});
+
+test('an unavailable or unknown lock check and a stale chart keep the original scan held', async () => {
+  for (const [overrides, reason] of [
+    [{ idleError: 'Idle service unavailable' }, 'lock_unavailable'],
+    [{ idleState: 'unknown' }, 'lock_unknown'],
+    [
+      {
+        tabResponse: {
+          supported: true,
+          contextToken: 'document-1',
+          buildAtLoad: { version: 'old' }
+        }
+      },
+      'stale_chart'
+    ]
+  ]) {
+    const h = harness(overrides);
+    await capture(h, 'held');
+    assert.equal(h.storageData.get(inbox)[0].reviewState, reason);
+    assert.equal(h.tabMessages.length, 1);
+  }
 });
