@@ -428,37 +428,6 @@ function setupMessageListener() {
         );
       return true;
     }
-    if (request.action === 'autoFill') {
-      if (sender.id !== chrome.runtime.id) return false;
-      if (window.top !== window.self) {
-        return false;
-      }
-      if (!isHandsFreeSupportedPage()) {
-        sendResponse({ success: false, error: 'Unsupported chart page' });
-        return true;
-      }
-      const entryBlocked = panoramaEntryBlockReason();
-      if (entryBlocked) {
-        warnPanoramaEntryBlocked(entryBlocked);
-        sendResponse({ success: false, error: entryBlocked });
-        return true;
-      }
-      try {
-        const result = autoFillPanorama(beginPanoramaAutofill(request.data));
-        vlog('autoFillPanorama', result?.status, result);
-        sendResponse({
-          success: isAutofillSuccess(result),
-          pending: isAutofillPending(result),
-          reason: result?.reason || '',
-          status: result?.status || 'failed',
-          error: result?.error || ''
-        });
-      } catch (e) {
-        console.error('Error in autoFillPanorama:', e);
-        sendResponse({ success: false, error: e.message });
-      }
-      return true;
-    }
     vlog('unknown action', request?.action);
     sendResponse({ success: false, error: 'Unknown action' });
     return true;

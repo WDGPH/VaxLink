@@ -131,21 +131,3 @@ export function getExpiryStatus(dateValue) {
     daysRemaining
   };
 }
-
-export function buildExpiryBanner(status) {
-  if (!status) return '';
-  if (status.flag === 'expired') {
-    return `<div class="expiry-banner expired">WARNING: Vaccine is expired. ${status.label}</div>`;
-  }
-  if (status.flag === 'expiring_soon') {
-    return `<div class="expiry-banner expiring">ATTENTION: Vaccine expiry is near. ${status.label}</div>`;
-  }
-  return '';
-}
-
-export function outputTypeForExpiry(status) {
-  if (!status) return 'info';
-  if (status.flag === 'expired') return 'error';
-  if (status.flag === 'expiring_soon') return 'warning';
-  return 'info';
-}

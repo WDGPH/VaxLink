@@ -9,13 +9,8 @@ import {
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
+import { getExpiryStatus, parseInputData } from './popup-parser.js';
 import {
-  getExpiryStatus,
-  outputTypeForExpiry,
-  parseInputData
-} from './popup-parser.js';
-import {
-  buildParsedOutputMarkup,
   escapeHtml,
   renderNVCStatus,
   formatNVCRefreshMessage,
@@ -28,7 +23,6 @@ import {
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
-let autoFillBtn;
 let refreshNvcBtn;
 let addBatchBtn;
 let exportCsvBtn;
@@ -36,12 +30,8 @@ let clearInventoryBtn;
 let clearMultipleBtn;
 let immunizationModeBtn;
 let inventoryModeBtn;
-let singleModeSection;
 let multipleModeSection;
 let inventoryModeSection;
-let scannerInputSection;
-let scannedInputLabel;
-let scannedInput;
 let nvcStatusDiv;
 let outputDiv;
 let analyticsSummaryDiv;
@@ -70,12 +60,9 @@ let inventoryEntryPanel;
 let inventoryEntryToggleBtn;
 let cancelInventoryEntryBtn;
 let inventoryQueueCount;
-let parsedData = null;
-let activeParseRequestId = 0;
 let inventoryAddInFlight = false;
 let multipleAddInFlight = false;
 let queueSaveNoticeVersion = 0;
-let autoParseTimer = null;
 let multipleInjectManager;
 let inventoryManager;
 let activeMode = 'immunization';
@@ -104,20 +91,6 @@ const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
 const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
 const AUTO_RESOLVE_FUNDING_KEY = 'vaxlink_auto_resolve_funding_v1';
 
-const MODE_CONFIG = {
-  single: {
-    inputLabel: 'Scanned Barcode',
-    inputPlaceholder: 'Paste barcode text here...',
-    usesScannerInput: true
-  },
-  multiple: {
-    usesScannerInput: false
-  },
-  inventory: {
-    usesScannerInput: false
-  }
-};
-
 document.addEventListener('DOMContentLoaded', async () => {
   const version = document.getElementById('extensionVersion');
   const manifest = chrome.runtime.getManifest();
@@ -126,7 +99,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
 
-  autoFillBtn = document.getElementById('autoFillBtn');
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
   addBatchBtn = document.getElementById('addBatchBtn');
   exportCsvBtn = document.getElementById('exportCsvBtn');
@@ -134,12 +106,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   clearMultipleBtn = document.getElementById('clearMultipleBtn');
   immunizationModeBtn = document.getElementById('immunizationModeBtn');
   inventoryModeBtn = document.getElementById('inventoryModeBtn');
-  singleModeSection = document.getElementById('singleModeSection');
   multipleModeSection = document.getElementById('multipleModeSection');
   inventoryModeSection = document.getElementById('inventoryModeSection');
-  scannerInputSection = document.getElementById('scannerInputSection');
-  scannedInputLabel = document.getElementById('scannedInputLabel');
-  scannedInput = document.getElementById('scannedData');
   nvcStatusDiv = document.getElementById('nvcStatus');
   outputDiv = document.getElementById('output');
   analyticsSummaryDiv = document.getElementById('analyticsSummary');
@@ -212,24 +180,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
   chrome.storage.onChanged.addListener(handlePopupStorageChanged);
-
-  if (scannedInput) {
-    scannedInput.addEventListener('input', () => {
-      if (usesScannerInput(activeMode)) {
-        queueAutoParse();
-      }
-    });
-
-    scannedInput.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter') {
-        return;
-      }
-      event.preventDefault();
-      if (activeMode === 'single') {
-        queueAutoParse(true);
-      }
-    });
-  }
 
   if (immunizationModeBtn) {
     immunizationModeBtn.addEventListener('click', () =>
@@ -331,74 +281,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       'change',
       () => void setAutofillSetting(key, toggle.checked)
     );
-  }
-
-  if (autoFillBtn) {
-    autoFillBtn.addEventListener('click', async () => {
-      if (!parsedData) {
-        writeOutput(
-          'Scan a barcode first. Parsing runs automatically.',
-          'error'
-        );
-        return;
-      }
-
-      if (globalThis.VaxLinkExpiryDate.blocksChartUse(parsedData)) {
-        writeOutput(
-          'This vaccine is expired. Use an in-date vaccine.',
-          'error'
-        );
-        return;
-      }
-
-      logAnalyticsEvent('autofill_attempt', {
-        workflow: activeMode,
-        source: 'popup_button',
-        vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
-        manufacturer: parsedData.manufacturer || '',
-        expiryFlag:
-          parsedData.expiry_flag ||
-          getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry).flag
-      });
-      try {
-        const response = await sendAutoFillToActiveTab(parsedData);
-        if (response && response.pending) {
-          writeOutput(
-            response.reason === 'funding_choice_required'
-              ? 'Choose the funding category in Panorama to continue.'
-              : 'VaxLink is checking the lot and chart fields in Panorama.',
-            'info'
-          );
-          return;
-        }
-        logAnalyticsEvent('autofill_result', {
-          workflow: activeMode,
-          source: 'popup_button',
-          success: true,
-          vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
-          manufacturer: parsedData.manufacturer || '',
-          expiryFlag:
-            parsedData.expiry_flag ||
-            getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry)
-              .flag
-        });
-        writeOutput(
-          parsedData.lookup_error
-            ? `Barcode fields filled. ${parsedData.lookup_error}. Verify vaccine details on the chart.`
-            : 'Chart auto-filled',
-          parsedData.lookup_error ? 'warning' : 'success'
-        );
-      } catch (error) {
-        logAnalyticsEvent('autofill_result', {
-          workflow: activeMode,
-          source: 'popup_button',
-          success: false,
-          vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
-          manufacturer: parsedData.manufacturer || ''
-        });
-        writeOutput(error.message || 'Could not auto-fill fields', 'error');
-      }
-    });
   }
 
   if (clearMultipleBtn) {
@@ -1022,10 +904,6 @@ async function exportAnalyticsJson() {
   }
 }
 
-function usesScannerInput(mode) {
-  return !!MODE_CONFIG[mode]?.usesScannerInput;
-}
-
 async function loadWorkflowMode() {
   try {
     const stored = await getLocalStorage([
@@ -1099,70 +977,6 @@ function parseImmunizationInput(raw, workflow, source) {
   return null;
 }
 
-function queueAutoParse(immediate = false) {
-  if (autoParseTimer) {
-    clearTimeout(autoParseTimer);
-    autoParseTimer = null;
-  }
-
-  const run = async () => {
-    const barcode = getPreviewBarcodeValue();
-    if (!barcode) {
-      return;
-    }
-
-    const parseRequestId = ++activeParseRequestId;
-    setButtonBusy(autoFillBtn, true);
-    try {
-      parsedData =
-        activeMode === 'single'
-          ? parseImmunizationInput(barcode, activeMode, 'popup_input')
-          : parseInputData(barcode);
-      if (!parsedData) return;
-      if (!parsedData.scanned_at) {
-        parsedData.scanned_at = new Date().toISOString();
-      }
-      logAnalyticsEvent('parse_success', {
-        workflow: activeMode,
-        source: 'popup_input',
-        expiryFlag: getExpiryStatus(parsedData.expiry).flag
-      });
-      await displayParsedData(parsedData, parseRequestId);
-    } catch (error) {
-      parsedData = null;
-      logAnalyticsEvent('parse_error', {
-        workflow: activeMode,
-        source: 'popup_input'
-      });
-      writeOutput(`Error parsing barcode: ${error.message}`, 'error');
-    } finally {
-      if (parseRequestId === activeParseRequestId) {
-        setButtonBusy(autoFillBtn, false);
-      }
-    }
-  };
-
-  if (immediate) {
-    run();
-    return;
-  }
-
-  autoParseTimer = setTimeout(run, 220);
-}
-
-function getPendingScanLines() {
-  if (!scannedInput || !scannedInput.value) return [];
-  return String(scannedInput.value)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-}
-
-function getPreviewBarcodeValue() {
-  const lines = getPendingScanLines();
-  return lines.length ? lines[lines.length - 1] : '';
-}
-
 function loadNVCStatus() {
   chrome.runtime.sendMessage({ action: 'getNVCUpdateStatus' }, (status) => {
     if (chrome.runtime.lastError || !status) {
@@ -1175,31 +989,6 @@ function loadNVCStatus() {
     }
     renderNVCStatus(status, nvcStatusDiv);
     if (status?.state === 'refreshing') setTimeout(loadNVCStatus, 1000);
-  });
-}
-
-async function sendAutoFillToActiveTab(data) {
-  const payload = { ...(data || {}) };
-  return new Promise((resolve, reject) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-
-      if (!tabs.length || !tabs[0]?.id) {
-        reject(new Error('No active tab found'));
-        return;
-      }
-
-      sendAutoFillMessage(tabs[0].id, payload, (response) => {
-        if (response && (response.success || response.pending)) {
-          resolve(response);
-          return;
-        }
-        reject(new Error(response?.error || 'Could not auto-fill fields'));
-      });
-    });
   });
 }
 
@@ -1646,131 +1435,4 @@ async function enrichParsedData(baseData, mode = activeMode) {
     expiryStatus,
     expirySource
   );
-}
-
-async function displayParsedData(data, parseRequestId) {
-  const previewExpiryStatus = getExpiryStatus(data.expiry);
-  writeOutput(
-    buildParsedOutputMarkup(data, { loading: !!data.lot }),
-    outputTypeForExpiry(previewExpiryStatus)
-  );
-
-  try {
-    const enriched = await enrichParsedData(data);
-    if (parseRequestId !== activeParseRequestId) {
-      return;
-    }
-    parsedData = enriched;
-    writeOutput(
-      buildParsedOutputMarkup(enriched),
-      outputTypeForExpiry(getExpiryStatus(enriched.inventory_expiry))
-    );
-  } catch (error) {
-    if (parseRequestId !== activeParseRequestId) {
-      return;
-    }
-    writeOutput(
-      buildParsedOutputMarkup({
-        ...data,
-        lookup_error: error.message || 'Lookup failed',
-        inventory_expiry: data.expiry || null,
-        expiry_source: data.expiry ? 'barcode' : 'none'
-      }),
-      'warning'
-    );
-  }
-}
-
-function isSupportedPanoramaUrl(value) {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === 'https:' &&
-      [
-        'www.panorama.prod.ehealthontario.ca',
-        'panorama.prod.ehealthontario.ca',
-        'trpanoramadhir.prod.ehealthontario.ca'
-      ].includes(url.hostname) &&
-      /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(url.pathname)
-    );
-  } catch (_) {
-    return false;
-  }
-}
-
-function getTabForFill(tabId) {
-  return new Promise((resolve) => {
-    chrome.tabs.query({}, (tabs) =>
-      resolve(
-        chrome.runtime.lastError ? null : tabs?.find((tab) => tab.id === tabId)
-      )
-    );
-  });
-}
-
-function hasPanoramaIntegration(tabId) {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), 1000);
-    chrome.tabs.sendMessage(
-      tabId,
-      { action: 'getPanoramaIntegration' },
-      { frameId: 0 },
-      (response) => {
-        clearTimeout(timer);
-        resolve(!chrome.runtime.lastError && response?.supported === true);
-      }
-    );
-  });
-}
-
-async function canFillPanoramaTab(tabId) {
-  const tab = await getTabForFill(tabId);
-  return (
-    !!tab &&
-    (tab.url
-      ? isSupportedPanoramaUrl(tab.url)
-      : await hasPanoramaIntegration(tabId))
-  );
-}
-
-async function sendAutoFillMessage(
-  tabId,
-  data,
-  callback = handleAutoFillResponse
-) {
-  const chartRequired = {
-    success: false,
-    error:
-      'Open a supported Panorama immunization page. If it’s already open, refresh it and try again.'
-  };
-  if (!(await canFillPanoramaTab(tabId))) return callback(chartRequired);
-  chrome.tabs.sendMessage(
-    tabId,
-    { action: 'autoFill', data },
-    { frameId: 0 },
-    (response) => {
-      if (!chrome.runtime.lastError) return callback(response);
-      const message = chrome.runtime.lastError.message || '';
-      callback(
-        message.includes('Receiving end does not exist')
-          ? chartRequired
-          : { success: false, error: `Message send failed: ${message}` }
-      );
-    }
-  );
-}
-
-function handleAutoFillResponse(response) {
-  if (response && response.success) {
-    writeOutput('Chart auto-filled', 'success');
-  } else if (response && response.pending) {
-    writeOutput(
-      'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.',
-      'info'
-    );
-  } else if (response && response.error) {
-    writeOutput(response.error, 'error');
-  } else {
-    writeOutput('Could not auto-fill fields', 'error');
-  }
 }
