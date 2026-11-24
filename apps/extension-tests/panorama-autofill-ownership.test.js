@@ -503,6 +503,7 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
   const selected = { funding: 'SHOW_ALL', lot: false };
   const select = { options: [{ text: 'OLD', value: 'other-lot' }] };
   let searches = 0;
+  let rescueStartedAt;
   const slot = {
     innerHTML: '',
     querySelector: () => null,
@@ -529,8 +530,9 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
     },
     getPanoramaLotWidget: () => ({ select }),
     hasPanoramaLotSelection: () => selected.lot,
-    tryFillPanoramaLotOrTrade() {
+    tryFillPanoramaLotOrTrade(_data, { panelRescue }) {
       searches++;
+      if (panelRescue) rescueStartedAt ??= f.state.now;
       selected.lot = select.options[0].text === 'N-TRAIN';
       return selected.lot;
     },
@@ -561,6 +563,12 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
   for (let attempt = 0; attempt < 15 && f.state.timers.length; attempt++)
     f.runTimer();
   assert.match(slot.innerHTML, /Try the other funding category/);
+  assert.equal(rescueStartedAt, 3000, 'panel rescue starts after two seconds');
+  assert.equal(
+    f.state.now - rescueStartedAt,
+    3000,
+    'a usable list must remain unchanged for three seconds'
+  );
   assert.doesNotMatch(
     slot.innerHTML,
     /data-vl-funded-choice="PUBLICLY_FUNDED"/
@@ -627,5 +635,28 @@ test('automatic comparison waits for the Agent refresh before offering both fund
   f.runTimer();
   assert.deepEqual(prompts, ['both']);
   assert.deepEqual(reports, [['funding_comparison', 'both']]);
+  assert.equal(f.state.timers.length, 0);
+});
+
+test('an unreadable Lot list does not establish a miss before the ten-second deadline', () => {
+  const f = fixture();
+  const reports = [];
+  const notices = [];
+  Object.assign(f.context, {
+    getPanoramaLotWidget: () => null,
+    hasPanoramaLotSelection: () => false,
+    tryFillPanoramaLotOrTrade: () => false,
+    showVaxlinkToast: (data) => notices.push(data._fillFeedback),
+    logAnalyticsEvent: (event, payload) =>
+      reports.push([event, payload.success])
+  });
+  const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+  const started = f.state.now;
+  f.schedulePanoramaLotOrTradeSelection(data, 0, { finalizeOnResolved: true });
+  for (let attempt = 0; attempt < 24 && f.state.timers.length; attempt++)
+    f.runTimer();
+  assert.equal(f.state.now - started, 10000);
+  assert.deepEqual(notices, ['deadline']);
+  assert.deepEqual(reports, [['autofill_result', false]]);
   assert.equal(f.state.timers.length, 0);
 });
