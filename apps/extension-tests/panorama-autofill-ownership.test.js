@@ -563,16 +563,27 @@ test('an owned field interaction before the deadline can continue on the same ch
   assert.equal(f.isPanoramaAutofillCurrent(data), false);
 });
 
-test('one pending watcher restarts its stable interval after repairing details', () => {
+test('one pending watcher restarts stability and records only actual late repairs', async () => {
   const f = fixture();
   f.state.resolved = true;
   let finalized = 0;
+  const observations = [];
+  const activity = vm.runInContext('chartActivity', f.context);
+  activity.isCurrent = () => true;
+  activity.record = (_trace, event, fields) =>
+    observations.push({ event, ...fields });
+  f.context.hasPanoramaDeferredDetailFieldsFilled = (_data, observed) => {
+    if (observed) observed.time = f.state.resolved ? 'match' : 'mismatch';
+    return f.state.resolved;
+  };
   f.context.finalizeDeferredPanoramaAutofill = () => finalized++;
   f.context.fillPanoramaDeferredDetailFields = () => {
     f.state.resolved = true;
     f.state.fills++;
+    return 1;
   };
   const data = f.beginPanoramaAutofill({});
+  data._vaxlinkOwner.activity = {};
   f.schedulePanoramaLotOrTradeSelection(data, 0, { finalizeOnResolved: true });
   assert.equal(f.state.timers.length, 1);
   f.runTimer();
@@ -589,6 +600,15 @@ test('one pending watcher restarts its stable interval after repairing details',
     f.state.timers.map((timer) => timer.delay),
     [1500, 3500]
   );
+  f.state.resolved = false;
+  await f.runTimer();
+  f.context.fillPanoramaDeferredDetailFields = () => 0;
+  await f.runTimer();
+  const late = observations.filter(({ wake }) => wake === 'late');
+  assert.equal(late.length, 1);
+  assert.equal(late[0].deferredCheck.before.time, 'mismatch');
+  assert.equal(late[0].deferredCheck.after.time, 'match');
+  assert.equal(finalized, 1);
 });
 
 test('a chosen funding category waits for its Lot list and a miss can try the other category once', async () => {
@@ -716,7 +736,10 @@ test('automatic comparison waits for the Agent refresh before offering both fund
     getPanoramaFundedRadioValue: () => 'SHOW_ALL',
     tryFillPanoramaLotOrTrade: () =>
       assert.fail('both entries need staff choice'),
-    showVaxlinkToast: (data) => prompts.push(data._fundingChoiceRequired),
+    showVaxlinkToast: (data) => {
+      if (data._fundingChoiceRequired)
+        prompts.push(data._fundingChoiceRequired);
+    },
     logAnalyticsEvent: (event, payload) =>
       reports.push([event, payload.outcome])
   });
@@ -756,7 +779,9 @@ test('an unreadable Lot list does not establish a miss before the ten-second dea
     getPanoramaLotWidget: () => null,
     hasPanoramaLotSelection: () => false,
     tryFillPanoramaLotOrTrade: () => false,
-    showVaxlinkToast: (data) => notices.push(data._fillFeedback),
+    showVaxlinkToast: (data) => {
+      if (data._fillFeedback) notices.push(data._fillFeedback);
+    },
     logAnalyticsEvent: (event, payload) =>
       reports.push([event, payload.success])
   });
@@ -786,8 +811,10 @@ test('a Lot miss first observed late uses the current list at the deadline', () 
         cleanups++;
         return 'review';
       },
-      showVaxlinkToast: (data) =>
-        notices.push([data._fillFeedback, data._lotNeedsReview]),
+      showVaxlinkToast: (data) => {
+        if (data._fillFeedback)
+          notices.push([data._fillFeedback, data._lotNeedsReview]);
+      },
       logAnalyticsEvent: (event, payload) => {
         if (event === 'autofill_result') reports.push(payload.success);
       }
@@ -814,4 +841,44 @@ test('a Lot miss first observed late uses the current list at the deadline', () 
     assert.deepEqual(reports, [false]);
     assert.equal(f.state.timers.length, 0);
   }
+});
+
+test('a repeatedly repaired Time shows detail progress after the Lot matches', () => {
+  const f = fixture();
+  const notices = [];
+  let lotMatches = false;
+  Object.assign(f.context, {
+    hasPanoramaLotSelection: () => lotMatches,
+    tryFillPanoramaLotOrTrade: () => false,
+    fillPanoramaDeferredDetailFields() {
+      f.state.resolved = true;
+      return 1;
+    },
+    getPanoramaDeferredDetailFieldsNeedingReview: () => ['time'],
+    showVaxlinkToast(data) {
+      notices.push([
+        data._fillProgress || data._fillFeedback,
+        data._reviewFields
+      ]);
+    }
+  });
+  const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+  f.schedulePanoramaLotOrTradeSelection(data, 0, { finalizeOnResolved: true });
+  f.runTimer();
+  f.runTimer();
+  f.runTimer();
+  assert.deepEqual(notices, [['retrying', undefined]]);
+
+  lotMatches = true;
+  while (f.state.timers.length) {
+    f.state.resolved = false;
+    f.runTimer();
+  }
+  assert.deepEqual(notices.slice(0, 2), [
+    ['retrying', undefined],
+    ['checking_details', undefined]
+  ]);
+  assert.equal(notices.length, 3);
+  assert.equal(notices[2][0], 'deadline_details');
+  assert.deepEqual(notices[2][1], ['time']);
 });

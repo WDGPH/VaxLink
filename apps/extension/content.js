@@ -2850,6 +2850,7 @@ function schedulePanoramaLotOrTradeSelection(
   let triedManualFilter = false;
   let lastFundingChangeAt = -Infinity;
   let usableMiss;
+  let lastProgress;
 
   const finalizeOnResolved = options.finalizeOnResolved === true;
 
@@ -2859,6 +2860,11 @@ function schedulePanoramaLotOrTradeSelection(
     if (reason) chartActivity?.record(trace, 'stop', { reason, ...fields });
     observer?.disconnect();
     clearTimeout(timer);
+    if (
+      lastProgress &&
+      toastRoutineSlot?.querySelector('[data-vl-fill-progress]')
+    )
+      toastRoutineSlot.innerHTML = '';
     if (stopPanoramaLotTradeWatcher === stop) {
       stopPanoramaLotTradeWatcher = null;
     }
@@ -2916,6 +2922,15 @@ function schedulePanoramaLotOrTradeSelection(
       return;
     }
   }
+
+  const status = (requested, checked, matched) =>
+    !requested
+      ? 'not_requested'
+      : !checked
+        ? 'not_checked'
+        : matched
+          ? 'match'
+          : 'mismatch';
 
   const attempt = (now, wake) => {
     if (blockIneligibleChartUse(data)) {
@@ -3063,14 +3078,6 @@ function schedulePanoramaLotOrTradeSelection(
     }
 
     if (chartActivity?.isCurrent(trace)) {
-      const status = (requested, checked, matched) =>
-        !requested
-          ? 'not_requested'
-          : !checked
-            ? 'not_checked'
-            : matched
-              ? 'match'
-              : 'mismatch';
       chartActivity.record(trace, 'check', {
         wake,
         agent: status(hasAgent, true, hasResolvedAgent),
@@ -3085,15 +3092,13 @@ function schedulePanoramaLotOrTradeSelection(
       });
     }
 
-    if (
-      !resolved ||
-      !deferredResolved ||
-      isPrimeFacesAjaxBusy() ||
-      !panoramaDetailAgentMatches(data) ||
-      !panoramaDetailProductMatches(data)
-    ) {
+    const productVerified =
+      resolved &&
+      panoramaDetailAgentMatches(data) &&
+      panoramaDetailProductMatches(data);
+    if (!productVerified || !deferredResolved || isPrimeFacesAjaxBusy()) {
       stableSince = null;
-      return;
+      return productVerified;
     }
     // A successful repair starts a new stability wait on the current form.
     stableSince ??= now;
@@ -3108,6 +3113,7 @@ function schedulePanoramaLotOrTradeSelection(
       // The finalizer records its verified outcome after any queue write.
       stop(finalizeOnResolved ? null : 'settled');
     }
+    return productVerified;
   };
 
   const runDeferredPass = async () => {
@@ -3126,7 +3132,25 @@ function schedulePanoramaLotOrTradeSelection(
       return;
     if (globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return;
     try {
-      runPanoramaAutofill(data, () => fillPanoramaDeferredDetailFields(data));
+      runPanoramaAutofill(data, () => {
+        const before = chartActivity?.isCurrent(trace) ? {} : null;
+        if (before) hasPanoramaDeferredDetailFieldsFilled(data, before);
+        const repaired = fillPanoramaDeferredDetailFields(data);
+        if (!before || !repaired) return;
+
+        const after = {};
+        const deferred = hasPanoramaDeferredDetailFieldsFilled(data, after);
+        const agent = panoramaDetailAgentMatches(data);
+        const product = agent && panoramaDetailProductMatches(data);
+        chartActivity.record(trace, 'check', {
+          wake: 'late',
+          agent: status(hasAgent, true, agent),
+          lot: status(hasLot, agent, product),
+          trade: status(!hasLot && hasTrade, agent, product),
+          deferred: status(shouldFillDeferredFields, true, deferred),
+          deferredCheck: { before, after }
+        });
+      });
     } catch (error) {
       vlog(error.message);
     }
@@ -3235,7 +3259,22 @@ function schedulePanoramaLotOrTradeSelection(
         );
         return;
       }
-      runPanoramaAutofill(data, () => attempt(now, wake));
+      const productVerified = runPanoramaAutofill(data, () =>
+        attempt(now, wake)
+      );
+      if (
+        !stopped &&
+        hasLot &&
+        (!productVerified || shouldFillDeferredFields) &&
+        now - scheduleStartedAt >= 800 &&
+        isPanoramaAutofillCurrent(data)
+      ) {
+        const progress = productVerified ? 'checking_details' : 'retrying';
+        if (progress !== lastProgress) {
+          lastProgress = progress;
+          showVaxlinkToast({ _fillProgress: progress });
+        }
+      }
     } catch (error) {
       if (finalizeOnResolved && isPanoramaAutofillCurrent(data))
         recordDeferredAutofillResult(data, false);
@@ -4206,6 +4245,21 @@ function showVaxlinkToast(data, durationMs = 4000) {
       toastDismissTimer = setTimeout(() => dismissToast(toastRoutineSlot), ms);
     }
   };
+
+  if (data._fillProgress) {
+    const message =
+      data._fillProgress === 'checking_details'
+        ? 'Checking the remaining fields in Panorama…'
+        : 'Looking for the lot in Panorama…';
+    showRoutineToast(
+      `<div class="vl-toast info show" role="status" data-vl-fill-progress>
+        <div class="vl-toast-title">${message}</div>
+      </div>`,
+      durationMs,
+      { persistent: true }
+    );
+    return;
+  }
 
   if (data._barcodeFeedback) {
     const title =

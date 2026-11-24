@@ -418,7 +418,7 @@
       },
       record(trace, event, fields) {
         if (!trace || trace.recording !== recording) return;
-        if (event === 'check') {
+        if (event === 'check' && fields.wake !== 'late') {
           const { wake, ...fieldResults } = fields;
           const signature = JSON.stringify(fieldResults);
           if (signature === trace.lastCheck) {
