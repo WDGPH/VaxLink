@@ -484,7 +484,9 @@ test('Enter Details carries only the exact grid row and foreground route', async
     'replace_before',
     'replace_during',
     'duplicate_agent',
+    'duplicate_during_transition',
     'different_lot',
+    'manual_takeover_while_waiting',
     'lock_cycle',
     'carry_off'
   ]) {
@@ -524,6 +526,7 @@ test('Enter Details carries only the exact grid row and foreground route', async
     let kind = 'multiple_grid';
     let agent = '';
     let productFill;
+    const warnings = [];
     Object.assign(context, {
       getPanoramaFormContext: () => ({ kind, ready: true }),
       getPanoramaMultipleGridRows: () => rows,
@@ -543,12 +546,17 @@ test('Enter Details carries only the exact grid row and foreground route', async
         }
       }),
       getPanoramaDisplayedLot: () =>
-        scenario === 'different_lot' ? 'DIFFERENT' : '',
+        ['different_lot', 'manual_takeover_while_waiting'].includes(scenario)
+          ? 'DIFFERENT'
+          : '',
+
       autoFillPanorama(data) {
         productFill = data;
         return { status: 'pending' };
       },
-      showVaxlinkToast() {},
+      showVaxlinkToast(data) {
+        if (data._entryWarning) warnings.push(data._entryWarning);
+      },
       setTimeout: () => 1,
       clearTimeout() {},
       MutationObserver: class {
@@ -582,6 +590,10 @@ test('Enter Details carries only the exact grid row and foreground route', async
       worker.setIdleState('locked');
       worker.setIdleState('active');
     }
+    if (scenario === 'duplicate_during_transition') {
+      rows.push(makeRow(1));
+      await context.advanceGridHandoff();
+    }
     kind = 'multiple_detail';
     state.step = scenario === 'duplicate_agent' ? '1-of-2' : '1-of-1';
     rows = [];
@@ -592,8 +604,26 @@ test('Enter Details carries only the exact grid row and foreground route', async
         'pending'
       );
     }
-    await context.advanceGridHandoff();
+    const advancement = context.advanceGridHandoff();
+    if (scenario === 'manual_takeover_while_waiting') {
+      const lotControl = { form };
+      context.handlePanoramaAutofillUserInteraction({
+        isTrusted: true,
+        type: 'pointerdown',
+        target: {
+          closest: (selector) =>
+            selector.startsWith('input') ? lotControl : null
+        }
+      });
+    }
+    await advancement;
     await new Promise(setImmediate);
+    assert.equal(
+      warnings.length,
+      scenario === 'different_lot' ? 1 : 0,
+      scenario
+    );
+    if (warnings.length) assert.match(warnings[0], /selected a different lot/);
     if (scenario === 'normal' || scenario === 'manual_use') {
       assert.ok(productFill, scenario);
       assert.equal(

@@ -2901,6 +2901,12 @@ function handlePanoramaAutofillUserInteraction(event) {
           .includes(overlay.id)
       ));
   if (form.contains(control) || linked) {
+    if (
+      gridDetailHandoff &&
+      getPanoramaFormContext().kind === 'multiple_detail'
+    ) {
+      void releaseGridDetailStep();
+    }
     beginPanoramaAutofill({}, false);
     cancelPanoramaAutofill();
   }
@@ -3823,8 +3829,12 @@ async function fillReservedTrayRecord(
         );
     }
 
-    if (owner.gridDetail && !matchesGridDetail(owner.gridDetail))
-      throw new Error('The matching Enter Details step is no longer open.');
+    if (owner.gridDetail) {
+      if (!matchesGridDetail(owner.gridDetail))
+        throw new Error('The matching Enter Details step is no longer open.');
+      if (hasDifferentGridDetailLot(owner.gridDetail))
+        throw new Error(DIFFERENT_GRID_DETAIL_LOT);
+    }
     if (
       requiredKind === 'multiple_detail' &&
       !queueRecordMatchesPanoramaAgentText(
@@ -5452,17 +5462,23 @@ function matchesGridDetail(entry) {
   const { dateField } = getPanoramaAdministeredDateTimeFields({
     _vaxlinkOwner: { form }
   });
-  const lot = getPanoramaDisplayedLot(getPanoramaLotWidget(form));
+  return (
+    panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)) ===
+      entry.agent && dateField?.value.trim() === entry.date
+  );
+}
+
+const DIFFERENT_GRID_DETAIL_LOT =
+  'Panorama selected a different lot. Check the lot on the chart before continuing.';
+
+function hasDifferentGridDetailLot(entry) {
+  const lot = getPanoramaDisplayedLot(getPanoramaLotWidget());
+  if (!lot) return false;
   const intended = normalizePanoramaLotToken(entry.lot);
   const displayed = normalizePanoramaLotToken(
     getPanoramaManufacturerLotText(lot, getPanoramaFundedRadioValue())
   );
-  return (
-    panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)) ===
-      entry.agent &&
-    dateField?.value.trim() === entry.date &&
-    (!lot || (intended && displayed === intended))
-  );
+  return !intended || displayed !== intended;
 }
 
 async function releaseGridDetailStep() {
@@ -5496,9 +5512,10 @@ async function advanceGridHandoff() {
     // Panorama can remove the old grid while building the detail form.
     if (
       visible.length &&
-      handoff.rows.some(
-        (row) => !visible.some((current) => sameGridAssignment(row, current))
-      )
+      (visible.length !== handoff.rows.length ||
+        handoff.rows.some(
+          (row, index) => !sameGridAssignment(row, visible[index])
+        ))
     )
       clearGridCarry();
     return;
@@ -5545,6 +5562,10 @@ async function advanceGridHandoff() {
       !matchesGridDetail(entry)
     )
       return;
+    if (hasDifferentGridDetailLot(entry)) {
+      showVaxlinkToast({ _entryWarning: DIFFERENT_GRID_DETAIL_LOT });
+      return;
+    }
 
     const data = beginPanoramaAutofill({}, true, { automatic: true });
     if (!isPanoramaAutofillCurrent(data)) return;
