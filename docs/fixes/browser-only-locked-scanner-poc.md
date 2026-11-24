@@ -88,6 +88,30 @@ showed scanner capture with Inventory selected. Check the tray itself when
 confirming Inventory saves. Panorama training was under maintenance during
 that run, so it did not provide a live chart result.
 
+## Local Alpha rewrite checks
+
+On November 24, 2026, Chromium loaded the unpacked Alpha ZIP built from
+`7910434` (runtime fingerprint starting with `64161aeb7347`). The runs
+used simulated serial ports and fictional chart pages.
+
+- Setup closed before the first regular capture. Both exits from the optional
+  test restored the previous capture setting. An unanswered reader showed the
+  last known capture. Disconnect during a delayed open stopped the reader.
+- Concurrent Inventory capture and CSV export each counted once. Turning Debug
+  off and on cleared its details and preserved the daily funding totals.
+- A direct scan stayed held until the chart verified Agent, Lot, Date and Time.
+  An exact Lot without a catalogue Agent stayed held with a visible warning and
+  no field changes.
+- An in-place Lot option refresh permitted the deferred fields. A later Time
+  repair left the verified dose count alone. Enter Details used the exact new
+  grid row and left an older tray item available.
+- Two charts competed for a final dose. Dismissing the first attempt before
+  field entry released it. Interrupting the second after Agent selection held
+  the dose for review.
+
+Physical scanner, Windows lock and sleep, browser switching, and live training
+chart acceptance still require a workstation run on this build.
+
 ## Evidence to record
 
 Record the workstation configuration, test date, sample order, expected and observed destinations, chart fields before and after, and any interruption. Keep patient information out of test records. A passing software simulation covers only the simulated case. Record a clinic hardware pass only after running the procedure on the named configuration.

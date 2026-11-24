@@ -367,7 +367,9 @@ Browser-isolated checks for page activity are one input to this verification.
 
 The fill stays with the original document, form, workflow and step. A staff
 interaction or a changed form stops further writes. A scanner-triggered fill
-also stops when its tab loses focus, and a delayed first write must meet the
+also stops when its tab loses focus. On a Multiple detail step, changing the
+Agent permanently stops the fill even if the original Agent returns. A delayed
+first write must meet the
 worker's deadline. An explicit tray choice can continue when the toolbar popup
 takes focus while the chart remains visible.
 
