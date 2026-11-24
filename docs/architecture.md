@@ -84,6 +84,10 @@ VaxLink reads the current selection after Panorama handles the field event.
 For older saved records with a Trade name and no Lot, the current Trade
 selection provides that readback.
 
+Date, Time, Reason, and Consent run after VaxLink has read back the requested
+Agent and Lot or Trade. A field event can change the product again, so each
+later write checks that selection on the current form.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

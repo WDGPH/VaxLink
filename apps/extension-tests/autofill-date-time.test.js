@@ -27,6 +27,7 @@ function fixture(settings = {}) {
   };
   const form = { isConnected: true };
   const writes = [];
+  let selectedLot;
   // Use the production fill entry point, settings, timestamp and date/time
   // writers. Replace only Panorama's widgets and asynchronous lot scheduler.
   Object.assign(context, {
@@ -39,7 +40,11 @@ function fixture(settings = {}) {
     resetPanoramaFundedRadioToShowAll: () => 'not_found',
     hasPanoramaAgentSelection: () => false,
     tryFillPanoramaAgent: () => true,
-    tryFillPanoramaLot: () => true,
+    tryFillPanoramaLot(lot) {
+      selectedLot = lot;
+      return true;
+    },
+    hasPanoramaLotSelection: (lot) => lot === selectedLot,
     schedulePanoramaLotOrTradeSelection() {},
     canFillPanoramaControl: () => true,
     isVisible: () => true,

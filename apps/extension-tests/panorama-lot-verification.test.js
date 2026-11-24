@@ -214,3 +214,39 @@ test('an older Trade-only row waits for the current select to retain its choice'
   assert.equal(fill(), true);
   assert.equal(f.context.hasPanoramaLotOrTradeSelection(data), true);
 });
+
+test('only current product readback permits Date and another refresh stops Time', () => {
+  const f = fixture();
+  const date = { value: '' };
+  const time = { value: '' };
+  let agentMatches = false;
+  const lot = f.select('ABC1');
+  f.state.controls = [f.root, lot];
+  const writes = [];
+  Object.assign(f.context, {
+    isPanoramaImmunizationPage: () => true,
+    hasPanoramaAgentSelection: () => agentMatches,
+    tryFillPanoramaAgent: () => true,
+    getPanoramaFundedRadioValue: () => 'SHOW_ALL',
+    resetPanoramaFundedRadioToShowAll: () => 'not_found',
+    schedulePanoramaLotOrTradeSelection() {},
+    getPanoramaAdministeredDateTimeFields: () => ({
+      dateField: date,
+      timeField: time
+    }),
+    fillPanoramaMaskedTextInput(field, value) {
+      writes.push(field);
+      field.value = value;
+      if (field === date) lot.value = '';
+      return true;
+    }
+  });
+  const owned = f.context.beginPanoramaAutofill({ lot: 'ABC1', name: 'MMR' });
+  assert.equal(f.context.autoFillPanorama(owned).status, 'pending');
+  assert.deepEqual(writes, []);
+  assert.equal(lot.value, '');
+  agentMatches = true;
+  assert.equal(f.context.autoFillPanorama(owned).status, 'pending');
+  assert.deepEqual(writes, [date]);
+  assert.equal(time.value, '');
+});

@@ -1261,7 +1261,7 @@ function isLooseSelectTextMatch(optionTextNorm, desiredNorm) {
   );
 }
 
-function fillSelectField(field, value) {
+function fillSelectField(field, value, canWrite = () => true) {
   const rawValue = String(value).trim();
   if (!rawValue) return false;
   const candidates = getValueAliases(rawValue, field);
@@ -1293,7 +1293,7 @@ function fillSelectField(field, value) {
       );
     });
   }
-  if (!matched || matched.disabled) return false;
+  if (!matched || matched.disabled || !canWrite()) return false;
 
   assertPanoramaAutofillWrite();
   field.focus();
@@ -1302,7 +1302,8 @@ function fillSelectField(field, value) {
   if (
     field.isConnected === false ||
     !Array.from(field.options || []).includes(matched) ||
-    matched.disabled
+    matched.disabled ||
+    !canWrite()
   )
     return false;
   field.value = matched.value;
@@ -1441,119 +1442,6 @@ function normalizeLabelText(value) {
     .trim();
 }
 
-function isFillableControl(el) {
-  if (!el) return false;
-  const isStandardControl =
-    el.tagName === 'INPUT' ||
-    el.tagName === 'SELECT' ||
-    el.tagName === 'TEXTAREA';
-  const isRoleCombobox =
-    el.getAttribute && el.getAttribute('role') === 'combobox';
-  if (!isStandardControl && !isRoleCombobox) return false;
-  if (el.disabled) return false;
-  if (
-    el.tagName === 'INPUT' &&
-    String(el.type || '').toLowerCase() === 'hidden'
-  )
-    return false;
-  return isVisible(el);
-}
-
-function scoreControlNearLabel(labelEl, controlEl) {
-  const labelRect = labelEl.getBoundingClientRect();
-  const controlRect = controlEl.getBoundingClientRect();
-  const labelY = labelRect.top + labelRect.height / 2;
-  const controlY = controlRect.top + controlRect.height / 2;
-  const verticalDistance = Math.abs(labelY - controlY);
-  const rightOfLabel = controlRect.left >= labelRect.left - 8;
-  const horizontalDistance = rightOfLabel
-    ? Math.max(0, controlRect.left - labelRect.right)
-    : 500 + Math.abs(controlRect.left - labelRect.left);
-  return verticalDistance * 10 + horizontalDistance;
-}
-
-function findNearestControlForLabel(labelEl, scope = document) {
-  if (!labelEl) return null;
-  const controlSelector = 'input, select, textarea, [role="combobox"]';
-
-  if (labelEl.tagName === 'LABEL') {
-    const htmlFor = labelEl.getAttribute('for');
-    if (htmlFor) {
-      const direct = scope.getElementById
-        ? scope.getElementById(htmlFor)
-        : document.getElementById(htmlFor);
-      if (isFillableControl(direct)) {
-        return direct;
-      }
-    }
-  }
-
-  const candidates = [];
-  const seen = new Set();
-
-  const addCandidates = (container) => {
-    if (!container || !container.querySelectorAll) return;
-    const controls = container.querySelectorAll(controlSelector);
-    for (const control of controls) {
-      if (seen.has(control) || !isFillableControl(control)) continue;
-      seen.add(control);
-      candidates.push(control);
-    }
-  };
-
-  let current = labelEl;
-  for (let depth = 0; depth < 4 && current; depth += 1) {
-    addCandidates(current.parentElement);
-    if (current.parentElement) {
-      addCandidates(current.parentElement.nextElementSibling);
-    }
-    current = current.parentElement;
-  }
-
-  if (!candidates.length) {
-    addCandidates(scope);
-  }
-  if (!candidates.length) return null;
-
-  const ranked = candidates
-    .map((control) => ({
-      control,
-      score: scoreControlNearLabel(labelEl, control)
-    }))
-    .sort((a, b) => a.score - b.score);
-
-  return ranked.length ? ranked[0].control : null;
-}
-
-function findFieldByLabelText(labelTexts, options = {}) {
-  const labels = Array.isArray(labelTexts) ? labelTexts : [labelTexts];
-  const wanted = labels.map(normalizeLabelText).filter(Boolean);
-  if (!wanted.length) return null;
-
-  const scope =
-    options.scope && options.scope.querySelectorAll ? options.scope : document;
-  const labelSelector = 'label, span, div, td, th, strong';
-  const allLabelNodes = Array.from(scope.querySelectorAll(labelSelector));
-  const matchingLabels = allLabelNodes.filter((node) => {
-    const text = normalizeLabelText(node.textContent || '');
-    if (!text) return false;
-    return wanted.some(
-      (target) => text === target || text.startsWith(`${target} `)
-    );
-  });
-
-  const labelOrder = options.preferLast
-    ? matchingLabels.slice().reverse()
-    : matchingLabels;
-  for (const labelEl of labelOrder) {
-    const control = findNearestControlForLabel(labelEl, scope);
-    if (control) {
-      return control;
-    }
-  }
-  return null;
-}
-
 function canFillPanoramaControl(field) {
   if (!field || field.disabled) return false;
   if (
@@ -1565,11 +1453,11 @@ function canFillPanoramaControl(field) {
   return true;
 }
 
-function fillFirstMatchingField(selectors, value) {
+function fillFirstMatchingField(selectors, value, scope, canWrite) {
   if (value === undefined || value === null || value === '') return false;
-  const fields = getFields(selectors).filter(canFillPanoramaControl);
+  const fields = getFields(selectors, scope).filter(canFillPanoramaControl);
   for (const field of fields) {
-    if (fillField(field, value)) {
+    if (fillSelectField(field, value, canWrite)) {
       return true;
     }
   }
@@ -1612,9 +1500,7 @@ function isAgentCandidateAccepted(candidate, field) {
   return isAgentTextAccepted(candidate, getFieldFilledText(field));
 }
 
-function fillPanoramaAgentField(selectors, candidate, scope) {
-  if (!candidate) return false;
-  const fields = getFields(selectors, scope).filter(canFillPanoramaControl);
+function fillPanoramaAgentField(fields, candidate, scope) {
   for (const field of fields) {
     if (!fillField(field, candidate)) {
       continue;
@@ -1766,8 +1652,18 @@ function panoramaSelectionControls(fields) {
   return selects.length ? selects : fields;
 }
 
-function getPanoramaSelectedAgentTexts(scope) {
+function getPanoramaDetailAgentFields(scope) {
   const fields = getFields(getPanoramaAgentSelectors(), scope);
+  if (fields.length || !scope) return fields;
+  const controls = [...scope.querySelectorAll('label')]
+    .filter((label) => normalizeLabelText(label.textContent) === 'agent')
+    .map((label) => label.control)
+    .filter((control) => control && scope.contains(control));
+  return controls.length === 1 ? controls : [];
+}
+
+function getPanoramaSelectedAgentTexts(scope) {
+  const fields = getPanoramaDetailAgentFields(scope);
   return panoramaSelectionControls(fields)
     .filter((field) => field.tagName !== 'SELECT' || !!field.value)
     .map(getFieldFilledText)
@@ -1828,13 +1724,12 @@ function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
 function tryFillPanoramaAgent(data) {
   const candidates = getPanoramaAgentCandidates(data);
   if (!candidates.length) return false;
-  const selectors = getPanoramaAgentSelectors();
+  const scope = data?._vaxlinkOwner?.form;
   for (const candidate of candidates) {
-    if (
-      fillPanoramaAgentField(selectors, candidate, data?._vaxlinkOwner?.form)
-    ) {
-      return true;
-    }
+    const fields = panoramaSelectionControls(
+      getPanoramaDetailAgentFields(scope)
+    ).filter(canFillPanoramaControl);
+    if (fillPanoramaAgentField(fields, candidate, scope)) return true;
   }
   return false;
 }
@@ -1885,8 +1780,9 @@ function getPanoramaAdministeredDateTimeFields(
 }
 
 function hasPanoramaDeferredDetailFieldsFilled(data) {
+  const scope = data?._vaxlinkOwner?.form;
   const administered = getPanoramaAdministeredDateTimeValues(data);
-  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data);
   const dateMatches =
     !administered.date ||
     String(dateField?.value || '').trim() === administered.date;
@@ -1897,27 +1793,31 @@ function hasPanoramaDeferredDetailFieldsFilled(data) {
     !reasonAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaReasonForImmunizationSelectors(),
-      getPanoramaReasonForImmunizationValue(data)
+      getPanoramaReasonForImmunizationValue(data),
+      scope
     );
   const consentSatisfied =
     !consentAutofillEnabled ||
     panoramaSelectAutofillSatisfied(
       getPanoramaConsentReasonSelectors(),
-      getPanoramaConsentReasonValue(data)
+      getPanoramaConsentReasonValue(data),
+      scope
     );
   return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
 }
 
-function fillPanoramaMaskedTextInput(field, nextValue) {
-  if (!field || !nextValue) return false;
+function fillPanoramaMaskedTextInput(field, nextValue, canWrite = () => true) {
+  if (!field || !nextValue || !canWrite()) return false;
   const value = String(nextValue).trim();
   if (!value) return false;
   assertPanoramaAutofillWrite();
   field.focus();
   assertPanoramaAutofillWrite();
+  if (field.isConnected === false || !canWrite()) return false;
   field.value = '';
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
+  if (field.isConnected === false || !canWrite()) return false;
   field.value = value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
@@ -1925,35 +1825,32 @@ function fillPanoramaMaskedTextInput(field, nextValue) {
     new KeyboardEvent('keyup', { key: value.slice(-1) || '0', bubbles: true })
   );
   assertPanoramaAutofillWrite();
+  if (field.isConnected === false || !canWrite()) return false;
   field.dispatchEvent(new Event('change', { bubbles: true }));
   assertPanoramaAutofillWrite();
   field.blur();
   return String(field.value || '').trim() === value;
 }
 
-function fillPanoramaAdministeredDateTimeFields(data) {
+function fillPanoramaAdministeredDateTimeFields(data, canWrite = () => true) {
   const administered = getPanoramaAdministeredDateTimeValues(data);
   if (!administered.date && !administered.time) return 0;
-
-  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
-
-  // Rewriting an already-correct value is not a no-op in Panorama: the change
-  // event triggers an AJAX refresh that clears the consent select (which only
-  // enables once a date is present) and it is not re-populated afterwards. So
-  // a re-fill pass (e.g. after the PF/NPF chooser is answered) must leave a
-  // matching date/time untouched.
   let fillCount = 0;
+  const { dateField } = getPanoramaAdministeredDateTimeFields(data);
   if (
     administered.date &&
     String(dateField?.value || '').trim() !== administered.date &&
-    fillPanoramaMaskedTextInput(dateField, administered.date)
+    canWrite() &&
+    fillPanoramaMaskedTextInput(dateField, administered.date, canWrite)
   ) {
     fillCount += 1;
   }
+  const { timeField } = getPanoramaAdministeredDateTimeFields(data);
   if (
     administered.time &&
     String(timeField?.value || '').trim() !== administered.time &&
-    fillPanoramaMaskedTextInput(timeField, administered.time)
+    canWrite() &&
+    fillPanoramaMaskedTextInput(timeField, administered.time, canWrite)
   ) {
     fillCount += 1;
   }
@@ -1984,10 +1881,10 @@ function getPanoramaConsentReasonValue(data) {
   return explicit || 'Consent obtained';
 }
 
-function panoramaSelectHasDesiredSelection(selectors, desiredText) {
+function panoramaSelectHasDesiredSelection(selectors, desiredText, scope) {
   const desiredNorm = normalizeForMatch(desiredText);
   if (!desiredNorm) return true;
-  return getFields(selectors).some((field) => {
+  return getFields(selectors, scope).some((field) => {
     if (field.tagName !== 'SELECT') return false;
     const opt =
       field.options && field.selectedIndex >= 0
@@ -2001,27 +1898,29 @@ function panoramaSelectHasDesiredSelection(selectors, desiredText) {
 // absent, still disabled (Panorama has not enabled it yet), or already showing the
 // desired option. This keeps the scheduler retrying only while a fillable control
 // is present but not yet set.
-function panoramaSelectAutofillSatisfied(selectors, desiredText) {
-  const fields = getFields(selectors);
+function panoramaSelectAutofillSatisfied(selectors, desiredText, scope) {
+  const fields = getFields(selectors, scope);
   if (!fields.length) return true;
   if (!fields.some(canFillPanoramaControl)) return true;
-  return panoramaSelectHasDesiredSelection(selectors, desiredText);
+  return panoramaSelectHasDesiredSelection(selectors, desiredText, scope);
 }
 
-function fillPanoramaReasonForImmunization(data) {
+function fillPanoramaReasonForImmunization(data, canWrite) {
   if (!reasonAutofillEnabled) return 0;
   const selectors = getPanoramaReasonForImmunizationSelectors();
   const value = getPanoramaReasonForImmunizationValue(data);
-  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
-  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+  const scope = data?._vaxlinkOwner?.form;
+  if (panoramaSelectHasDesiredSelection(selectors, value, scope)) return 0;
+  return fillFirstMatchingField(selectors, value, scope, canWrite) ? 1 : 0;
 }
 
-function fillPanoramaConsentReason(data) {
+function fillPanoramaConsentReason(data, canWrite) {
   if (!consentAutofillEnabled) return 0;
   const selectors = getPanoramaConsentReasonSelectors();
   const value = getPanoramaConsentReasonValue(data);
-  if (panoramaSelectHasDesiredSelection(selectors, value)) return 0;
-  return fillFirstMatchingField(selectors, value) ? 1 : 0;
+  const scope = data?._vaxlinkOwner?.form;
+  if (panoramaSelectHasDesiredSelection(selectors, value, scope)) return 0;
+  return fillFirstMatchingField(selectors, value, scope, canWrite) ? 1 : 0;
 }
 
 function isPrimeFacesAjaxBusy() {
@@ -2043,11 +1942,33 @@ function isPrimeFacesAjaxBusy() {
   return false;
 }
 
+function panoramaDetailAgentMatches(data) {
+  return (
+    !getPanoramaAgentCandidates(data).length || hasPanoramaAgentSelection(data)
+  );
+}
+
+function panoramaDetailProductMatches(data) {
+  return data.lot
+    ? hasPanoramaLotSelection(data.lot)
+    : !getPanoramaTradeCandidates(data).length ||
+        hasPanoramaTradeSelection(data);
+}
+
 function fillPanoramaDeferredDetailFields(data) {
   if (!data) return 0;
-  let count = fillPanoramaAdministeredDateTimeFields(data);
-  count += fillPanoramaReasonForImmunization(data);
-  count += fillPanoramaConsentReason(data);
+  // A field event can replace the selected product or the later controls.
+  const canWrite = () =>
+    (!data._vaxlinkOwner || isPanoramaAutofillCurrent(data)) &&
+    !isPrimeFacesAjaxBusy() &&
+    panoramaDetailAgentMatches(data) &&
+    panoramaDetailProductMatches(data);
+  if (!canWrite()) return 0;
+  let count = fillPanoramaAdministeredDateTimeFields(data, canWrite);
+  if (reasonAutofillEnabled && canWrite())
+    count += fillPanoramaReasonForImmunization(data, canWrite);
+  if (consentAutofillEnabled && canWrite())
+    count += fillPanoramaConsentReason(data, canWrite);
   return count;
 }
 
@@ -2789,10 +2710,10 @@ function schedulePanoramaLotOrTradeSelection(
     lastAttemptAt = now;
     const busy = isPrimeFacesAjaxBusy();
 
-    let hasResolvedAgent = !hasAgent || hasPanoramaAgentSelection(data);
+    let hasResolvedAgent = panoramaDetailAgentMatches(data);
     if (!hasResolvedAgent && !busy) {
-      hasResolvedAgent =
-        tryFillPanoramaAgent(data) || hasPanoramaAgentSelection(data);
+      tryFillPanoramaAgent(data);
+      hasResolvedAgent = panoramaDetailAgentMatches(data);
     }
 
     let resolved = !shouldTryLotOrTrade;
@@ -2833,9 +2754,10 @@ function schedulePanoramaLotOrTradeSelection(
 
       // Try lot fill with the current radio state first — avoids triggering a
       // funded-radio AJAX that can reset the agent and create a re-fill cascade.
-      resolved =
-        tryFillPanoramaLotOrTrade(data, { panelRescue }) ||
-        hasPanoramaLotOrTradeSelection(data);
+      if (panoramaDetailAgentMatches(data) && !isPrimeFacesAjaxBusy()) {
+        tryFillPanoramaLotOrTrade(data, { panelRescue });
+      }
+      resolved = hasPanoramaLotOrTradeSelection(data);
       if (
         !resolved &&
         preserveFundingFilter &&
@@ -2868,41 +2790,29 @@ function schedulePanoramaLotOrTradeSelection(
         const radioResult = resetPanoramaFundedRadioToShowAll();
         if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
         // Radio was already at SHOW_ALL or not found — retry immediately
-        resolved =
-          tryFillPanoramaLotOrTrade(data, { panelRescue }) ||
-          hasPanoramaLotOrTradeSelection(data);
+        if (panoramaDetailAgentMatches(data) && !isPrimeFacesAjaxBusy()) {
+          tryFillPanoramaLotOrTrade(data, { panelRescue });
+        }
+        resolved = hasPanoramaLotOrTradeSelection(data);
       }
-    }
-
-    // Last-ditch visible-dropdown pass: only for layouts without a fillable
-    // native select, or once the silent select path has had its rescue window.
-    if (
-      !resolved &&
-      hasLot &&
-      hasResolvedAgent &&
-      !busy &&
-      (!canFillPanoramaControl(getPanoramaLotWidget()?.select) ||
-        now - scheduleStartedAt >= PANEL_RESCUE_AFTER_MS)
-    ) {
-      if (!hasPanoramaLotSelection(data?.lot)) {
-        openPanoramaLotDropdown();
-      }
-      resolved =
-        fillPanoramaLotFromPanelItems(data?.lot) ||
-        hasPanoramaLotSelection(data?.lot) ||
-        resolved;
     }
 
     let deferredResolved =
       !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
-    if (!deferredResolved && !busy) {
+    if (!deferredResolved && !isPrimeFacesAjaxBusy()) {
       fillPanoramaDeferredDetailFields(data);
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
     // Require spaced stable follow-up passes before stopping so we do not exit
     // while PrimeFaces is still applying dependent field refreshes.
-    if (!busy && resolved && deferredResolved) {
+    if (
+      resolved &&
+      deferredResolved &&
+      !isPrimeFacesAjaxBusy() &&
+      panoramaDetailAgentMatches(data) &&
+      panoramaDetailProductMatches(data)
+    ) {
       if (now - lastStablePassAt >= STABLE_PASS_GAP_MS) {
         lastStablePassAt = now;
         stablePasses += 1;
@@ -3026,7 +2936,7 @@ function getPanoramaFormContext({ checkReadiness = true } = {}) {
 
   const shown = (node) =>
     isVisible(node) && getComputedStyle(node).visibility === 'visible';
-  const agent = getFields(getPanoramaAgentSelectors(), form).find((field) =>
+  const agent = getPanoramaDetailAgentFields(form).find((field) =>
     shown(field.closest('.ui-selectonemenu') || field)
   );
   const date = getPanoramaAdministeredDateTimeFields(
@@ -3172,102 +3082,48 @@ function fillPanoramaImmunizationFields(data) {
     ? 'preserved'
     : resetPanoramaFundedRadioToShowAll();
 
-  let agentCount = 0;
-  if (hasPanoramaAgentSelection(data) || tryFillPanoramaAgent(data)) {
-    agentCount = 1;
+  const agentRequested = getPanoramaAgentCandidates(data).length > 0;
+  let agentMatches = hasPanoramaAgentSelection(data);
+  if (agentRequested && !agentMatches && !isPrimeFacesAjaxBusy()) {
+    tryFillPanoramaAgent(data);
+    agentMatches = hasPanoramaAgentSelection(data);
   }
 
-  let fillCount = agentCount;
-  const lotCount =
-    data.lot && !isPrimeFacesAjaxBusy()
-      ? tryFillPanoramaLot(data.lot)
-        ? 1
-        : 0
-      : 0;
-  fillCount += lotCount;
+  const productRequested =
+    !!data.lot || getPanoramaTradeCandidates(data).length > 0;
+  let fillCount = agentMatches ? 1 : 0;
+  if ((!agentRequested || agentMatches) && productRequested) {
+    if (!panoramaDetailProductMatches(data) && !isPrimeFacesAjaxBusy()) {
+      tryFillPanoramaLotOrTrade(data);
+    }
+    if (panoramaDetailProductMatches(data)) fillCount += 1;
+  }
   fillCount += fillPanoramaDeferredDetailFields(data);
+  if (!isPanoramaAutofillCurrent(data))
+    return createAutofillResult('failed', {
+      error: 'Autofill stopped: form changed or manual takeover'
+    });
 
-  // Panorama refreshes lot options and dependent controls asynchronously after selection.
-  const finalizeOnResolved =
-    preserveFundingFilter && !!data?.lot && !hasPanoramaLotSelection(data.lot);
+  const waitingForSelection =
+    !panoramaDetailAgentMatches(data) || !panoramaDetailProductMatches(data);
   if (
-    agentCount > 0 ||
-    data.lot ||
-    hasPanoramaDeferredDetailData(data) ||
-    getPanoramaTradeCandidates(data).length > 0
+    agentRequested ||
+    productRequested ||
+    hasPanoramaDeferredDetailData(data)
   ) {
-    // Start the scheduler (and its MutationObserver) almost immediately: every
-    // pass is now a silent, idempotent no-op until there is real work, so the
-    // old 1200ms head start was pure dead time — the observer is what reacts
-    // the moment an agent/radio/checkbox AJAX lands the refreshed lot options.
-    schedulePanoramaLotOrTradeSelection(data, agentCount > 0 ? 200 : 100, {
+    schedulePanoramaLotOrTradeSelection(data, agentMatches ? 200 : 100, {
       fundedRadioEnsured: !preserveFundingFilter && radioResult !== 'not_found',
       preserveFundingFilter,
-      finalizeOnResolved
+      finalizeOnResolved: waitingForSelection
     });
   }
 
-  if (preserveFundingFilter && data?.lot) {
-    if (hasPanoramaLotSelection(data.lot)) {
-      return createAutofillResult('success', { fillCount });
-    }
-    return createAutofillResult('pending', {
-      reason: 'waiting_for_lot_resolution',
-      fillCount
-    });
-  }
-
-  if (fillCount > 0) {
-    return createAutofillResult('success', { fillCount });
-  }
-
-  // If agent did not fill, still attempt lot/trade directly.
-  if (tryFillPanoramaLotOrTrade(data)) {
-    fillCount += 1;
-  }
-  if (fillCount > 0) {
-    return createAutofillResult('success', { fillCount });
-  }
-
-  const fallbackMapping = [
-    {
-      value:
-        getPanoramaAgentCandidates(data)[0] ||
-        data.name ||
-        data.generic_name ||
-        data.tradename ||
-        data.din,
-      labels: ['Agent'],
-      preferLast: false
-    }
-  ];
-
-  let fallbackCount = 0;
-  const usedFields = new Set();
-  for (const entry of fallbackMapping) {
-    if (!entry.value) continue;
-    const field = findFieldByLabelText(entry.labels, {
-      preferLast: entry.preferLast
-    });
-    if (!field || usedFields.has(field)) continue;
-    if (!fillField(field, entry.value)) {
-      continue;
-    }
-    if (
-      entry.labels &&
-      entry.labels.includes('Agent') &&
-      !isAgentCandidateAccepted(entry.value, field)
-    ) {
-      continue;
-    }
-    {
-      usedFields.add(field);
-      fallbackCount += 1;
-    }
-  }
-  return createAutofillResult(fallbackCount > 0 ? 'success' : 'failed', {
-    fillCount: fallbackCount
-  });
+  return waitingForSelection
+    ? createAutofillResult('pending', {
+        reason: 'waiting_for_required_selection',
+        fillCount
+      })
+    : createAutofillResult(fillCount > 0 ? 'success' : 'failed', { fillCount });
 }
 
 const PANORAMA_AGENT_RULES = Array.isArray(
