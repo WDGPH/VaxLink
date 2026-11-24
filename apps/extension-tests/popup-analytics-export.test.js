@@ -7,30 +7,27 @@ import {
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
-test('Activity export retains every stored day and Today counts use the local day', async () => {
-  const RealDate = Date;
+test('a CSV export during a delayed Inventory save counts each action once', async () => {
+  const inventoryKey = 'inventory_scan_batch_v1';
+  const analyticsKey = 'vaxlink_analytics_v1';
+  const localDay = (offset) => {
+    const date = new Date();
+    date.setDate(date.getDate() + offset);
+    return new Intl.DateTimeFormat('en-CA').format(date);
+  };
+  const yesterday = localDay(-1);
+  const today = localDay(0);
+  const tomorrow = localDay(1);
   const createObjectURL = URL.createObjectURL;
   const downloads = [];
   const blobs = new Map();
   const listeners = {};
   const requests = [];
   let ready;
-  let eventRecorded;
-  const recorded = new Promise((resolve) => {
-    eventRecorded = resolve;
-  });
-  // 21:30 in Toronto on June 11, already June 12 in UTC.
-  globalThis.Date = class extends RealDate {
-    constructor(...args) {
-      super(...(args.length ? args : ['2026-06-12T01:30:00Z']));
-    }
-    static now() {
-      return RealDate.parse('2026-06-12T01:30:00Z');
-    }
-  };
-  const background = createBackgroundHarness(makeTestNvcBundle());
+  const savingScan = Promise.withResolvers();
+  let resumeScan;
   const nodes = Object.fromEntries(
-    ['analyticsSummary', 'exportAllAnalyticsBtn'].map((id) => [
+    ['analyticsSummary', 'exportAllAnalyticsBtn', 'exportCsvBtn'].map((id) => [
       id,
       {
         addEventListener(type, listener) {
@@ -40,7 +37,12 @@ test('Activity export retains every stored day and Today counts use the local da
     ])
   );
   const day = (count) => ({
-    workflows: { single: { liveScans: count } },
+    workflows: {
+      single: { liveScans: count },
+      inventory: { liveScans: 0, queueSaved: 0 }
+    },
+    exports: { inventoryCount: 0, inventoryRows: 0 },
+    queues: { inventorySaved: 0, maxInventoryDepth: 0 },
     autofill: { success: count },
     popupOpens: 0,
     eventCount: 0,
@@ -49,17 +51,35 @@ test('Activity export retains every stored day and Today counts use the local da
     manufacturers: {}
   });
   const data = {
-    vaxlink_analytics_v1: {
+    vaxlink_workflow_mode_v1: 'inventory',
+    [inventoryKey]: [{ id: 'existing', lot: 'EXISTING' }],
+    [analyticsKey]: {
       version: 1,
       deviceId: 'sample-device',
       deviceLabel: 'Sample workstation',
+      firstSeenAt: '2026-06-09T15:00:00.000Z',
       days: {
-        '2026-06-10': day(2),
-        '2026-06-11': day(3),
-        '2026-06-12': day(5)
-      }
+        [yesterday]: {
+          ...day(2),
+          expiry: { expiringSoon: 5 },
+          vaccines: { 'HISTORICAL-LOT': 2 },
+          funding: { prompts: 2, choices: 1 }
+        },
+        [today]: { ...day(3), expiry: { noticesShown: 1 } },
+        [tomorrow]: { ...day(5), funding: { single: 3, both: 1, unmatched: 2 } }
+      },
+      recentEvents: [{ note: 'OLD-EVENT' }]
     }
   };
+  const background = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: structuredClone(data),
+    delayStorageSet(values, resume) {
+      if (!values[inventoryKey] || resumeScan) return false;
+      resumeScan = resume;
+      savingScan.resolve();
+      return true;
+    }
+  });
   URL.createObjectURL = (blob) => {
     const url = `blob:sample-${blobs.size}`;
     blobs.set(url, blob);
@@ -98,13 +118,8 @@ test('Activity export retains every stored day and Today counts use the local da
           done(Object.fromEntries(keys.map((key) => [key, data[key]])));
         },
         set(values, done) {
+          assert.equal(analyticsKey in values, false);
           Object.assign(data, values);
-          if (
-            Object.values(data.vaxlink_analytics_v1.days).some(
-              (day) => day.popupOpens > 0
-            )
-          )
-            eventRecorded();
           done?.();
         }
       }
@@ -113,31 +128,64 @@ test('Activity export retains every stored day and Today counts use the local da
   try {
     await import('../extension/popup.js?local-analytics-export');
     await ready();
-    await recorded;
-    assert.ok(
-      data.vaxlink_analytics_v1.days['2026-06-11'].popupOpens > 0,
-      'popup events also use the local day'
-    );
     assert.match(
       nodes.analyticsSummary.innerHTML,
       /Scans<\/th><td>3<\/td><td>10<\/td>/
     );
+
+    const capture = background.sendMessage({
+      action: 'scannerScanCaptured',
+      scan: { rawText: '01001234567890121727123110UNLISTEDLOT' }
+    });
+    await savingScan.promise;
+    try {
+      listeners['exportCsvBtn:click']();
+      assert.match(downloads[0].filename, /\.csv$/);
+      const csv = await downloads[0].blob.text();
+      assert.match(csv, /EXISTING/);
+      assert.doesNotMatch(csv, /UNLISTEDLOT/);
+    } finally {
+      resumeScan();
+    }
+    assert.equal((await capture).queued, true);
     await listeners['exportAllAnalyticsBtn:click']();
-    const all = JSON.parse(await downloads[0].blob.text());
-    assert.deepEqual(Object.keys(all.days), [
-      '2026-06-10',
-      '2026-06-11',
-      '2026-06-12'
-    ]);
+
+    assert.match(downloads[1].filename, /\.json$/);
+    assert.match(
+      nodes.analyticsSummary.innerHTML,
+      /Inventory exports<\/th><td>1<\/td><td>1<\/td>/
+    );
+    const all = JSON.parse(await downloads[1].blob.text());
+    assert.deepEqual(Object.keys(all.days), [yesterday, today, tomorrow]);
+    assert.equal(all.deviceId, 'sample-device');
+    assert.equal(all.deviceLabel, 'Sample workstation');
+    assert.equal(all.firstSeenAt, data[analyticsKey].firstSeenAt);
+    assert.equal(all.days[today].popupOpens, 1);
     assert.equal(all.rollup.workflows.single.liveScans, 10);
+    assert.equal(all.rollup.workflows.inventory.liveScans, 1);
     assert.equal(all.rollup.autofill.success, 10);
-    assert.ok(
-      downloads.every((download) => download.filename.endsWith('.json'))
+    assert.deepEqual(all.rollup.exports, {
+      inventoryCount: 1,
+      inventoryRows: 1
+    });
+    assert.deepEqual(all.rollup.vaccines, { 'HISTORICAL-LOT': 2 });
+    assert.deepEqual(all.rollup.funding, {
+      prompts: 2,
+      choices: 1,
+      single: 3,
+      both: 1,
+      unmatched: 2
+    });
+    assert.equal(all.rollup.expiry.expiringSoon, 5);
+    assert.equal(all.rollup.expiry.noticesShown, 1);
+    assert.equal(all.days[yesterday].expiry.noticesShown, undefined);
+    assert.doesNotMatch(
+      JSON.stringify(all),
+      /UNLISTEDLOT|00123456789012|OLD-EVENT/
     );
   } finally {
     for (let index = 0; index < requests.length; index++) await requests[index];
     await new Promise(setImmediate);
-    globalThis.Date = RealDate;
     URL.createObjectURL = createObjectURL;
     delete globalThis.document;
     delete globalThis.chrome;

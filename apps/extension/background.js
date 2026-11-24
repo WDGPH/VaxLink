@@ -67,7 +67,6 @@ const STORAGE_KEYS = {
   health: 'nvc_bundle_health'
 };
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
-const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
@@ -1021,12 +1020,7 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
       workflow: mode,
       source: scan.source || 'web-serial',
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        record.gtin ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag
     });
@@ -1038,11 +1032,7 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
         count: 1,
         queueSizeAfter: record.queueSizeAfter || 0,
         vaccineLabel:
-          record.tradename ||
-          record.generic_name ||
-          record.name ||
-          record.lot ||
-          '',
+          record.tradename || record.generic_name || record.name || '',
         manufacturer: record.manufacturer || '',
         expiryFlag
       });
@@ -1292,35 +1282,23 @@ function createAnalyticsStore() {
     firstSeenAt: now,
     lastEventAt: null,
     lastExportAt: null,
-    days: {},
-    recentEvents: []
+    days: {}
   };
 }
 
-async function getAnalyticsStore() {
-  const stored = await getStorage([ANALYTICS_STORAGE_KEY]);
-  const existing = stored[ANALYTICS_STORAGE_KEY];
+function normalizeAnalyticsStore(existing) {
   if (!existing || typeof existing !== 'object') {
-    const created = createAnalyticsStore();
-    await setStorage({ [ANALYTICS_STORAGE_KEY]: created });
-    return created;
+    return createAnalyticsStore();
   }
-  if (!existing.deviceId) {
-    existing.deviceId = buildAnalyticsId();
-  }
-  if (!existing.firstSeenAt) {
-    existing.firstSeenAt = new Date().toISOString();
-  }
-  if (!existing.days || typeof existing.days !== 'object') {
-    existing.days = {};
-  }
-  if (!Array.isArray(existing.recentEvents)) {
-    existing.recentEvents = [];
-  }
-  if (typeof existing.deviceLabel !== 'string') {
-    existing.deviceLabel = '';
-  }
-  return existing;
+  return {
+    ...existing,
+    deviceId: existing.deviceId || buildAnalyticsId(),
+    firstSeenAt: existing.firstSeenAt || new Date().toISOString(),
+    days:
+      existing.days && typeof existing.days === 'object' ? existing.days : {},
+    deviceLabel:
+      typeof existing.deviceLabel === 'string' ? existing.deviceLabel : ''
+  };
 }
 
 function ensureAnalyticsDay(store, dayKey) {
@@ -1372,13 +1350,6 @@ function applyTopCounter(map, rawKey, amount = 1) {
   });
 }
 
-function appendRecentAnalyticsEvent(store, event) {
-  store.recentEvents.push(event);
-  if (store.recentEvents.length > ANALYTICS_MAX_RECENT_EVENTS) {
-    store.recentEvents = store.recentEvents.slice(-ANALYTICS_MAX_RECENT_EVENTS);
-  }
-}
-
 function applyAnalyticsEvent(day, event) {
   const workflow = normalizeWorkflowKey(event.workflow);
   const count = safeAnalyticsCount(event.count, 1);
@@ -1394,7 +1365,9 @@ function applyAnalyticsEvent(day, event) {
     applyTopCounter(day.manufacturers, event.manufacturer, count);
   }
   if (event.expiryFlag) {
-    day.expiry[normalizeExpiryKey(event.expiryFlag)] += count;
+    const key = normalizeExpiryKey(event.expiryFlag);
+    day.expiry ??= {};
+    day.expiry[key] = (day.expiry[key] || 0) + count;
   }
 
   switch (event.eventType) {
@@ -1486,7 +1459,6 @@ function applyAnalyticsEvent(day, event) {
 function makeAnalyticsEvent(eventType, payload = {}) {
   const ts = payload.ts || new Date().toISOString();
   return {
-    id: buildAnalyticsId(),
     ts,
     day: analyticsDayKey(ts),
     eventType,
@@ -1500,29 +1472,32 @@ function makeAnalyticsEvent(eventType, payload = {}) {
     expiryFlag: payload.expiryFlag || '',
     vaccineLabel: trimAnalyticsLabel(payload.vaccineLabel, 60),
     manufacturer: trimAnalyticsLabel(payload.manufacturer, 60),
-    trigger: payload.trigger || '',
-    note: trimAnalyticsLabel(payload.note, 120)
+    trigger: payload.trigger || ''
   };
 }
 
-function mutateAnalyticsStore(mutator) {
+function accessAnalyticsStore(mutator) {
   analyticsWriteQueue = analyticsWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      const store = await getAnalyticsStore();
-      await mutator(store);
-      await setStorage({ [ANALYTICS_STORAGE_KEY]: store });
+      const stored = await getStorage([ANALYTICS_STORAGE_KEY]);
+      const existing = stored[ANALYTICS_STORAGE_KEY];
+      const normalized = normalizeAnalyticsStore(existing);
+      const store = mutator?.(normalized) ?? normalized;
+      // First use needs a lasting identity even when Activity opens before a scan.
+      if (mutator || !existing?.deviceId || !existing.firstSeenAt) {
+        await setStorage({ [ANALYTICS_STORAGE_KEY]: store });
+      }
       return store;
     });
   return analyticsWriteQueue;
 }
 
 async function logAnalyticsEvent(eventType, payload = {}) {
-  return mutateAnalyticsStore((store) => {
-    const event = makeAnalyticsEvent(eventType, payload);
+  const event = makeAnalyticsEvent(eventType, payload);
+  return accessAnalyticsStore((store) => {
     const day = ensureAnalyticsDay(store, event.day);
     applyAnalyticsEvent(day, event);
-    appendRecentAnalyticsEvent(store, event);
     store.lastEventAt = event.ts;
   });
 }
@@ -1535,6 +1510,7 @@ function sumObjectCounters(target, source) {
 
 function aggregateAnalyticsDays(days) {
   const rollup = createAnalyticsDay('rollup');
+  rollup.expiry.noticesShown = null;
   for (const day of days) {
     rollup.eventCount += day.eventCount || 0;
     rollup.popupOpens += day.popupOpens || 0;
@@ -1549,10 +1525,12 @@ function aggregateAnalyticsDays(days) {
       target.autofillSuccess += source.autofillSuccess || 0;
       target.autofillFailure += source.autofillFailure || 0;
     });
-    ['success', 'error'].forEach((key) => {
-      rollup.parsing[key] += day.parsing?.[key] || 0;
-      rollup.lookup[key] += day.lookup?.[key] || 0;
-    });
+    sumObjectCounters(rollup.parsing, day.parsing);
+    sumObjectCounters(rollup.lookup, day.lookup);
+    if (day.funding) {
+      rollup.funding ??= {};
+      sumObjectCounters(rollup.funding, day.funding);
+    }
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });
@@ -1584,6 +1562,10 @@ function aggregateAnalyticsDays(days) {
     ['expired', 'expiringSoon', 'valid', 'unknown'].forEach((key) => {
       rollup.expiry[key] += day.expiry?.[key] || 0;
     });
+    if (typeof day.expiry?.noticesShown === 'number') {
+      rollup.expiry.noticesShown =
+        (rollup.expiry.noticesShown ?? 0) + day.expiry.noticesShown;
+    }
     sumObjectCounters(rollup.sources, day.sources);
     sumObjectCounters(rollup.vaccines, day.vaccines);
     sumObjectCounters(rollup.manufacturers, day.manufacturers);
@@ -1592,10 +1574,13 @@ function aggregateAnalyticsDays(days) {
 }
 
 async function getAnalyticsSummary() {
-  const store = await getAnalyticsStore();
+  return buildAnalyticsSummary(await accessAnalyticsStore());
+}
+
+function buildAnalyticsSummary(store) {
   const dayKeys = Object.keys(store.days).sort();
   const todayKey = analyticsDayKey();
-  const today = store.days[todayKey] || createAnalyticsDay(todayKey);
+  const today = store.days[todayKey] || {};
   const rollup = aggregateAnalyticsDays(dayKeys.map((key) => store.days[key]));
   return {
     deviceId: store.deviceId,
@@ -1611,16 +1596,18 @@ async function getAnalyticsSummary() {
 }
 
 async function getAnalyticsExport(scope = 'pilot') {
-  const store = await getAnalyticsStore();
+  const store = await accessAnalyticsStore((store) => {
+    store.lastExportAt = new Date().toISOString();
+  });
   const dayKeys = Object.keys(store.days).sort();
-  const todayKey = analyticsDayKey();
+  const todayKey = analyticsDayKey(store.lastExportAt);
   const selectedKeys =
     scope === 'today' ? dayKeys.filter((key) => key === todayKey) : dayKeys;
   const selectedDays = Object.fromEntries(
     selectedKeys.map((key) => [key, store.days[key]])
   );
   return {
-    exportedAt: new Date().toISOString(),
+    exportedAt: store.lastExportAt,
     scope,
     deviceId: store.deviceId,
     deviceLabel: store.deviceLabel || '',
@@ -1633,21 +1620,13 @@ async function getAnalyticsExport(scope = 'pilot') {
 }
 
 async function setAnalyticsDeviceLabel(label) {
-  return mutateAnalyticsStore((store) => {
+  return accessAnalyticsStore((store) => {
     store.deviceLabel = trimAnalyticsLabel(label, 80);
   });
 }
 
-async function markAnalyticsExported() {
-  return mutateAnalyticsStore((store) => {
-    store.lastExportAt = new Date().toISOString();
-  });
-}
-
 async function resetAnalyticsStore() {
-  const fresh = createAnalyticsStore();
-  await setStorage({ [ANALYTICS_STORAGE_KEY]: fresh });
-  return fresh;
+  return accessAnalyticsStore(() => createAnalyticsStore());
 }
 
 async function sha256Hex(text) {
@@ -2047,8 +2026,7 @@ async function performNVCRefresh(options) {
     }).catch(() => undefined);
     await logAnalyticsEvent('nvc_refresh_result', {
       trigger,
-      success: false,
-      note: nvcHealth.lastError
+      success: false
     }).catch(() => undefined);
     return nvcFailure(nvcHealth.lastError);
   }
@@ -3447,11 +3425,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'getAnalyticsExport') {
     getAnalyticsExport(request.scope === 'today' ? 'today' : 'pilot')
-      .then((data) =>
-        markAnalyticsExported().then(() =>
-          sendResponse({ success: true, data })
-        )
-      )
+      .then((data) => sendResponse({ success: true, data }))
       .catch((error) =>
         sendResponse({
           success: false,
@@ -3463,8 +3437,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'setAnalyticsDeviceLabel') {
     setAnalyticsDeviceLabel(request.label || '')
-      .then(() => getAnalyticsSummary())
-      .then((summary) => sendResponse({ success: true, summary }))
+      .then((store) =>
+        sendResponse({ success: true, summary: buildAnalyticsSummary(store) })
+      )
       .catch((error) =>
         sendResponse({
           success: false,
@@ -3476,8 +3451,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'resetAnalyticsStore') {
     resetAnalyticsStore()
-      .then(() => getAnalyticsSummary())
-      .then((summary) => sendResponse({ success: true, summary }))
+      .then((store) =>
+        sendResponse({ success: true, summary: buildAnalyticsSummary(store) })
+      )
       .catch((error) =>
         sendResponse({
           success: false,

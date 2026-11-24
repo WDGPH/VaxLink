@@ -104,8 +104,10 @@ fields. Disabled fields keep their existing values.
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
-today in local time or all activity since the last reset. Its counts describe
-extension activity, not confirmation that Panorama saved a clinical record.
+today in local time or all activity since the last reset. The popup reports
+activity and starts downloads. The background worker saves the daily totals and
+prepares the summaries and JSON export. The totals describe extension activity,
+and staff verify and save clinical records in Panorama.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with
@@ -143,22 +145,22 @@ it in a queue.
 
 ## Key storage keys
 
-| Key                                         | Writers            | Purpose                                       |
-| ------------------------------------------- | ------------------ | --------------------------------------------- |
-| `multiple_inject_queue_v1`                  | background         | Multiple Immunizations queue rows             |
-| `inventory_scan_batch_v1`                   | background         | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`             | background         | Single scans held for later chart delivery    |
-| `vaxlink_scanner_capture_error_v1`          | background         | Capture warning awaiting acknowledgement      |
-| `vaxlink_scanner_status_snapshot_v1`        | background         | Last saved scanner status and capture history |
-| `nvc_bundle_override`                       | background         | Cached NVC catalogue                          |
-| `vaxlink_administered_date_autofill_v1`     | popup              | Date Administered autofill preference         |
-| `vaxlink_administered_time_autofill_v1`     | popup              | Time Administered autofill preference         |
-| `vaxlink_administered_datetime_autofill_v1` | legacy popup       | Default for unset date and time switches      |
-| `vaxlink_reason_autofill_v1`                | popup              | Reason for Immunization autofill preference   |
-| `vaxlink_consent_autofill_v1`               | popup              | Consent for Service autofill preference       |
-| `vaxlink_reason_consent_autofill_v1`        | legacy popup       | Default for unset reason and consent switches |
-| `vaxlink_workflow_mode_v1`                  | popup + content    | Current workflow mode                         |
-| `vaxlink_analytics_v1`                      | background + popup | Local event log and summaries                 |
+| Key                                         | Writers         | Purpose                                       |
+| ------------------------------------------- | --------------- | --------------------------------------------- |
+| `multiple_inject_queue_v1`                  | background      | Multiple Immunizations queue rows             |
+| `inventory_scan_batch_v1`                   | background      | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`             | background      | Single scans held for later chart delivery    |
+| `vaxlink_scanner_capture_error_v1`          | background      | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1`        | background      | Last saved scanner status and capture history |
+| `nvc_bundle_override`                       | background      | Cached NVC catalogue                          |
+| `vaxlink_administered_date_autofill_v1`     | popup           | Date Administered autofill preference         |
+| `vaxlink_administered_time_autofill_v1`     | popup           | Time Administered autofill preference         |
+| `vaxlink_administered_datetime_autofill_v1` | legacy popup    | Default for unset date and time switches      |
+| `vaxlink_reason_autofill_v1`                | popup           | Reason for Immunization autofill preference   |
+| `vaxlink_consent_autofill_v1`               | popup           | Consent for Service autofill preference       |
+| `vaxlink_reason_consent_autofill_v1`        | legacy popup    | Default for unset reason and consent switches |
+| `vaxlink_workflow_mode_v1`                  | popup + content | Current workflow mode                         |
+| `vaxlink_analytics_v1`                      | background      | Local Activity daily totals                   |
 
 Queue appends, popup edits, HUD removals, and dose consumption share the
 background writer. Each change reads the latest rows after earlier writes finish,

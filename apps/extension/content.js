@@ -613,7 +613,6 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     logAnalyticsEvent('parse_success', {
       workflow: activeWorkflowMode,
       source,
-      vaccineLabel: parsed.lot || parsed.gtin || '',
       expiryFlag: getExpiryStatus(parsed.expiry).flag
     });
   } catch (error) {
@@ -621,8 +620,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     playAudioCue('error');
     logAnalyticsEvent('parse_error', {
       workflow: activeWorkflowMode,
-      source,
-      note: error.message
+      source
     });
     return {
       accepted: true,
@@ -662,12 +660,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
         workflow: activeWorkflowMode,
         source,
-        vaccineLabel:
-          parsed.tradename ||
-          parsed.generic_name ||
-          parsed.lot ||
-          parsed.gtin ||
-          '',
+        vaccineLabel: parsed.tradename || parsed.generic_name || '',
         manufacturer: parsed.manufacturer || '',
         expiryFlag: lookupExpiryFlag
       });
@@ -676,8 +669,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     console.warn('Hands-free lookup error:', error);
     logAnalyticsEvent('lookup_error', {
       workflow: activeWorkflowMode,
-      source,
-      note: error?.message || 'Lookup failed'
+      source
     });
   }
 
@@ -704,12 +696,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   logAnalyticsEvent('scan_captured', {
     workflow: activeWorkflowMode,
     source,
-    vaccineLabel:
-      parsed.tradename ||
-      parsed.generic_name ||
-      parsed.lot ||
-      parsed.gtin ||
-      '',
+    vaccineLabel: parsed.tradename || parsed.generic_name || '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
@@ -733,11 +720,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
           queue: queueKey,
           source,
           vaccineLabel:
-            record.tradename ||
-            record.generic_name ||
-            record.name ||
-            record.lot ||
-            '',
+            record.tradename || record.generic_name || record.name || '',
           manufacturer: record.manufacturer || '',
           expiryFlag: record.expiry_flag || finalExpiryFlag
         });
@@ -769,11 +752,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         count: 1,
         queueSizeAfter: record.queueSizeAfter || 0,
         vaccineLabel:
-          record.tradename ||
-          record.generic_name ||
-          record.name ||
-          record.lot ||
-          '',
+          record.tradename || record.generic_name || record.name || '',
         manufacturer: record.manufacturer || '',
         expiryFlag: record.expiry_flag || finalExpiryFlag
       });
@@ -799,12 +778,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   logAnalyticsEvent('autofill_attempt', {
     workflow: activeWorkflowMode,
     source,
-    vaccineLabel:
-      parsed.tradename ||
-      parsed.generic_name ||
-      parsed.lot ||
-      parsed.gtin ||
-      '',
+    vaccineLabel: parsed.tradename || parsed.generic_name || '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
@@ -821,12 +795,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     source,
     success,
     pending,
-    vaccineLabel:
-      parsed.tradename ||
-      parsed.generic_name ||
-      parsed.lot ||
-      parsed.gtin ||
-      '',
+    vaccineLabel: parsed.tradename || parsed.generic_name || '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
@@ -3237,12 +3206,7 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     source,
     count: 1,
     queueSizeAfter: nextRows.length,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
+    vaccineLabel: record.tradename || record.generic_name || record.name || '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -3251,12 +3215,7 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     source,
     success: true,
     deferred: true,
-    vaccineLabel:
-      record.tradename ||
-      record.generic_name ||
-      record.name ||
-      record.lot ||
-      '',
+    vaccineLabel: record.tradename || record.generic_name || record.name || '',
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -4386,11 +4345,7 @@ async function applyNextQueueItem(options = {}) {
       workflow: 'multiple',
       source: 'hud',
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
@@ -4411,11 +4366,7 @@ async function applyNextQueueItem(options = {}) {
       success,
       pending,
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });

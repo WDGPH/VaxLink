@@ -6,7 +6,6 @@ import {
 } from './helpers/clinic-sim.js';
 
 test('Scanner setup opens and focuses Settings without leaving the popup', async () => {
-  const background = createBackgroundHarness(makeTestNvcBundle());
   const listeners = {};
   const nodes = Object.fromEntries(
     [
@@ -76,6 +75,9 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       deviceLabel: 'Sample workstation',
       days: {
         [new Intl.DateTimeFormat('en-CA').format(new Date())]: {
+          eventCount: 0,
+          popupOpens: 0,
+          sources: {},
           workflows: {
             single: { liveScans: 2, popupParses: 1 },
             multiple: { liveScans: 3 },
@@ -86,6 +88,9 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       }
     }
   };
+  const background = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: localData
+  });
   let runtimeListener;
   globalThis.document = {
     getElementById: (id) => nodes[id] || null,

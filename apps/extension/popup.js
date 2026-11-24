@@ -84,7 +84,6 @@ const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
 const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
 const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
 const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
-const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
   'vaxlink_administered_datetime_autofill_v1';
@@ -317,7 +316,6 @@ document.addEventListener('DOMContentLoaded', async () => {
           parsedData.tradename ||
           parsedData.generic_name ||
           parsedData.name ||
-          parsedData.lot ||
           '',
         manufacturer: parsedData.manufacturer || '',
         expiryFlag:
@@ -336,7 +334,6 @@ document.addEventListener('DOMContentLoaded', async () => {
               parsedData.tradename ||
               parsedData.generic_name ||
               parsedData.name ||
-              parsedData.lot ||
               '',
             manufacturer: parsedData.manufacturer || '',
             expiryFlag:
@@ -358,7 +355,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             parsedData.tradename ||
             parsedData.generic_name ||
             parsedData.name ||
-            parsedData.lot ||
             '',
           manufacturer: parsedData.manufacturer || '',
           expiryFlag:
@@ -381,7 +377,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             parsedData.tradename ||
             parsedData.generic_name ||
             parsedData.name ||
-            parsedData.lot ||
             '',
           manufacturer: parsedData.manufacturer || ''
         });
@@ -459,9 +454,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (resetAnalyticsBtn) {
     resetAnalyticsBtn.addEventListener('click', async () => {
       try {
-        const store = createEmptyAnalyticsStore();
-        await setLocalAnalyticsStore(store);
-        renderAnalyticsSummary(buildAnalyticsSummaryFromStore(store));
+        const result = await sendRuntimeMessage({
+          action: 'resetAnalyticsStore'
+        });
+        if (!result?.success)
+          throw new Error(result?.error || 'Could not reset analytics');
+        renderAnalyticsSummary(result.summary);
         writeOutput('Activity reset.', 'info');
       } catch (error) {
         writeOutput(error.message || 'Could not reset analytics', 'error');
@@ -751,15 +749,11 @@ async function setAutofillSetting(key, enabled) {
 }
 
 function logAnalyticsEvent(eventType, payload = {}) {
-  void recordLocalAnalyticsEvent(eventType, payload)
-    .then(() => loadAnalyticsSummary())
+  void sendRuntimeMessage({ action: 'logAnalyticsEvent', eventType, payload })
+    .then((result) => {
+      if (result?.success) return loadAnalyticsSummary();
+    })
     .catch(() => undefined);
-  chrome.runtime.sendMessage(
-    { action: 'logAnalyticsEvent', eventType, payload },
-    () => {
-      void chrome.runtime.lastError;
-    }
-  );
 }
 
 function getLocalStorage(keys) {
@@ -788,8 +782,9 @@ function setLocalStorage(values) {
 
 async function loadAnalyticsSummary() {
   try {
-    const store = await getLocalAnalyticsStore();
-    renderAnalyticsSummary(buildAnalyticsSummaryFromStore(store));
+    const result = await sendRuntimeMessage({ action: 'getAnalyticsSummary' });
+    if (!result?.success) throw new Error(result?.error);
+    renderAnalyticsSummary(result.summary);
   } catch (_) {
     if (analyticsSummaryDiv) {
       analyticsSummaryDiv.textContent =
@@ -883,11 +878,11 @@ function downloadTextFile(filename, text, mimeType) {
 
 async function exportAnalyticsJson() {
   try {
-    const store = await getLocalAnalyticsStore();
-    store.lastExportAt = new Date().toISOString();
-    await setLocalAnalyticsStore(store);
-    const data = buildAnalyticsExportFromStore(store, 'pilot');
-    const filename = `vaxlink-activity-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    const result = await sendRuntimeMessage({ action: 'getAnalyticsExport' });
+    if (!result?.success)
+      throw new Error(result?.error || 'Could not export analytics');
+    const data = result.data;
+    const filename = `vaxlink-activity-${data.exportedAt.replace(/[:.]/g, '-')}.json`;
     downloadTextFile(
       filename,
       JSON.stringify(data, null, 2),
@@ -898,343 +893,6 @@ async function exportAnalyticsJson() {
   } catch (error) {
     writeOutput(error.message || 'Could not export analytics', 'error');
   }
-}
-
-async function getLocalAnalyticsStore() {
-  const stored = await getLocalStorage([ANALYTICS_STORAGE_KEY]);
-  return normalizeAnalyticsStore(stored[ANALYTICS_STORAGE_KEY]);
-}
-
-async function setLocalAnalyticsStore(store) {
-  await setLocalStorage({
-    [ANALYTICS_STORAGE_KEY]: normalizeAnalyticsStore(store)
-  });
-}
-
-function createEmptyAnalyticsStore() {
-  return {
-    version: 1,
-    deviceId: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    deviceLabel: '',
-    firstSeenAt: new Date().toISOString(),
-    lastEventAt: null,
-    lastExportAt: null,
-    days: {},
-    recentEvents: []
-  };
-}
-
-function createEmptyAnalyticsDay(dayKey) {
-  return {
-    day: dayKey,
-    eventCount: 0,
-    popupOpens: 0,
-    modeSwitches: { single: 0, multiple: 0, inventory: 0 },
-    workflows: {
-      single: {
-        liveScans: 0,
-        popupParses: 0,
-        queueSaved: 0,
-        queueUsed: 0,
-        autofillSuccess: 0,
-        autofillFailure: 0
-      },
-      multiple: {
-        liveScans: 0,
-        popupParses: 0,
-        queueSaved: 0,
-        queueUsed: 0,
-        autofillSuccess: 0,
-        autofillFailure: 0
-      },
-      inventory: {
-        liveScans: 0,
-        popupParses: 0,
-        queueSaved: 0,
-        queueUsed: 0,
-        autofillSuccess: 0,
-        autofillFailure: 0
-      }
-    },
-    parsing: { success: 0, error: 0 },
-    lookup: { success: 0, error: 0 },
-    autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
-    queues: {
-      multipleSaved: 0,
-      multipleUsed: 0,
-      multipleCleared: 0,
-      inventorySaved: 0,
-      inventoryCleared: 0,
-      maxMultipleDepth: 0,
-      maxInventoryDepth: 0
-    },
-    exports: { inventoryCount: 0, inventoryRows: 0 },
-    nvc: { manualSuccess: 0, manualFailure: 0, autoSuccess: 0, autoFailure: 0 },
-    expiry: { expired: 0, expiringSoon: 0, valid: 0, unknown: 0 },
-    sources: {},
-    vaccines: {},
-    manufacturers: {}
-  };
-}
-
-function normalizeAnalyticsStore(store) {
-  const normalized =
-    store && typeof store === 'object' ? store : createEmptyAnalyticsStore();
-  if (!normalized.deviceId) {
-    normalized.deviceId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-  if (!normalized.firstSeenAt) {
-    normalized.firstSeenAt = new Date().toISOString();
-  }
-  if (!normalized.days || typeof normalized.days !== 'object') {
-    normalized.days = {};
-  }
-  if (!Array.isArray(normalized.recentEvents)) {
-    normalized.recentEvents = [];
-  }
-  if (typeof normalized.deviceLabel !== 'string') {
-    normalized.deviceLabel = '';
-  }
-  return normalized;
-}
-
-function normalizeAnalyticsWorkflow(value) {
-  return value === 'multiple' || value === 'inventory' ? value : 'single';
-}
-
-function normalizeAnalyticsQueue(value) {
-  return value === 'inventory' ? 'inventory' : 'multiple';
-}
-
-function normalizeExpiryFlag(value) {
-  if (value === 'expired') return 'expired';
-  if (value === 'expiring_soon') return 'expiringSoon';
-  if (value === 'valid') return 'valid';
-  return 'unknown';
-}
-
-function safeAnalyticsCount(value, fallback = 1) {
-  const num = Number(value);
-  return Number.isFinite(num) && num > 0 ? num : fallback;
-}
-
-function incrementCounterMap(map, key, amount = 1) {
-  if (!map || !key) return;
-  map[key] = (map[key] || 0) + amount;
-}
-
-function ensureAnalyticsDay(store, dayKey) {
-  if (!store.days[dayKey]) {
-    store.days[dayKey] = createEmptyAnalyticsDay(dayKey);
-  }
-  return store.days[dayKey];
-}
-
-function analyticsDayKey(value = new Date()) {
-  const date = new Date(value);
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function buildLocalAnalyticsEvent(eventType, payload = {}) {
-  const ts = new Date().toISOString();
-  return {
-    eventType,
-    ts,
-    day: analyticsDayKey(ts),
-    workflow: normalizeAnalyticsWorkflow(payload.workflow),
-    queue: payload.queue ? normalizeAnalyticsQueue(payload.queue) : '',
-    source: String(payload.source || '')
-      .trim()
-      .slice(0, 40),
-    success: !!payload.success,
-    count: safeAnalyticsCount(payload.count, 1),
-    rows: safeAnalyticsCount(payload.rows, 0),
-    queueSizeAfter: safeAnalyticsCount(payload.queueSizeAfter, 0),
-    expiryFlag: payload.expiryFlag || '',
-    vaccineLabel: String(payload.vaccineLabel || '')
-      .trim()
-      .slice(0, 60),
-    manufacturer: String(payload.manufacturer || '')
-      .trim()
-      .slice(0, 60)
-  };
-}
-
-function applyLocalAnalyticsEvent(day, event) {
-  const workflow = event.workflow;
-  const count = event.count;
-  day.eventCount += 1;
-
-  incrementCounterMap(day.sources, event.source, count);
-  incrementCounterMap(day.vaccines, event.vaccineLabel, count);
-  incrementCounterMap(day.manufacturers, event.manufacturer, count);
-  if (event.expiryFlag) {
-    day.expiry[normalizeExpiryFlag(event.expiryFlag)] += count;
-  }
-
-  switch (event.eventType) {
-    case 'popup_open':
-      day.popupOpens += 1;
-      break;
-    case 'workflow_mode_set':
-      day.modeSwitches[workflow] += 1;
-      break;
-    case 'parse_success':
-      day.parsing.success += count;
-      day.workflows[workflow].popupParses += count;
-      break;
-    case 'parse_error':
-      day.parsing.error += count;
-      break;
-    case 'lookup_success':
-      day.lookup.success += count;
-      break;
-    case 'lookup_error':
-      day.lookup.error += count;
-      break;
-    case 'queue_saved':
-      if (event.queue === 'inventory') {
-        day.queues.inventorySaved += count;
-        day.queues.maxInventoryDepth = Math.max(
-          day.queues.maxInventoryDepth,
-          event.queueSizeAfter || 0
-        );
-        day.workflows.inventory.queueSaved += count;
-      } else {
-        day.queues.multipleSaved += count;
-        day.queues.maxMultipleDepth = Math.max(
-          day.queues.maxMultipleDepth,
-          event.queueSizeAfter || 0
-        );
-        day.workflows.multiple.queueSaved += count;
-      }
-      break;
-    case 'queue_used':
-      day.queues.multipleUsed += count;
-      day.workflows.multiple.queueUsed += count;
-      break;
-    case 'queue_cleared':
-      if (event.queue === 'inventory') {
-        day.queues.inventoryCleared += count;
-      } else {
-        day.queues.multipleCleared += count;
-      }
-      break;
-    case 'autofill_attempt':
-      day.autofill.attempts += count;
-      break;
-    case 'autofill_result':
-      if (event.success) {
-        day.autofill.success += count;
-        day.workflows[workflow].autofillSuccess += count;
-        if (event.source === 'queue') {
-          day.autofill.fromQueueSuccess += count;
-        }
-      } else {
-        day.autofill.failure += count;
-        day.workflows[workflow].autofillFailure += count;
-      }
-      break;
-    case 'inventory_export':
-      day.exports.inventoryCount += count;
-      day.exports.inventoryRows += event.rows || 0;
-      break;
-    default:
-      break;
-  }
-}
-
-async function recordLocalAnalyticsEvent(eventType, payload = {}) {
-  const store = await getLocalAnalyticsStore();
-  const event = buildLocalAnalyticsEvent(eventType, payload);
-  const day = ensureAnalyticsDay(store, event.day);
-  applyLocalAnalyticsEvent(day, event);
-  store.lastEventAt = event.ts;
-  await setLocalAnalyticsStore(store);
-}
-
-function buildAnalyticsSummaryFromStore(store) {
-  const normalized = normalizeAnalyticsStore(store);
-  const todayKey = analyticsDayKey();
-  const today = normalized.days[todayKey] || {};
-  const rollup = aggregateAnalyticsDaysLocal(Object.values(normalized.days));
-  return {
-    deviceId: normalized.deviceId,
-    deviceLabel: normalized.deviceLabel || '',
-    firstSeenAt: normalized.firstSeenAt || null,
-    lastEventAt: normalized.lastEventAt || null,
-    lastExportAt: normalized.lastExportAt || null,
-    daysTracked: Object.keys(normalized.days).length,
-    todayKey,
-    today,
-    rollup
-  };
-}
-
-function buildAnalyticsExportFromStore(store, scope) {
-  const normalized = normalizeAnalyticsStore(store);
-  const todayKey = analyticsDayKey();
-  const selectedKeys = Object.keys(normalized.days)
-    .sort()
-    .filter((key) => (scope === 'today' ? key === todayKey : true));
-  const days = Object.fromEntries(
-    selectedKeys.map((key) => [key, normalized.days[key]])
-  );
-  return {
-    exportedAt: new Date().toISOString(),
-    scope,
-    deviceId: normalized.deviceId,
-    deviceLabel: normalized.deviceLabel || '',
-    firstSeenAt: normalized.firstSeenAt || null,
-    lastEventAt: normalized.lastEventAt || null,
-    daysTracked: selectedKeys.length,
-    days,
-    rollup: aggregateAnalyticsDaysLocal(
-      selectedKeys.map((key) => normalized.days[key])
-    )
-  };
-}
-
-function aggregateAnalyticsDaysLocal(days) {
-  const rollup = {
-    workflows: {
-      single: { liveScans: 0, popupParses: 0 },
-      multiple: { liveScans: 0, popupParses: 0 },
-      inventory: { liveScans: 0, popupParses: 0 }
-    },
-    autofill: { success: 0, failure: 0 },
-    queues: { multipleSaved: 0, multipleUsed: 0, inventorySaved: 0 },
-    exports: { inventoryCount: 0, inventoryRows: 0 },
-    expiry: { expired: 0, expiringSoon: 0 }
-  };
-
-  (days || []).forEach((day) => {
-    if (!day || typeof day !== 'object') return;
-    rollup.workflows.single.liveScans += day.workflows?.single?.liveScans || 0;
-    rollup.workflows.single.popupParses +=
-      day.workflows?.single?.popupParses || 0;
-    rollup.workflows.multiple.liveScans +=
-      day.workflows?.multiple?.liveScans || 0;
-    rollup.workflows.multiple.popupParses +=
-      day.workflows?.multiple?.popupParses || 0;
-    rollup.workflows.inventory.liveScans +=
-      day.workflows?.inventory?.liveScans || 0;
-    rollup.workflows.inventory.popupParses +=
-      day.workflows?.inventory?.popupParses || 0;
-    rollup.autofill.success += day.autofill?.success || 0;
-    rollup.autofill.failure += day.autofill?.failure || 0;
-    rollup.queues.multipleSaved += day.queues?.multipleSaved || 0;
-    rollup.queues.multipleUsed += day.queues?.multipleUsed || 0;
-    rollup.queues.inventorySaved += day.queues?.inventorySaved || 0;
-    rollup.exports.inventoryCount += day.exports?.inventoryCount || 0;
-    rollup.exports.inventoryRows += day.exports?.inventoryRows || 0;
-    rollup.expiry.expired += day.expiry?.expired || 0;
-    rollup.expiry.expiringSoon += day.expiry?.expiringSoon || 0;
-  });
-
-  return rollup;
 }
 
 function usesScannerInput(mode) {
@@ -1401,7 +1059,6 @@ function queueAutoParse(immediate = false) {
       logAnalyticsEvent('parse_success', {
         workflow: activeMode,
         source: 'popup_input',
-        vaccineLabel: parsedData.lot || parsedData.gtin || '',
         expiryFlag: getExpiryStatus(parsedData.expiry).flag
       });
       await displayParsedData(parsedData, parseRequestId);
@@ -1581,11 +1238,7 @@ async function addManualScanToMultipleQueue() {
       count: 1,
       queueSizeAfter: multipleInjectManager.count,
       vaccineLabel:
-        enriched.tradename ||
-        enriched.generic_name ||
-        enriched.name ||
-        enriched.lot ||
-        '',
+        enriched.tradename || enriched.generic_name || enriched.name || '',
       manufacturer: enriched.manufacturer || '',
       expiryFlag:
         enriched.expiry_flag ||
@@ -1672,7 +1325,6 @@ async function addPendingScansToInventory() {
           lastRecord?.tradename ||
           lastRecord?.generic_name ||
           lastRecord?.name ||
-          lastRecord?.lot ||
           '',
         manufacturer: lastRecord?.manufacturer || '',
         expiryFlag:
@@ -1745,11 +1397,7 @@ async function handleUseMultipleInjectRecord(record) {
       workflow: 'multiple',
       source: 'queue',
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1763,11 +1411,7 @@ async function handleUseMultipleInjectRecord(record) {
         success: false,
         pending: true,
         vaccineLabel:
-          record.tradename ||
-          record.generic_name ||
-          record.name ||
-          record.lot ||
-          '',
+          record.tradename || record.generic_name || record.name || '',
         manufacturer: record.manufacturer || '',
         expiryFlag:
           record.expiry_flag ||
@@ -1799,11 +1443,7 @@ async function handleUseMultipleInjectRecord(record) {
       count: 1,
       queueSizeAfter: multipleInjectManager.count,
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1814,11 +1454,7 @@ async function handleUseMultipleInjectRecord(record) {
       source: 'queue',
       success: true,
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1848,11 +1484,7 @@ async function handleUseMultipleInjectRecord(record) {
       source: 'queue',
       success: false,
       vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        '',
+        record.tradename || record.generic_name || record.name || '',
       manufacturer: record.manufacturer || ''
     });
     writeOutput(error.message || 'Could not auto-fill fields', 'error');
@@ -1923,12 +1555,7 @@ async function enrichParsedData(baseData) {
       {
         workflow: activeMode,
         source: 'popup_lookup',
-        vaccineLabel:
-          vaccineInfo?.tradename ||
-          vaccineInfo?.generic_name ||
-          baseData.lot ||
-          baseData.gtin ||
-          '',
+        vaccineLabel: vaccineInfo?.tradename || vaccineInfo?.generic_name || '',
         manufacturer: vaccineInfo?.manufacturer || '',
         expiryFlag: expiryStatus.flag
       }
