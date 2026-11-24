@@ -185,13 +185,12 @@
       }
 
       textarea {
+        display: block;
         width: 100%;
-        min-height: 88px;
         border: 1px solid var(--line);
         border-radius: 14px;
-        padding: 10px 11px;
+        padding: 7px 11px;
         resize: vertical;
-        font-family: inherit;
         font-size: 12px;
         line-height: 1.45;
         color: var(--ink);
@@ -683,10 +682,6 @@
 
       .queue-entry {
         margin-top: 12px;
-      }
-
-      .queue-entry textarea {
-        min-height: 62px;
       }
 
       .queue-entry-actions {
@@ -1411,7 +1406,7 @@
                   <label for="queueBarcodeInput">Barcode</label>
                   <textarea
                     id="queueBarcodeInput"
-                    rows="2"
+                    rows="1"
                     placeholder="Paste barcode text here..."
                   ></textarea>
                   <div class="queue-entry-actions">
@@ -1486,7 +1481,7 @@
                   <label for="inventoryBarcodeInput">Barcode</label>
                   <textarea
                     id="inventoryBarcodeInput"
-                    rows="2"
+                    rows="1"
                     placeholder="Paste one barcode per line..."
                   ></textarea>
                   <div class="queue-entry-actions">
