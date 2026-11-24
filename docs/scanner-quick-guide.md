@@ -38,7 +38,7 @@ verified chart lot, choose it below the tray and confirm **Add to tray**.
 
 ## A tray dose is already in use
 
-Check the original chart. If the dose needs review, open **Review dose** in the VaxLink controls on the chart. Choose **Dose used** if the original entry accounts for it, or **Dose unused** to make it available again. Choose **Not now** if you still need to check.
+**In progress** means VaxLink has reserved the dose. If **Check original chart** appears, open it and check the vaccine and lot on the original chart. Choose **Remove one from tray** if the chart accounts for that dose, or **Keep in tray** if the dose is still available. Choose **Not now** if you still need to check.
 
 ## Download troubleshooting details
 
