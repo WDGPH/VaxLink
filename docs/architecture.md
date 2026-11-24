@@ -208,6 +208,12 @@ checks the saved dose fields before applying the change, so a quantity edit
 does not overwrite a use that already occurred. Inventory retains its CSV
 columns.
 
+The background can reserve a counted dose for one chart document. It accepts
+another reservation only when the saved quantity still covers it. A chart
+can release its own reservation before it touches any fields. If a field may
+have changed, staff check the original chart before returning the dose or
+recording it as used. A missing response leaves the dose held.
+
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
 it in a queue. Inventory uses the local catalogue when available and saves the

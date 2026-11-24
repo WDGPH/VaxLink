@@ -664,9 +664,35 @@ function appendQueueRecord(storageKey, record, options = {}) {
   return scannerQueueWriteQueue;
 }
 
+const DOSE_RESERVATION_OPERATIONS = [
+  'reserve_dose',
+  'stop_dose',
+  'review_dose'
+];
+const DOSE_IN_USE = 'This dose is already in use in another chart.';
+const DOSE_REVIEW =
+  'The chart may already contain this scan. Check the original chart before using it again.';
+
+function doseReservations(row) {
+  return Array.isArray(row?.dose_reservations) ? row.dose_reservations : [];
+}
+
+function withDoseReservations(row, reservations) {
+  const updated = { ...row };
+  if (reservations.length) updated.dose_reservations = reservations;
+  else delete updated.dose_reservations;
+  return updated;
+}
+
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
-function mutateQueue(storageKey, operation, payload = {}, popup = false) {
+function mutateQueue(
+  storageKey,
+  operation,
+  payload = {},
+  popup = false,
+  chart = null
+) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
     .then(async () => {
@@ -687,7 +713,8 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
               typeof row !== 'object' ||
               Array.isArray(row) ||
               typeof row.id !== 'string' ||
-              !row.id.trim()
+              !row.id.trim() ||
+              'dose_reservations' in row
           ))
       ) {
         throw new Error('Queue add requires an array of records with IDs');
@@ -698,7 +725,8 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
           'update',
           'consume',
           'setDoseCount',
-          'setDosePinned'
+          'setDosePinned',
+          ...DOSE_RESERVATION_OPERATIONS
         ].includes(operation) &&
         (typeof payload.id !== 'string' || !payload.id.trim())
       ) {
@@ -709,7 +737,8 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
         (!payload.patch ||
           typeof payload.patch !== 'object' ||
           Array.isArray(payload.patch) ||
-          ('id' in payload.patch && payload.patch.id !== payload.id))
+          ('id' in payload.patch && payload.patch.id !== payload.id) ||
+          'dose_reservations' in payload.patch)
       ) {
         throw new Error(
           'Queue update requires a patch that preserves the record ID'
@@ -717,6 +746,113 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
       }
       const stored = await getStorage([storageKey]);
       let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      const index = rows.findIndex((row) => row?.id === payload.id);
+      const current = rows[index];
+      const reservations = doseReservations(current);
+      const reservation =
+        typeof payload.token === 'string'
+          ? reservations.find(({ token }) => token === payload.token)
+          : null;
+      const ownsReservation =
+        chart &&
+        reservation?.tabId === chart.tab.id &&
+        reservation.documentId === chart.documentId;
+
+      let consumeReviewed = false;
+      if (DOSE_RESERVATION_OPERATIONS.includes(operation)) {
+        if (
+          storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+          typeof chart?.documentId !== 'string' ||
+          !chart.documentId ||
+          typeof payload.token !== 'string' ||
+          !/^[a-f0-9-]{36}$/.test(payload.token)
+        )
+          throw new Error('Open the chart again before using a tray dose.');
+
+        if (operation === 'reserve_dose') {
+          if (
+            typeof current?.lot !== 'string' ||
+            !current.lot.trim() ||
+            rows.findLastIndex((row) => row?.id === payload.id) !== index
+          )
+            throw new Error(
+              'This vaccine is unavailable. Choose a tray item again.'
+            );
+          if (globalThis.VaxLinkExpiryDate.blocksChartUse(current))
+            throw new Error(
+              'This lot is expired or saved for reference. Choose another tray item.'
+            );
+          if (reservation && (!ownsReservation || reservation.review))
+            throw new Error(DOSE_REVIEW);
+          const remaining = getTrayRemainingDoses(current);
+          if (remaining === null) return { record: current, reserved: false };
+          if (reservation) return { record: current, reserved: true };
+          if (reservations.length >= remaining)
+            throw new Error(
+              reservations.some((dose) => !dose.review)
+                ? DOSE_IN_USE
+                : DOSE_REVIEW
+            );
+
+          rows = rows.slice();
+          rows[index] = withDoseReservations(current, [
+            ...reservations,
+            {
+              token: payload.token,
+              tabId: chart.tab.id,
+              documentId: chart.documentId
+            }
+          ]);
+          await setStorage({ [storageKey]: rows });
+          return { record: current, reserved: true };
+        }
+
+        if (operation === 'stop_dose') {
+          if (
+            typeof payload.written !== 'boolean' ||
+            (reservation && !ownsReservation)
+          )
+            throw new Error(
+              'Only the original chart can stop using this dose.'
+            );
+          if (!reservation || reservation.review) return { rows };
+        } else {
+          if (typeof payload.used !== 'boolean' || !reservation?.review)
+            throw new Error(
+              'Check the original chart before resolving this dose.'
+            );
+          consumeReviewed = payload.used;
+        }
+
+        if (!consumeReviewed) {
+          // A possible write holds the dose until staff verify the original chart.
+          const saved =
+            payload.written === true && operation === 'stop_dose'
+              ? reservations.map((dose) =>
+                  dose === reservation ? { ...dose, review: true } : dose
+                )
+              : reservations.filter((dose) => dose !== reservation);
+          rows = rows.slice();
+          rows[index] = withDoseReservations(current, saved);
+          await setStorage({ [storageKey]: rows });
+          return { rows };
+        }
+      }
+
+      if (
+        (['remove', 'update', 'setDoseCount', 'setDosePinned'].includes(
+          operation
+        ) &&
+          rows.some(
+            (row) => row?.id === payload.id && doseReservations(row).length
+          )) ||
+        (operation === 'clear' &&
+          rows.some((row) => doseReservations(row).length))
+      )
+        throw new Error(
+          'Review the reserved dose on the original chart before changing the tray.'
+        );
+
       let record = null;
       let consumed = null;
       if (operation === 'add') {
@@ -792,15 +928,23 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
         }
         record = { ...current, ...changes };
         rows = rows.map((row) => (row === current ? record : row));
-      } else if (operation === 'consume') {
-        // A legacy duplicate ID must not turn one use into several dose changes.
-        const index = rows.findIndex((row) => row?.id === payload.id);
+      } else if (operation === 'consume' || consumeReviewed) {
         if (index >= 0) {
-          consumed = rows[index];
-          const remaining = getTrayRemainingDoses(consumed);
-          if (remaining === null) record = consumed;
+          if (
+            !consumeReviewed &&
+            (reservations.length || payload.token !== undefined) &&
+            (!ownsReservation || reservation.review)
+          )
+            throw new Error(DOSE_IN_USE);
+          consumed = current;
+          const remaining = getTrayRemainingDoses(current);
+          const saved = reservations.filter((dose) => dose !== reservation);
+          if (remaining === null) record = current;
           else if (remaining > 1) {
-            record = { ...consumed, remaining_doses: remaining - 1 };
+            record = withDoseReservations(
+              { ...current, remaining_doses: remaining - 1 },
+              saved
+            );
           }
           rows = rows.slice();
           if (record) rows[index] = record;
@@ -3731,7 +3875,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    mutateQueue(request.storageKey, request.operation, request.payload, popup)
+    if (DOSE_RESERVATION_OPERATIONS.includes(request.operation) && popup) {
+      sendResponse({
+        success: false,
+        error: 'Dose reservations require a supported chart.'
+      });
+      return false;
+    }
+    mutateQueue(
+      request.storageKey,
+      request.operation,
+      request.payload,
+      popup,
+      popup ? null : sender
+    )
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
@@ -3744,6 +3901,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       !record ||
       typeof record !== 'object' ||
       Array.isArray(record) ||
+      'dose_reservations' in record ||
       typeof record.id !== 'string' ||
       !record.id.trim()
     ) {
