@@ -7,11 +7,7 @@ A Chrome extension that parses GS1 vaccine barcodes and auto-fills them into
 Panorama immunization records. Built by
 Wellington-Dufferin-Guelph Public Health.
 
-!!! info "Client-side by design"
-Scanned barcode data is parsed locally in the browser and is not uploaded
-to any server. The default catalogue source is the public NVC vaccine
-bundle. See the [Security Policy](security.md) for the full data-handling
-model.
+VaxLink looks up product barcodes on the workstation and helps staff enter vaccine details in the open Panorama chart. Privacy teams can trace what the clinic browser stores, what enters the clinical record and what staff can share in the [privacy assessment guide](privacy-assessment.md).
 
 ## What it does
 
@@ -34,7 +30,7 @@ records. After installing or updating the extension, reload the training page
 and open an immunization record. Check single forms, the Multiple Immunizations
 grid and detail step, Inventory, and how held scans appear after unlock.
 
-[Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
+[Trying VaxLink in a clinic](adoption-and-troubleshooting.md) · [Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
 
 In Settings, **Debug mode** keeps troubleshooting details for the current
 browser session. It starts on in packaged Alpha and off in production and
