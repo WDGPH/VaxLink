@@ -41,6 +41,7 @@ const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
 const CHART_INSTALLATIONS_ATTRIBUTE = 'data-vaxlink-installations';
+const PANORAMA_TRAINING_HOST = 'trpanoramadhir.prod.ehealthontario.ca';
 const MULTIPLE_INSTALLATIONS_WARNING =
   'Two copies of VaxLink are open on this chart. Disable the extra copy in browser extensions, then refresh the chart after checking unsaved work.';
 let registeredChart = null;
@@ -1781,26 +1782,35 @@ function panoramaDateTimeHasValue(value) {
   return /[a-z0-9]/i.test(String(value || ''));
 }
 
-function hasPanoramaDeferredDetailFieldsFilled(data) {
+function getPanoramaDeferredDetailFieldsNeedingReview(data) {
   const scope = data?._vaxlinkOwner?.form;
   const administered = getPanoramaAdministeredDateTimeValues(data);
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data, {
     includeDisabled: true
   });
-  const dateMatches =
-    !administered.date || panoramaDateTimeHasValue(dateField?.value);
-  const timeMatches =
-    !administered.time || panoramaDateTimeHasValue(timeField?.value);
-  const reasonSatisfied =
-    !reasonAutofillEnabled ||
-    panoramaSelectAutofillSatisfied(
+  const fields = [];
+  if (administered.date && !panoramaDateTimeHasValue(dateField?.value))
+    fields.push('administration date');
+  if (administered.time && !panoramaDateTimeHasValue(timeField?.value))
+    fields.push('administration time');
+  if (
+    reasonAutofillEnabled &&
+    !panoramaSelectAutofillSatisfied(
       getPanoramaReasonForImmunizationSelectors(),
       scope
-    );
-  const consentSatisfied =
-    !consentAutofillEnabled ||
-    panoramaSelectAutofillSatisfied(getPanoramaConsentReasonSelectors(), scope);
-  return dateMatches && timeMatches && reasonSatisfied && consentSatisfied;
+    )
+  )
+    fields.push('Reason for Immunization');
+  if (
+    consentAutofillEnabled &&
+    !panoramaSelectAutofillSatisfied(getPanoramaConsentReasonSelectors(), scope)
+  )
+    fields.push('Consent for Service');
+  return fields;
+}
+
+function hasPanoramaDeferredDetailFieldsFilled(data) {
+  return getPanoramaDeferredDetailFieldsNeedingReview(data).length === 0;
 }
 
 function fillPanoramaMaskedTextInput(
@@ -2321,6 +2331,77 @@ function readPanoramaLotSelection(widget) {
   return widget.label?.textContent || '';
 }
 
+function getPanoramaDisplayedLot(widget) {
+  return (
+    getPanoramaNonemptyLotLabel(readPanoramaLotSelection(widget)) ||
+    getPanoramaNonemptyLotLabel(widget?.label?.textContent)
+  );
+}
+
+function clearPanoramaSelection(field) {
+  const blanks = [...(field?.options || [])].filter(
+    (option) => !option.disabled && option.value === ''
+  );
+  if (blanks.length !== 1 || !canFillPanoramaControl(field) || !field.value)
+    return false;
+  assertPanoramaAutofillWrite();
+  field.value = '';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
+  if (field.isConnected)
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
+  return field.isConnected && !field.value;
+}
+
+function clearPanoramaNonMatchingLot(data) {
+  const owner = data._vaxlinkOwner;
+  const widget = getPanoramaLotWidget();
+  const selectedValue = getPanoramaNonemptyLotLabel(
+    readPanoramaLotSelection(widget)
+  );
+  const visible = getPanoramaNonemptyLotLabel(widget?.label?.textContent);
+  const selected = selectedValue || visible;
+  if (!selected) return 'empty';
+  const lot = normalizePanoramaLotToken(data.lot);
+  const ownedAgent =
+    owner.filledAgent &&
+    getPanoramaCurrentAgentSelectionText(owner.form) === owner.filledAgent;
+  if (
+    !lot ||
+    !isPanoramaAutofillCurrent(data) ||
+    isPrimeFacesAjaxBusy() ||
+    owner.initialLot ||
+    (owner.lotSelectionWidgetId !== widget.id && !ownedAgent) ||
+    (visible && visible !== selectedValue) ||
+    normalizePanoramaLotToken(selected) === lot ||
+    normalizePanoramaLotToken(selected.replace(/^N-/, '')) === lot
+  )
+    return 'review';
+
+  // Panorama may reselect its only Lot. Reset an Agent only if this fill
+  // selected it on an empty form and the same owned Agent is still current.
+  if (ownedAgent && !owner.initialAgent) {
+    const fields = getPanoramaDetailAgentFields(owner.form).filter(
+      (field) => field.tagName === 'SELECT'
+    );
+    if (fields.length === 1 && clearPanoramaSelection(fields[0])) {
+      return !getPanoramaCurrentAgentSelectionText(owner.form) &&
+        !getPanoramaDisplayedLot(getPanoramaLotWidget())
+        ? 'cleared'
+        : 'review';
+    }
+    if (getPanoramaLotWidget()?.select !== widget.select) return 'review';
+  }
+  if (!clearPanoramaSelection(widget.select)) return 'review';
+  const current = getPanoramaLotWidget();
+  if (current?.id !== widget.id) return 'review';
+  if (current.select === widget.select && current.label)
+    current.label.textContent =
+      widget.select.options[widget.select.selectedIndex]?.text || '';
+  return getPanoramaDisplayedLot(current) ? 'review' : 'cleared';
+}
+
 function fillPanoramaLotFromSelect(widget, lotValue) {
   const field = widget.select;
   if (!canFillPanoramaControl(field)) return false;
@@ -2354,6 +2435,8 @@ function fillPanoramaLotFromSelect(widget, lotValue) {
     matched.disabled
   )
     return false;
+  if (panoramaWritingData?._vaxlinkOwner)
+    panoramaWritingData._vaxlinkOwner.lotSelectionWidgetId = widget.id;
   field.value = matched.value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
@@ -2562,6 +2645,8 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
     ) !== matched
   )
     return false;
+  if (panoramaWritingData?._vaxlinkOwner)
+    panoramaWritingData._vaxlinkOwner.lotSelectionWidgetId = widget.id;
   matched.click();
   assertPanoramaAutofillWrite();
 
@@ -2847,11 +2932,15 @@ function schedulePanoramaLotOrTradeSelection(
     ) {
       showVaxlinkToast({ ...data, _fundingChoiceRequired: 'other' });
     } else {
-      recordDeferredAutofillResult(data, false);
-      showVaxlinkToast({
-        ...data,
-        _fillFeedback: choice ? 'funding_exhausted' : 'lot_not_matched'
-      });
+      const cleanup = clearPanoramaNonMatchingLot(data);
+      if (isPanoramaAutofillCurrent(data)) {
+        recordDeferredAutofillResult(data, false);
+        showVaxlinkToast({
+          ...data,
+          _fillFeedback: choice ? 'funding_exhausted' : 'lot_not_matched',
+          _lotNeedsReview: cleanup === 'review'
+        });
+      }
     }
     stop();
   }
@@ -2873,8 +2962,14 @@ function schedulePanoramaLotOrTradeSelection(
       stableSince = null;
       usableMiss = undefined;
       const previousList = hasLot ? readPanoramaLotList() : null;
+      const priorAgent = getPanoramaCurrentAgentSelectionText(owner.form);
       const started = tryFillPanoramaAgent(data);
       hasResolvedAgent = panoramaDetailAgentMatches(data);
+      if (hasLot && started && hasResolvedAgent) {
+        const currentAgent = getPanoramaCurrentAgentSelectionText(owner.form);
+        if (currentAgent && currentAgent !== priorAgent)
+          owner.filledAgent = currentAgent;
+      }
       if (previousList && (started || hasResolvedAgent)) {
         owner.lotListBeforeRefresh = previousList;
         return;
@@ -3030,8 +3125,23 @@ function schedulePanoramaLotOrTradeSelection(
     const now = performance.now();
     if (now >= deadline) {
       if (finalizeOnResolved) {
-        recordDeferredAutofillResult(data, false);
-        showVaxlinkToast({ ...data, _fillFeedback: 'deadline' });
+        const feedback = runPanoramaAutofill(data, () => {
+          const productVerified =
+            !isPrimeFacesAjaxBusy() &&
+            panoramaDetailAgentMatches(data) &&
+            panoramaDetailProductMatches(data);
+          return productVerified
+            ? {
+                _fillFeedback: 'deadline_details',
+                _reviewFields:
+                  getPanoramaDeferredDetailFieldsNeedingReview(data)
+              }
+            : { _fillFeedback: 'deadline' };
+        });
+        if (feedback && isPanoramaAutofillCurrent(data)) {
+          recordDeferredAutofillResult(data, false);
+          showVaxlinkToast({ ...data, ...feedback });
+        }
       }
       stop();
       return;
@@ -3246,6 +3356,11 @@ function fillPanoramaImmunizationFields(data) {
   if (blocked) return blocked;
   const owner = data._vaxlinkOwner;
   if (data.lot) {
+    if (!Object.hasOwn(owner, 'initialLot')) {
+      const widget = getPanoramaLotWidget();
+      owner.initialLot = widget ? getPanoramaDisplayedLot(widget) : null;
+      owner.initialAgent = getPanoramaCurrentAgentSelectionText(owner.form);
+    }
     const selectedFunding = getPanoramaFundedRadioValue();
     if (
       !data._fundedRadioChoice &&
@@ -3830,14 +3945,37 @@ function showVaxlinkToast(data, durationMs = 4000) {
   }
 
   if (data._fillFeedback) {
-    const title =
-      data._fillFeedback === 'deadline'
-        ? 'Autofill needs review'
-        : data._fillFeedback === 'funding_exhausted'
-          ? 'Lot not found in either funding category'
-          : 'Lot not found in Panorama';
+    const miss =
+      data._fillFeedback === 'lot_not_matched' ||
+      data._fillFeedback === 'funding_exhausted';
+    const catalogueMiss = data.lookup_error_category === 'not_found';
+    const training = miss && location.hostname === PANORAMA_TRAINING_HOST;
+    let title = 'Autofill needs review';
+    let detail = 'Check the Agent and Lot in Panorama.';
+    if (miss) {
+      title = training
+        ? 'Lot not found in Panorama training'
+        : 'Lot not found in Panorama';
+      detail = training
+        ? 'The training lot list may be incomplete or out of date.'
+        : 'Verify the lot and funding in Panorama. If the lot is still missing, contact your Panorama Resolution Coordinator (PRC).';
+      if (data._fillFeedback === 'funding_exhausted' && !training)
+        title = 'Lot not found in either funding category';
+    } else if (data._fillFeedback === 'deadline_details') {
+      detail = data._reviewFields?.length
+        ? `Check the ${new Intl.ListFormat('en').format(data._reviewFields)} in Panorama.`
+        : 'Review the autofilled fields in Panorama.';
+    }
+    const catalogueStatus = catalogueMiss
+      ? 'The lot was missing from the National Vaccine Catalogue.'
+      : data.lookup_error || '';
     showRoutineToast(
-      `<div class="vl-toast info show"><div class="vl-toast-title">${title}</div><div class="vl-toast-detail">Check the Agent and Lot in Panorama.</div></div>`,
+      `<div class="vl-toast info show" role="status">
+        <div class="vl-toast-title">${escapeToastHtml(title)}</div>
+        <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
+        ${data._lotNeedsReview ? '<div class="vl-toast-detail">The Lot field still needs review. Clear any entry that does not match the scanned lot.</div>' : ''}
+        ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
+      </div>`,
       9000
     );
     return;
@@ -3979,6 +4117,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
     // Persistent: own slot, no timer \u2014 stays until the nurse dismisses it
     // (issue #28). Routine toasts keep flowing in the slot below.
     toastWarningSlot.innerHTML = toastHtml;
+    logAnalyticsEvent('expiry_notice_shown', {
+      workflow: data._vaxlinkQueueContext?.workflow || activeWorkflowMode
+    });
     playAudioCue('expiry_warning');
     const dismissBtn = toastWarningSlot.querySelector('.vl-toast-dismiss');
     if (dismissBtn)
@@ -3988,6 +4129,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
   showRoutineToast(toastHtml, durationMs);
+  if (flag === 'expiring_soon')
+    logAnalyticsEvent('expiry_notice_shown', {
+      workflow: data._vaxlinkQueueContext?.workflow || activeWorkflowMode
+    });
 }
 
 function dismissToast(slot) {
@@ -5277,7 +5422,7 @@ function panoramaEntryBlockReason() {
   if (
     (contentBuildAtLoad.name !== 'VaxLink' ||
       !contentBuildAtLoad.fingerprint) &&
-    location.hostname !== 'trpanoramadhir.prod.ehealthontario.ca'
+    location.hostname !== PANORAMA_TRAINING_HOST
   ) {
     return 'VaxLink Alpha and development copies fill training charts only.';
   }

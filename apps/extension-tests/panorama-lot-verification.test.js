@@ -303,3 +303,30 @@ test('an options change during focus cannot turn a sole funding match into a sil
   assert.equal(f.run('ABC1'), false);
   assert.equal(select.value, '');
 });
+
+test('Lot cleanup clears a newly selected wrong entry and preserves a staff selection', () => {
+  const f = fixture();
+  const field = f.select('WRONG', 'lot-option');
+  f.state.controls = [f.root, field];
+  const data = f.context.beginPanoramaAutofill({ lot: 'INTENDED' });
+  const owner = data._vaxlinkOwner;
+  const events = [];
+  field.dispatchEvent = (event) => events.push(event.type);
+  const cleanup = () =>
+    f.context.runPanoramaAutofill(data, () =>
+      f.context.clearPanoramaNonMatchingLot(data)
+    );
+
+  owner.initialLot = 'WRONG';
+  owner.lotSelectionWidgetId = id;
+  assert.equal(cleanup(), 'review');
+  assert.equal(field.value, 'lot-option');
+  owner.initialLot = '';
+  owner.lotSelectionWidgetId = undefined;
+  assert.equal(cleanup(), 'review');
+  assert.equal(field.value, 'lot-option');
+  owner.lotSelectionWidgetId = id;
+  assert.equal(cleanup(), 'cleared');
+  assert.equal(field.value, '');
+  assert.deepEqual(events, ['input', 'change']);
+});

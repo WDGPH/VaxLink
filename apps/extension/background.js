@@ -1503,7 +1503,13 @@ function createAnalyticsDay(dayKey) {
     },
     exports: { inventoryCount: 0, inventoryRows: 0 },
     nvc: { manualSuccess: 0, manualFailure: 0, autoSuccess: 0, autoFailure: 0 },
-    expiry: { expired: 0, expiringSoon: 0, valid: 0, unknown: 0 },
+    expiry: {
+      expired: 0,
+      expiringSoon: 0,
+      valid: 0,
+      unknown: 0,
+      noticesShown: 0
+    },
     sources: {},
     vaccines: {},
     manufacturers: {}
@@ -1608,6 +1614,10 @@ function applyAnalyticsEvent(day, event) {
   }
 
   switch (event.eventType) {
+    case 'expiry_notice_shown':
+      day.expiry ??= {};
+      day.expiry.noticesShown = (day.expiry.noticesShown ?? 0) + 1;
+      break;
     case 'popup_open':
       day.popupOpens += 1;
       break;

@@ -826,8 +826,7 @@ function renderAnalyticsSummary(summary) {
       'No funding category matched': funding.unmatched || 0,
       'Forms filled': day.autofill?.success || 0,
       'Inventory exports': day.exports?.inventoryCount || 0,
-      'Expiry warnings':
-        (day.expiry?.expired || 0) + (day.expiry?.expiringSoon || 0),
+      'Expiry notices shown': day.expiry?.noticesShown ?? '—',
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
@@ -844,7 +843,7 @@ function renderAnalyticsSummary(summary) {
   const groups = [
     [
       'Scanning',
-      ['Scans', 'Scanner captures', 'Manual entries', 'Expiry warnings']
+      ['Scans', 'Scanner captures', 'Manual entries', 'Expiry notices shown']
     ],
     ['Charting', ['Forms filled', 'Tray to chart']],
     [

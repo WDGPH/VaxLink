@@ -166,6 +166,11 @@ a sole match. If both funding categories list the lot, staff choose one.
 VaxLink keeps an existing category and waits for the Lot list to change after
 a category change. After a miss in one category, staff can try the other.
 
+If the Lot cannot be matched, VaxLink only clears a different selection it can
+attribute to the current fill. It leaves a staff selection for review. When the
+product matches but another field does not settle, the chart names the fields
+staff need to check.
+
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover

@@ -177,6 +177,10 @@ test('a CSV export during a delayed Inventory save counts each action once', asy
     });
     assert.equal(all.rollup.expiry.expiringSoon, 5);
     assert.equal(all.rollup.expiry.noticesShown, 1);
+    assert.match(
+      nodes.analyticsSummary.innerHTML,
+      /Expiry notices shown<\/th><td>1<\/td><td>1<\/td>/
+    );
     assert.equal(all.days[yesterday].expiry.noticesShown, undefined);
     assert.doesNotMatch(
       JSON.stringify(all),

@@ -36,6 +36,8 @@ function fixture(settings = {}) {
     getPanoramaMultiStepIndicatorKey: () => '',
     isPanoramaImmunizationPage: () => true,
     getPanoramaFundedRadioValue: () => 'SHOW_ALL',
+    getPanoramaLotWidget: () => null,
+    getPanoramaCurrentAgentSelectionText: () => '',
     hasPanoramaAgentSelection: () => false,
     tryFillPanoramaAgent: () => true,
     tryFillPanoramaLot(lot) {
