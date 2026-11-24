@@ -8,6 +8,8 @@ importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-daemon-protocol.js');
 importScripts('shared/tray-doses.js');
 
+const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
+
 const {
   getTrayRemainingDoses,
   getTrayDoseFields,
@@ -759,6 +761,88 @@ async function findInactiveDoseDocument(storageKey, payload) {
   return inactive ? reservation : null;
 }
 
+async function getRecentChartLots() {
+  const { [RECENT_CHART_LOTS_KEY]: rows } = await chrome.storage.session.get(
+    RECENT_CHART_LOTS_KEY
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+function recentLotExpiry(vaccine) {
+  const date = [
+    vaccine.inventory_expiry,
+    vaccine.barcode_expiry,
+    vaccine.nvc_lot_expiry
+  ]
+    .map(globalThis.VaxLinkExpiryDate.parseDateToLocal)
+    .find(Boolean);
+  if (!date) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function recentLotKey(vaccine) {
+  const product =
+    vaccine.gtin ||
+    vaccine.din ||
+    vaccine.tradename ||
+    vaccine.generic_name ||
+    vaccine.name;
+  return JSON.stringify(
+    [product, vaccine.lot, recentLotExpiry(vaccine)].map((value) =>
+      String(value || '')
+        .trim()
+        .toUpperCase()
+    )
+  );
+}
+
+async function rememberVerifiedChartLot(data) {
+  if (!data || data.reference_only) return;
+  const vaccine = {};
+  // Store only vaccine identification needed to recognize or add this lot again.
+  for (const field of [
+    'lot',
+    'gtin',
+    'din',
+    'tradename',
+    'generic_name',
+    'name',
+    'disease',
+    'antigen',
+    'manufacturer',
+    'inventory_expiry',
+    'barcode_expiry',
+    'nvc_lot_expiry'
+  ]) {
+    const value = data[field];
+    if (typeof value === 'string' && value.trim() && value.length <= 200)
+      vaccine[field] = value.trim();
+  }
+  if (
+    !vaccine.lot ||
+    !(
+      vaccine.tradename ||
+      vaccine.generic_name ||
+      (vaccine.name && vaccine.name !== vaccine.din)
+    )
+  )
+    return;
+
+  const expiry = recentLotExpiry(vaccine);
+  if (expiry) vaccine.inventory_expiry = expiry;
+  const key = recentLotKey(vaccine);
+  const rows = await getRecentChartLots();
+  const existing = rows.find((row) => recentLotKey(row) === key);
+  await chrome.storage.session.set({
+    [RECENT_CHART_LOTS_KEY]: [
+      { ...vaccine, id: existing?.id || crypto.randomUUID() },
+      ...rows.filter((row) => row !== existing)
+    ].slice(0, 20)
+  });
+}
+
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
 function mutateQueue(
@@ -823,6 +907,39 @@ function mutateQueue(
       }
       const stored = await getStorage([storageKey]);
       let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      if (operation === 'add_from_history') {
+        if (
+          typeof payload.id !== 'string' ||
+          !payload.id ||
+          payload.confirmed !== true
+        )
+          throw new Error('Confirm adding the recent lot to the tray.');
+        const vaccine = (await getRecentChartLots()).find(
+          (row) => row.id === payload.id
+        );
+        if (!vaccine)
+          throw new Error('This lot is no longer in Recent chart lots.');
+
+        const toImmunization = storageKey === MULTIPLE_INJECT_QUEUE_KEY;
+        const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(vaccine);
+        if (toImmunization && expired && payload.confirmExpired !== true)
+          throw new Error(
+            'Confirm before adding an expired lot for reference.'
+          );
+        if (
+          rows.some((row) => row && recentLotKey(row) === recentLotKey(vaccine))
+        )
+          return { rows, alreadyInTray: true };
+
+        const record = buildQueueRecordFromParsed(vaccine, '', {
+          dose_tracking: toImmunization ? 'single_use' : 'manual',
+          ...(toImmunization &&
+            expired && { reference_only: true, expiry_flag: 'expired' })
+        });
+        rows = [...rows, record];
+        await setStorage({ [storageKey]: rows });
+        return { rows, record };
+      }
       if (operation === 'transfer') {
         if (
           !Array.isArray(payload.ids) ||
@@ -1121,6 +1238,8 @@ function mutateQueue(
         throw new Error('Invalid queue operation');
       }
       await setStorage({ [storageKey]: rows });
+      if (operation === 'consume' && ownsReservation && consumed && !record)
+        await rememberVerifiedChartLot(consumed).catch(() => {});
       return { rows, record, consumed };
     });
   scannerQueueWriteQueue = result;
@@ -1761,10 +1880,18 @@ async function verifyScannerChartFields(request, sender) {
   const check = await checkScannerDelivery(request, sender);
   if (!check.success || check.delivery !== delivery) return false;
   activeScannerDeliveries.delete(request.captureId);
-  return updateScannerDelivery(
+  const saved = await updateScannerDelivery(
     delivery,
     request.verified ? 'verified' : 'check_chart'
   );
+  if (saved && request.verified && request.vaccine) {
+    const record = scannerQueueWriteQueue
+      .catch(() => {})
+      .then(() => rememberVerifiedChartLot(request.vaccine));
+    scannerQueueWriteQueue = record.catch(() => {});
+    await scannerQueueWriteQueue;
+  }
+  return saved;
 }
 
 async function routeScanToActiveSupportedTab(rawScan) {
@@ -4255,9 +4382,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'mutateQueue') {
     const popup = sender.url === chrome.runtime.getURL('popup.html');
     if (
-      ['setDoseCount', 'setDosePinned', 'reorder', 'transfer'].includes(
-        request.operation
-      ) &&
+      [
+        'setDoseCount',
+        'setDosePinned',
+        'reorder',
+        'transfer',
+        'add_from_history'
+      ].includes(request.operation) &&
       !popup
     ) {
       sendResponse({

@@ -268,7 +268,7 @@ async function checkPanoramaScannerRoute(delivery, verified = false) {
   }
 }
 
-async function reportPanoramaScannerVerification(owner, verified) {
+async function reportPanoramaScannerVerification(owner, verified, data) {
   if (
     !owner?.scannerDelivery ||
     owner.scannerVerificationSent ||
@@ -276,10 +276,28 @@ async function reportPanoramaScannerVerification(owner, verified) {
   )
     return false;
   owner.scannerVerificationSent = true;
+  const vaccine =
+    verified && data
+      ? {
+          lot: data.lot,
+          gtin: data.gtin,
+          din: data.din,
+          tradename: data.tradename,
+          generic_name: data.generic_name,
+          name: data.name,
+          disease: data.disease,
+          antigen: data.antigen,
+          manufacturer: data.manufacturer,
+          inventory_expiry: data.inventory_expiry,
+          barcode_expiry: data.barcode_expiry || data.expiry,
+          nvc_lot_expiry: data.nvc_lot_expiry
+        }
+      : undefined;
   try {
     const result = await chrome.runtime.sendMessage({
       action: 'verifyScannerChartFields',
       ...owner.scannerDelivery,
+      vaccine,
       verified
     });
     return verified && result?.success === true;
@@ -3985,7 +4003,7 @@ async function finalizeDeferredPanoramaAutofill(data) {
   let verified = false;
   let consumed;
   if (owner.scannerDelivery) {
-    verified = await reportPanoramaScannerVerification(owner, true);
+    verified = await reportPanoramaScannerVerification(owner, true, data);
   } else {
     try {
       consumed = await consumeQueueRecordAfterDeferredAutofill(queueContext);

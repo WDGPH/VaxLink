@@ -389,9 +389,12 @@ test('only the hidden scanner host can submit a physical capture', async () => {
   assert.equal(h.storageData.has(inbox), false);
 });
 
-test('a pending response clears only after the matching chart document verifies once', async () => {
+test('a pending response clears and adds recent history only when the matching chart verifies', async () => {
   const delivery = gate();
+  const sessionStorage = new Map();
+  const recent = 'vaxlink_recent_chart_lots_v1';
   const h = harness({
+    sessionStorage,
     tabResponse: {
       supported: true,
       contextToken: 'document-1',
@@ -423,7 +426,13 @@ test('a pending response clears only after the matching chart document verifies 
   const verification = {
     action: 'verifyScannerChartFields',
     ...claim,
-    verified: true
+    verified: true,
+    vaccine: {
+      tradename: 'Sample vaccine',
+      lot: 'LOT1',
+      barcode_expiry: '2099-01-01',
+      raw_barcode: 'private fixture'
+    }
   };
   delivery.release();
   assert.equal((await captured).queued, true);
@@ -442,6 +451,7 @@ test('a pending response clears only after the matching chart document verifies 
   ]) {
     assert.equal((await h.sendMessage(request, from)).success, false);
     assert.equal(h.storageData.get(inbox).length, 1);
+    assert.equal(sessionStorage.has(recent), false);
   }
   const copies = await Promise.all([
     h.sendMessage(verification, sender),
@@ -449,6 +459,9 @@ test('a pending response clears only after the matching chart document verifies 
   ]);
   assert.equal(copies.filter((result) => result.success).length, 1);
   assert.equal(h.storageData.get(inbox).length, 0);
+  assert.equal(sessionStorage.get(recent).length, 1);
+  assert.equal(sessionStorage.get(recent)[0].lot, 'LOT1');
+  assert.equal('raw_barcode' in sessionStorage.get(recent)[0], false);
 });
 
 test('an unavailable or unknown lock check and a stale chart keep the original scan held', async () => {

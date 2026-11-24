@@ -813,6 +813,23 @@
         font-weight: 600;
       }
 
+      .recent-chart-lots h3 {
+        font-size: 13px;
+        margin: 12px 0 5px;
+      }
+      .recent-chart-lots ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .recent-chart-lots li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 4px 0;
+      }
+
       .tray-dialog {
         width: calc(100% - 36px);
         max-width: 310px;
@@ -1139,6 +1156,10 @@
                   Move selected to Inventory
                 </button>
                 <div id="multipleQueueList" class="inventory-list"></div>
+                <section class="recent-chart-lots">
+                  <h3>Recent chart lots</h3>
+                  <ul id="immunizationRecentChartLots"></ul>
+                </section>
               </div>
             </div>
 
@@ -1192,6 +1213,10 @@
                   Move selected to Immunization
                 </button>
                 <div id="inventoryList" class="inventory-list"></div>
+                <section class="recent-chart-lots">
+                  <h3>Recent chart lots</h3>
+                  <ul id="inventoryRecentChartLots"></ul>
+                </section>
               </div>
               <div class="actions">
                 <button id="exportCsvBtn">Export CSV</button>
@@ -1204,6 +1229,21 @@
       </div>
     </div>
     <script type="module" src="popup.js"></script>
+    <dialog
+      id="recentChartLotDialog"
+      class="tray-dialog"
+      aria-labelledby="recentChartLotTitle"
+      aria-describedby="recentChartLotMessage"
+    >
+      <form method="dialog">
+        <h2 id="recentChartLotTitle">Add recent lot?</h2>
+        <p id="recentChartLotMessage"></p>
+        <div class="queue-entry-actions">
+          <button value="cancel" autofocus>Cancel</button>
+          <button value="add">Add to tray</button>
+        </div>
+      </form>
+    </dialog>
     <dialog
       id="expiredTrayDialog"
       class="tray-dialog"

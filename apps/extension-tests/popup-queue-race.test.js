@@ -452,3 +452,32 @@ test('moving a selected set with a reserved dose preserves every source row', as
   assert.equal(harness.storageData.get(QUEUE_KEY).length, 2);
   assert.equal(harness.storageData.has('inventory_scan_batch_v1'), false);
 });
+
+test('confirmed recent lots are added once per tray with the correct dose policy', async () => {
+  const historyKey = 'vaxlink_recent_chart_lots_v1';
+  const history = row('recent', { barcode_expiry: '2099-01-01' });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    sessionStorage: new Map([[historyKey, [history]]])
+  });
+  const add = (storageKey, confirmed) =>
+    harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey,
+        operation: 'add_from_history',
+        payload: { id: history.id, confirmed }
+      },
+      popupSender
+    );
+
+  assert.equal((await add(QUEUE_KEY, false)).success, false);
+  const one = (await add(QUEUE_KEY, true)).record;
+  const inventory = (await add('inventory_scan_batch_v1', true)).record;
+  assert.equal(one.dose_tracking, 'single_use');
+  assert.equal(inventory.dose_tracking, 'manual');
+  assert.equal(inventory.total_doses, null);
+  assert.equal(inventory.remaining_doses, null);
+  assert.notEqual(one.id, history.id);
+  assert.notEqual(inventory.id, one.id);
+  assert.equal((await add(QUEUE_KEY, true)).alreadyInTray, true);
+});

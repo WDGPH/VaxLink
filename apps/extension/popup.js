@@ -72,6 +72,7 @@ let unlockReviewRead = 0;
 const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
 const REVIEWED_LOCK_SESSION_KEY = 'vaxlink_reviewed_lock_id';
 const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
+const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
 
 const {
   WORKFLOW_MODE_KEY,
@@ -437,6 +438,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadNVCStatus();
   void renderHeldScannerScans();
   void loadUnlockReview();
+  void loadRecentChartLots();
 });
 
 function handleRuntimeMessage(request) {
@@ -557,7 +559,98 @@ async function loadUnlockReview() {
   }
 }
 
+async function loadRecentChartLots() {
+  try {
+    const stored = await chrome.storage.session.get(RECENT_CHART_LOTS_KEY);
+    renderRecentChartLots(stored[RECENT_CHART_LOTS_KEY]);
+  } catch (_) {
+    renderRecentChartLots([]);
+  }
+}
+
+function renderRecentChartLots(history) {
+  const recent = Array.isArray(history) ? history : [];
+  for (const mode of ['immunization', 'inventory']) {
+    const list = document.getElementById(`${mode}RecentChartLots`);
+    if (!list) continue;
+    if (!recent.length) {
+      const empty = document.createElement('li');
+      empty.textContent = 'No recent chart lots.';
+      list.replaceChildren(empty);
+      continue;
+    }
+    list.replaceChildren(
+      ...recent.map((row) => {
+        const item = document.createElement('li');
+        const label = document.createElement('span');
+        const name = row.tradename || row.generic_name || row.name;
+        const expiry =
+          row.inventory_expiry || row.barcode_expiry || row.nvc_lot_expiry;
+        label.textContent = `${name} · Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}`;
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.textContent = 'Add again';
+        add.setAttribute('aria-label', `Add ${name}, lot ${row.lot} again`);
+        add.addEventListener('click', () => void addRecentChartLot(row, mode));
+        item.append(label, add);
+        return item;
+      })
+    );
+  }
+}
+
+async function addRecentChartLot(row, mode) {
+  const dialog = document.getElementById('recentChartLotDialog');
+  if (dialog.open) return;
+  const inventory = mode === 'inventory';
+  const destination = inventory ? 'Inventory' : 'Immunization';
+  const expired =
+    !inventory && globalThis.VaxLinkExpiryDate.isExpiredVaccine(row);
+  const reference = expired
+    ? ' It will be saved for reference. VaxLink will block chart entry.'
+    : '';
+  document.getElementById('recentChartLotMessage').textContent =
+    `Add ${row.tradename || row.generic_name || row.name}, lot ${row.lot}, to the ${destination} tray?${reference}`;
+  dialog.returnValue = '';
+  const confirmed = await new Promise((resolve) => {
+    dialog.addEventListener(
+      'close',
+      () => resolve(dialog.returnValue === 'add'),
+      { once: true }
+    );
+    dialog.showModal();
+  });
+  if (!confirmed) return;
+  try {
+    const response = await sendRuntimeMessage({
+      action: 'mutateQueue',
+      operation: 'add_from_history',
+      storageKey: inventory ? INVENTORY_BATCH_KEY : MULTIPLE_INJECT_QUEUE_KEY,
+      payload: { id: row.id, confirmed, confirmExpired: expired }
+    });
+    if (!response?.success)
+      throw new Error(response?.error || 'Could not add the recent lot.');
+    if (!response.alreadyInTray)
+      logAnalyticsEvent('queue_saved', {
+        workflow: mode,
+        queue: inventory ? 'inventory' : 'multiple',
+        source: 'popup',
+        queueSizeAfter: response.rows?.length || 0
+      });
+    writeOutput(
+      response.alreadyInTray
+        ? `This lot is already in the ${destination} tray.`
+        : `Lot added to ${destination}.`,
+      response.alreadyInTray ? 'info' : 'success'
+    );
+  } catch (error) {
+    writeOutput(escapeHtml(error.message), 'error');
+  }
+}
+
 function handlePopupStorageChanged(changes, area) {
+  if (area === 'session' && RECENT_CHART_LOTS_KEY in changes)
+    renderRecentChartLots(changes[RECENT_CHART_LOTS_KEY]?.newValue);
   if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
     void loadAutofillSettings();
   if (

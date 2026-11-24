@@ -210,3 +210,35 @@ test('review of a silent reservation requires confirmation from the original bro
     true
   );
 });
+
+test('only the verified last tray use renews one bounded session history entry', async () => {
+  const historyKey = 'vaxlink_recent_chart_lots_v1';
+  const original = {
+    id: 'two',
+    tradename: 'Sample vaccine',
+    lot: 'LOT',
+    barcode_expiry: '2099-12-31',
+    remaining_doses: 2
+  };
+  const earlier = Array.from({ length: 20 }, (_, i) => ({
+    ...original,
+    id: `recent-${i}`,
+    lot: `PRIOR${i}`
+  }));
+  const sessionStorage = new Map([[historyKey, earlier]]);
+  const { change, get } = tray([original], { sessionStorage });
+  const first = randomUUID();
+  const final = randomUUID();
+  await change(chart(1), 'reserve_dose', 'two', first);
+  await change(chart(1), 'consume', 'two', first);
+  assert.equal(get('two').remaining_doses, 1);
+  assert.equal(sessionStorage.get(historyKey), earlier);
+
+  await change(chart(2), 'reserve_dose', 'two', final);
+  await change(chart(2), 'consume', 'two', final);
+  assert.equal(get('two'), undefined);
+  const history = sessionStorage.get(historyKey);
+  assert.equal(history.length, 20);
+  assert.equal(history[0].lot, 'LOT');
+  assert.equal('remaining_doses' in history[0], false);
+});

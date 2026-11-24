@@ -302,6 +302,13 @@ The background writes both tray changes together and blocks transfer of a
 reserved dose. A scan that finishes lookup late can be inserted ahead of later
 captures without changing the order of existing rows.
 
+Recent chart lots appear below both trays. The worker keeps up to 20 named
+product, lot and expiry combinations in browser-session storage. A direct scan
+enters that list only when the original chart's field verification clears its
+pending receipt. A reserved tray dose enters the list when a verified use
+removes the final dose. Each addition requires confirmation. Immunization gets
+one use, and Inventory starts with an unknown count.
+
 ## Pending scanner scans
 
 VaxLink saves a direct single-form scan before sending it once to its original
