@@ -3,8 +3,6 @@ import './shared/vaccine-label.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
-  buildInventorySummary,
-  buildMultipleInjectSummary,
   buildQueueRecord,
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
@@ -156,8 +154,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showUseAction: true,
     useButtonLabel: 'Use',
     emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
-    emptyMessage: '',
-    summaryBuilder: buildMultipleInjectSummary
+    emptyMessage: ''
   });
 
   inventoryManager = new ScanQueueManager({
@@ -171,7 +168,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
     emptyMessage: '',
-    summaryBuilder: buildInventorySummary,
     exportFilenamePrefix: 'vaxlink-inventory'
   });
 
