@@ -73,6 +73,13 @@ The [Panorama autofill sequence](#panorama-autofill-sequence) explains how the
 integration verifies the product, stops when chart ownership changes, and
 consumes a confirmed tray dose.
 
+A verified grid assignment keeps its exact saved dose, row, Agent, date and
+foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
+that assignment when the matching detail step opens. Changing the grid row,
+the Lot or the active route stops automatic carry. Staff can still select a
+dose deliberately on the detail step. The grid assignment itself does not
+use a dose.
+
 ### User controls: popup
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual

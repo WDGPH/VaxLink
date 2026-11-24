@@ -80,7 +80,7 @@ function fixture() {
     },
     console
   };
-  const { context, documentListeners, windowListeners } =
+  const { context, documentListeners, windowListeners, storageListeners } =
     createContentHarness(globals);
   // Replace only the page/catalogue dependencies for each case. Ownership and
   // its initial state come from the complete production script above.
@@ -98,6 +98,7 @@ function fixture() {
     form,
     documentListeners,
     windowListeners,
+    storageListeners,
     runTimer(callback = state.timers[0]) {
       assert.ok(callback, 'expected a pending check');
       state.timers = state.timers.filter((timer) => timer !== callback);
@@ -710,6 +711,21 @@ test('automatic comparison waits for the Agent refresh before offering both fund
   f.runTimer();
   assert.deepEqual(prompts, ['both']);
   assert.deepEqual(reports, [['funding_comparison', 'both']]);
+  assert.equal(f.state.timers.length, 0);
+});
+
+test('turning automatic funding off stops a pending Lot selection', () => {
+  const f = fixture();
+  f.context.initHandsFreeScanner();
+  const onChange = f.storageListeners.at(-1);
+  const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+  f.schedulePanoramaLotOrTradeSelection(data);
+  assert.equal(f.state.timers.length, 1);
+  onChange(
+    { vaxlink_auto_resolve_funding_v1: { oldValue: true, newValue: false } },
+    'local'
+  );
+  assert.equal(f.context.isPanoramaAutofillCurrent(data), false);
   assert.equal(f.state.timers.length, 0);
 });
 

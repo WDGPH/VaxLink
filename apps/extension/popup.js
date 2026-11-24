@@ -91,6 +91,7 @@ const {
   LEGACY_POPUP_MODE_KEY,
   SINGLE_SCAN_AUTOFILL_KEY,
   GRID_SCAN_AUTOFILL_KEY,
+  GRID_DETAIL_AUTOFILL_KEY,
   normalizeWorkflowMode
 } = globalThis.VaxLinkWorkflow;
 const SETTINGS_PANEL_OPEN_KEY = 'vaxlink_settings_panel_open_v1';
@@ -316,7 +317,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   for (const [id, key] of [
     ['singleScanAutofillToggle', SINGLE_SCAN_AUTOFILL_KEY],
-    ['gridScanAutofillToggle', GRID_SCAN_AUTOFILL_KEY]
+    ['gridScanAutofillToggle', GRID_SCAN_AUTOFILL_KEY],
+    ['gridDetailAutofillToggle', GRID_DETAIL_AUTOFILL_KEY]
   ]) {
     const toggle = document.getElementById(id);
     toggle?.addEventListener(
@@ -808,6 +810,10 @@ async function loadAutofillSettings() {
       SINGLE_SCAN_AUTOFILL_KEY
     ],
     [document.getElementById('gridScanAutofillToggle'), GRID_SCAN_AUTOFILL_KEY],
+    [
+      document.getElementById('gridDetailAutofillToggle'),
+      GRID_DETAIL_AUTOFILL_KEY
+    ],
     [
       adminDateAutofillToggle,
       ADMIN_DATE_AUTOFILL_KEY,
@@ -1497,7 +1503,9 @@ async function handleUseMultipleInjectRecord(record) {
 
     if (result.status === 'grid_added') {
       writeOutput(
-        'Added to the grid. The vaccine stays in the tray for Enter Details.',
+        result.carryToDetails
+          ? 'Added to the grid. Check that Enter Details opens the matching step.'
+          : 'Added to the grid. The vaccine stays in the tray for Enter Details.',
         'success'
       );
       return;

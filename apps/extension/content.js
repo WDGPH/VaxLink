@@ -28,6 +28,7 @@ const {
   LEGACY_POPUP_MODE_KEY,
   SINGLE_SCAN_AUTOFILL_KEY,
   GRID_SCAN_AUTOFILL_KEY,
+  GRID_DETAIL_AUTOFILL_KEY,
   normalizeWorkflowMode
 } = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
@@ -185,6 +186,9 @@ function logAnalyticsEvent(eventType, payload = {}) {
     // Ignore analytics failures on client pages.
   }
 }
+
+const gridAssignments = new Map();
+let gridDetailHandoff = null;
 
 let trayUseContext = null;
 let trayUseContextGeneration = 0;
@@ -1087,6 +1091,7 @@ function initHandsFreeScanner() {
     LEGACY_POPUP_MODE_KEY,
     SINGLE_SCAN_AUTOFILL_KEY,
     GRID_SCAN_AUTOFILL_KEY,
+    GRID_DETAIL_AUTOFILL_KEY,
     LEGACY_ADMIN_DATETIME_AUTOFILL_KEY,
     ADMIN_DATE_AUTOFILL_KEY,
     ADMIN_TIME_AUTOFILL_KEY,
@@ -1114,12 +1119,16 @@ function initHandsFreeScanner() {
     const next = { ...autofillSettings };
     for (const key of changedKeys) next[key] = changes[key].newValue;
     applySettings(next);
+    if (next[GRID_DETAIL_AUTOFILL_KEY] === false) clearGridCarry();
     const owner = panoramaAutofillOwner;
+    const scanPreference = owner?.gridDetail
+      ? GRID_DETAIL_AUTOFILL_KEY
+      : owner?.kind === 'multiple_grid'
+        ? GRID_SCAN_AUTOFILL_KEY
+        : SINGLE_SCAN_AUTOFILL_KEY;
     if (
-      owner?.automatic &&
-      (owner.kind === 'multiple_grid'
-        ? next[GRID_SCAN_AUTOFILL_KEY]
-        : next[SINGLE_SCAN_AUTOFILL_KEY]) === false
+      (owner?.automatic && next[scanPreference] === false) ||
+      (owner?.autoResolveFunding && next[AUTO_RESOLVE_FUNDING_KEY] === false)
     )
       cancelPanoramaAutofill();
   });
@@ -1131,12 +1140,17 @@ function initHandsFreeScanner() {
       true
     );
   }
+  document.addEventListener('click', startGridHandoff, true);
   for (const type of ['pagehide', 'popstate', 'hashchange']) {
-    window.addEventListener(type, cancelPanoramaAutofill);
+    window.addEventListener(type, () => {
+      clearGridCarry();
+      cancelPanoramaAutofill();
+    });
   }
   window.addEventListener('blur', invalidateAutomaticPanoramaContext);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') return;
+    clearGridCarry();
     if (panoramaAutofillOwner?.trayDose) cancelPanoramaAutofill();
     else {
       trayUseContextGeneration += 1;
@@ -2761,6 +2775,7 @@ function isPanoramaChartActive() {
 }
 
 function invalidateAutomaticPanoramaContext() {
+  clearGridCarry();
   // A return to this tab cannot revive a scan pinned before focus was lost.
   if (panoramaAutofillOwner?.automatic)
     cancelPanoramaAutofill({ focusOnly: true });
@@ -2831,6 +2846,7 @@ function isPanoramaAutofillCurrent(data) {
 
 function updatePanoramaWorkflowMode(mode) {
   if (activeWorkflowMode === mode) return;
+  clearGridCarry();
   cancelPanoramaAutofill();
   panoramaAutofillOwner = null;
   activeWorkflowMode = mode;
@@ -3167,6 +3183,11 @@ function schedulePanoramaLotOrTradeSelection(
         !(await checkPanoramaScannerRoute(owner.scannerDelivery, true)))
     )
       return;
+    if (
+      owner.scannerRoute &&
+      !(await checkPanoramaScannerRoute({ scannerRoute: owner.scannerRoute }))
+    )
+      return;
     if (globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return;
     try {
       runPanoramaAutofill(data, () => fillPanoramaDeferredDetailFields(data));
@@ -3198,9 +3219,12 @@ function schedulePanoramaLotOrTradeSelection(
       return;
     }
     const owner = data._vaxlinkOwner;
-    if (owner.scannerDelivery) {
+    const delivery =
+      owner.scannerDelivery ||
+      (owner.scannerRoute && { scannerRoute: owner.scannerRoute });
+    if (delivery) {
       checkingRoute = true;
-      const active = await checkPanoramaScannerRoute(owner.scannerDelivery);
+      const active = await checkPanoramaScannerRoute(delivery);
       checkingRoute = false;
       if (stopped) return;
       if (!active || !isPanoramaAutofillCurrent(data)) {
@@ -3723,6 +3747,14 @@ async function useTrayVaccine(recordId, contextToken, scannerRoute = null) {
   )
     throw new Error('The grid changed. The vaccine remains in the tray.');
 
+  if (!scannerRoute && context.kind === 'multiple_detail') {
+    await releaseGridDetailStep();
+    if (!current() || document.visibilityState !== 'visible')
+      throw new Error(
+        'Panorama changed. Check the chart and choose the vaccine again.'
+      );
+  }
+
   const data = beginPanoramaAutofill({}, true, {
     automatic: !!scannerRoute,
     startBy: scannerRoute?.startBy ?? null
@@ -3740,7 +3772,8 @@ async function fillReservedTrayRecord(
   recordId,
   ownerData,
   source,
-  requiredKind
+  requiredKind,
+  carriedDose = null
 ) {
   if (!isPanoramaAutofillCurrent(ownerData)) {
     throw new Error(
@@ -3752,7 +3785,8 @@ async function fillReservedTrayRecord(
     return createAutofillResult('failed', {
       error: 'This chart already has a tray fill.'
     });
-  const dose = { recordId, token: crypto.randomUUID(), owner };
+  const dose = carriedDose || { recordId, token: crypto.randomUUID() };
+  dose.owner = owner;
   owner.trayDose = dose;
   activeTrayReservations.add(dose.token);
   let keepReservation = false;
@@ -3776,7 +3810,9 @@ async function fillReservedTrayRecord(
         scannerRoute: owner.scannerRoute
       })) ||
         !isPanoramaAutofillCurrent(ownerData) ||
-        autofillSettings[GRID_SCAN_AUTOFILL_KEY] === false)
+        autofillSettings[
+          owner.gridDetail ? GRID_DETAIL_AUTOFILL_KEY : GRID_SCAN_AUTOFILL_KEY
+        ] === false)
     )
       throw new Error('The grid changed. The vaccine remains in the tray.');
     if (requiredKind) {
@@ -3787,6 +3823,8 @@ async function fillReservedTrayRecord(
         );
     }
 
+    if (owner.gridDetail && !matchesGridDetail(owner.gridDetail))
+      throw new Error('The matching Enter Details step is no longer open.');
     if (
       requiredKind === 'multiple_detail' &&
       !queueRecordMatchesPanoramaAgentText(
@@ -3824,8 +3862,12 @@ async function fillReservedTrayRecord(
         assignTrayVaccineToGrid(data)
       );
       verifiedGridAssignment = !!assignment;
+      keepReservation =
+        assignment && rememberGridAssignment(assignment, dose, record, source);
       return assignment
-        ? createAutofillResult('grid_added')
+        ? createAutofillResult('grid_added', {
+            carryToDetails: !!keepReservation
+          })
         : createAutofillResult('failed', {
             error: 'Check the current grid row and choose the vaccine again.'
           });
@@ -3849,8 +3891,11 @@ async function fillReservedTrayRecord(
   }
 }
 
-async function stopTrayDose(owner, verifiedGridAssignment = false) {
-  const dose = owner?.trayDose;
+async function stopTrayDose(
+  owner,
+  verifiedGridAssignment = false,
+  dose = owner?.trayDose
+) {
   if (
     !dose?.reserved ||
     owner.detailOutcome === 'verifying' ||
@@ -5228,6 +5273,299 @@ function assignTrayVaccineToGrid(data) {
   assignment.agent = panoramaAgentIdentity(agentText);
   assignment.date = dateText;
   return assignment;
+}
+
+async function readGridAssignmentRoute() {
+  try {
+    const reply = await chrome.runtime.sendMessage({
+      action: 'checkScannerChart'
+    });
+    return reply?.success ? reply.scannerRoute : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function rememberGridAssignment(assignment, dose, record, source) {
+  if (!assignment.date || autofillSettings[GRID_DETAIL_AUTOFILL_KEY] === false)
+    return false;
+  const { owner } = dose;
+  const route = owner.scannerRoute
+    ? Promise.resolve({
+        epoch: owner.scannerRoute.epoch,
+        generation: owner.scannerRoute.generation
+      })
+    : readGridAssignmentRoute();
+  const prior = gridAssignments.get(assignment.index);
+  if (prior) void releaseGridAssignment(prior);
+  const entry = {
+    ...assignment,
+    form: owner.form,
+    url: owner.url,
+    route,
+    dose,
+    lot: record.lot,
+    source
+  };
+  gridAssignments.set(entry.index, entry);
+  // A verified Agent/date assignment is not a product write. Keep its
+  // reservation separate from the grid owner as the form changes to details.
+  owner.trayDose = null;
+  void route.then((active) => {
+    if (!active && gridAssignments.get(entry.index) === entry) {
+      gridAssignments.delete(entry.index);
+      void releaseGridAssignment(entry);
+    }
+  });
+  return true;
+}
+
+function releaseGridAssignment(entry) {
+  return stopTrayDose(entry.dose.owner, true, entry.dose);
+}
+
+function clearGridCarry() {
+  for (const entry of gridAssignments.values())
+    void releaseGridAssignment(entry);
+  gridAssignments.clear();
+  const handoff = gridDetailHandoff;
+  if (!handoff) return;
+  gridDetailHandoff = null;
+  handoff.observer.disconnect();
+  clearTimeout(handoff.opening);
+  for (const row of handoff.rows)
+    if (row.entry) void releaseGridAssignment(row.entry);
+}
+
+function visiblePopulatedGridRows() {
+  return getPanoramaMultipleGridRows()
+    .filter(isVisible)
+    .flatMap((row) => {
+      const index = row.getAttribute('data-ri');
+      const { agentText, dateText } = getPanoramaMultipleGridRowState(index);
+      const agent = panoramaAgentIdentity(agentText);
+      return agent
+        ? [
+            {
+              row,
+              index,
+              key: row.getAttribute('data-rk'),
+              agent,
+              date: dateText
+            }
+          ]
+        : [];
+    });
+}
+
+function sameGridAssignment(left, right) {
+  return (
+    right &&
+    left.row === right.row &&
+    left.index === right.index &&
+    left.key === right.key &&
+    left.agent === right.agent &&
+    left.date === right.date
+  );
+}
+
+function startGridHandoff(event) {
+  if (!event.isTrusted || (!gridAssignments.size && !gridDetailHandoff)) return;
+  const button = event.target?.closest?.(
+    'button, a, input[type="submit"], input[type="button"], [role="button"]'
+  );
+  if (!button) return;
+  const label = normalizeLabelText(
+    button.textContent || button.value || button.title
+  );
+  if (['cancel', 'close', 'reset'].includes(label)) {
+    clearGridCarry();
+    return;
+  }
+  if (!gridAssignments.size || label !== 'enter details') return;
+  const form = getPanoramaAutofillForm();
+  if (
+    !form?.contains(button) ||
+    !isPanoramaChartActive() ||
+    getPanoramaFormContext({ checkReadiness: false }).kind !== 'multiple_grid'
+  )
+    return;
+  const rows = visiblePopulatedGridRows();
+  for (const row of rows) {
+    const entry = gridAssignments.get(row.index);
+    if (
+      entry?.form !== form ||
+      entry.url !== location.href ||
+      !sameGridAssignment(row, entry)
+    )
+      continue;
+    if (rows.some((other) => other !== row && other.agent === row.agent))
+      continue;
+    row.entry = entry;
+    gridAssignments.delete(row.index);
+  }
+  clearGridCarry();
+  if (!rows.some((row) => row.entry)) return;
+
+  const observer = new MutationObserver(() => {
+    void advanceGridHandoff();
+  });
+  const handoff = {
+    rows,
+    form,
+    url: location.href,
+    observer,
+    step: 0,
+    attempted: 0
+  };
+  gridDetailHandoff = handoff;
+  handoff.opening = setTimeout(() => {
+    if (gridDetailHandoff === handoff && !handoff.step) clearGridCarry();
+  }, 16000);
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: [
+      'disabled',
+      'class',
+      'style',
+      'value',
+      'data-ri',
+      'data-rk'
+    ]
+  });
+}
+
+function currentGridDetailStep() {
+  const [step, , total] = getPanoramaMultiStepIndicatorKey({
+    visibleOnly: true
+  })
+    .split('-')
+    .map(Number);
+  return { step, total };
+}
+
+function matchesGridDetail(entry) {
+  const form = getPanoramaAutofillForm();
+  const { dateField } = getPanoramaAdministeredDateTimeFields({
+    _vaxlinkOwner: { form }
+  });
+  const lot = getPanoramaDisplayedLot(getPanoramaLotWidget(form));
+  const intended = normalizePanoramaLotToken(entry.lot);
+  const displayed = normalizePanoramaLotToken(
+    getPanoramaManufacturerLotText(lot, getPanoramaFundedRadioValue())
+  );
+  return (
+    panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)) ===
+      entry.agent &&
+    dateField?.value.trim() === entry.date &&
+    (!lot || (intended && displayed === intended))
+  );
+}
+
+async function releaseGridDetailStep() {
+  const handoff = gridDetailHandoff;
+  if (!handoff) return;
+  const { step, total } = currentGridDetailStep();
+  if (total !== handoff.rows.length) return;
+  const row = handoff.rows[step - 1];
+  handoff.attempted = step;
+  if (!row?.entry) return;
+  const entry = row.entry;
+  row.entry = null;
+  await releaseGridAssignment(entry);
+}
+
+async function advanceGridHandoff() {
+  const handoff = gridDetailHandoff;
+  if (!handoff) return;
+  const context = getPanoramaFormContext();
+  if (
+    !isPanoramaChartActive() ||
+    handoff.url !== location.href ||
+    (context.kind === 'multiple_grid' && handoff.step) ||
+    ['provider_single', 'non_provider_single'].includes(context.kind)
+  ) {
+    clearGridCarry();
+    return;
+  }
+  if (context.kind === 'multiple_grid') {
+    const visible = visiblePopulatedGridRows();
+    // Panorama can remove the old grid while building the detail form.
+    if (
+      visible.length &&
+      handoff.rows.some(
+        (row) => !visible.some((current) => sameGridAssignment(row, current))
+      )
+    )
+      clearGridCarry();
+    return;
+  }
+  if (context.kind !== 'multiple_detail') return;
+
+  const { step, total } = currentGridDetailStep();
+  const row = handoff.rows[step - 1];
+  const form = getPanoramaAutofillForm();
+  if (
+    !row ||
+    total !== handoff.rows.length ||
+    step < handoff.step ||
+    step > handoff.step + 1 ||
+    (form !== handoff.form && (!form?.id || form.id !== handoff.form.id))
+  ) {
+    clearGridCarry();
+    return;
+  }
+  if (step > handoff.step && handoff.step) {
+    const previous = handoff.rows[handoff.step - 1];
+    if (previous.entry) void releaseGridAssignment(previous.entry);
+    previous.entry = null;
+  }
+  handoff.step = step;
+  clearTimeout(handoff.opening);
+  if (!row.entry || !context.ready || handoff.attempted === step) return;
+  handoff.attempted = step;
+  const entry = row.entry;
+  try {
+    const route = await entry.route;
+    if (!route || !(await checkPanoramaScannerRoute({ scannerRoute: route })))
+      return;
+    const current = getPanoramaFormContext();
+    const detail = currentGridDetailStep();
+    if (
+      gridDetailHandoff !== handoff ||
+      row.entry !== entry ||
+      current.kind !== 'multiple_detail' ||
+      !current.ready ||
+      getPanoramaAutofillForm() !== form ||
+      detail.step !== step ||
+      detail.total !== total ||
+      !matchesGridDetail(entry)
+    )
+      return;
+
+    const data = beginPanoramaAutofill({}, true, { automatic: true });
+    if (!isPanoramaAutofillCurrent(data)) return;
+    data._vaxlinkOwner.scannerRoute = route;
+    data._vaxlinkOwner.gridDetail = entry;
+    row.entry = null;
+    await fillReservedTrayRecord(
+      entry.dose.recordId,
+      data,
+      entry.source,
+      'multiple_detail',
+      entry.dose
+    );
+  } catch (error) {
+    showVaxlinkToast({ _entryWarning: error.message });
+  } finally {
+    if (row.entry === entry) {
+      row.entry = null;
+      await releaseGridAssignment(entry);
+    }
+  }
 }
 
 function getPanoramaCurrentTradeSelectionText(scope) {

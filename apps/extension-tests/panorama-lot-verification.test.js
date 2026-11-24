@@ -472,3 +472,141 @@ test('explicit grid Use assigns only the chosen dose and leaves it for Details',
     );
   }
 });
+
+test('Enter Details carries only the exact grid row and foreground route', async () => {
+  const storageKey = 'multiple_inject_queue_v1';
+  const lot = 'SAMPLE';
+  const date = '2026/11/24';
+  for (const scenario of [
+    'normal',
+    'manual_use',
+    'different_date',
+    'replace_before',
+    'replace_during',
+    'duplicate_agent',
+    'different_lot',
+    'lock_cycle',
+    'carry_off'
+  ]) {
+    const f = fixture();
+    const { context, state } = f;
+    const url = context.location.href;
+    const tab = { id: 42, url, active: true };
+    const worker = createBackgroundHarness(makeTestNvcBundle(), {
+      tabs: [tab],
+      storage: {
+        [storageKey]: [
+          { id: 'chosen', lot, tradename: 'Priorix', remaining_doses: 2 }
+        ]
+      }
+    });
+    const sender = {
+      id: 'vaxlink-test',
+      frameId: 0,
+      documentId: 'grid-chart',
+      url,
+      tab
+    };
+    context.chrome.runtime.sendMessage = (message, reply) => {
+      const result = worker.sendMessage(message, sender);
+      if (reply) void result.then(reply);
+      return result;
+    };
+    const form = context.getPanoramaAutofillForm();
+    const makeRow = (index) => ({
+      form,
+      isConnected: true,
+      getAttribute: (key) =>
+        ({ 'data-ri': String(index), 'data-rk': `row-${index}` })[key],
+      getBoundingClientRect: shown
+    });
+    let rows = [makeRow(0)];
+    let kind = 'multiple_grid';
+    let agent = '';
+    let productFill;
+    Object.assign(context, {
+      getPanoramaFormContext: () => ({ kind, ready: true }),
+      getPanoramaMultipleGridRows: () => rows,
+      getPanoramaMultipleGridRowState: () => ({
+        agentText: agent,
+        dateText: date
+      }),
+      fillPanoramaMultipleGridAgent() {
+        context.assertPanoramaAutofillWrite();
+        agent = 'MMR';
+        return true;
+      },
+      getPanoramaCurrentAgentSelectionText: () => agent,
+      getPanoramaAdministeredDateTimeFields: () => ({
+        dateField: {
+          value: scenario === 'different_date' ? '2026/11/23' : date
+        }
+      }),
+      getPanoramaDisplayedLot: () =>
+        scenario === 'different_lot' ? 'DIFFERENT' : '',
+      autoFillPanorama(data) {
+        productFill = data;
+        return { status: 'pending' };
+      },
+      showVaxlinkToast() {},
+      setTimeout: () => 1,
+      clearTimeout() {},
+      MutationObserver: class {
+        observe() {}
+        disconnect() {}
+      }
+    });
+    if (scenario === 'carry_off')
+      context.applyAutofillSettings({ vaxlink_grid_detail_autofill_v1: false });
+    const choose = await context.useTrayVaccine(
+      'chosen',
+      context.getScannerDeliveryContext(kind, true)
+    );
+    assert.equal(choose.status, 'grid_added', scenario);
+    assert.equal(choose.carryToDetails, scenario !== 'carry_off', scenario);
+    const saved = () => worker.storageData.get(storageKey)[0];
+    assert.equal(saved().remaining_doses, 2, scenario);
+    const token = saved().dose_reservations?.[0]?.token;
+
+    if (scenario === 'replace_before') rows = [makeRow(0)];
+    if (scenario === 'duplicate_agent') rows.push(makeRow(1));
+    context.startGridHandoff({
+      isTrusted: true,
+      target: { closest: () => ({ textContent: 'Enter Details', form }) }
+    });
+    if (scenario === 'replace_during') {
+      rows = [makeRow(0)];
+      await context.advanceGridHandoff();
+    }
+    if (scenario === 'lock_cycle') {
+      worker.setIdleState('locked');
+      worker.setIdleState('active');
+    }
+    kind = 'multiple_detail';
+    state.step = scenario === 'duplicate_agent' ? '1-of-2' : '1-of-1';
+    rows = [];
+    if (scenario === 'manual_use') {
+      const manualToken = context.getScannerDeliveryContext(kind, true);
+      assert.equal(
+        (await context.useTrayVaccine('chosen', manualToken)).status,
+        'pending'
+      );
+    }
+    await context.advanceGridHandoff();
+    await new Promise(setImmediate);
+    if (scenario === 'normal' || scenario === 'manual_use') {
+      assert.ok(productFill, scenario);
+      assert.equal(
+        saved().dose_reservations[0].token === token,
+        scenario === 'normal',
+        scenario
+      );
+      await context.finalizeDeferredPanoramaAutofill(productFill);
+      assert.equal(saved().remaining_doses, 1, scenario);
+    } else {
+      assert.equal(productFill, undefined, scenario);
+      assert.equal(saved().remaining_doses, 2, scenario);
+    }
+    assert.equal(saved().dose_reservations, undefined, scenario);
+  }
+});
