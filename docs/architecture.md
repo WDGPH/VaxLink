@@ -33,7 +33,10 @@ closing the popup does not end that worker. It passes control
 requests to the worker and forwards scans and status to the background program.
 It remembers the requested connection so it can restart a failed worker.
 
-The host passes messages; the scanner worker opens and reads the device.
+The scanner worker opens and reads the device. The host stops routing scans
+as soon as Disconnect is requested and waits for the reader to confirm the
+port closed. Chrome can finish opening a port after cancellation. The reader
+closes that port without reading from it and retains a failed close for retry.
 
 ### Scanner reader: `scanner/scanner-daemon-worker.js`
 
@@ -139,8 +142,8 @@ it in a queue.
 - **`queue-record.js`** normalizes popup queue records;
   **`popup-inventory.js`** manages the popup display and CSV columns, requesting
   saved row changes through the background writer.
-- **`scanner/scanner-daemon-shared.js`** supplies common scanner status and port
-  selection helpers. **`scanner/serial-profiles.js`** holds device settings, and
+- **`scanner/scanner-daemon-protocol.js`** defines scanner commands and saved status.
+  **`scanner/scanner-daemon-shared.js`** supplies port selection and status display helpers. **`scanner/serial-profiles.js`** holds device settings, and
   **`scanner/scanner-lock-session.js`** holds lock-session metadata helpers.
 
 ## Key storage keys

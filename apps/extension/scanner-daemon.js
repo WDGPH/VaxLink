@@ -3,6 +3,7 @@ import {
   SCANNER_DAEMON_BACKGROUND_TARGET,
   SCANNER_DAEMON_TARGET,
   SCANNER_STATUS_STATES,
+  SCANNER_WORKER_MESSAGES,
   createScannerStatusSnapshot,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot
@@ -11,6 +12,9 @@ import {
 let daemonWorker = null;
 let restartTimer = null;
 let desiredConnection = null;
+let stopping = false;
+let nextRequestId = 0;
+const workerRequests = new Map();
 let currentStatus = createScannerStatusSnapshot();
 
 function postStatusToBackground(status) {
@@ -68,19 +72,26 @@ function ensureWorker() {
     chrome.runtime.getURL('scanner/scanner-daemon-worker.js'),
     { type: 'module' }
   );
+  const worker = daemonWorker;
   daemonWorker.addEventListener('message', (event) => {
+    if (worker !== daemonWorker) return;
     const data = event.data || {};
-    if (data.type === 'status') {
-      applyStatus(data.status);
+    if (data.type === SCANNER_WORKER_MESSAGES.STATUS) {
+      if (!stopping) applyStatus(data.status);
       return;
     }
-    if (data.type === 'scan') {
+    if (data.type === SCANNER_WORKER_MESSAGES.REPLY) {
+      workerRequests.get(data.requestId)?.(data);
+    }
+    if (data.type === SCANNER_WORKER_MESSAGES.SCAN && desiredConnection) {
       void routeScannerScan(data.scan);
     }
   });
   daemonWorker.addEventListener('error', (event) => {
+    if (worker !== daemonWorker) return;
     const message = String(event?.message || 'Scanner worker crashed.').trim();
     daemonWorker = null;
+    for (const finish of workerRequests.values()) finish({ error: message });
     applyStatus({
       ...currentStatus,
       state: SCANNER_STATUS_STATES.ERROR,
@@ -90,14 +101,15 @@ function ensureWorker() {
     if (desiredConnection) {
       restartTimer = setTimeout(() => {
         restartTimer = null;
-        const worker = ensureWorker();
-        worker.postMessage({ type: 'connectGranted', ...desiredConnection });
+        ensureWorker();
       }, 1000);
     }
   });
-  daemonWorker.postMessage({ type: 'getStatus' });
   if (desiredConnection) {
-    daemonWorker.postMessage({ type: 'connectGranted', ...desiredConnection });
+    daemonWorker.postMessage({
+      type: SCANNER_WORKER_MESSAGES.CONNECT_GRANTED,
+      ...desiredConnection
+    });
   }
   return daemonWorker;
 }
@@ -128,6 +140,7 @@ async function routeScannerScan(scan) {
 }
 
 function requestConnect(message = {}) {
+  const worker = ensureWorker();
   desiredConnection = {
     profileId: String(
       message.profileId || currentStatus.profileId || ''
@@ -137,17 +150,59 @@ function requestConnect(message = {}) {
     ),
     trigger: message.trigger || 'manual'
   };
-  ensureWorker().postMessage({ type: 'connectGranted', ...desiredConnection });
+  worker.postMessage({
+    type: SCANNER_WORKER_MESSAGES.CONNECT_GRANTED,
+    ...desiredConnection
+  });
 }
 
-function requestDisconnect() {
+function requestWorker(worker, type, timeoutMs) {
+  return new Promise((resolve) => {
+    const requestId = ++nextRequestId;
+    const finish = ({ status, error }) => {
+      clearTimeout(timer);
+      workerRequests.delete(requestId);
+      resolve(error ? { success: false, error } : { success: true, status });
+    };
+    const timer = timeoutMs
+      ? setTimeout(
+          () => finish({ error: 'Scanner status unavailable' }),
+          timeoutMs
+        )
+      : null;
+    workerRequests.set(requestId, finish);
+    worker.postMessage({ type, requestId });
+  });
+}
+
+async function requestDisconnect() {
   desiredConnection = null;
-  ensureWorker().postMessage({ type: 'disconnect' });
+  clearRestartTimer();
+  stopping = true;
+  applyStatus({ ...currentStatus, state: SCANNER_STATUS_STATES.STOPPING });
+  try {
+    const reply = await requestWorker(
+      ensureWorker(),
+      SCANNER_WORKER_MESSAGES.DISCONNECT
+    );
+    applyStatus(
+      reply.success
+        ? reply.status
+        : {
+            ...currentStatus,
+            state: SCANNER_STATUS_STATES.UNAVAILABLE,
+            lastError: reply.error
+          }
+    );
+    return reply;
+  } finally {
+    stopping = false;
+  }
 }
 
-function refreshGrantedPorts(trigger = 'device-event') {
-  if (!desiredConnection) return;
-  ensureWorker().postMessage({ type: 'refreshPorts', trigger });
+function refreshGrantedPorts() {
+  if (!desiredConnection || !daemonWorker) return;
+  daemonWorker.postMessage({ type: SCANNER_WORKER_MESSAGES.REFRESH_PORTS });
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -156,20 +211,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
+    if (stopping || currentStatus.state === SCANNER_STATUS_STATES.UNAVAILABLE) {
+      sendResponse({
+        success: false,
+        error: 'Finish disconnecting the scanner before reconnecting.'
+      });
+      return false;
+    }
     requestConnect(request);
     sendResponse({ success: true, accepted: true, status: currentStatus });
     return false;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    requestDisconnect();
-    sendResponse({ success: true, accepted: true, status: currentStatus });
-    return false;
+    if (stopping) {
+      sendResponse({
+        success: false,
+        error: 'The scanner is already stopping.'
+      });
+      return false;
+    }
+    requestDisconnect().then(sendResponse, (error) =>
+      sendResponse({ success: false, error: error.message })
+    );
+    return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.GET_STATUS) {
-    sendResponse({ success: true, status: currentStatus });
-    return false;
+    if (!daemonWorker) {
+      sendResponse({ success: false, error: 'Scanner status unavailable' });
+      return false;
+    }
+    requestWorker(daemonWorker, SCANNER_WORKER_MESSAGES.GET_STATUS, 900).then(
+      sendResponse
+    );
+    return true;
   }
 
   return false;

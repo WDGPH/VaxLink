@@ -58,7 +58,9 @@ function bindEvents() {
   });
 
   els.disconnectBtn?.addEventListener('click', () => {
-    void disconnectActivePort();
+    void disconnectActivePort().catch((error) =>
+      setStatus(els.connectionStatus, error.message, 'error')
+    );
   });
 }
 
@@ -108,12 +110,17 @@ function applyDaemonStatus(status, source = 'live') {
   els.scannerIdentity.textContent = identityKnown
     ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label} (Web Serial)`
     : '';
-  setButtons({ canConnect: !connected, canDisconnect: connected });
+  const stopping = state === SCANNER_STATUS_STATES.STOPPING;
+  const retryStop = state === SCANNER_STATUS_STATES.UNAVAILABLE;
+  setButtons({
+    canConnect: !connected && !stopping && !retryStop,
+    canDisconnect: connected || retryStop
+  });
   els.requestPortBtn.hidden = connected;
   els.connectGrantedBtn.hidden =
     connected ||
     (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !identityKnown);
-  els.disconnectBtn.hidden = !connected;
+  els.disconnectBtn.hidden = !(connected || stopping || retryStop);
 }
 
 function loadScannerConnection() {
@@ -150,22 +157,6 @@ function loadScannerConnection() {
         );
     }
   );
-
-  navigator.serial.addEventListener('connect', () => {
-    setStatus(
-      els.connectionStatus,
-      'Scanner detected. Choose Reconnect or Pair.',
-      'info'
-    );
-  });
-
-  navigator.serial.addEventListener('disconnect', () => {
-    setStatus(
-      els.connectionStatus,
-      'Serial device disconnected. The background daemon will retry automatically.',
-      'warning'
-    );
-  });
 
   setStatus(els.connectionStatus, 'Checking scanner connection…', 'info');
   setButtons({ canConnect: true, canDisconnect: false });
@@ -240,9 +231,13 @@ async function reconnectGrantedPort() {
 }
 
 async function disconnectActivePort(options = {}) {
-  await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.DISCONNECT, {
-    trigger: 'setup_disconnect'
-  });
+  const reply = await sendScannerDaemonCommand(
+    SCANNER_DAEMON_ACTIONS.DISCONNECT,
+    {
+      trigger: 'setup_disconnect'
+    }
+  );
+  applyDaemonStatus(reply.status);
   setButtons({ canConnect: true, canDisconnect: false });
   if (!options.quiet)
     setStatus(

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-test('dedicated scanner worker opens a granted Web Serial port and disconnects cleanly', async () => {
+test('scanner reads and disconnects even when optional control signals fail', async () => {
   const workerMessages = [];
   const workerListeners = new Map();
   let resolveRead = null;
@@ -28,7 +28,9 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
     writable: null,
     getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
     open: async () => undefined,
-    setSignals: async () => undefined,
+    setSignals: async () => {
+      throw new DOMException('Failed to set control signals.', 'NetworkError');
+    },
     close: async () => {
       closeCount += 1;
       readable = null;
@@ -39,9 +41,11 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
     postMessage: (message) => workerMessages.push(message),
     addEventListener: (type, listener) => workerListeners.set(type, listener)
   };
+  const unrelated = { getInfo: () => ({ usbVendorId: 1 }) };
+  let ports = [port, unrelated];
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { serial: { getPorts: async () => [port] } }
+    value: { serial: { getPorts: async () => ports } }
   });
 
   await import(
@@ -60,6 +64,11 @@ test('dedicated scanner worker opens a granted Web Serial port and disconnects c
     (message) => message.status?.state === 'connected'
   );
   assert.ok(connected, 'worker must report a connected background serial port');
+
+  ports = [port];
+  workerListeners.get('message')({ data: { type: 'refreshPorts' } });
+  await Promise.resolve();
+  assert.equal(closeCount, 0, 'an unrelated USB removal does not stop capture');
 
   resolveRead({
     value: new TextEncoder().encode('01001234567890121727123110LOCKLOT1\r\n'),
@@ -139,3 +148,78 @@ for (const [label, ports] of [
     }
   });
 }
+
+test('Disconnect retries a failed close after a late open without reading any bytes', async (t) => {
+  const workerMessages = [];
+  let receive;
+  let finishOpen;
+  let startedOpening;
+  let receiveReply;
+  let readable = null;
+  let closeCount = 0;
+  const opening = new Promise((resolve) => {
+    startedOpening = resolve;
+  });
+  const port = {
+    get readable() {
+      return readable;
+    },
+    getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
+    open() {
+      startedOpening();
+      return new Promise((resolve) => {
+        finishOpen = resolve;
+      });
+    },
+    async close() {
+      if (++closeCount === 1) throw new Error('Close failed');
+      readable = null;
+    }
+  };
+  globalThis.self = {
+    postMessage(message) {
+      workerMessages.push(message);
+      if (message.type === 'reply') receiveReply(message);
+    },
+    addEventListener(type, listener) {
+      receive = listener;
+    }
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { serial: { getPorts: async () => [port] } }
+  });
+  t.after(() => {
+    delete globalThis.self;
+    delete globalThis.navigator;
+  });
+
+  await import('../extension/scanner/scanner-daemon-worker.js?lateOpen');
+  receive({
+    data: { type: 'connectGranted', profileId: 'zebra-ds8178-usb-cdc' }
+  });
+  await opening;
+  const stop = (requestId) =>
+    new Promise((resolve) => {
+      receiveReply = resolve;
+      receive({ data: { type: 'disconnect', requestId } });
+    });
+  const firstStop = stop(1);
+  readable = {
+    getReader() {
+      assert.fail('cancelled connection must never open a reader');
+    }
+  };
+  assert.ok(!workerMessages.some((message) => message.type === 'reply'));
+  finishOpen();
+  assert.match((await firstStop).error, /confirm that the scanner stopped/);
+  assert.equal(closeCount, 1);
+  assert.equal((await stop(2)).status.state, 'disabled');
+  assert.equal(closeCount, 2);
+  assert.ok(
+    !workerMessages.some(
+      (message) =>
+        message.type === 'scan' || message.status?.state === 'connected'
+    )
+  );
+});

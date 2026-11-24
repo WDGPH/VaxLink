@@ -52,29 +52,22 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   const worker = workers[0];
   assert.equal(worker.options.type, 'module');
   assert.match(worker.url, /scanner-daemon-worker\.js$/);
-  assert.deepEqual(worker.messages[0], { type: 'getStatus' });
-
-  const messagesBeforeStatus = worker.messages.length;
-  let statusResponse;
-  runtimeListeners[0](
-    { target: 'scannerDaemon', action: 'scannerDaemon.getStatus' },
-    {},
-    (response) => {
-      statusResponse = response;
-    }
-  );
-  assert.equal(statusResponse.success, true);
-  assert.equal(worker.messages.length, messagesBeforeStatus);
+  const request = (action) =>
+    new Promise((resolve) => {
+      runtimeListeners[0]({ target: 'scannerDaemon', action }, {}, resolve);
+    });
+  const statusRequest = request('scannerDaemon.getStatus');
+  const query = worker.messages.at(-1);
+  assert.equal(query.type, 'getStatus');
+  worker.emit('message', {
+    type: 'reply',
+    requestId: query.requestId,
+    status: { state: 'connected' }
+  });
+  assert.equal((await statusRequest).status.state, 'connected');
 
   worker.listeners.get('error')({ message: 'Worker stopped' });
-  runtimeListeners[0](
-    { target: 'scannerDaemon', action: 'scannerDaemon.getStatus' },
-    {},
-    (response) => {
-      statusResponse = response;
-    }
-  );
-  assert.equal(statusResponse.status.state, 'error');
+  assert.equal((await request('scannerDaemon.getStatus')).success, false);
   assert.equal(workers.length, 1, 'status must not restart a stopped worker');
 
   const connectRequest = {
@@ -110,6 +103,30 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   );
   assert.equal(captured.scan.rawText, '010012345678901210LOCKLOT1');
   assert.equal(echo.response.locked, true);
+
+  let stopResponse;
+  const stopRequest = request('scannerDaemon.disconnect').then((response) => {
+    stopResponse = response;
+  });
+  const stop = connectedWorker.messages.at(-1);
+  assert.equal(stop.type, 'disconnect');
+  connectedWorker.emit('message', { type: 'scan', scan: { rawText: 'late' } });
+  await Promise.resolve();
+  assert.equal(stopResponse, undefined);
+  assert.equal(
+    runtimeMessages.filter(
+      (message) => message.action === 'scannerScanCaptured'
+    ).length,
+    1
+  );
+  connectedWorker.emit('message', {
+    type: 'reply',
+    requestId: stop.requestId,
+    status: { state: 'disabled' }
+  });
+  await stopRequest;
+  assert.equal(stopResponse.status.state, 'disabled');
+  runtimeListeners[0](connectRequest, {}, () => {});
 
   connectedWorker.emit('message', {
     type: 'status',

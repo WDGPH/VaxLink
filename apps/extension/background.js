@@ -3156,12 +3156,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (!bootstrap.profileId) {
         throw new Error('No scanner profile is configured yet.');
       }
-      await sendScannerDaemonMessage({
+      const reply = await sendScannerDaemonMessage({
         action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
         profileId: bootstrap.profileId,
         preferredPortInfo: bootstrap.portInfo,
         trigger: request.trigger || 'manual'
       });
+      if (!reply?.success)
+        throw new Error(reply?.error || 'Scanner reconnect failed');
       sendResponse({ success: true, accepted: true, status: bootstrap.status });
     })().catch((error) => {
       sendResponse({
@@ -3181,7 +3183,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })
       )
       .then((response) =>
-        sendResponse({ success: true, accepted: true, response })
+        sendResponse(
+          response || {
+            success: false,
+            error: 'Scanner stop could not be confirmed.'
+          }
+        )
       )
       .catch((error) =>
         sendResponse({

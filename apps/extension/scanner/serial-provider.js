@@ -85,7 +85,16 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     profile.signals &&
     typeof port.setSignals === 'function'
   ) {
-    await port.setSignals(profile.signals).catch(() => undefined);
+    try {
+      await port.setSignals(profile.signals);
+    } catch (error) {
+      // Chromium reports an unsupported control-signal write as NetworkError.
+      // An open read stream can still receive scans. Failed reads surface below.
+      const optionalSignalError =
+        error?.name === 'NetworkError' || error?.name === 'NotSupportedError';
+      if (!signal?.aborted && !(optionalSignalError && port.readable))
+        throw error;
+    }
   }
   // Web Serial cannot cancel open(). Close before any reader can receive bytes.
   if (signal?.aborted) {

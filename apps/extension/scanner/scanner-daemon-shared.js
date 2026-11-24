@@ -37,6 +37,8 @@ export function getScannerConnectionLabel(status, source = 'live') {
     state === SCANNER_STATUS_STATES.RECOVERING
   )
     return 'Checking';
+  if (state === SCANNER_STATUS_STATES.STOPPING) return 'Disconnecting';
+  if (state === SCANNER_STATUS_STATES.UNAVAILABLE) return 'Connection unknown';
   if (state === SCANNER_STATUS_STATES.BUSY) return 'In use elsewhere';
   return 'Disconnected';
 }
