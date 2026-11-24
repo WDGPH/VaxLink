@@ -68,13 +68,16 @@ function fixture() {
       state.fills++;
     },
     isPrimeFacesAjaxBusy: () => false,
+    performance: { now: () => state.now },
     setTimeout: (callback, delay) => {
       callback.delay = delay;
+      callback.at = state.now + delay;
       state.timers.push(callback);
-      return state.timers.length;
+      return callback;
     },
-    clearTimeout: () => {},
-    setInterval: () => 1,
+    clearTimeout: (callback) => {
+      state.timers = state.timers.filter((timer) => timer !== callback);
+    },
     console
   };
   const { context, documentListeners, windowListeners } =
@@ -95,6 +98,12 @@ function fixture() {
     form,
     documentListeners,
     windowListeners,
+    runTimer(callback = state.timers[0]) {
+      assert.ok(callback, 'expected a pending check');
+      state.timers = state.timers.filter((timer) => timer !== callback);
+      state.now = callback.at;
+      callback();
+    },
     setMode: context.updatePanoramaWorkflowMode
   };
 }
@@ -265,10 +274,9 @@ test('a delayed retry cannot write after a newer fill takes ownership', () => {
     const f = fixture();
     const data = f.beginPanoramaAutofill({});
     f.schedulePanoramaLotOrTradeSelection(data);
-    f.state.timers.shift()(); // Start the retry watcher.
-    const retry = f.state.timers.shift();
+    const retry = f.state.timers[0];
     if (invalidate) f.beginPanoramaAutofill({});
-    retry();
+    f.runTimer(retry);
     assert.equal(f.state.fills, invalidate ? 0 : 1);
   }
 });
@@ -279,11 +287,9 @@ test('late corrective passes do not write after manual takeover', () => {
     f.state.resolved = true;
     const data = f.beginPanoramaAutofill({});
     f.schedulePanoramaLotOrTradeSelection(data);
-    f.state.timers.shift()();
-    const retry = f.state.timers[0];
-    retry();
-    f.state.now += 800;
-    retry();
+    f.runTimer();
+    f.runTimer();
+    f.runTimer();
     const late = f.state.timers.filter((timer) =>
       [1500, 3500].includes(timer.delay)
     );
@@ -457,4 +463,32 @@ test('an owned field interaction before the deadline can continue on the same ch
   assert.equal(f.isPanoramaAutofillCurrent(data), true);
   f.windowListeners.get('blur').forEach((listener) => listener());
   assert.equal(f.isPanoramaAutofillCurrent(data), false);
+});
+
+test('one pending watcher restarts its stable interval after repairing details', () => {
+  const f = fixture();
+  f.state.resolved = true;
+  let finalized = 0;
+  f.context.finalizeDeferredPanoramaAutofill = () => finalized++;
+  f.context.fillPanoramaDeferredDetailFields = () => {
+    f.state.resolved = true;
+    f.state.fills++;
+  };
+  const data = f.beginPanoramaAutofill({});
+  f.schedulePanoramaLotOrTradeSelection(data, 0, { finalizeOnResolved: true });
+  assert.equal(f.state.timers.length, 1);
+  f.runTimer();
+  f.state.resolved = false;
+  f.runTimer();
+  assert.equal(f.state.fills, 1);
+  assert.equal(finalized, 0);
+  assert.equal(f.state.timers.length, 1);
+  f.runTimer();
+  assert.equal(finalized, 0, 'the repair starts another stability wait');
+  f.runTimer();
+  assert.equal(finalized, 1);
+  assert.deepEqual(
+    f.state.timers.map((timer) => timer.delay),
+    [1500, 3500]
+  );
 });

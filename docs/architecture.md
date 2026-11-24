@@ -88,6 +88,13 @@ Date, Time, Reason, and Consent run after VaxLink has read back the requested
 Agent and Lot or Trade. A field event can change the product again, so each
 later write checks that selection on the current form.
 
+One watcher rechecks the current controls when Panorama updates the page and
+on quiet pages. An Agent or funding change can leave the old Lot list in
+place; the watcher can recognize a refresh even when the select stays in
+place. A repair restarts the stability wait. The watcher ends after ten
+seconds and gives an owned, settled form two opportunities for late detail
+repairs.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

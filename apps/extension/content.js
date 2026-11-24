@@ -1948,9 +1948,51 @@ function panoramaDetailAgentMatches(data) {
   );
 }
 
+function readPanoramaLotList() {
+  const widget = getPanoramaLotWidget();
+  const options = panoramaLotSelectOptions(widget?.select);
+  const control = options.length ? widget.select : widget?.panel;
+  if (!control) return null;
+  const rows = options.length
+    ? options.map((option) => ({
+        node: option,
+        text: option.text,
+        value: option.value,
+        disabled: option.disabled
+      }))
+    : panoramaLotPanelItems(widget.panel).map((item) => ({
+        node: item,
+        text: panoramaLotPanelItemText(item)
+      }));
+  return rows.length ? { control, rows } : null;
+}
+
+function isPanoramaLotListAwaitingRefresh(data) {
+  const owner = data._vaxlinkOwner;
+  const before = owner?.lotListBeforeRefresh;
+  if (!before) return false;
+  const after = readPanoramaLotList();
+  if (!after) return true;
+  const unchanged =
+    after.control === before.control &&
+    before.rows.length === after.rows.length &&
+    after.rows.every((row, i) => {
+      const old = before.rows[i];
+      return (
+        row.node === old.node &&
+        row.text === old.text &&
+        row.value === old.value &&
+        row.disabled === old.disabled
+      );
+    });
+  if (!unchanged) owner.lotListBeforeRefresh = null;
+  return unchanged;
+}
+
 function panoramaDetailProductMatches(data) {
   return data.lot
-    ? hasPanoramaLotSelection(data.lot)
+    ? !isPanoramaLotListAwaitingRefresh(data) &&
+        hasPanoramaLotSelection(data.lot)
     : !getPanoramaTradeCandidates(data).length ||
         hasPanoramaTradeSelection(data);
 }
@@ -2632,101 +2674,96 @@ function schedulePanoramaLotOrTradeSelection(
     return;
   }
 
-  const maxDurationMs = 16000;
-  const attemptDelaysMs = [
-    0, 120, 260, 450, 800, 1300, 1900, 2800, 4100, 5600, 8000, 11000, 14000
-  ];
-  const minAttemptGapMs = 110;
-  let observer = null;
-  const timers = [];
+  const scheduleStartedAt = performance.now();
+  const firstCheckAt =
+    scheduleStartedAt + Math.max(0, Number(initialDelayMs) || 0);
+  const deadline = firstCheckAt + 10000;
+  const minCheckGapMs = 110;
+  const fallbackGapMs = 500;
+  const stableGapMs = 700;
+  let lastCheckAt = -Infinity;
+  let nextFallbackAt = firstCheckAt;
+  let stableSince = null;
+  let domHint = false;
+  let timer;
+  let timerAt = Infinity;
+  let observer;
   let stopped = false;
-  let lastAttemptAt = 0;
-  let stablePasses = 0;
   let fundedRadioEnsured = !!options.fundedRadioEnsured;
   const preserveFundingFilter = options.preserveFundingFilter === true;
   let sharedFundingMisses = 0;
   // isPrimeFacesAjaxBusy() cannot see the page's PrimeFaces queue from the
   // isolated content-script world, so attempts are NOT actually gated while a
-  // radio/checkbox AJAX is refreshing the lot options. Attempts fire in a
-  // sub-second burst (0/120/260/450ms + mutation observer), so counting every
-  // failed lookup would hit the 3-miss limit and re-summon the PF/NPF chooser
-  // before the refresh lands. Space counted misses out so 3 misses represent
-  // seconds of genuine failure, and restart the window whenever we trigger a
-  // refresh ourselves.
-  // The full cascade after a PF/NPF answer (radio AJAX -> checkbox reset ->
-  // re-assert -> lot options refresh) takes a few seconds; three counted
-  // misses must outlast it or the chooser re-appears mid-refresh.
+  // radio or checkbox refreshes the options. Space counted misses out to
+  // give that refresh time before asking staff to try the other category.
   const SHARED_FUNDING_MISS_GAP_MS = 1200;
   // Panorama re-renders can momentarily drop the funded radio's checked state.
   // Re-clicking it on each pass stacks radio AJAX requests.
   // Re-apply at most once per cooldown.
   const FUNDING_REAPPLY_COOLDOWN_MS = 2500;
-  let lastFundingReapplyClickAt = 0;
+  let lastFundingReapplyClickAt = -Infinity;
   // While a fillable lot select exists, lot filling is silent and lands in one
   // action once the options refresh. Only if it stays unresolved this long do
   // we start driving the visible dropdown as a rescue.
   const PANEL_RESCUE_AFTER_MS = 5000;
-  const scheduleStartedAt = Date.now();
-  // Attempts can fire ~110ms apart, so two back-to-back "stable" passes can
-  // land inside a transient state: right after a funding-radio AJAX the
-  // consent select is momentarily DISABLED (counts as satisfied) while the
-  // lot is already re-filled — the scheduler would stop, and when Panorama
-  // re-enables consent moments later, nothing is left running to fill it.
-  // Spacing the counted passes keeps the scheduler alive across that window.
-  const STABLE_PASS_GAP_MS = 700;
-  let lastSharedFundingMissAt = 0;
-  let lastStablePassAt = 0;
-  const restartSharedFundingMissWindow = () => {
+  let lastSharedFundingMissAt = -Infinity;
+  const restartSharedFundingMissWindow = (now) => {
     sharedFundingMisses = 0;
-    lastSharedFundingMissAt = Date.now();
+    lastSharedFundingMissAt = now;
   };
   let finalizeOnResolved = options.finalizeOnResolved === true;
 
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    if (observer) {
-      observer.disconnect();
-      observer = null;
-    }
-    while (timers.length > 0) {
-      const timer = timers.pop();
-      clearTimeout(timer);
-    }
+    observer?.disconnect();
+    clearTimeout(timer);
     if (stopPanoramaLotTradeWatcher === stop) {
       stopPanoramaLotTradeWatcher = null;
     }
   };
   stopPanoramaLotTradeWatcher = stop;
 
-  const attempt = () => {
-    if (stopped) return;
+  const attempt = (now) => {
     if (blockIneligibleChartUse(data)) {
       stop();
       return;
     }
-    const now = Date.now();
-    if (now - lastAttemptAt < minAttemptGapMs) return;
-    lastAttemptAt = now;
-    const busy = isPrimeFacesAjaxBusy();
-
+    if (isPrimeFacesAjaxBusy() || isPanoramaLotListAwaitingRefresh(data)) {
+      stableSince = null;
+      return;
+    }
+    const owner = data._vaxlinkOwner;
     let hasResolvedAgent = panoramaDetailAgentMatches(data);
-    if (!hasResolvedAgent && !busy) {
-      tryFillPanoramaAgent(data);
+    if (!hasResolvedAgent) {
+      stableSince = null;
+      const previousList =
+        hasLot &&
+        (preserveFundingFilter ||
+          getPanoramaCurrentAgentSelectionText(owner.form))
+          ? readPanoramaLotList()
+          : null;
+      const started = tryFillPanoramaAgent(data);
       hasResolvedAgent = panoramaDetailAgentMatches(data);
+      if (previousList && (started || hasResolvedAgent)) {
+        owner.lotListBeforeRefresh = previousList;
+        return;
+      }
     }
 
     let resolved = !shouldTryLotOrTrade;
     if (!resolved && hasResolvedAgent) {
       resolved = hasPanoramaLotOrTradeSelection(data);
     }
-    if (!resolved && hasResolvedAgent && !busy) {
+    if (!resolved && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
+      stableSince = null;
       if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
         const fundedValue = getPanoramaFundedRadioValue();
         if (!isExplicitPanoramaFundingValue(fundedValue)) {
           if (now - lastFundingReapplyClickAt < FUNDING_REAPPLY_COOLDOWN_MS) {
             return; // a reapply click is still settling — don't stack another radio AJAX
           }
+          const previousList = readPanoramaLotList();
           const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
           if (!reapplied) {
             showVaxlinkToast(
@@ -2744,8 +2781,9 @@ function schedulePanoramaLotOrTradeSelection(
           }
           if (reapplied === 'clicked') {
             lastFundingReapplyClickAt = now;
-            restartSharedFundingMissWindow();
-            return; // wait for the radio AJAX to settle
+            restartSharedFundingMissWindow(now);
+            owner.lotListBeforeRefresh = previousList;
+            return;
           }
         }
       }
@@ -2787,8 +2825,12 @@ function schedulePanoramaLotOrTradeSelection(
       }
       if (!resolved && !fundedRadioEnsured && !preserveFundingFilter) {
         fundedRadioEnsured = true;
+        const previousList = hasLot ? readPanoramaLotList() : null;
         const radioResult = resetPanoramaFundedRadioToShowAll();
-        if (radioResult === 'clicked') return; // wait for AJAX to refresh lot panel
+        if (radioResult === 'clicked') {
+          owner.lotListBeforeRefresh = previousList;
+          return;
+        }
         // Radio was already at SHOW_ALL or not found — retry immediately
         if (panoramaDetailAgentMatches(data) && !isPrimeFacesAjaxBusy()) {
           tryFillPanoramaLotOrTrade(data, { panelRescue });
@@ -2799,29 +2841,25 @@ function schedulePanoramaLotOrTradeSelection(
 
     let deferredResolved =
       !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
-    if (!deferredResolved && !isPrimeFacesAjaxBusy()) {
+    if (!deferredResolved) {
+      stableSince = null;
       fillPanoramaDeferredDetailFields(data);
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
     }
 
-    // Require spaced stable follow-up passes before stopping so we do not exit
-    // while PrimeFaces is still applying dependent field refreshes.
     if (
-      resolved &&
-      deferredResolved &&
-      !isPrimeFacesAjaxBusy() &&
-      panoramaDetailAgentMatches(data) &&
-      panoramaDetailProductMatches(data)
+      !resolved ||
+      !deferredResolved ||
+      isPrimeFacesAjaxBusy() ||
+      !panoramaDetailAgentMatches(data) ||
+      !panoramaDetailProductMatches(data)
     ) {
-      if (now - lastStablePassAt >= STABLE_PASS_GAP_MS) {
-        lastStablePassAt = now;
-        stablePasses += 1;
-      }
-    } else {
-      stablePasses = 0;
+      stableSince = null;
+      return;
     }
-
-    if (stablePasses >= 2) {
+    // A successful repair starts a new stability wait on the current form.
+    stableSince ??= now;
+    if (now - stableSince >= stableGapMs) {
       if (finalizeOnResolved) {
         finalizeOnResolved = false;
         void finalizeDeferredPanoramaAutofill(data);
@@ -2843,43 +2881,77 @@ function schedulePanoramaLotOrTradeSelection(
       vlog(error.message);
     }
   };
-  const runAttempt = () => {
-    if (!isPanoramaAutofillCurrent(data)) {
-      stop();
-      return;
-    }
-    try {
-      runPanoramaAutofill(data, attempt);
-    } catch (error) {
-      stop();
-      vlog(error.message);
-    }
-  };
-  const start = () => {
+  function armNextCheck() {
+    if (stopped) return;
+    const earliest = Math.max(firstCheckAt, lastCheckAt + minCheckGapMs);
+    const requested = domHint
+      ? earliest
+      : Math.min(
+          nextFallbackAt,
+          stableSince === null ? Infinity : stableSince + stableGapMs
+        );
+    const desiredAt = Math.min(deadline, Math.max(earliest, requested));
+    if (desiredAt >= timerAt) return;
+    clearTimeout(timer);
+    timerAt = desiredAt;
+    timer = setTimeout(check, Math.max(0, desiredAt - performance.now()));
+  }
+
+  function check() {
+    const scheduledAt = timerAt;
+    timerAt = Infinity;
     if (stopped || !isPanoramaAutofillCurrent(data)) {
       stop();
       return;
     }
-    for (const delayMs of attemptDelaysMs) {
-      timers.push(setTimeout(runAttempt, delayMs));
+    const now = performance.now();
+    if (now >= deadline) {
+      stop();
+      return;
     }
-    timers.push(setTimeout(stop, maxDurationMs));
-    timers.push(setInterval(runAttempt, 500));
-
-    if (typeof MutationObserver === 'function' && document.body) {
-      observer = new MutationObserver(() => {
-        runAttempt();
-      });
-      observer.observe(document.body, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['class', 'style', 'aria-expanded']
-      });
+    if (now < scheduledAt) {
+      armNextCheck();
+      return;
     }
-  };
+    domHint = false;
+    lastCheckAt = now;
+    if (now >= nextFallbackAt) {
+      // Keep checking on quiet pages even when DOM hints are frequent.
+      nextFallbackAt =
+        firstCheckAt +
+        (Math.floor((now - firstCheckAt) / fallbackGapMs) + 1) * fallbackGapMs;
+    }
+    try {
+      runPanoramaAutofill(data, () => attempt(now));
+    } catch (error) {
+      stop();
+      vlog(error.message);
+    }
+    if (!stopped) armNextCheck();
+  }
 
-  timers.push(setTimeout(start, Math.max(0, Number(initialDelayMs) || 0)));
+  if (typeof MutationObserver === 'function' && document.body) {
+    observer = new MutationObserver(() => {
+      domHint = true;
+      armNextCheck();
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: [
+        'class',
+        'style',
+        'aria-expanded',
+        'disabled',
+        'label',
+        'value',
+        'selected'
+      ]
+    });
+  }
+  armNextCheck();
 }
 
 function isPanoramaRecordImmsPage() {
@@ -3048,6 +3120,7 @@ function fillPanoramaImmunizationFields(data) {
   const preserveFundingFilter = !!(
     sharedFundingProductLabel && String(data?.lot || '').trim()
   );
+  const owner = data._vaxlinkOwner;
   const fundedValue = getPanoramaFundedRadioValue();
   if (
     preserveFundingFilter &&
@@ -3056,7 +3129,10 @@ function fillPanoramaImmunizationFields(data) {
   ) {
     // If the nurse already answered the chooser, re-apply their pick rather than
     // re-prompting; only summon the chooser when there is no recorded answer yet.
-    if (!reapplyAnsweredPanoramaFundingChoice(data)) {
+    const previousList = readPanoramaLotList();
+    const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
+    if (reapplied === 'clicked') owner.lotListBeforeRefresh = previousList;
+    if (!reapplied) {
       showVaxlinkToast(
         {
           ...data,
@@ -3078,22 +3154,42 @@ function fillPanoramaImmunizationFields(data) {
   // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
   // expiry not selected after selecting the agent). The scheduler below only
   // falls back to resetting it again if this attempt found no radio at all.
+  const previousList =
+    data.lot &&
+    !preserveFundingFilter &&
+    fundedValue !== 'SHOW_ALL' &&
+    hasPanoramaFundedRadio()
+      ? readPanoramaLotList()
+      : null;
   const radioResult = preserveFundingFilter
     ? 'preserved'
     : resetPanoramaFundedRadioToShowAll();
+  if (radioResult === 'clicked') owner.lotListBeforeRefresh = previousList;
 
   const agentRequested = getPanoramaAgentCandidates(data).length > 0;
   let agentMatches = hasPanoramaAgentSelection(data);
   if (agentRequested && !agentMatches && !isPrimeFacesAjaxBusy()) {
-    tryFillPanoramaAgent(data);
+    const priorAgent =
+      data.lot && getPanoramaCurrentAgentSelectionText(owner.form);
+    const priorLotList =
+      priorAgent || (data.lot && preserveFundingFilter)
+        ? readPanoramaLotList()
+        : null;
+    const started = tryFillPanoramaAgent(data);
     agentMatches = hasPanoramaAgentSelection(data);
+    if (priorLotList && (started || agentMatches))
+      owner.lotListBeforeRefresh = priorLotList;
   }
 
   const productRequested =
     !!data.lot || getPanoramaTradeCandidates(data).length > 0;
   let fillCount = agentMatches ? 1 : 0;
   if ((!agentRequested || agentMatches) && productRequested) {
-    if (!panoramaDetailProductMatches(data) && !isPrimeFacesAjaxBusy()) {
+    if (
+      !panoramaDetailProductMatches(data) &&
+      !isPanoramaLotListAwaitingRefresh(data) &&
+      !isPrimeFacesAjaxBusy()
+    ) {
       tryFillPanoramaLotOrTrade(data);
     }
     if (panoramaDetailProductMatches(data)) fillCount += 1;

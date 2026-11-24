@@ -250,3 +250,14 @@ test('only current product readback permits Date and another refresh stops Time'
   assert.deepEqual(writes, [date]);
   assert.equal(time.value, '');
 });
+
+test('an observed refresh can change option text in place on the same Lot widget', () => {
+  const f = fixture();
+  const select = f.select('ABC1', 'lot-option');
+  f.state.controls = [f.root, select];
+  const data = f.context.beginPanoramaAutofill({ lot: 'ABC1' });
+  data._vaxlinkOwner.lotListBeforeRefresh = f.context.readPanoramaLotList();
+  assert.equal(f.context.panoramaDetailProductMatches(data), false);
+  select.options[1].text = 'ABC1 - Exp. 2028-03-31';
+  assert.equal(f.context.panoramaDetailProductMatches(data), true);
+});
