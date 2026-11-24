@@ -87,6 +87,7 @@ const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
 const PENDING_SCAN_INBOX_LIMIT = 250;
 const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
+const SCANNER_TEST_OWNER_KEY = 'vaxlink_scanner_test_owner_v1';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
 const {
@@ -310,11 +311,12 @@ function persistScannerStatusSnapshot(snapshot) {
       const values = {
         [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
       };
-      if (normalized.selectionRequired)
+      if (normalized.selectionRequired && !normalized.testing)
         values[SCANNER_DAEMON_ENABLED_KEY] = false;
       // An old install can have a profile without a saved port identity.
       if (
         normalized.state === SCANNER_STATUS_STATES.CONNECTED &&
+        !normalized.testing &&
         normalized.portInfo &&
         stored[SCANNER_DAEMON_ENABLED_KEY] === true &&
         !stored[SCANNER_PORT_INFO_STORAGE_KEY]
@@ -418,7 +420,10 @@ function queueScannerControl(task) {
 }
 
 function maybeStartScannerDaemon(trigger = 'startup') {
-  return queueScannerControl(() => startConfiguredScanner(trigger));
+  return queueScannerControl(async () => {
+    if ((await getScannerTestOwner()) === undefined)
+      return startConfiguredScanner(trigger);
+  });
 }
 
 async function startConfiguredScanner(trigger) {
@@ -426,7 +431,7 @@ async function startConfiguredScanner(trigger) {
   if (
     !bootstrap.enabled ||
     !bootstrap.profileId ||
-    bootstrap.status.selectionRequired
+    (bootstrap.status.selectionRequired && !bootstrap.status.testing)
   ) {
     return { started: false, status: bootstrap.status };
   }
@@ -438,7 +443,10 @@ async function startConfiguredScanner(trigger) {
     preferredPortInfo: bootstrap.portInfo,
     trigger
   });
-  return { started: true, status: response?.status || bootstrap.status };
+  return {
+    started: response?.success === true,
+    status: response?.status || bootstrap.status
+  };
 }
 
 async function stopConfiguredScanner(
@@ -461,7 +469,69 @@ function isScannerSetupPage(sender) {
   );
 }
 
+async function getScannerTestOwner() {
+  const stored = await chrome.storage.session.get(SCANNER_TEST_OWNER_KEY);
+  return stored[SCANNER_TEST_OWNER_KEY];
+}
+
+async function requireRegularScannerControls() {
+  if ((await getScannerTestOwner()) !== undefined) {
+    throw new Error('Finish or close the scanner test first.');
+  }
+}
+
+async function startScannerTest(tabId) {
+  await requireRegularScannerControls();
+  const { profileId, portInfo } = await getScannerBootstrapState();
+  if (!profileId) throw new Error('Connect a scanner before testing it.');
+  await chrome.tabs.get(tabId);
+  await chrome.storage.session.set({ [SCANNER_TEST_OWNER_KEY]: tabId });
+  try {
+    await stopConfiguredScanner();
+  } catch (error) {
+    await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+    throw error;
+  }
+  try {
+    const reply = await sendScannerDaemonMessage({
+      action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+      profileId,
+      preferredPortInfo: portInfo,
+      testing: true
+    });
+    if (!reply?.success)
+      throw new Error(reply?.error || 'Could not start the scanner test.');
+    return reply;
+  } catch (error) {
+    await endScannerTest(tabId);
+    throw error;
+  }
+}
+
+async function endScannerTest(tabId, tabClosed = false) {
+  if ((await getScannerTestOwner()) !== tabId) return { success: true };
+  try {
+    await stopConfiguredScanner();
+  } catch (error) {
+    // If setup has closed, let Settings retry the stop. Capture stays paused.
+    if (tabClosed) await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+    throw error;
+  }
+  // Both pagehide and tab removal can report the same exit.
+  await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+  await scannerStatusWriteQueue.catch(() => undefined);
+  await startConfiguredScanner('test_finished');
+  return { success: true };
+}
+
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  void queueScannerControl(() => endScannerTest(tabId, true)).catch(
+    () => undefined
+  );
+});
+
 async function connectConfiguredScanner(request) {
+  await requireRegularScannerControls();
   const bootstrap = await getScannerBootstrapState();
   const selected = request.action === SCANNER_DAEMON_ACTIONS.SELECT;
   const requestedPort = normalizeScannerPortInfo(request.preferredPortInfo);
@@ -3202,8 +3272,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.ENABLE_AUTOSTART) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true })
-      .then(() => getScannerBootstrapState())
+    queueScannerControl(async () => {
+      await requireRegularScannerControls();
+      await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true });
+      return getScannerBootstrapState();
+    })
       .then((bootstrap) =>
         sendResponse({ success: true, status: bootstrap.status })
       )
@@ -3238,10 +3311,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (
+    request.action === SCANNER_DAEMON_ACTIONS.START_TEST ||
+    request.action === SCANNER_DAEMON_ACTIONS.END_TEST
+  ) {
+    const tabId = sender.tab?.id;
+    if (!isScannerSetupPage(sender) || !Number.isInteger(tabId)) {
+      sendResponse({
+        success: false,
+        error: 'Open Scanner setup from Settings.'
+      });
+      return false;
+    }
+    queueScannerControl(() =>
+      request.action === SCANNER_DAEMON_ACTIONS.START_TEST
+        ? startScannerTest(tabId)
+        : endScannerTest(tabId)
+    ).then(sendResponse, (error) =>
+      sendResponse({ success: false, error: error.message })
+    );
+    return true;
+  }
+
+  if (
     request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT ||
     request.action === SCANNER_DAEMON_ACTIONS.FORGET
   ) {
     queueScannerControl(async () => {
+      await requireRegularScannerControls();
       const forgetting = request.action === SCANNER_DAEMON_ACTIONS.FORGET;
       const { portInfo } = await getScannerBootstrapState();
       // An interrupted or failed close must not restart capture on startup.

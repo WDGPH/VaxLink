@@ -83,7 +83,11 @@ function ensureWorker() {
     if (data.type === SCANNER_WORKER_MESSAGES.REPLY) {
       workerRequests.get(data.requestId)?.(data);
     }
-    if (data.type === SCANNER_WORKER_MESSAGES.SCAN && desiredConnection) {
+    if (
+      data.type === SCANNER_WORKER_MESSAGES.SCAN &&
+      desiredConnection &&
+      !desiredConnection.testing
+    ) {
       void routeScannerScan(data.scan);
     }
   });
@@ -144,7 +148,8 @@ function requestConnect(message = {}) {
   desiredConnection = {
     profileId: String(message.profileId || '').trim(),
     preferredPortInfo: normalizeScannerPortInfo(message.preferredPortInfo),
-    trigger: message.trigger || 'manual'
+    trigger: message.trigger || 'manual',
+    testing: message.testing === true
   };
   worker.postMessage({
     type: SCANNER_WORKER_MESSAGES.CONNECT_GRANTED,
@@ -208,6 +213,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
+    if (desiredConnection?.testing) {
+      sendResponse({
+        success: false,
+        error: 'Finish or close the scanner test first.'
+      });
+      return false;
+    }
     if (stopping || currentStatus.state === SCANNER_STATUS_STATES.UNAVAILABLE) {
       sendResponse({
         success: false,

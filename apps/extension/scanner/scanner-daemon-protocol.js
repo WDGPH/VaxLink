@@ -14,6 +14,8 @@
     SELECT: 'scannerDaemon.select',
     DISCONNECT: 'scannerDaemon.disconnect',
     FORGET: 'scannerDaemon.forget',
+    START_TEST: 'scannerDaemon.startTest',
+    END_TEST: 'scannerDaemon.endTest',
     ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
     STATUS_CHANGED: 'scannerDaemon.statusChanged',
     SCAN_ECHO: 'scannerDaemon.scanEcho',
@@ -108,6 +110,8 @@
       lastKnownCaptureAt: normalizeIsoTimestamp(source.lastKnownCaptureAt),
       captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
       selectionRequired: source.selectionRequired === true,
+      testing: source.testing === true,
+      sampleReceived: source.sampleReceived === true,
       lastError: String(source.lastError || '').trim(),
       recoverAttemptCount: Math.max(
         0,

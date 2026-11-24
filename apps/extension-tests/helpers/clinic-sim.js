@@ -256,6 +256,8 @@ export function createBackgroundHarness(bundle, options = {}) {
     storageData.set(key, value);
   }
 
+  const sessionData = new Map();
+  const tabRemovedListeners = [];
   const changedListeners = [];
   const messageListeners = [];
   const startupListeners = [];
@@ -315,6 +317,12 @@ export function createBackgroundHarness(bundle, options = {}) {
       onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
     },
     tabs: {
+      onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
+      async get(tabId) {
+        const tab = options.tabs?.find(({ id }) => id === tabId);
+        if (!tab) throw new Error('Tab not found');
+        return tab;
+      },
       query(queryInfo, callback) {
         let tabs = Array.isArray(options.tabs) ? options.tabs : [];
         if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);
@@ -345,6 +353,18 @@ export function createBackgroundHarness(bundle, options = {}) {
       setBadgeBackgroundColor() {}
     },
     storage: {
+      session: {
+        async get(key) {
+          return sessionData.has(key) ? { [key]: sessionData.get(key) } : {};
+        },
+        async set(values) {
+          for (const [key, value] of Object.entries(values))
+            sessionData.set(key, value);
+        },
+        async remove(key) {
+          sessionData.delete(key);
+        }
+      },
       onChanged: { addListener: (fn) => changedListeners.push(fn) },
       local: {
         get(keys, callback) {
@@ -464,6 +484,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     sendMessage,
     startup: () => startupListeners.forEach((fn) => fn()),
     install: () => installListeners.forEach((fn) => fn()),
+    removeTab: (id) => tabRemovedListeners.forEach((fn) => fn(id)),
     storageData,
     alarms,
     consoleLines,

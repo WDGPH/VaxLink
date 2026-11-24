@@ -5,7 +5,7 @@ test('scanner reads and disconnects even when optional control signals fail', as
   const workerMessages = [];
   const workerListeners = new Map();
   let resolveRead = null;
-  let readable = {
+  const stream = {
     getReader() {
       return {
         read() {
@@ -20,6 +20,7 @@ test('scanner reads and disconnects even when optional control signals fail', as
       };
     }
   };
+  let readable = null;
   let closeCount = 0;
   let forgetCount = 0;
   const port = {
@@ -31,7 +32,9 @@ test('scanner reads and disconnects even when optional control signals fail', as
     async forget() {
       forgetCount += 1;
     },
-    open: async () => undefined,
+    open: async () => {
+      readable = stream;
+    },
     setSignals: async () => {
       throw new DOMException('Failed to set control signals.', 'NetworkError');
     },
@@ -94,6 +97,28 @@ test('scanner reads and disconnects even when optional control signals fail', as
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(closeCount, 1);
   assert.equal(workerMessages.at(-1).status.state, 'disabled');
+
+  workerListeners.get('message')({
+    data: {
+      type: 'connectGranted',
+      profileId: 'zebra-ds8178-usb-cdc',
+      testing: true
+    }
+  });
+  await new Promise(setImmediate);
+  resolveRead({
+    value: new TextEncoder().encode('01001234567890121727123110TESTONLY\r\n'),
+    done: false
+  });
+  await new Promise(setImmediate);
+  assert.equal(workerMessages.at(-1).status.sampleReceived, true);
+  assert.equal(workerMessages.at(-1).status.captureCount, 1);
+  assert.equal(
+    workerMessages.filter((message) => message.type === 'scan').length,
+    1
+  );
+  workerListeners.get('message')({ data: { type: 'disconnect' } });
+  await new Promise(setImmediate);
 
   for (const ambiguous of [true, false]) {
     ports = ambiguous ? [port, { getInfo: port.getInfo }] : [port, unrelated];

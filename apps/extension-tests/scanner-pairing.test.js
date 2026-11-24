@@ -4,7 +4,13 @@ import test from 'node:test';
 test('pairing needs a click, preserves cancellation, and waits for connection handoff', async () => {
   const saved = Object.getOwnPropertyDescriptors(globalThis);
   const nodes = Object.fromEntries(
-    ['chooseScannerBtn', 'closePairingBtn', 'pairingStatus'].map((id) => [
+    [
+      'chooseScannerBtn',
+      'testScannerBtn',
+      'closePairingBtn',
+      'pairingStatus',
+      'setupHint'
+    ].map((id) => [
       id,
       {
         dataset: {},
@@ -14,7 +20,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       }
     ])
   );
-  let portError, releaseCommand, commandStarted;
+  let portError, releaseCommand, commandStarted, pagehide;
   let requestCount = 0,
     closeCount = 0;
   const commands = [];
@@ -22,6 +28,9 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
   globalThis.document = { getElementById: (id) => nodes[id] };
   globalThis.window = {
     location: { search: '?profile=zebra-ds8178-usb-cdc' },
+    addEventListener(type, listener) {
+      if (type === 'pagehide') pagehide = listener;
+    },
     close() {
       closeCount++;
     }
@@ -41,9 +50,25 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
     }
   });
   globalThis.chrome = {
+    storage: {
+      local: {
+        get(_key, done) {
+          done({ vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc' });
+        }
+      }
+    },
     runtime: {
+      onMessage: { addListener() {} },
       sendMessage(message, done) {
         commands.push(message);
+        if (message.action === 'scannerDaemon.getStatus') {
+          done({
+            success: true,
+            source: 'live',
+            status: { testing: true, state: 'connected' }
+          });
+          return;
+        }
         releaseCommand = done;
         commandStarted();
       }
@@ -114,6 +139,23 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
         );
       } else assert.equal(closeCount, 1);
     }
+    assert.equal(nodes.testScannerBtn.hidden, false);
+    const begin = nodes.testScannerBtn.click();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.startTest');
+    releaseCommand({ success: true });
+    await begin;
+    assert.equal(nodes.closePairingBtn.textContent, 'Finish test');
+    assert.match(nodes.pairingStatus.textContent, /Test scans stay out/);
+    pagehide();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.endTest');
+    releaseCommand({ success: true });
+
+    const finish = nodes.closePairingBtn.click();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.endTest');
+    assert.equal(closeCount, 1);
+    releaseCommand({ success: true });
+    await finish;
+    assert.equal(closeCount, 2);
   } finally {
     for (const key of ['document', 'window', 'navigator', 'chrome']) {
       if (saved[key]) Object.defineProperty(globalThis, key, saved[key]);

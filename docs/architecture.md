@@ -93,6 +93,13 @@ replacing a scanner, the background waits for the existing port to close before
 saving the new device and starting capture. The setup window closes after the
 hidden reader accepts the request. Settings confirms when it is connected.
 
+After connecting a device, reopen Scanner setup and choose **Test saved
+scanner**. The reader pauses regular capture and checks for a sample barcode.
+It only reports whether a sample arrived. Sample scans stay out of charts and
+trays. **Finish test** and closing the window both restore the previous capture
+setting, even if no sample arrived. If capture was off, the scanner stays
+disconnected.
+
 National Vaccine Catalogue shows its version, publication date, and last checked
 date, with a Refresh button. Loading and refresh errors stay visible.
 

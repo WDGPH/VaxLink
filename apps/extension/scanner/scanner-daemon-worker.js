@@ -210,6 +210,11 @@ function connectGrantedPort() {
       signal,
       onScan: (scan) => {
         if (!desiredConnected || signal.aborted || activePort !== port) return;
+        if (currentStatus.testing) {
+          if (!currentStatus.sampleReceived)
+            updateStatus({ sampleReceived: true });
+          return;
+        }
         updateStatus({
           lastCaptureAt: scan.capturedAt || new Date().toISOString(),
           captureCount: currentStatus.captureCount + 1
@@ -288,6 +293,8 @@ async function disconnectScanner({ requestId, forget, portInfo }) {
         : SCANNER_STATUS_STATES.DISABLED,
       profileId: desiredProfileId,
       selectionRequired: false,
+      testing: false,
+      sampleReceived: false,
       portInfo: preferredPortInfo,
       lastDisconnectedAt: new Date().toISOString(),
       lastError: '',
@@ -344,7 +351,11 @@ self.addEventListener('message', (event) => {
     case SCANNER_WORKER_MESSAGES.CONNECT_GRANTED:
       if (stopping || (!desiredConnected && activePort)) break;
       desiredConnected = true;
-      updateStatus({ selectionRequired: false });
+      updateStatus({
+        selectionRequired: false,
+        testing: data.testing === true,
+        sampleReceived: false
+      });
       desiredProfileId = String(
         data.profileId || desiredProfileId || ''
       ).trim();

@@ -87,7 +87,9 @@ function applyDaemonStatus(status, source = 'live') {
   const profile = getSerialScannerProfile(scannerStatusSnapshot.profileId);
   const state = scannerStatusSnapshot.state;
   const connected =
-    state === SCANNER_STATUS_STATES.CONNECTED && source === 'live';
+    state === SCANNER_STATUS_STATES.CONNECTED &&
+    source === 'live' &&
+    !scannerStatusSnapshot.testing;
   const tone = connected
     ? 'success'
     : source === 'live' &&
@@ -125,11 +127,15 @@ function applyDaemonStatus(status, source = 'live') {
   const needsSetup =
     state === SCANNER_STATUS_STATES.PERMISSION_LOST ||
     scannerStatusSnapshot.selectionRequired;
+  const testing = scannerStatusSnapshot.testing;
   const canStop =
     retryStop ||
-    (identityKnown && !needsSetup && state !== SCANNER_STATUS_STATES.DISABLED);
+    (identityKnown &&
+      !testing &&
+      !needsSetup &&
+      state !== SCANNER_STATUS_STATES.DISABLED);
   setButtons({
-    canConnect: !stopping && !starting && !retryStop,
+    canConnect: !stopping && !starting && !retryStop && !testing,
     canDisconnect: canStop && !stopping
   });
   els.connectGrantedBtn.hidden =
@@ -138,11 +144,12 @@ function applyDaemonStatus(status, source = 'live') {
     needsSetup ||
     starting ||
     stopping ||
-    retryStop;
+    retryStop ||
+    testing;
   els.disconnectBtn.hidden = !(canStop || stopping);
   if (els.forgetScannerBtn) {
     els.forgetScannerBtn.hidden = !identityKnown;
-    els.forgetScannerBtn.disabled = stopping;
+    els.forgetScannerBtn.disabled = stopping || testing;
   }
 }
 

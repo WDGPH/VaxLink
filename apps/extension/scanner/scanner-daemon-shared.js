@@ -18,9 +18,9 @@ export const {
 const RECONNECT_DELAYS_MS = [0, 1000, 3000, 10000, 30000, 60000];
 
 export function isScannerConnected(status) {
+  const snapshot = normalizeScannerStatusSnapshot(status);
   return (
-    normalizeScannerStatusSnapshot(status).state ===
-    SCANNER_STATUS_STATES.CONNECTED
+    snapshot.state === SCANNER_STATUS_STATES.CONNECTED && !snapshot.testing
   );
 }
 
@@ -39,6 +39,7 @@ export function getScannerConnectionLabel(status, source = 'live') {
     return 'Checking';
   if (state === SCANNER_STATUS_STATES.STOPPING) return 'Disconnecting';
   if (state === SCANNER_STATUS_STATES.UNAVAILABLE) return 'Connection unknown';
+  if (snapshot.testing) return 'Scanner test in progress';
   if (state === SCANNER_STATUS_STATES.BUSY) return 'In use elsewhere';
   return 'Disconnected';
 }
@@ -292,6 +293,13 @@ export function buildScannerStatusDescriptor(status) {
       break;
     default:
       break;
+  }
+
+  if (snapshot.testing && snapshot.state === SCANNER_STATUS_STATES.CONNECTED) {
+    descriptor.label = 'Scanner test in progress';
+    descriptor.detail = 'Regular capture is paused during the scanner test.';
+    descriptor.bannerText = descriptor.detail;
+    descriptor.tone = 'info';
   }
 
   if (!canBanner) {

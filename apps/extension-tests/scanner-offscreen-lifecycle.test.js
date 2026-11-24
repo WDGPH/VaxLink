@@ -239,3 +239,68 @@ test('selecting a replacement waits for the old reader before saving and startin
   assert.equal(harness.storageData.get(profileKey), '');
   assert.equal(harness.storageData.get(portKey), null);
 });
+
+test('test exits restore only the previous capture preference, even before a sample', async () => {
+  const enabledKey = 'vaxlink_scanner_daemon_enabled_v1';
+  const tabId = 19;
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/scanner-pairing.html',
+    tab: { id: tabId }
+  };
+  for (const enabled of [false, true]) {
+    for (const windowClose of [false, true]) {
+      const commands = [];
+      const harness = createBackgroundHarness(makeTestNvcBundle(), {
+        tabs: [{ id: tabId }],
+        storage: {
+          [enabledKey]: enabled,
+          vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc'
+        },
+        runtimeSendMessage(message, reply) {
+          if (message.target === 'scannerDaemon') commands.push(message);
+          reply({ success: true });
+        }
+      });
+      const start = await harness.sendMessage(
+        { action: 'scannerDaemon.startTest' },
+        sender
+      );
+      assert.equal(start.success, true);
+      assert.equal(commands.at(-1).testing, true);
+      const reconnect = await harness.sendMessage({
+        action: 'scannerDaemon.connectGranted',
+        enableAutostart: true
+      });
+      assert.match(reconnect.error, /Finish or close the scanner test/);
+      const disconnect = await harness.sendMessage({
+        action: 'scannerDaemon.disconnect'
+      });
+      assert.match(disconnect.error, /Finish or close the scanner test/);
+      assert.equal(harness.storageData.get(enabledKey), enabled);
+      assert.equal(commands.length, 2);
+
+      const end = () =>
+        harness.sendMessage({ action: 'scannerDaemon.endTest' }, sender);
+      if (windowClose) harness.removeTab(tabId);
+      assert.equal((await end()).success, true);
+      if (!windowClose) harness.removeTab(tabId);
+      await end();
+      assert.equal(
+        commands.filter(
+          (message) => message.action === 'scannerDaemon.disconnect'
+        ).length,
+        2
+      );
+      assert.equal(
+        commands.filter(
+          (message) =>
+            message.action === 'scannerDaemon.connectGranted' &&
+            !message.testing
+        ).length,
+        Number(enabled)
+      );
+      assert.equal(harness.storageData.get(enabledKey), enabled);
+    }
+  }
+});

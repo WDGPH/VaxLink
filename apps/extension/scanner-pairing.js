@@ -1,9 +1,11 @@
 import {
   SCANNER_DAEMON_ACTIONS,
+  SCANNER_STATUS_STATES,
   normalizeScannerPortInfo,
   selectGrantedPort
 } from './scanner/scanner-daemon-shared.js';
 import {
+  SCANNER_PROFILE_STORAGE_KEY,
   ZEBRA_USB_VENDOR_ID,
   getSerialScannerProfile,
   portMatchesProfile
@@ -15,18 +17,113 @@ import {
 } from './scanner/serial-provider.js';
 
 const chooseButton = document.getElementById('chooseScannerBtn');
+const testButton = document.getElementById('testScannerBtn');
+const closeButton = document.getElementById('closePairingBtn');
 const status = document.getElementById('pairingStatus');
-document.getElementById('closePairingBtn').addEventListener('click', () => {
-  window.close();
+let testing = false;
+let finishing = false;
+let statusVersion = 0;
+
+closeButton.addEventListener('click', async () => {
+  if (!testing) {
+    window.close();
+    return;
+  }
+  finishing = true;
+  closeButton.disabled = true;
+  try {
+    showStatus('Ending test…');
+    await sendCommand(SCANNER_DAEMON_ACTIONS.END_TEST);
+    window.close();
+  } catch (error) {
+    showStatus(error.message, true);
+  } finally {
+    finishing = false;
+    closeButton.disabled = false;
+  }
+});
+
+window.addEventListener('pagehide', () => {
+  if (testing && !finishing) {
+    void sendCommand(SCANNER_DAEMON_ACTIONS.END_TEST).catch(() => undefined);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (
+    testing &&
+    !finishing &&
+    message?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED
+  ) {
+    void readTestStatus();
+  }
 });
 
 if (!isWebSerialSupported()) {
   chooseButton.disabled = true;
   showStatus('Web Serial is not available in this browser.', true);
+} else {
+  chrome.storage.local.get(SCANNER_PROFILE_STORAGE_KEY, (stored) => {
+    testButton.hidden = !stored?.[SCANNER_PROFILE_STORAGE_KEY];
+  });
+}
+
+testButton.addEventListener('click', async () => {
+  chooseButton.disabled = testButton.disabled = closeButton.disabled = true;
+  testing = true;
+  try {
+    showStatus('Starting scanner test…');
+    await sendCommand(SCANNER_DAEMON_ACTIONS.START_TEST);
+    chooseButton.hidden = testButton.hidden = true;
+    closeButton.textContent = 'Finish test';
+    document.getElementById('setupHint').textContent =
+      'Closing setup restores the previous capture setting.';
+    await readTestStatus();
+  } catch (error) {
+    testing = false;
+    chooseButton.disabled = testButton.disabled = false;
+    showStatus(error.message, true);
+  } finally {
+    closeButton.disabled = false;
+  }
+});
+
+async function readTestStatus() {
+  const version = ++statusVersion;
+  try {
+    const result = await sendCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS);
+    if (version !== statusVersion || !testing || finishing) return;
+    if (result.source !== 'live') {
+      showStatus(
+        'Scanner status unavailable. Finish the test to return to regular capture.',
+        true
+      );
+      return;
+    }
+    const snapshot = result.status;
+    if (
+      !snapshot.testing ||
+      snapshot.state !== SCANNER_STATUS_STATES.CONNECTED
+    ) {
+      showStatus(
+        snapshot.lastError || 'Waiting for the scanner…',
+        Boolean(snapshot.lastError)
+      );
+      return;
+    }
+    showStatus(
+      snapshot.sampleReceived
+        ? 'Sample scan received.'
+        : 'Scan a sample barcode. Test scans stay out of charts and trays.'
+    );
+  } catch (error) {
+    if (version === statusVersion && !finishing)
+      showStatus(error.message, true);
+  }
 }
 
 chooseButton.addEventListener('click', async () => {
-  chooseButton.disabled = true;
+  chooseButton.disabled = testButton.disabled = true;
   try {
     showStatus('Waiting for scanner selection…');
     // The browser needs a click in this window. Opening it from Pair does not
@@ -53,23 +150,9 @@ chooseButton.addEventListener('click', async () => {
       );
     }
     showStatus('Connecting scanner…');
-    await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        {
-          action: SCANNER_DAEMON_ACTIONS.SELECT,
-          profileId: profile.id,
-          preferredPortInfo: info
-        },
-        (response) => {
-          if (chrome.runtime.lastError)
-            reject(new Error(chrome.runtime.lastError.message));
-          else if (!response?.success)
-            reject(
-              new Error(response?.error || 'Could not request connection.')
-            );
-          else resolve();
-        }
-      );
+    await sendCommand(SCANNER_DAEMON_ACTIONS.SELECT, {
+      profileId: profile.id,
+      preferredPortInfo: info
     });
     // The background reader now owns connection attempts. Its live status in
     // Settings confirms connection; this acknowledgement only accepts the request.
@@ -81,9 +164,21 @@ chooseButton.addEventListener('click', async () => {
         : error.message || 'Scanner pairing failed.',
       error.name !== 'NotFoundError'
     );
-    chooseButton.disabled = false;
+    chooseButton.disabled = testButton.disabled = false;
   }
 });
+
+function sendCommand(action, payload) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({ action, ...payload }, (response) => {
+      if (chrome.runtime.lastError)
+        reject(new Error(chrome.runtime.lastError.message));
+      else if (!response?.success)
+        reject(new Error(response?.error || 'Scanner command failed.'));
+      else resolve(response);
+    });
+  });
+}
 
 function showStatus(message, error = false) {
   status.textContent = message;

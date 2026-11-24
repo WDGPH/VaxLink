@@ -61,10 +61,13 @@
   <body>
     <main>
       <h1>Scanner setup</h1>
-      <p>Connect your scanner to capture barcodes in VaxLink.</p>
+      <p id="setupHint">Connect your scanner to capture barcodes in VaxLink.</p>
       <p id="pairingStatus" role="status" hidden></p>
       <div class="actions">
         <button id="chooseScannerBtn" type="button">Connect scanner</button>
+        <button id="testScannerBtn" type="button" hidden>
+          Test saved scanner
+        </button>
         <button id="closePairingBtn" type="button">Close</button>
       </div>
     </main>
