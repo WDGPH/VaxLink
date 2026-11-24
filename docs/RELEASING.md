@@ -45,21 +45,21 @@ preference overrides it. Use the exact package being evaluated for the
 3. An authorized publisher verifies the ZIP and uploads it to the separate
    VaxLink Alpha listing for review. Store publication remains manual.
 
-Alpha versioning starts after v1.1.5, without the old 1.1.3 override. For patch
-changes the sequence is `1.1.6-alpha`, `1.1.6-alpha.1`, and so on; features or
-breaking changes can advance the minor or major version instead. Release-please
-owns these version changes; do not edit the version files or tag releases by hand.
+The first 2.0 candidate uses the commit footer `Release-As: 2.0.0-rc1`.
+If you squash the feature PR, keep that footer in the squash commit body.
+Check that the release PR proposes `2.0.0-rc1` before merging it.
+GitHub marks `v2.0.0-rc1` as a prerelease. Further changes to the 2.0.0
+candidate go into the next release PR for `2.0.0-rc2`, then `2.0.0-rc3`.
+Several feature PRs can go into one candidate.
 
-Chrome requires numeric versions. Packaging maps `1.1.6-alpha` to `1.1.6.0`,
-`1.1.6-alpha.1` to `1.1.6.1`, and so on, while `version_name` and the ZIP filename
-retain the full prerelease version. This lets successive Alpha uploads update
-the same listing. Production packaging requires a stable package version and
-keeps its three-part numeric version. Check the version against the target store
-listing before every upload.
+For `v2.0.0-rc1`, upload `vaxlink-alpha-2.0.0-rc1.zip` to VaxLink Alpha.
+Its manifest displays `2.0.0-rc1` and uses `2.0.0.1` for Chrome updates.
+RC2 uses `2.0.0.2`. Each numeric version must exceed the previous upload
+to that listing. Production uses a separate listing and a three-part version.
 
 Promote reviewed changes through a separate promotion PR based on current `main`.
 Preserve the feature and fix commits so release-please can classify them; do not
-replace the changes with one `chore:` commit. Keep stable version and release
+replace the changes with one `chore:` commit. Omit the candidate’s `Release-As` footer when carrying commits to production. Keep stable version and release
 bookkeeping from `main`, and let its stable release PR update them. Inspect the
 production package for channel-specific exclusions before promotion. The stable
 release PR and Store submission remain separate steps. Direct production fixes

@@ -46,14 +46,15 @@ try:
     manifest["action"]["default_title"] = manifest["name"]
     # Keep the prerelease sequence in Chrome's numeric version so successive
     # Alpha uploads can update the same listing. The initial -alpha is sequence 0.
-    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-alpha(?:\.(\d+))?)?", package_version)
+    match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-alpha(?:\.(?P<alpha>\d+))?|-rc(?P<rc>0|[1-9]\d*))?", package_version)
     if not match:
         raise ValueError(f"Unsupported package version: {package_version}")
     version = match.group(1)
     prerelease = "-" in package_version
     if channel == "prod" and prerelease:
         raise ValueError("Production packages require a stable package version")
-    manifest["version"] = f"{version}.{int(match.group(2) or 0)}" if prerelease else version
+    sequence = int(match["rc"] or match["alpha"] or 0)
+    manifest["version"] = f"{version}.{sequence}" if prerelease else version
     manifest["version_name"] = package_version if prerelease or channel == "prod" else f"{version}-alpha"
     if any(int(part) > 65535 for part in manifest["version"].split(".")):
         raise ValueError("Chrome version components must not exceed 65535")

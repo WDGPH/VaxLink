@@ -127,7 +127,10 @@ test('successive Alpha prereleases have increasing Chrome versions and cannot sh
   for (const [version, numeric] of [
     ['1.1.6-alpha', '1.1.6.0'],
     ['1.1.6-alpha.1', '1.1.6.1'],
-    ['1.1.6-alpha.2', '1.1.6.2']
+    ['2.0.0-rc0', '2.0.0.0'],
+    ['2.0.0-rc1', '2.0.0.1'],
+    ['2.0.0-rc2', '2.0.0.2'],
+    ['2.0.0-rc10', '2.0.0.10']
   ]) {
     writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
     const { manifest } = buildPackage(root, 'alpha', version);
@@ -155,7 +158,7 @@ test('Alpha automation targets alpha with advancing prerelease versions', () => 
   assert.doesNotMatch(workflow, /refs\/heads\/dev|target-branch: dev/);
   assert.equal(config.prerelease, true);
   assert.equal(config.versioning, 'prerelease');
-  assert.equal(config['prerelease-type'], 'alpha');
+  assert.equal(config['prerelease-type'], 'rc1');
   assert.equal(config['release-as'], undefined);
   assert.equal(config['last-release-sha'], undefined);
   assert.match(
