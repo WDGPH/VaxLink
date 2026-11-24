@@ -11,7 +11,8 @@ importScripts('recent-activity.js');
 
 const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
   getStorage,
-  setStorage
+  setStorage,
+  getDebugSettingsAtExport
 );
 
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
@@ -1901,7 +1902,7 @@ async function verifyScannerChartFields(request, sender) {
   return saved;
 }
 
-async function routeScanToActiveSupportedTab(rawScan) {
+async function routeScanToActiveSupportedTab(rawScan, observeRouting) {
   const scan = {
     ...normalizeScanEvent(rawScan),
     captureId: buildAnalyticsId()
@@ -1931,6 +1932,15 @@ async function routeScanToActiveSupportedTab(rawScan) {
   const { destination, chart, storedWorkflow } = routeContext;
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
   const contextToken = chart?.contextToken || null;
+  observeRouting?.({
+    workflow: workflowMode,
+    form: chart?.formContext?.kind ?? null,
+    formBlockedBy: chart?.formContext?.blockedBy ?? null,
+    chartReady: chart?.ready === true,
+    formReady: chart?.formContext?.ready === true,
+    singleAutofill: storedWorkflow[SINGLE_SCAN_AUTOFILL_KEY] !== false,
+    gridAutofill: storedWorkflow[GRID_SCAN_AUTOFILL_KEY] !== false
+  });
   const immunization = workflowMode === 'immunization';
   const readyKind =
     chart?.ready && chart.formContext?.ready ? chart.formContext.kind : null;
@@ -4165,6 +4175,44 @@ function canChangeQueue(sender) {
   );
 }
 
+async function getDebugSettingsAtExport() {
+  const legacyDateTime = 'vaxlink_administered_datetime_autofill_v1';
+  const legacyReasonConsent = 'vaxlink_reason_consent_autofill_v1';
+  const preferences = {
+    singleImmunization: [SINGLE_SCAN_AUTOFILL_KEY],
+    multipleImmunizationsGrid: [GRID_SCAN_AUTOFILL_KEY],
+    multipleImmunizationsDetails: ['vaxlink_grid_detail_autofill_v1'],
+    administrationDate: [
+      'vaxlink_administered_date_autofill_v1',
+      legacyDateTime
+    ],
+    administrationTime: [
+      'vaxlink_administered_time_autofill_v1',
+      legacyDateTime
+    ],
+    routineReason: ['vaxlink_reason_autofill_v1', legacyReasonConsent],
+    consentObtained: ['vaxlink_consent_autofill_v1', legacyReasonConsent]
+  };
+  const stored = await getStorage([
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    'vaxlink_auto_resolve_funding_v1',
+    ...new Set(Object.values(preferences).flat())
+  ]);
+  return {
+    workflow: normalizeWorkflowMode(stored),
+    autofill: {
+      ...Object.fromEntries(
+        Object.entries(preferences).map(([name, [key, legacyKey]]) => [
+          name,
+          (stored[key] ?? stored[legacyKey]) !== false
+        ])
+      ),
+      autoResolveFunding: stored.vaxlink_auto_resolve_funding_v1 !== false
+    }
+  };
+}
+
 const traceMessageFields = {
   openRecentActivity: [],
   appendRecentActivity: ['token', 'source', 'rows'],
@@ -4543,7 +4591,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     const started = performance.now();
     const traceTicket = recentActivity.open().catch(() => null);
-    routeScanToActiveSupportedTab(request.scan || null)
+    let routing;
+    routeScanToActiveSupportedTab(
+      request.scan || null,
+      (observed) => (routing = observed)
+    )
       .then((result) => {
         sendResponse({ success: true, ...result });
         if (result.response?.activityRecording === true) return;
@@ -4552,28 +4604,54 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         void traceTicket
           .then((ticket) => {
             if (!ticket?.token) return;
+            const status = result.response?.status;
             const accepted =
               !result.locked &&
-              !!(
-                result.routed ||
+              (result.routed ||
                 result.queuedToWorkflow ||
-                result.duplicate_ignored
-              );
-            return recentActivity.append(ticket.token, ticket.source, [
+                result.duplicate_ignored ||
+                ['expired', 'missing_lot', 'parse_error'].includes(status));
+            const stage =
+              status === 'grid_added'
+                ? 'grid'
+                : result.response?.activityStage === 'detail'
+                  ? 'detail'
+                  : 'none';
+            const operation = {
+              operation: 1,
+              ms,
+              mode:
+                result.workflow === 'inventory'
+                  ? 'inventory'
+                  : result.queuedToWorkflow || stage === 'grid'
+                    ? 'multiple'
+                    : 'single',
+              stage
+            };
+            const rows = [
               {
+                ...operation,
                 event: 'scan',
-                operation: 1,
-                ms,
-                mode:
-                  result.workflow === 'inventory'
-                    ? 'inventory'
-                    : result.queuedToWorkflow
-                      ? 'multiple'
-                      : 'single',
-                stage: 'none',
+                ...(routing ? { routing } : {}),
                 decision: accepted ? 'accepted' : 'held'
               }
-            ]);
+            ];
+            if (status === 'expired')
+              rows.push({ ...operation, event: 'stop', reason: 'expired' });
+            if (status === 'missing_lot' || status === 'parse_error') {
+              const missingLot = status === 'missing_lot';
+              rows.push({
+                ...operation,
+                event: 'barcode',
+                result: missingLot ? 'missing_lot' : 'malformed',
+                barcode: missingLot
+                  ? globalThis.VaxLinkRecentActivity.scannedBarcode(
+                      request.scan?.rawText
+                    )
+                  : ''
+              });
+            }
+            return recentActivity.append(ticket.token, ticket.source, rows);
           })
           .catch(() => {});
       })

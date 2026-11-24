@@ -155,7 +155,10 @@ and staff verify and save clinical records in Panorama.
 Debug mode keeps a separate session history for troubleshooting. Packaged
 Alpha starts with Debug on. Production and development start with Debug off.
 Staff can change the preference in Settings and download the retained history.
-Turning Debug off clears the session details without changing Local Activity.
+Turning Debug off clears the session details without changing Local Activity. The export
+includes the build, autofill settings at download, and the observed route and
+chart checks. It can include a scanned vaccine barcode. Chart fields are
+described by their check status, and repeated checks are summarized.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with

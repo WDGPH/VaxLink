@@ -310,3 +310,60 @@ test('detailed Debug checks retain statuses under the byte cap and reject field 
   assert.equal(exported.retained + exported.overwritten, 3000);
   assert.ok(bytes <= 1024 * 1024);
 });
+
+test('Debug keeps the observed routing reason when a chart has no delivery token', async () => {
+  const logged = Promise.withResolvers();
+  const worker = fixture({
+    buildId: 'training-build',
+    storage: {
+      vaxlink_workflow_mode_v1: 'single',
+      vaxlink_administered_datetime_autofill_v1: false,
+      vaxlink_administered_time_autofill_v1: true,
+      vaxlink_grid_scan_autofill_v1: false
+    },
+    tabs: [{ id: 4, active: true, url: chartUrl }],
+    tabResponse: {
+      supported: true,
+      contextToken: null,
+      ready: false,
+      formContext: {
+        kind: 'unknown',
+        ready: false,
+        blockedBy: 'form_missing_or_ambiguous'
+      },
+      buildAtLoad: {
+        name: 'VaxLink Alpha',
+        version: '1.1.5',
+        versionName: '1.2.0-alpha',
+        fingerprint: 'training-build'
+      }
+    },
+    beforeSessionSet(values) {
+      if (Object.values(values)[0].rows?.length) logged.resolve();
+    }
+  });
+  const result = await worker.captureScannerScan({ rawText: '(10)TRAINING' });
+  assert.equal(result.queuedToWorkflow, true);
+  await logged.promise;
+  worker.storageData.set('vaxlink_workflow_mode_v1', 'inventory');
+  const exported = await worker.manage('exportRecentActivity');
+  assert.equal(exported.build.fingerprint, 'training-build');
+  const routes = JSON.parse(JSON.stringify(exported.rows[0].routing));
+  assert.deepEqual(routes, {
+    workflow: 'immunization',
+    form: 'unknown',
+    formBlockedBy: 'form_missing_or_ambiguous',
+    chartReady: false,
+    formReady: false,
+    singleAutofill: true,
+    gridAutofill: false
+  });
+  assert.equal(exported.settingsAtExport.workflow, 'inventory');
+  assert.equal(
+    exported.settingsAtExport.autofill.multipleImmunizationsGrid,
+    false
+  );
+  assert.equal(exported.settingsAtExport.autofill.administrationDate, false);
+  assert.equal(exported.settingsAtExport.autofill.administrationTime, true);
+  assert.doesNotMatch(JSON.stringify(exported.rows), /TRAINING|ehealthontario/);
+});

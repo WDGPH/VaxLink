@@ -112,6 +112,34 @@
     mode: choices('single', 'multiple', 'inventory'),
     stage: choices('grid', 'detail', 'none')
   };
+  const scanRouting = {
+    workflow: choices('immunization', 'inventory'),
+    form: choices(
+      null,
+      'unknown',
+      'provider_single',
+      'non_provider_single',
+      'multiple_grid',
+      'multiple_detail'
+    ),
+    formBlockedBy: choices(
+      null,
+      'form_missing_or_ambiguous',
+      'conflicting_controls',
+      'detail_controls_not_visible',
+      'conflicting_titles',
+      'unrecognized_title',
+      'controls_unavailable',
+      'panorama_busy',
+      'no_grid_rows',
+      'already_has_vaccine'
+    ),
+    chartReady: choices(true, false),
+    formReady: choices(true, false),
+    singleAutofill: choices(true, false),
+    gridAutofill: choices(true, false)
+  };
+
   function validEvent(row) {
     if (
       !row ||
@@ -126,6 +154,14 @@
     )
       return false;
     const fields = { ...common, ...details[row.event] };
+    if (row.event === 'scan' && Object.hasOwn(row, 'routing')) {
+      fields.routing = (routing) =>
+        routing &&
+        Object.keys(routing).length === Object.keys(scanRouting).length &&
+        Object.entries(scanRouting).every(
+          ([key, valid]) => Object.hasOwn(routing, key) && valid(routing[key])
+        );
+    }
     if (
       row.event === 'check' &&
       row.stage === 'detail' &&
