@@ -38,6 +38,7 @@
         "shared/gs1-parser.js",
         "shared/expiry-date.js",
         "shared/vaccine-label.js",
+        "shared/nvc-lot-report.js",
         "content.js"
       ],
       "run_at": "document_start"

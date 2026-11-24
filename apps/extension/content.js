@@ -528,7 +528,8 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || '',
     lookup_error_category: data.lookup_error_category || '',
-    nvc_catalogue_version: data.nvc_catalogue_version || ''
+    nvc_catalogue_version: data.nvc_catalogue_version || '',
+    nvc_lot_matched: data.nvc_lot_matched === true
   };
 }
 
@@ -554,6 +555,7 @@ async function saveScanToQueue(data, rawBarcode, storageKey) {
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   if (!parsed || !vaccineInfo) return;
+  parsed.nvc_lot_matched = true;
   parsed.tradename = vaccineInfo.tradename;
   parsed.generic_name = vaccineInfo.generic_name;
   parsed.disease = vaccineInfo.disease;
@@ -3582,6 +3584,7 @@ function buildAutofillPayloadFromQueueRecord(record) {
     lookup_error: record.lookup_error || '',
     lookup_error_category: record.lookup_error_category || '',
     nvc_catalogue_version: record.nvc_catalogue_version || '',
+    nvc_lot_matched: record.nvc_lot_matched === true,
     reference_only: record.reference_only === true,
     barcode_expiry: record.barcode_expiry || '',
     name:
@@ -3842,6 +3845,7 @@ function ensureToastHost() {
       cursor: pointer;
     }
     .vl-toast-action:hover { background: rgba(255,255,255,.22); }
+    .vl-toast-report { display: inline-block; margin-top: 6px; color: #fff; }
     .vl-toast-action.secondary {
       background: rgba(0,0,0,.22);
       border-color: rgba(255,255,255,.35);
@@ -3944,22 +3948,34 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
+  const panoramaMiss =
+    data._fillFeedback === 'lot_not_matched' ||
+    data._fillFeedback === 'funding_exhausted';
+  const trainingMiss =
+    panoramaMiss && location.hostname === PANORAMA_TRAINING_HOST;
+  const catalogueMatched =
+    panoramaMiss && globalThis.VaxLinkNvcLotReport.hasCatalogueMatch(data);
+  const reportUrl = globalThis.VaxLinkNvcLotReport.makeDraft(data, {
+    panorama: catalogueMatched,
+    training: trainingMiss,
+    bothFundingCategories: data._fillFeedback === 'funding_exhausted'
+  });
+  const reportMarkup = reportUrl
+    ? `<a class="vl-toast-action vl-toast-report" href="${escapeToastHtml(reportUrl)}">${catalogueMatched ? 'Email Panorama lot report' : 'Email lot report'}</a>`
+    : '';
+
   if (data._fillFeedback) {
-    const miss =
-      data._fillFeedback === 'lot_not_matched' ||
-      data._fillFeedback === 'funding_exhausted';
     const catalogueMiss = data.lookup_error_category === 'not_found';
-    const training = miss && location.hostname === PANORAMA_TRAINING_HOST;
     let title = 'Autofill needs review';
     let detail = 'Check the Agent and Lot in Panorama.';
-    if (miss) {
-      title = training
+    if (panoramaMiss) {
+      title = trainingMiss
         ? 'Lot not found in Panorama training'
         : 'Lot not found in Panorama';
-      detail = training
+      detail = trainingMiss
         ? 'The training lot list may be incomplete or out of date.'
         : 'Verify the lot and funding in Panorama. If the lot is still missing, contact your Panorama Resolution Coordinator (PRC).';
-      if (data._fillFeedback === 'funding_exhausted' && !training)
+      if (data._fillFeedback === 'funding_exhausted' && !trainingMiss)
         title = 'Lot not found in either funding category';
     } else if (data._fillFeedback === 'deadline_details') {
       detail = data._reviewFields?.length
@@ -3968,15 +3984,18 @@ function showVaxlinkToast(data, durationMs = 4000) {
     }
     const catalogueStatus = catalogueMiss
       ? 'The lot was missing from the National Vaccine Catalogue.'
-      : data.lookup_error || '';
+      : catalogueMatched
+        ? 'Found in the National Vaccine Catalogue.'
+        : data.lookup_error || '';
     showRoutineToast(
       `<div class="vl-toast info show" role="status">
         <div class="vl-toast-title">${escapeToastHtml(title)}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
         ${data._lotNeedsReview ? '<div class="vl-toast-detail">The Lot field still needs review. Clear any entry that does not match the scanned lot.</div>' : ''}
         ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
+        ${reportMarkup}
       </div>`,
-      9000
+      reportUrl ? 12000 : 9000
     );
     return;
   }
@@ -4110,6 +4129,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${queuedNote}
     ${data.lookup_error ? `<div class="vl-toast-detail">${escapeToastHtml(data.lookup_error)}. Vaccine details are incomplete; verify the chart.</div>` : ''}
+    ${reportMarkup}
     ${isExpired ? '<button class="vl-toast-dismiss" type="button">Dismiss</button>' : ''}
   </div>`;
 
@@ -4128,7 +4148,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
       );
     return;
   }
-  showRoutineToast(toastHtml, durationMs);
+  showRoutineToast(
+    toastHtml,
+    reportUrl ? Math.max(durationMs, 10000) : durationMs
+  );
   if (flag === 'expiring_soon')
     logAnalyticsEvent('expiry_notice_shown', {
       workflow: data._vaxlinkQueueContext?.workflow || activeWorkflowMode

@@ -1,3 +1,4 @@
+import './shared/nvc-lot-report.js';
 import { buildLegacyQueueRecord } from './queue-record.js';
 import { escapeHtml } from './popup-ui.js';
 
@@ -455,6 +456,10 @@ function buildQueueItemMarkup(row, index, options) {
   const status = escapeHtml(formatInventoryStatus(row));
   const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
   const id = escapeHtml(row.id || '');
+  const reportUrl = globalThis.VaxLinkNvcLotReport.makeDraft(row);
+  const lookupMessage = reportUrl
+    ? 'Lot missing from the catalogue'
+    : row.lookup_error;
   const doseText = formatDoseSummary(row);
   const useActionMarkup =
     options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
@@ -481,6 +486,7 @@ function buildQueueItemMarkup(row, index, options) {
         <span class="inventory-chip">Mfr ${manufacturer}</span>
         ${doseText ? `<span class="inventory-chip">${escapeHtml(doseText)}</span>` : ''}
       </div>
+      ${lookupMessage ? `<div class="inventory-lot-report"><span>${escapeHtml(lookupMessage)}</span>${reportUrl ? `<a href="${escapeHtml(reportUrl)}">Email lot report</a>` : ''}</div>` : ''}
     </div>
   `;
 }

@@ -1078,6 +1078,7 @@ function getPositiveInt(value, fallback = null) {
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   if (!parsed || !vaccineInfo) return;
+  parsed.nvc_lot_matched = true;
   parsed.tradename = vaccineInfo.tradename;
   parsed.generic_name = vaccineInfo.generic_name;
   parsed.disease = vaccineInfo.disease;
@@ -1146,6 +1147,7 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
     lookup_error: data.lookup_error || '',
     lookup_error_category: data.lookup_error_category || '',
     nvc_catalogue_version: data.nvc_catalogue_version || '',
+    nvc_lot_matched: data.nvc_lot_matched === true,
     ...context
   };
 }

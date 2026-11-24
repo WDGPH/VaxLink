@@ -68,6 +68,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   context.showVaxlinkToast({
     _fillFeedback: 'lot_not_matched',
     _lotNeedsReview: true,
+    lot: 'TRAIN&LOT',
     lookup_error_category: 'not_found'
   });
   assert.match(routine.innerHTML, /Lot not found in Panorama training/);
@@ -77,6 +78,38 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     /missing from the National Vaccine Catalogue/
   );
   assert.doesNotMatch(routine.innerHTML, /Resolution Coordinator/);
+  const draft = () =>
+    new URL(
+      routine.innerHTML
+        .match(/href="(mailto:[^"]+)"/)[1]
+        .replaceAll('&amp;', '&')
+    );
+  assert.equal(draft().pathname, 'NVC-CNV@phac-aspc.gc.ca');
+  const catalogueMatch = {
+    lot: 'TRAIN&LOT',
+    tradename: 'Training vaccine',
+    nvc_lot_matched: true,
+    nvc_catalogue_version: '1.138'
+  };
+  context.showVaxlinkToast({
+    ...catalogueMatch,
+    _fillFeedback: 'funding_exhausted'
+  });
+  assert.match(routine.innerHTML, /Found in the National Vaccine Catalogue/);
+  assert.equal(draft().pathname, '');
+  assert.match(draft().searchParams.get('subject'), /Panorama training/);
+  assert.equal(draft().searchParams.get('cc'), 'innovation@wdgpublichealth.ca');
+  context.showVaxlinkToast({
+    ...catalogueMatch,
+    _fillFeedback: 'deadline_details'
+  });
+  assert.doesNotMatch(routine.innerHTML, /mailto:/);
+  context.showVaxlinkToast({
+    lot: 'TRAIN',
+    _fillFeedback: 'lot_not_matched',
+    lookup_error_category: 'unavailable'
+  });
+  assert.doesNotMatch(routine.innerHTML, /mailto:/);
   context.showVaxlinkToast({ expiry_flag: 'valid' });
   context.showVaxlinkToast({ expiry_flag: 'expired' });
   context.showVaxlinkToast({ expiry_flag: 'expiring_soon' });

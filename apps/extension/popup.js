@@ -999,6 +999,7 @@ function buildAutofillPayloadFromQueueRecord(record) {
     lookup_error: record.lookup_error || '',
     lookup_error_category: record.lookup_error_category || '',
     nvc_catalogue_version: record.nvc_catalogue_version || '',
+    nvc_lot_matched: record.nvc_lot_matched === true,
     reference_only: record.reference_only === true,
     barcode_expiry: record.barcode_expiry || '',
     name:
@@ -1574,6 +1575,7 @@ function mergeVaccineInfoIntoParsedData(
 ) {
   const merged = { ...baseData };
   if (vaccineInfo && !vaccineInfo.error) {
+    merged.nvc_lot_matched = true;
     merged.tradename = vaccineInfo.tradename || merged.tradename || null;
     merged.generic_name =
       vaccineInfo.generic_name || merged.generic_name || null;

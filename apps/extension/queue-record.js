@@ -95,7 +95,8 @@ function normalizeQueueRecord(data = {}) {
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || '',
     lookup_error_category: data.lookup_error_category || '',
-    nvc_catalogue_version: data.nvc_catalogue_version || ''
+    nvc_catalogue_version: data.nvc_catalogue_version || '',
+    nvc_lot_matched: data.nvc_lot_matched === true
   };
 }
 

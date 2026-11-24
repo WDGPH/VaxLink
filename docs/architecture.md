@@ -171,6 +171,11 @@ attribute to the current fill. It leaves a staff selection for review. When the
 product matches but another field does not settle, the chart names the fields
 staff need to check.
 
+A confirmed catalogue miss can open an email draft from a saved row or the
+chart. If the catalogue matched and Panorama could not find the lot, the
+chart offers a draft for the Panorama support contact. Staff choose that
+recipient, review the vaccine details, and decide whether to send.
+
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
