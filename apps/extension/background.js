@@ -7,6 +7,12 @@ importScripts('shared/vaccine-label.js');
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-daemon-protocol.js');
 importScripts('shared/tray-doses.js');
+importScripts('recent-activity.js');
+
+const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
+  getStorage,
+  setStorage
+);
 
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
 
@@ -4159,8 +4165,52 @@ function canChangeQueue(sender) {
   );
 }
 
+const traceMessageFields = {
+  openRecentActivity: [],
+  appendRecentActivity: ['token', 'source', 'rows'],
+  getRecentActivity: [],
+  setRecentActivity: ['enabled'],
+  exportRecentActivity: []
+};
+
+function handleRecentActivityMessage(request, sender, sendResponse) {
+  const { action } = request;
+  const fields = traceMessageFields[action];
+  const chartAction =
+    action === 'openRecentActivity' || action === 'appendRecentActivity';
+  if (
+    sender.id !== chrome.runtime.id ||
+    (chartAction
+      ? !isChartMessageSender(sender)
+      : sender.url !== chrome.runtime.getURL('popup.html')) ||
+    Object.keys(request).length !== fields.length + 1 ||
+    !fields.every((key) => Object.hasOwn(request, key)) ||
+    (action === 'setRecentActivity' && typeof request.enabled !== 'boolean')
+  ) {
+    sendResponse({ success: false });
+    return false;
+  }
+
+  let result;
+  if (action === 'openRecentActivity') result = recentActivity.open();
+  else if (action === 'appendRecentActivity') {
+    result = recentActivity.append(request.token, request.source, request.rows);
+  } else result = recentActivity.manage(action, request.enabled);
+
+  result.then(
+    (response) => sendResponse({ success: true, ...response }),
+    () => sendResponse({ success: false })
+  );
+  return true;
+}
+
 // Listen for requests from extension contexts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (
+    typeof request?.action === 'string' &&
+    Object.hasOwn(traceMessageFields, request.action)
+  )
+    return handleRecentActivityMessage(request, sender, sendResponse);
   if (request?.action === 'scannerPairing.open') {
     if (
       sender.id !== chrome.runtime.id ||
@@ -4491,8 +4541,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
+    const started = performance.now();
+    const traceTicket = recentActivity.open().catch(() => null);
     routeScanToActiveSupportedTab(request.scan || null)
-      .then((result) => sendResponse({ success: true, ...result }))
+      .then((result) => {
+        sendResponse({ success: true, ...result });
+        const ms = Math.round(performance.now() - started);
+        // Capture acknowledgement depends on the saved scan, not Debug.
+        void traceTicket
+          .then((ticket) => {
+            if (!ticket?.token) return;
+            const accepted =
+              !result.locked &&
+              !!(
+                result.routed ||
+                result.queuedToWorkflow ||
+                result.duplicate_ignored
+              );
+            return recentActivity.append(ticket.token, ticket.source, [
+              {
+                event: 'scan',
+                operation: 1,
+                ms,
+                mode:
+                  result.workflow === 'inventory'
+                    ? 'inventory'
+                    : result.queuedToWorkflow
+                      ? 'multiple'
+                      : 'single',
+                stage: 'none',
+                decision: accepted ? 'accepted' : 'held'
+              }
+            ]);
+          })
+          .catch(() => {});
+      })
       .catch((error) => {
         void recordCaptureWarning().catch(() => undefined);
         sendResponse({

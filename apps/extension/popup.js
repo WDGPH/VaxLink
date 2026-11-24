@@ -33,6 +33,7 @@ let inventoryModeBtn;
 let multipleModeSection;
 let inventoryModeSection;
 let nvcStatusDiv;
+let refreshRecentActivity;
 let outputDiv;
 let analyticsSummaryDiv;
 let settingsToggleBtn;
@@ -177,6 +178,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadSettingsPanelState();
   await loadAutofillSettings();
   await loadAnalyticsSummary();
+  refreshRecentActivity = setupRecentActivityControls();
   await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
@@ -999,6 +1001,89 @@ function downloadTextFile(filename, text, mimeType) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function setupRecentActivityControls() {
+  const section = document.getElementById('recentActivitySettings');
+  if (!section) return;
+  const toggle = document.getElementById('recentActivityToggle');
+  const status = document.getElementById('recentActivityStatus');
+  const notice = document.getElementById('recentActivityNotice');
+  const exportButton = document.getElementById('exportRecentActivityBtn');
+  let snapshot = null;
+  let busy = false;
+  let requestNumber = 0;
+
+  function render(message) {
+    if (!busy) toggle.checked = snapshot?.enabled === true;
+    toggle.disabled = busy || !snapshot;
+    exportButton.disabled = busy || !snapshot?.retained;
+    const retained = snapshot?.retained ?? 0;
+    status.textContent = snapshot
+      ? `${retained.toLocaleString()} ${retained === 1 ? 'event' : 'events'}`
+      : '';
+    const overwritten = snapshot?.overwritten ?? 0;
+    notice.textContent =
+      message ||
+      (overwritten
+        ? `${overwritten.toLocaleString()} older ${overwritten === 1 ? 'event was' : 'events were'} removed to make room.`
+        : '');
+  }
+
+  async function request(action = 'getRecentActivity', payload = {}) {
+    if (busy) return;
+    const number = ++requestNumber;
+    if (action !== 'getRecentActivity') {
+      busy = true;
+      render();
+    }
+    let message;
+    try {
+      const result = await sendRuntimeMessage({ action, ...payload });
+      if (number !== requestNumber) return;
+      if (!result?.success) throw new Error();
+      snapshot = result;
+      if (action === 'exportRecentActivity') {
+        const { format, build, settingsAtExport, retained, overwritten, rows } =
+          result;
+        downloadTextFile(
+          'vaxlink-debug-details.json',
+          JSON.stringify(
+            { format, build, settingsAtExport, retained, overwritten, rows },
+            null,
+            2
+          ),
+          'application/json;charset=utf-8'
+        );
+      }
+    } catch (_) {
+      message = 'Could not access troubleshooting details. Try again.';
+    } finally {
+      if (number === requestNumber) {
+        busy = false;
+        render(message);
+      }
+    }
+  }
+
+  section.hidden = false;
+  toggle.addEventListener(
+    'change',
+    () => void request('setRecentActivity', { enabled: toggle.checked })
+  );
+  exportButton.addEventListener(
+    'click',
+    () => void request('exportRecentActivity')
+  );
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (
+      area === 'session' &&
+      changes.vaxlink_recent_activity_v1 &&
+      !settingsPanel?.hidden
+    )
+      void request();
+  });
+  return request;
 }
 
 async function exportAnalyticsJson() {

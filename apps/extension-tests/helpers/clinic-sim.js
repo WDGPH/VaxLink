@@ -307,7 +307,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       getManifest: () => ({
         version: '1.1.5',
         version_name: '1.2.0-alpha',
-        name: 'VaxLink Alpha'
+        name: options.manifestName || 'VaxLink Alpha'
       }),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
@@ -402,13 +402,17 @@ export function createBackgroundHarness(bundle, options = {}) {
     storage: {
       session: {
         async get(key) {
-          return sessionData.has(key) ? { [key]: sessionData.get(key) } : {};
+          return sessionData.has(key)
+            ? { [key]: structuredClone(sessionData.get(key)) }
+            : {};
         },
         async set(values) {
+          await options.beforeSessionSet?.(values);
           for (const [key, value] of Object.entries(values))
-            sessionData.set(key, value);
+            sessionData.set(key, structuredClone(value));
         },
         async remove(key) {
+          await options.beforeSessionRemove?.(key);
           sessionData.delete(key);
         }
       },
@@ -473,6 +477,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
+    performance,
     URL,
     AbortController,
     setTimeout: options.setTimeout || setTimeout,

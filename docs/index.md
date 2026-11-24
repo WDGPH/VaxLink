@@ -31,6 +31,11 @@ records. After installing or updating the extension, reload the training page
 and open an immunization record. Check Single Inject, Multiple Inject, Inventory, and lock-screen
 capture/replay before moving to production.
 
+In Settings, **Debug mode** keeps troubleshooting details for the current
+browser session. It starts on in packaged Alpha and off in production and
+development unless you save a different choice. Turning it off clears the
+details. Local Activity counts are separate.
+
 <div class="grid cards" markdown>
 
 - :material-source-branch: **Architecture**

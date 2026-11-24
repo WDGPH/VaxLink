@@ -989,6 +989,18 @@
         background: #edf7f6;
       }
 
+      .settings-hint {
+        margin: 4px 0 0;
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--subtle);
+      }
+
+      #recentActivityStatus:empty + span,
+      #recentActivityNotice:empty {
+        display: none;
+      }
+
       .tray-dialog {
         width: calc(100% - 36px);
         max-width: 310px;
@@ -1159,6 +1171,47 @@
                 <input id="consentAutofillToggle" type="checkbox" />
                 <span>Set Consent for Service to "Consent obtained"</span>
               </label>
+            </section>
+            <section
+              id="recentActivitySettings"
+              class="settings-card"
+              aria-labelledby="recentActivitySettingsTitle"
+              hidden
+            >
+              <div class="settings-heading">
+                <div class="settings-summary">
+                  <h3 id="recentActivitySettingsTitle">Debug mode</h3>
+                  <label class="settings-check" for="recentActivityToggle">
+                    <input
+                      id="recentActivityToggle"
+                      type="checkbox"
+                      aria-describedby="recentActivityHint"
+                      disabled
+                    />
+                    <span>Collect troubleshooting details</span>
+                  </label>
+                  <p id="recentActivityHint" class="settings-hint">
+                    <span id="recentActivityStatus" role="status"></span
+                    ><span aria-hidden="true"> · </span>Clears when turned off
+                    or browser restarted.
+                  </p>
+                </div>
+                <div class="settings-update">
+                  <button
+                    id="exportRecentActivityBtn"
+                    type="button"
+                    aria-label="Download troubleshooting details"
+                    disabled
+                  >
+                    Download
+                  </button>
+                </div>
+              </div>
+              <p
+                id="recentActivityNotice"
+                class="settings-hint"
+                role="status"
+              ></p>
             </section>
             <section
               id="nvcSettingsSection"

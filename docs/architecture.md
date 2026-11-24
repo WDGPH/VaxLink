@@ -152,6 +152,11 @@ activity and starts downloads. The background worker saves the daily totals and
 prepares the summaries and JSON export. The totals describe extension activity,
 and staff verify and save clinical records in Panorama.
 
+Debug mode keeps a separate session history for troubleshooting. Packaged
+Alpha starts with Debug on. Production and development start with Debug off.
+Staff can change the preference in Settings and download the retained history.
+Turning Debug off clears the session details without changing Local Activity.
+
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with
 the Scanner section expanded and focused. The small close button allows manual
