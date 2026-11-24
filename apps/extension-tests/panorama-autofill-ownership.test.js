@@ -563,7 +563,7 @@ test('an owned field interaction before the deadline can continue on the same ch
   assert.equal(f.isPanoramaAutofillCurrent(data), false);
 });
 
-test('one pending watcher restarts stability and records only actual late repairs', async () => {
+test('one pending watcher restarts stability and reports both late checks', async () => {
   const f = fixture();
   f.state.resolved = true;
   let finalized = 0;
@@ -573,9 +573,16 @@ test('one pending watcher restarts stability and records only actual late repair
   activity.record = (_trace, event, fields) =>
     observations.push({ event, ...fields });
   f.context.hasPanoramaDeferredDetailFieldsFilled = (_data, observed) => {
-    if (observed) observed.time = f.state.resolved ? 'match' : 'mismatch';
+    if (observed)
+      Object.assign(observed, {
+        time: f.state.resolved ? 'match' : 'mismatch',
+        reason: 'not_requested'
+      });
     return f.state.resolved;
   };
+  f.context.observePanoramaDetail = () => ({
+    time: f.state.resolved ? 'complete' : 'blank'
+  });
   f.context.finalizeDeferredPanoramaAutofill = () => finalized++;
   f.context.fillPanoramaDeferredDetailFields = () => {
     f.state.resolved = true;
@@ -605,10 +612,90 @@ test('one pending watcher restarts stability and records only actual late repair
   f.context.fillPanoramaDeferredDetailFields = () => 0;
   await f.runTimer();
   const late = observations.filter(({ wake }) => wake === 'late');
-  assert.equal(late.length, 1);
+  assert.deepEqual(
+    observations
+      .filter((row) => row.event === 'late_readback')
+      .map((row) => [row.delay, row.result]),
+    [
+      [1500, 'restored'],
+      [3500, 'still_populated']
+    ]
+  );
+  assert.equal(late.length, 2);
   assert.equal(late[0].deferredCheck.before.time, 'mismatch');
   assert.equal(late[0].deferredCheck.after.time, 'match');
   assert.equal(finalized, 1);
+});
+
+test('detail readbacks distinguish the painted reason from the native value across a funding refresh', () => {
+  const f = fixture();
+  const data = f.beginPanoramaAutofill({});
+  const owner = data._vaxlinkOwner;
+  owner.activity = {};
+  const rows = [];
+  const activity = vm.runInContext('chartActivity', f.context);
+  activity.isCurrent = (trace) => trace === owner.activity;
+  activity.record = (_trace, event, fields) => rows.push({ event, ...fields });
+  const field = {
+    id: 'reason_input',
+    value: '1',
+    options: [{ text: 'Routine' }],
+    selectedIndex: 0
+  };
+  let label = { form: f.form, textContent: 'Select One' };
+  let timeField = { value: '09:__' };
+  let funding = 'SHOW_ALL';
+  const list = { control: {}, rows: [] };
+  Object.assign(f.context, {
+    getFields: (selectors) =>
+      selectors[0].includes('reasonForImmunization') ? [field] : [],
+    getPanoramaAdministeredDateTimeFields: () => ({ timeField }),
+    getPanoramaFundedRadioValue: () => funding,
+    readPanoramaLotList: () => ({ ...list, rows: [...list.rows] }),
+    isVisible: () => true,
+    getComputedStyle: () => ({ visibility: 'visible' })
+  });
+  f.context.document.getElementById = () => label;
+  f.observePanoramaDetail(data);
+  funding = 'PUBLICLY_FUNDED';
+  label = { ...label, textContent: 'Routine' };
+  list.rows.push({ node: {}, text: 'training option' });
+  timeField = { value: '09:30' };
+  f.observePanoramaDetail(data);
+  f.observePanoramaDetail(data);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    [rows[0].native, rows[0].visible, rows[0].time],
+    ['requested', 'blank', 'partial']
+  );
+  assert.deepEqual(
+    [rows[1].funding, rows[1].visible, rows[1].time],
+    ['PUBLICLY_FUNDED', 'requested', 'complete']
+  );
+  assert.deepEqual(Array.from(rows[1].changed), ['label', 'time', 'lot']);
+  assert.doesNotMatch(JSON.stringify(rows), /09:30|training option|Routine/);
+  let onAjax;
+  f.context.jsf = {
+    ajax: {
+      addOnEvent: (fn) => {
+        assert.equal(onAjax, undefined);
+        onAjax = fn;
+      }
+    }
+  };
+  f.observePanoramaAjax();
+  f.observePanoramaAjax();
+  f.context.getPanoramaAutofillForm = () => f.form;
+  for (const source of [
+    { form: f.form, id: 'foo:fundedRadio:bar' },
+    { form: {}, id: 'outside' }
+  ]) {
+    onAjax({ status: 'begin', source });
+    onAjax({ status: 'success', source });
+  }
+  assert.deepEqual(rows.slice(2), [
+    { event: 'ajax_complete', source: 'funding' }
+  ]);
 });
 
 test('a chosen funding category waits for its Lot list and a miss can try the other category once', async () => {

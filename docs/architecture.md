@@ -166,7 +166,12 @@ Turning Debug off clears the session details without changing Local Activity. Th
 includes the build, autofill settings at download, and the observed route and
 chart checks. The export groups related events by operation. It can include a
 scanned vaccine barcode. Chart field checks record statuses, and repeated
-observations are summarized. The session retains up to 3,000 events and 1 MiB.
+observations are summarized. Detail readbacks record the funding radio, the native
+and visible Reason selections, time completeness, and which controls or Lot options
+changed between samples. The two scheduled late checks record their outcomes if
+the page is still running. A completed request has a source label when the page
+exposes its JSF callback and the source belongs to the observed form. Otherwise
+the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with

@@ -83,6 +83,35 @@
     funding_choice: {
       funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED')
     },
+    detail_position: { step: integer(1, 9999), total: integer(1, 9999) },
+    detail_readback: {
+      funding,
+      native: choices('missing', 'blank', 'requested', 'other'),
+      visible: choices('missing', 'blank', 'requested', 'other'),
+      time: choices('missing', 'blank', 'partial', 'complete'),
+      changed: (names) =>
+        Array.isArray(names) &&
+        names.length <= 6 &&
+        new Set(names).size === names.length &&
+        names.every(
+          choices('lot', 'reason', 'label', 'time', 'date', 'consent')
+        )
+    },
+    ajax_complete: { source: choices('funding', 'lot', 'consent', 'unknown') },
+    late_readback: {
+      delay: choices(1500, 3500),
+      result: choices(
+        'still_populated',
+        'restored',
+        'needs_review',
+        'detail_changed',
+        'product_changed',
+        'route_unavailable',
+        'expired',
+        'busy',
+        'error'
+      )
+    },
     check: {
       wake,
       agent: outcome,

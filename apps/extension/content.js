@@ -1970,13 +1970,9 @@ function readPanoramaLotList() {
   return rows.length ? { control, rows } : null;
 }
 
-function isPanoramaLotListAwaitingRefresh(data) {
-  const owner = data._vaxlinkOwner;
-  const before = owner?.lotListBeforeRefresh;
-  if (!before) return false;
-  const after = readPanoramaLotList();
-  if (!after) return true;
-  const unchanged =
+function samePanoramaLotList(before, after) {
+  if (!before || !after) return before === after;
+  return (
     after.control === before.control &&
     before.rows.length === after.rows.length &&
     after.rows.every((row, i) => {
@@ -1987,7 +1983,17 @@ function isPanoramaLotListAwaitingRefresh(data) {
         row.value === old.value &&
         row.disabled === old.disabled
       );
-    });
+    })
+  );
+}
+
+function isPanoramaLotListAwaitingRefresh(data) {
+  const owner = data._vaxlinkOwner;
+  const before = owner?.lotListBeforeRefresh;
+  if (!before) return false;
+  const after = readPanoramaLotList();
+  if (!after) return true;
+  const unchanged = samePanoramaLotList(before, after);
   if (!unchanged) owner.lotListBeforeRefresh = null;
   return unchanged;
 }
@@ -2926,6 +2932,128 @@ function recordFundingComparison(data, outcome) {
   });
 }
 
+// Compare successive reads on this operation. DOM nodes and option text stay
+// on the page. Only the bounded statuses below go into the Debug export.
+function observePanoramaDetail(data) {
+  const owner = data._vaxlinkOwner;
+  const trace = owner.activity;
+  if (!chartActivity?.isCurrent(trace)) return null;
+  const form = owner.form;
+  if (!trace.detailSample && owner.kind === 'multiple_detail') {
+    const step = /^(\d{1,4})-of-(\d{1,4})$/.exec(owner.step);
+    if (step && Number(step[1]) > 0 && Number(step[1]) <= Number(step[2]))
+      chartActivity.record(trace, 'detail_position', {
+        step: Number(step[1]),
+        total: Number(step[2])
+      });
+  }
+  const reasons = getFields(getPanoramaReasonForImmunizationSelectors(), form);
+  const reason = reasons.length === 1 ? reasons[0] : null;
+  const label =
+    reason?.id &&
+    document.getElementById(reason.id.replace(/_input$/, '_label'));
+  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data, {
+    includeDisabled: true
+  });
+  const consent = getFields(getPanoramaConsentReasonSelectors(), form)[0];
+  const lot = readPanoramaLotList();
+  const nodes = { reason, label, time: timeField, date: dateField, consent };
+  const previous = trace.detailSample;
+  const changed = previous
+    ? Object.keys(nodes).filter((key) => previous.nodes[key] !== nodes[key])
+    : [];
+  if (previous && !samePanoramaLotList(previous.lot, lot)) changed.push('lot');
+  const desired = normalizeForMatch(
+    getPanoramaReasonForImmunizationValue(data)
+  );
+  const reasonStatus = (text) => {
+    const normalized = normalizeForMatch(text || '');
+    if (!normalized || ['select', 'select one'].includes(normalized))
+      return 'blank';
+    return normalized === desired ? 'requested' : 'other';
+  };
+  const option = reason?.options?.[reason.selectedIndex];
+  const native = !reason
+    ? 'missing'
+    : !reason.value
+      ? 'blank'
+      : reasonStatus(option?.text);
+  const shown = (node) =>
+    node &&
+    form.contains(node) &&
+    isVisible(node) &&
+    getComputedStyle(node).visibility === 'visible';
+  const visible = shown(label)
+    ? reasonStatus(label.textContent)
+    : shown(reason)
+      ? native
+      : 'missing';
+  const value = String(timeField?.value || '').trim();
+  const time = !timeField
+    ? 'missing'
+    : !panoramaDateTimeHasValue(value)
+      ? 'blank'
+      : /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
+        ? 'complete'
+        : 'partial';
+  const radio = getPanoramaFundedRadioValue();
+  const funding =
+    radio === 'SHOW_ALL' || isExplicitPanoramaFundingValue(radio) ? radio : '';
+  const fields = { funding, native, visible, time };
+  const signature = JSON.stringify(fields);
+  trace.detailSample = { nodes, lot, signature };
+  if (changed.length || previous?.signature !== signature)
+    chartActivity.record(trace, 'detail_readback', { ...fields, changed });
+  return fields;
+}
+
+// Some JSF pages expose the completed AJAX request in this scripting world.
+// Record only an identifiable source on the owned form. DOM reads alone
+// cannot tell which request caused a replacement.
+let observedAjaxApi;
+function observePanoramaAjax() {
+  const ajax = (globalThis.faces || globalThis.jsf)?.ajax;
+  if (!ajax?.addOnEvent || observedAjaxApi === ajax) return;
+  let request;
+  ajax.addOnEvent((event) => {
+    if (event.status === 'success') {
+      if (request && event.source === request.source)
+        chartActivity.record(request.trace, 'ajax_complete', {
+          source: request.kind
+        });
+      request = null;
+      return;
+    }
+    if (event.status !== 'begin') return;
+    request = null;
+    const owner = panoramaAutofillOwner;
+    if (
+      !owner ||
+      !chartActivity?.isCurrent(owner.activity) ||
+      owner.cancelled ||
+      !owner.form?.isConnected ||
+      owner.form !== getPanoramaAutofillForm() ||
+      owner.step !== getPanoramaMultiStepIndicatorKey({ visibleOnly: true })
+    )
+      return;
+    const source =
+      typeof event.source === 'string'
+        ? document.getElementById(event.source)
+        : event.source;
+    if (!source || !owner.form.contains(source)) return;
+    const id = source.id || '';
+    const kind = id.includes('fundedRadio:')
+      ? 'funding'
+      : id.includes('LotInfo:lotNumberSelect')
+        ? 'lot'
+        : id.includes('consentReadinessReasonSelect:')
+          ? 'consent'
+          : 'unknown';
+    request = { trace: owner.activity, source: event.source, kind };
+  });
+  observedAjaxApi = ajax;
+}
+
 function schedulePanoramaLotOrTradeSelection(
   data,
   initialDelayMs = 0,
@@ -3073,6 +3201,7 @@ function schedulePanoramaLotOrTradeSelection(
       stopUnverified(null);
       return;
     }
+    observePanoramaDetail(data);
     if (isPrimeFacesAjaxBusy() || isPanoramaLotListAwaitingRefresh(data)) {
       usableMiss = undefined;
       stableSince = null;
@@ -3211,6 +3340,7 @@ function schedulePanoramaLotOrTradeSelection(
     if (!deferredResolved) {
       stableSince = null;
       fillPanoramaDeferredDetailFields(data);
+      observePanoramaDetail(data);
       if (before) after = {};
       deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data, after);
     }
@@ -3246,40 +3376,65 @@ function schedulePanoramaLotOrTradeSelection(
       // consent re-enabling) can still land after we stop and clear a value we
       // already set. These late passes re-assert only what changed — every fill
       // in them is a no-op while the fields still hold the desired values.
-      setTimeout(() => runDeferredPass(), 1500);
-      setTimeout(() => runDeferredPass(), 3500);
+      for (const delay of [1500, 3500])
+        setTimeout(() => runDeferredPass(delay), delay);
       // The finalizer records its verified outcome after any queue write.
       stop(finalizeOnResolved ? null : 'settled');
     }
     return productVerified;
   };
 
-  const runDeferredPass = async () => {
+  const runDeferredPass = async (delay) => {
+    const report = (result) =>
+      chartActivity?.record(trace, 'late_readback', { delay, result });
     const owner = data._vaxlinkOwner;
-    if (!isPanoramaAutofillCurrent(data)) return;
+    if (!isPanoramaAutofillCurrent(data)) return report('detail_changed');
     if (
       owner.scannerDelivery &&
       (owner.detailOutcome !== 'verified' ||
         !(await checkPanoramaScannerRoute(owner.scannerDelivery, true)))
     )
-      return;
+      return report('route_unavailable');
     if (
       owner.scannerRoute &&
       !(await checkPanoramaScannerRoute({ scannerRoute: owner.scannerRoute }))
     )
-      return;
-    if (globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return;
+      return report('route_unavailable');
+    if (!isPanoramaAutofillCurrent(data)) return report('detail_changed');
+    if (globalThis.VaxLinkExpiryDate.blocksChartUse(data))
+      return report('expired');
     try {
       runPanoramaAutofill(data, () => {
         const before = chartActivity?.isCurrent(trace) ? {} : null;
+        const visibleBefore = observePanoramaDetail(data);
         if (before) hasPanoramaDeferredDetailFieldsFilled(data, before);
         const repaired = fillPanoramaDeferredDetailFields(data);
-        if (!before || !repaired) return;
+        if (!before) return;
+        if (!isPanoramaAutofillCurrent(data)) return report('detail_changed');
+        const visibleAfter = observePanoramaDetail(data);
 
         const after = {};
         const deferred = hasPanoramaDeferredDetailFieldsFilled(data, after);
         const agent = panoramaDetailAgentMatches(data);
         const product = agent && panoramaDetailProductMatches(data);
+        const visiblyIncomplete = (sample) =>
+          (before.time !== 'not_requested' && sample?.time !== 'complete') ||
+          (reasonAutofillEnabled &&
+            !['disabled', 'not_requested'].includes(before.reason) &&
+            (!sample ||
+              !['requested', 'other'].includes(sample.visible) ||
+              sample.native !== sample.visible));
+        report(
+          !product
+            ? 'product_changed'
+            : isPrimeFacesAjaxBusy()
+              ? 'busy'
+              : !deferred || visiblyIncomplete(visibleAfter)
+                ? 'needs_review'
+                : repaired || visiblyIncomplete(visibleBefore)
+                  ? 'restored'
+                  : 'still_populated'
+        );
         chartActivity.record(trace, 'check', {
           wake: 'late',
           agent: status(hasAgent, true, agent),
@@ -3290,6 +3445,7 @@ function schedulePanoramaLotOrTradeSelection(
         });
       });
     } catch (error) {
+      report('error');
       vlog(error.message);
     }
   };
@@ -3627,6 +3783,10 @@ function fillPanoramaImmunizationFields(data) {
     owner.kind === 'multiple_detail' ? 'multiple' : 'single',
     'detail'
   );
+  if (chartActivity?.isCurrent(owner.activity)) {
+    observePanoramaAjax();
+    observePanoramaDetail(data);
+  }
   if (data.lot) {
     if (!Object.hasOwn(owner, 'initialLot')) {
       const widget = getPanoramaLotWidget();

@@ -240,13 +240,14 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
   const exported = await worker.manage('exportRecentActivity');
   assert.deepEqual(
     Array.from(exported.rows, (row) => row.event),
-    ['barcode', 'nvc_lookup', 'funding_prompt', 'scan']
+    ['barcode', 'nvc_lookup', 'detail_readback', 'funding_prompt', 'scan']
   );
   assert.equal(
     new Set(Array.from(exported.rows, (row) => row.operation)).size,
     1
   );
   assert.equal(exported.rows[1].result, 'not_found');
+  assert.equal(exported.rows[2].visible, 'missing');
   assert.match(exported.rows[0].barcode, /00123456789012.*TRAIN-ON/);
   await setDebug(false);
   const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });
@@ -292,6 +293,30 @@ test('detailed Debug checks retain statuses under the byte cap and reject field 
             after: { ...statuses, time: '09:30' }
           }
         }
+      ])
+    ).success,
+    false
+  );
+  const observation = {
+    event: 'detail_readback',
+    operation: 1,
+    ms: 10,
+    mode: 'multiple',
+    stage: 'detail',
+    funding: 'PUBLICLY_FUNDED',
+    native: 'requested',
+    visible: 'blank',
+    time: 'partial',
+    changed: ['lot', 'label']
+  };
+  assert.equal(
+    (await worker.append(ticket, [{ ...observation, time: '09:30' }])).success,
+    false
+  );
+  assert.equal(
+    (
+      await worker.append(ticket, [
+        { ...observation, changed: ['patient text'] }
       ])
     ).success,
     false
