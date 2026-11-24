@@ -20,7 +20,7 @@ extension events and can stop it when idle. It coordinates:
 - Looking up a vaccine by lot and barcode product identifier (GTIN).
 - Routing scans to supported chart tabs or retaining them when delivery fails.
 - Saving Single scans before one delivery attempt, retaining uncertain scans,
-  and handling queue appends in order.
+  and writing tray and held-scan changes in order.
 - Saving scanner capture warnings and analytics, and updating the icon and badge.
 - Creating the hidden scanner host and passing scanner control requests to it.
 
@@ -91,7 +91,7 @@ access to the page in the current tab.
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
-Settings has three sections, in order: Scanner, Autofill, and National Vaccine Catalogue.
+Settings includes Scanner, Autofill, National Vaccine Catalogue, and Debug mode.
 `scanner-settings.js` provides connection controls directly within the Scanner
 section. It shows the saved device and gets current connection status from the
 reader. When the reader does not reply, Settings shows the last known capture
@@ -154,11 +154,13 @@ and staff verify and save clinical records in Panorama.
 
 Debug mode keeps a separate session history for troubleshooting. Packaged
 Alpha starts with Debug on. Production and development start with Debug off.
-Staff can change the preference in Settings and download the retained history.
+A saved preference overrides the starting value. Staff can download the
+retained history in Settings.
 Turning Debug off clears the session details without changing Local Activity. The export
 includes the build, autofill settings at download, and the observed route and
-chart checks. It can include a scanned vaccine barcode. Chart fields are
-described by their check status, and repeated checks are summarized.
+chart checks. The export groups related events by operation. It can include a
+scanned vaccine barcode. Chart field checks record statuses, and repeated
+observations are summarized. The session retains up to 3,000 events and 1 MiB.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with
@@ -194,8 +196,9 @@ yet to confirm that its operation stopped, the background checks that browser
 document before accepting review.
 
 A hardware scan travels from the scanner worker through the hidden host to the
-background program. The background routes it to a supported chart or retains
-it in a queue. Inventory uses the local catalogue when available and saves the
+background program. The background saves it to a tray or retains it in the
+held-scan inbox before delivery to a ready single form. The chart reports
+what happened on that form. Inventory uses the local catalogue when available and saves the
 barcode while a download is pending. Saved rows keep the lookup result and the
 catalogue version when known. Scanner acknowledgement follows the saved row
 without waiting for Local Activity counts.

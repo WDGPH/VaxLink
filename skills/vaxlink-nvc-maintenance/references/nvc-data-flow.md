@@ -24,4 +24,4 @@
 1. Refresh the bundle locally.
 2. Verify lookup behavior against a known lot.
 3. Keep the previous bundle if the refresh fails.
-4. Do not commit live bundle snapshots without permission.
+4. Never commit raw NVC bundle snapshots.

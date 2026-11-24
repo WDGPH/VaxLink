@@ -11,8 +11,7 @@ same v1.1.5 commit; the former `dev` branch is not used.
    and generated changelog.
 3. Merge the release PR. Release-please creates the version tag and GitHub Release.
 4. GitHub Actions packages the production extension and uploads
-   `vaxlink-prod-<v>.zip` and, for releases produced after this improvement,
-   `SHA256SUMS` calculated from that final ZIP.
+   `vaxlink-prod-<v>.zip` and `SHA256SUMS` calculated from that final ZIP.
 5. An authorized publisher verifies the ZIP, uploads it to the existing VaxLink
    Chrome Web Store listing, and submits it for review. GitHub release creation
    does not publish to the store automatically.
@@ -32,7 +31,10 @@ higher than the one already uploaded to that listing.
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
-branch differences; runtime channel behaviour derives from the manifest name.
+branch differences; runtime channel behaviour uses that packaged identity. Debug starts on in
+packaged Alpha and off in production and unpacked development unless a saved
+preference overrides it. Use the exact package being evaluated for the
+[workstation acceptance checks](fixes/browser-only-locked-scanner-poc.md).
 
 ### Alpha releases
 
@@ -70,8 +72,8 @@ the existing stable documentation-hub integration is unchanged.
 - **Chrome Web Store:** Chrome validates the extension package through its normal distribution process and updates the installed listing automatically. Use the approved VaxLink listing for production.
 - **Manual GitHub deployment:** Partner IT downloads an approved `vaxlink-prod-<v>.zip` from the GitHub Release, verifies it, extracts it, and uses Chrome's **Load unpacked** option to deploy the folder. This is an IT-managed fallback, subject to organizational Chrome policies. It does not automatically receive Chrome Web Store updates. Partner IT must deliberately install each subsequent approved version. Reload supported Panorama tabs after an extension update.
 
-Releases produced after this improvement attach `SHA256SUMS` for their final
-ZIP assets. Historical releases, including v1.1.5, may not have a separate checksum
+New releases attach `SHA256SUMS` for their final ZIP assets. Historical
+releases, including v1.1.5, may not have a separate checksum
 file. Do not assume it is available or replace historical assets to add one.
 GitHub also provides native SHA-256 release-asset digests, which partner IT can
 use to verify older downloads when available.

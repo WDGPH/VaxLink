@@ -22,14 +22,19 @@ model.
 - Selects Panorama agent and lot, lets Panorama derive vaccine details, and
   fills enabled date/time, reason, and consent fields for staff review
 - Flags expiry state (`Expired`, `Expiring soon`, `Valid`)
-- Supports single, multiple, and inventory scan workflows with CSV export
+- Uses one Immunization tray for single forms and the Multiple Immunizations grid
+- Saves Inventory scans to a separate tray with CSV export
+- Keeps scans for review if automatic chart entry is uncertain
+- Connects a scanner directly and offers an optional sample test
 
 ## Get started
 
 First test VaxLink in the Panorama training environment using synthetic training
 records. After installing or updating the extension, reload the training page
-and open an immunization record. Check Single Inject, Multiple Inject, Inventory, and lock-screen
-capture/replay before moving to production.
+and open an immunization record. Check single forms, the Multiple Immunizations
+grid and detail step, Inventory, and how held scans appear after unlock.
+
+[Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
 
 In Settings, **Debug mode** keeps troubleshooting details for the current
 browser session. It starts on in packaged Alpha and off in production and
