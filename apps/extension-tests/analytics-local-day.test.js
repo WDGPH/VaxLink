@@ -9,6 +9,7 @@ process.env.TZ = 'America/Toronto';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import '../extension/shared/vaccine-label.js';
 
 import {
   createBackgroundHarness,
@@ -126,5 +127,20 @@ test('an Activity reset and export wait for an earlier delayed count', async () 
   assert.equal(
     harness.storageData.get(ANALYTICS_KEY).lastExportAt,
     after.exportedAt
+  );
+});
+
+test('Activity accepts older product names and skips barcode identifiers used as display names', () => {
+  const label = globalThis.vaxlinkVaccineLabel;
+  for (const field of ['lot', 'gtin', 'din', 'drug_code']) {
+    assert.equal(label({ name: 'IDENTIFIER', [field]: 'identifier' }), '');
+  }
+  assert.equal(
+    label({ name: 'Legacy vaccine name', lot: 'TRAIN-01' }),
+    'Legacy vaccine name'
+  );
+  assert.equal(
+    label({ name: 'TRAIN-01', lot: 'TRAIN-01', tradename: 'Trade name' }),
+    'Trade name'
   );
 });

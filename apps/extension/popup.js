@@ -1,3 +1,4 @@
+import './shared/vaccine-label.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
@@ -314,11 +315,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       logAnalyticsEvent('autofill_attempt', {
         workflow: activeMode,
         source: 'popup_button',
-        vaccineLabel:
-          parsedData.tradename ||
-          parsedData.generic_name ||
-          parsedData.name ||
-          '',
+        vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
         manufacturer: parsedData.manufacturer || '',
         expiryFlag:
           parsedData.expiry_flag ||
@@ -332,11 +329,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             source: 'popup_button',
             success: false,
             pending: true,
-            vaccineLabel:
-              parsedData.tradename ||
-              parsedData.generic_name ||
-              parsedData.name ||
-              '',
+            vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
             manufacturer: parsedData.manufacturer || '',
             expiryFlag:
               parsedData.expiry_flag ||
@@ -353,11 +346,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           workflow: activeMode,
           source: 'popup_button',
           success: true,
-          vaccineLabel:
-            parsedData.tradename ||
-            parsedData.generic_name ||
-            parsedData.name ||
-            '',
+          vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
           manufacturer: parsedData.manufacturer || '',
           expiryFlag:
             parsedData.expiry_flag ||
@@ -375,11 +364,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           workflow: activeMode,
           source: 'popup_button',
           success: false,
-          vaccineLabel:
-            parsedData.tradename ||
-            parsedData.generic_name ||
-            parsedData.name ||
-            '',
+          vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
           manufacturer: parsedData.manufacturer || ''
         });
         writeOutput(error.message || 'Could not auto-fill fields', 'error');
@@ -971,6 +956,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     remaining_doses: remainingDoses,
     dose_tracking: record.dose_tracking || 'manual',
     lookup_error: record.lookup_error || '',
+    lookup_error_category: record.lookup_error_category || '',
+    nvc_catalogue_version: record.nvc_catalogue_version || '',
     name:
       record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -1155,14 +1142,14 @@ function sendScannerDaemonCommand(action, payload = {}) {
   return sendRuntimeMessage({ action, ...payload });
 }
 
-async function lookupVaccineInfo(lot, gtin) {
+async function lookupVaccineInfo(lot, gtin, waitForDownload) {
   const lotKey = String(lot || '')
     .trim()
     .toLowerCase();
   if (!lotKey) {
     return { error: 'No lot number provided' };
   }
-  const message = { action: 'lookupVaccineInfo', lot };
+  const message = { action: 'lookupVaccineInfo', lot, waitForDownload };
   if (gtin) {
     message.gtin = gtin;
   }
@@ -1239,8 +1226,7 @@ async function addManualScanToMultipleQueue() {
       source: 'popup_manual_entry',
       count: 1,
       queueSizeAfter: multipleInjectManager.count,
-      vaccineLabel:
-        enriched.tradename || enriched.generic_name || enriched.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(enriched),
       manufacturer: enriched.manufacturer || '',
       expiryFlag:
         enriched.expiry_flag ||
@@ -1304,7 +1290,7 @@ async function addPendingScansToInventory() {
       const rawBarcode = lines[index];
       try {
         const baseData = parseInputData(rawBarcode);
-        const enriched = await enrichParsedData(baseData);
+        const enriched = await enrichParsedData(baseData, 'inventory');
         records.push(buildQueueRecord(enriched, rawBarcode));
         lastRecord = enriched;
         addedCount += 1;
@@ -1323,11 +1309,7 @@ async function addPendingScansToInventory() {
         source: 'popup_manual_batch',
         count: addedCount,
         queueSizeAfter: inventoryManager.count,
-        vaccineLabel:
-          lastRecord?.tradename ||
-          lastRecord?.generic_name ||
-          lastRecord?.name ||
-          '',
+        vaccineLabel: globalThis.vaxlinkVaccineLabel(lastRecord),
         manufacturer: lastRecord?.manufacturer || '',
         expiryFlag:
           lastRecord?.expiry_flag ||
@@ -1398,8 +1380,7 @@ async function handleUseMultipleInjectRecord(record) {
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source: 'queue',
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1412,8 +1393,7 @@ async function handleUseMultipleInjectRecord(record) {
         source: 'queue',
         success: false,
         pending: true,
-        vaccineLabel:
-          record.tradename || record.generic_name || record.name || '',
+        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
         manufacturer: record.manufacturer || '',
         expiryFlag:
           record.expiry_flag ||
@@ -1444,8 +1424,7 @@ async function handleUseMultipleInjectRecord(record) {
       source: 'queue',
       count: 1,
       queueSizeAfter: multipleInjectManager.count,
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1455,8 +1434,7 @@ async function handleUseMultipleInjectRecord(record) {
       workflow: 'multiple',
       source: 'queue',
       success: true,
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || '',
       expiryFlag:
         record.expiry_flag ||
@@ -1485,8 +1463,7 @@ async function handleUseMultipleInjectRecord(record) {
       workflow: 'multiple',
       source: 'queue',
       success: false,
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || ''
     });
     writeOutput(error.message || 'Could not auto-fill fields', 'error');
@@ -1508,8 +1485,6 @@ function mergeVaccineInfoIntoParsedData(
     merged.antigen = vaccineInfo.antigen || merged.antigen || null;
     merged.manufacturer =
       vaccineInfo.manufacturer || merged.manufacturer || null;
-    merged.nvc_lot_expiry =
-      vaccineInfo.lot_expiry || merged.nvc_lot_expiry || null;
     merged.din = vaccineInfo.din || merged.din || null;
     merged.route = vaccineInfo.route || merged.route || null;
     merged.strength = vaccineInfo.strength || merged.strength || null;
@@ -1523,7 +1498,11 @@ function mergeVaccineInfoIntoParsedData(
       vaccineInfo.din ||
       null;
   }
-  merged.inventory_expiry = merged.expiry || vaccineInfo?.lot_expiry || null;
+  merged.nvc_lot_expiry =
+    vaccineInfo?.lot_expiry || merged.nvc_lot_expiry || '';
+  merged.nvc_catalogue_version = vaccineInfo?.catalogueVersion || '';
+  merged.lookup_error_category = vaccineInfo?.errorCategory || '';
+  merged.inventory_expiry = merged.expiry || merged.nvc_lot_expiry || null;
   merged.expiry_flag = expiryStatus.flag;
   merged.expiry_days_remaining = expiryStatus.daysRemaining;
   merged.expiry_source = expirySource;
@@ -1531,16 +1510,23 @@ function mergeVaccineInfoIntoParsedData(
   return merged;
 }
 
-async function enrichParsedData(baseData) {
+async function enrichParsedData(baseData, mode = activeMode) {
   let vaccineInfo = null;
   let lookupAttempted = false;
 
   if (baseData.lot) {
     try {
       lookupAttempted = true;
-      vaccineInfo = await lookupVaccineInfo(baseData.lot, baseData.gtin);
+      vaccineInfo = await lookupVaccineInfo(
+        baseData.lot,
+        baseData.gtin,
+        mode !== 'inventory'
+      );
     } catch (error) {
-      vaccineInfo = { error: error.message || 'Lookup failed' };
+      vaccineInfo = {
+        error: error.message || 'Lookup failed',
+        errorCategory: 'unavailable'
+      };
     }
   }
 
@@ -1555,7 +1541,7 @@ async function enrichParsedData(baseData) {
     logAnalyticsEvent(
       vaccineInfo && !vaccineInfo.error ? 'lookup_success' : 'lookup_error',
       {
-        workflow: activeMode,
+        workflow: mode,
         source: 'popup_lookup',
         vaccineLabel: vaccineInfo?.tradename || vaccineInfo?.generic_name || '',
         manufacturer: vaccineInfo?.manufacturer || '',

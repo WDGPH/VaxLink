@@ -363,13 +363,13 @@ function parseGS1BarcodeFromScanner(rawScan) {
   return getGS1Parser().parseGS1Barcode(rawScan);
 }
 
-function lookupVaccineInfoByLot(lot, gtin) {
+function lookupVaccineInfoByLot(lot, gtin, waitForDownload) {
   return new Promise((resolve) => {
     if (!lot) {
       resolve(null);
       return;
     }
-    const request = { action: 'lookupVaccineInfo', lot };
+    const request = { action: 'lookupVaccineInfo', lot, waitForDownload };
     if (gtin) {
       request.gtin = gtin;
     }
@@ -468,7 +468,8 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
   const inventoryExpiry =
     data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
-  const expirySource = data.expiry
+  const barcodeExpiry = data.barcode_expiry ?? data.expiry ?? '';
+  const expirySource = barcodeExpiry
     ? 'barcode'
     : data.nvc_lot_expiry
       ? 'nvc'
@@ -487,7 +488,7 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
     gtin: data.gtin || '',
     lot: data.lot || '',
     serial: data.serial || '',
-    barcode_expiry: data.expiry || '',
+    barcode_expiry: barcodeExpiry,
     inventory_expiry: inventoryExpiry,
     nvc_lot_expiry: data.nvc_lot_expiry || '',
     expiry_flag: expiryStatus.flag || '',
@@ -502,7 +503,9 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
     dose_tracking: data.dose_tracking || 'manual',
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
-    lookup_error: data.lookup_error || ''
+    lookup_error: data.lookup_error || '',
+    lookup_error_category: data.lookup_error_category || '',
+    nvc_catalogue_version: data.nvc_catalogue_version || ''
   };
 }
 
@@ -648,15 +651,26 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     };
   }
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
+  parsed.barcode_expiry = parsed.expiry || '';
 
   try {
     let vaccineInfo = null;
     let lookupAttempted = false;
     if (parsed.lot) {
       lookupAttempted = true;
-      const lookup = await lookupVaccineInfoByLot(parsed.lot, parsed.gtin);
-      if (lookup?.error) parsed.lookup_error = lookup.error;
-      else vaccineInfo = lookup;
+      const lookup = await lookupVaccineInfoByLot(
+        parsed.lot,
+        parsed.gtin,
+        activeWorkflowMode !== 'inventory'
+      );
+      parsed.nvc_catalogue_version = lookup?.catalogueVersion;
+      if (lookup?.error) {
+        parsed.lookup_error = lookup.error;
+        parsed.lookup_error_category = lookup.errorCategory;
+        parsed.nvc_lot_expiry = lookup.lot_expiry;
+      } else {
+        vaccineInfo = lookup;
+      }
     }
 
     // Do not treat GTIN as a lot lookup key (pilot: wrong agent / e.g. TI vs HB).
@@ -737,8 +751,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
           workflow: activeWorkflowMode,
           queue: queueKey,
           source,
-          vaccineLabel:
-            record.tradename || record.generic_name || record.name || '',
+          vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
           manufacturer: record.manufacturer || '',
           expiryFlag: record.expiry_flag || finalExpiryFlag
         });
@@ -769,8 +782,7 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
         source,
         count: 1,
         queueSizeAfter: record.queueSizeAfter || 0,
-        vaccineLabel:
-          record.tradename || record.generic_name || record.name || '',
+        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
         manufacturer: record.manufacturer || '',
         expiryFlag: record.expiry_flag || finalExpiryFlag
       });
@@ -3159,6 +3171,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     din: record.din || '',
     drug_code: record.drug_code || record.din || '',
     lookup_error: record.lookup_error || '',
+    lookup_error_category: record.lookup_error_category || '',
+    nvc_catalogue_version: record.nvc_catalogue_version || '',
     name:
       record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -3223,7 +3237,7 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     source,
     count: 1,
     queueSizeAfter: nextRows.length,
-    vaccineLabel: record.tradename || record.generic_name || record.name || '',
+    vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -3232,7 +3246,7 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     source,
     success: true,
     deferred: true,
-    vaccineLabel: record.tradename || record.generic_name || record.name || '',
+    vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
@@ -4377,8 +4391,7 @@ async function applyNextQueueItem(options = {}) {
     logAnalyticsEvent('autofill_attempt', {
       workflow: 'multiple',
       source: 'hud',
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });
@@ -4398,8 +4411,7 @@ async function applyNextQueueItem(options = {}) {
       source: 'hud',
       success,
       pending,
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
       manufacturer: record.manufacturer || '',
       expiryFlag: record.expiry_flag || ''
     });

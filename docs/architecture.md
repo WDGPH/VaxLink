@@ -145,7 +145,10 @@ Inventory batch save, only the failed lines remain for correction.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
-it in a queue.
+it in a queue. Inventory uses the local catalogue when available and saves the
+barcode while a download is pending. Saved rows keep the lookup result and the
+catalogue version when known. Scanner acknowledgement follows the saved row
+without waiting for Local Activity counts.
 
 ## Shared helpers
 

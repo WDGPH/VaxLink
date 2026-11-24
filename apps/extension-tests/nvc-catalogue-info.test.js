@@ -97,9 +97,11 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   assert.equal(restored.lotCount, 2);
   assert.notEqual(restored.updatedAt, restored.releaseDate);
   const version = {};
+  const check = {};
+  const statusNodes = { nvcSettingsVersion: version, nvcLastCheck: check };
   const container = {
     ownerDocument: {
-      getElementById: (id) => (id === 'nvcSettingsVersion' ? version : null)
+      getElementById: (id) => statusNodes[id] || null
     }
   };
   renderNVCStatus(restored, container);
@@ -107,6 +109,12 @@ test('accepted publication metadata survives reopening and popup renders upstrea
     version.textContent,
     'Version <img src=x onerror=alert(1)> · November 5, 2026'
   );
+  assert.equal(
+    check.textContent,
+    `Last successful check ${new Date(restored.lastCheckAt).toLocaleString()}`
+  );
+  renderNVCStatus({ ...restored, lastCheckAt: null }, container);
+  assert.equal(check.textContent, 'No successful check recorded');
   assert.equal(container.textContent, '');
   assert.equal(container.hidden, true);
   const missing = await status(

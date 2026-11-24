@@ -2,6 +2,7 @@ const VAXLINK_BG_DEBUG = false;
 importScripts('build-info.js');
 importScripts('shared/gs1-parser.js');
 importScripts('shared/expiry-date.js');
+importScripts('shared/vaccine-label.js');
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-daemon-protocol.js');
 
@@ -1083,7 +1084,8 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
   const inventoryExpiry =
     data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
-  const expirySource = data.expiry
+  const barcodeExpiry = data.barcode_expiry ?? data.expiry ?? '';
+  const expirySource = barcodeExpiry
     ? 'barcode'
     : data.nvc_lot_expiry
       ? 'nvc'
@@ -1102,7 +1104,7 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
     gtin: data.gtin || '',
     lot: data.lot || '',
     serial: data.serial || '',
-    barcode_expiry: data.expiry || '',
+    barcode_expiry: barcodeExpiry,
     inventory_expiry: inventoryExpiry,
     nvc_lot_expiry: data.nvc_lot_expiry || '',
     expiry_flag: expiryStatus.flag || '',
@@ -1118,6 +1120,8 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || '',
+    lookup_error_category: data.lookup_error_category || '',
+    nvc_catalogue_version: data.nvc_catalogue_version || '',
     ...context
   };
 }
@@ -1134,12 +1138,20 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const parsed = parser.parseGS1Barcode(scan.rawText);
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
+  parsed.barcode_expiry = parsed.expiry || '';
   if (parsed.lot) {
     const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
-      gtin: parsed.gtin
+      gtin: parsed.gtin,
+      waitForDownload: mode !== 'inventory'
     });
-    if (!vaccineInfo.error) mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
-    else parsed.lookup_error = vaccineInfo.error;
+    parsed.nvc_catalogue_version = vaccineInfo.catalogueVersion;
+    if (!vaccineInfo.error) {
+      mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
+    } else {
+      parsed.lookup_error = vaccineInfo.error;
+      parsed.lookup_error_category = vaccineInfo.errorCategory;
+      parsed.nvc_lot_expiry = vaccineInfo.lot_expiry;
+    }
   }
 
   const record = await appendQueueRecord(
@@ -1150,29 +1162,21 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   const expiryFlag =
     record.expiry_flag ||
     getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  try {
-    await logAnalyticsEvent('scan_captured', {
-      workflow: mode,
-      source: scan.source || 'web-serial',
-      vaccineLabel:
-        record.tradename || record.generic_name || record.name || '',
-      manufacturer: record.manufacturer || '',
-      expiryFlag
-    });
-    if (!record.duplicate_ignored)
-      await logAnalyticsEvent('queue_saved', {
-        workflow: mode,
-        queue: mode === 'inventory' ? 'inventory' : 'multiple',
-        source: scan.source || 'web-serial',
-        count: 1,
-        queueSizeAfter: record.queueSizeAfter || 0,
-        vaccineLabel:
-          record.tradename || record.generic_name || record.name || '',
-        manufacturer: record.manufacturer || '',
-        expiryFlag
-      });
-  } catch (_) {
-    console.warn('Scanner scan retained; usage counters could not be updated.');
+  // Capture has already been saved. Usage counts can finish independently.
+  const activity = {
+    workflow: mode,
+    source: scan.source || 'web-serial',
+    vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  };
+  void logAnalyticsEvent('scan_captured', activity).catch(() => {});
+  if (!record.duplicate_ignored) {
+    void logAnalyticsEvent('queue_saved', {
+      ...activity,
+      queue: mode === 'inventory' ? 'inventory' : 'multiple',
+      queueSizeAfter: record.queueSizeAfter || 0
+    }).catch(() => {});
   }
 
   return {
@@ -1814,7 +1818,7 @@ function nvcFailure(category) {
 
 async function lookupVaccineInfo(lot, options = {}) {
   await loadNVCBundle();
-  if (!hasUsableNVCCatalogue()) {
+  if (!hasUsableNVCCatalogue() && options.waitForDownload !== false) {
     let timer;
     try {
       await Promise.race([
@@ -1837,10 +1841,14 @@ async function lookupVaccineInfo(lot, options = {}) {
     );
   }
   const info = lookupVaccineLot(lot, options);
-  if (!info) return nvcFailure('not_found');
-  return hasNVCVaccineIdentity(info)
-    ? info
-    : { ...info, ...nvcFailure('incomplete') };
+  const catalogueVersion = nvcIndexes.catalogueInfo?.releaseVersion ?? null;
+  if (!info) return { ...nvcFailure('not_found'), catalogueVersion };
+  if (info.error) return { ...info, catalogueVersion };
+  return {
+    ...info,
+    ...(hasNVCVaccineIdentity(info) ? {} : nvcFailure('incomplete')),
+    catalogueVersion
+  };
 }
 
 function validateBundleShape(data) {
@@ -3065,7 +3073,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
     return vaccineInfo;
   } catch (e) {
     console.error('Error looking up vaccine lot:', e);
-    return null;
+    return nvcFailure('unavailable');
   }
 }
 
@@ -3495,7 +3503,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'lookupVaccineInfo') {
-    lookupVaccineInfo(request.lot, { gtin: request.gtin })
+    lookupVaccineInfo(request.lot, {
+      gtin: request.gtin,
+      waitForDownload: request.waitForDownload !== false
+    })
       .catch(() => nvcFailure('unavailable'))
       .then(sendResponse);
 

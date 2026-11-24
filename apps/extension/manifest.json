@@ -37,6 +37,7 @@
         "panorama-agent-rules.js",
         "shared/gs1-parser.js",
         "shared/expiry-date.js",
+        "shared/vaccine-label.js",
         "content.js"
       ],
       "run_at": "document_start"

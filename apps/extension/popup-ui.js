@@ -56,6 +56,13 @@ export function renderNVCStatus(status, container) {
       .filter(Boolean)
       .join(' · ');
   }
+  const checked = container.ownerDocument?.getElementById('nvcLastCheck');
+  if (checked) {
+    const time = Date.parse(status.lastCheckAt || '');
+    checked.textContent = Number.isFinite(time)
+      ? `Last successful check ${new Date(time).toLocaleString()}`
+      : 'No successful check recorded';
+  }
   const health = describeNVCHealth(status);
   container.textContent = health;
   container.hidden = !health;

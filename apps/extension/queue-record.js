@@ -93,7 +93,9 @@ function normalizeQueueRecord(data = {}) {
     dose_tracking: data.dose_tracking || 'manual',
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
-    lookup_error: data.lookup_error || ''
+    lookup_error: data.lookup_error || '',
+    lookup_error_category: data.lookup_error_category || '',
+    nvc_catalogue_version: data.nvc_catalogue_version || ''
   };
 }
 
