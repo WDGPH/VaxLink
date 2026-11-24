@@ -110,13 +110,19 @@ test('Lot labels distinguish prefix lots and preserve expiry, funding, and punct
   for (const text of [
     'ABC1',
     'ABC-1 - Exp. 2028-03-31',
-    'AB/C.1 (Non-Publicly Funded)',
-    'ABC1 — NPF',
+    'N-AB/C.1 (Non-Publicly Funded)',
+    'N-ABC1 — NPF',
     'ABC1 | Publicly Funded'
   ]) {
     assert.equal(context.panoramaLotLabelMatches(text, 'ABC1'), true, text);
   }
-  for (const text of ['ABC12', 'ABC-12 - Exp. 2028-03-31', 'AB9 (PF)']) {
+  for (const text of [
+    'ABC12',
+    'ABC-12 - Exp. 2028-03-31',
+    'AB9 (PF)',
+    'ABC1 (NPF)',
+    'N-ABC1 (Publicly Funded)'
+  ]) {
     assert.equal(context.panoramaLotLabelMatches(text, 'ABC1'), false, text);
   }
   const hyphenated = 'ABC1-PF-2 - Exp. 2028-03-31';
@@ -260,4 +266,38 @@ test('an observed refresh can change option text in place on the same Lot widget
   assert.equal(f.context.panoramaDetailProductMatches(data), false);
   select.options[1].text = 'ABC1 - Exp. 2028-03-31';
   assert.equal(f.context.panoramaDetailProductMatches(data), true);
+});
+
+test('the current Lot widget distinguishes two funding matches from a sole N- entry', () => {
+  const f = fixture();
+  let funding = 'SHOW_ALL';
+  f.context.getPanoramaFundedRadioValue = () => funding;
+  const prefixed = f.select('N-ABC1 - Exp. 2028-03-31');
+  f.state.controls = [f.root, prefixed];
+  assert.equal(f.run('ABC1'), true);
+  assert.equal(prefixed.value, 'lot-option');
+  prefixed.value = '';
+  funding = 'PUBLICLY_FUNDED';
+  assert.equal(f.run('ABC1'), false);
+  assert.equal(prefixed.value, '');
+
+  funding = 'SHOW_ALL';
+  const publicPanelOption = f.panel(`${id}_panel`, 'ABC1 | Publicly Funded');
+  assert.equal(f.run('ABC1'), false);
+  assert.equal(prefixed.value, '');
+  assert.equal(publicPanelOption.clicks, 0);
+  funding = 'NON_PUBLICLY_FUNDED';
+  assert.equal(f.run('ABC1'), true);
+  assert.equal(prefixed.value, 'lot-option');
+});
+
+test('an options change during focus cannot turn a sole funding match into a silent choice', () => {
+  const f = fixture();
+  const select = f.select('ABC1');
+  f.state.controls = [f.root, select];
+  select.focus = () => {
+    select.options.push({ text: 'N-ABC1', value: 'other-bucket' });
+  };
+  assert.equal(f.run('ABC1'), false);
+  assert.equal(select.value, '');
 });

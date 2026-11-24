@@ -2130,6 +2130,8 @@ function getPanoramaSharedFundingLotProductLabel(data) {
   return '';
 }
 
+const PANORAMA_FUNDING_CHOICES = ['PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED'];
+
 function hasPanoramaFundedRadio() {
   return !!document.querySelector('input[id*="fundedRadio:selectOneRadio"]');
 }
@@ -2142,7 +2144,7 @@ function getPanoramaFundedRadioValue() {
 }
 
 function isExplicitPanoramaFundingValue(value) {
-  return value === 'PUBLICLY_FUNDED' || value === 'NON_PUBLICLY_FUNDED';
+  return PANORAMA_FUNDING_CHOICES.includes(value);
 }
 
 function getPanoramaFundingLabel(value) {
@@ -2152,7 +2154,7 @@ function getPanoramaFundingLabel(value) {
   return 'funding filter';
 }
 
-function getPanoramaLotText(optionText) {
+function readPanoramaLotLabel(optionText) {
   // Labels can add expiry and funding. A dash inside the Lot is part of
   // its identity, including segments such as PF in ABC1-PF-2.
   const expiry = /(?:\s+(?:[-–—|,]\s*)?|\s*\(\s*)exp(?:iry|iration)?[.\s:]/i;
@@ -2161,29 +2163,57 @@ function getPanoramaLotText(optionText) {
   const [lotAndFunding] = String(optionText || '')
     .trim()
     .split(expiry, 1);
-  return lotAndFunding.trim().replace(funding, '').trim().toUpperCase();
+  const label = lotAndFunding.trim();
+  const fundingNote = label.match(funding)?.[0] || '';
+  const lot = label.replace(funding, '').trim().toUpperCase();
+  const prefixed = lot.startsWith('N-');
+  const markedNonPublic = /npf|non[-_ ]?publicly/i.test(fundingNote);
+  return {
+    lot,
+    manufacturerLot: prefixed ? lot.slice(2) : lot,
+    // Panorama requires N- for an NPF entry. Disagreeing marks are ambiguous.
+    funding:
+      fundingNote && prefixed !== markedNonPublic
+        ? null
+        : prefixed
+          ? 'NON_PUBLICLY_FUNDED'
+          : 'PUBLICLY_FUNDED'
+  };
 }
 
-function panoramaLotLabelMatches(optionText, lotValue) {
+function getPanoramaLotText(optionText) {
+  return readPanoramaLotLabel(optionText).lot;
+}
+
+function getPanoramaManufacturerLotText(optionText, funding) {
+  const label = readPanoramaLotLabel(optionText);
+  return label.funding && (!funding || label.funding === funding)
+    ? label.manufacturerLot
+    : '';
+}
+
+function panoramaLotLabelMatches(optionText, lotValue, funding) {
   const lotToken = normalizePanoramaLotToken(lotValue);
   return (
     !!lotToken &&
-    normalizePanoramaLotToken(getPanoramaLotText(optionText)) === lotToken
+    normalizePanoramaLotToken(
+      getPanoramaManufacturerLotText(optionText, funding)
+    ) === lotToken
   );
 }
 
-function findPanoramaLotChoice(items, textOf, lotValue) {
+function findPanoramaLotChoice(items, textOf, lotValue, funding) {
   const exact = String(lotValue || '')
     .trim()
     .toUpperCase();
   if (!exact) return null;
   const exactMatches = items.filter(
-    (item) => getPanoramaLotText(textOf(item)) === exact
+    (item) => getPanoramaManufacturerLotText(textOf(item), funding) === exact
   );
   if (exactMatches.length)
     return exactMatches.length === 1 ? exactMatches[0] : null;
   const similar = items.filter((item) =>
-    panoramaLotLabelMatches(textOf(item), lotValue)
+    panoramaLotLabelMatches(textOf(item), lotValue, funding)
   );
   return similar.length === 1 ? similar[0] : null;
 }
@@ -2207,18 +2237,46 @@ function panoramaLotPanelItems(panel) {
   ].filter(panoramaLotPanelItemText);
 }
 
+function getPanoramaLotFundingChoices(widget, lotValue) {
+  const radio = getPanoramaFundedRadioValue();
+  const choice = panoramaWritingData?._fundedRadioChoice;
+  if (isExplicitPanoramaFundingValue(radio))
+    return choice && choice !== radio ? [] : [radio];
+  if (choice) return [choice];
+
+  const labels = [
+    ...panoramaLotSelectOptions(widget?.select).map((option) => option.text),
+    ...panoramaLotPanelItems(widget?.panel).map(panoramaLotPanelItemText)
+  ];
+  return PANORAMA_FUNDING_CHOICES.filter((funding) =>
+    labels.some((label) => panoramaLotLabelMatches(label, lotValue, funding))
+  );
+}
+
+function hasOnlyPanoramaLotFunding(widget, lotValue, funding) {
+  const choices = getPanoramaLotFundingChoices(widget, lotValue);
+  return choices.length === 1 && choices[0] === funding;
+}
+
 function panoramaLotSelectionMatches(widget, lotValue) {
   if (!widget) return false;
+  const fundingChoices = getPanoramaLotFundingChoices(widget, lotValue);
+  if (fundingChoices.length !== 1) return false;
+  const [funding] = fundingChoices;
   const options = panoramaLotSelectOptions(widget.select);
   if (options.length) {
     const matched = findPanoramaLotChoice(
       options,
       (option) => option.text,
-      lotValue
+      lotValue,
+      funding
     );
     return !!matched && widget.select.value === matched.value;
   }
-  const selected = getPanoramaLotText(readPanoramaLotSelection(widget));
+  const selected = getPanoramaManufacturerLotText(
+    readPanoramaLotSelection(widget),
+    funding
+  );
   if (!selected) return false;
   const items = panoramaLotPanelItems(widget.panel);
   if (!items.length)
@@ -2231,11 +2289,13 @@ function panoramaLotSelectionMatches(widget, lotValue) {
   const matched = findPanoramaLotChoice(
     items,
     panoramaLotPanelItemText,
-    lotValue
+    lotValue,
+    funding
   );
   return (
     !!matched &&
-    selected === getPanoramaLotText(panoramaLotPanelItemText(matched))
+    selected ===
+      getPanoramaManufacturerLotText(panoramaLotPanelItemText(matched), funding)
   );
 }
 
@@ -2283,25 +2343,32 @@ function readPanoramaLotSelection(widget) {
 function fillPanoramaLotFromSelect(widget, lotValue) {
   const field = widget.select;
   if (!canFillPanoramaControl(field)) return false;
+  const fundingChoices = getPanoramaLotFundingChoices(widget, lotValue);
+  if (fundingChoices.length !== 1) return false;
+  const [funding] = fundingChoices;
   const options = panoramaLotSelectOptions(field);
   const matched = findPanoramaLotChoice(
     options,
     (option) => option.text,
-    lotValue
+    lotValue,
+    funding
   );
   if (!matched || matched.disabled) return false;
 
   assertPanoramaAutofillWrite();
   field.focus();
   assertPanoramaAutofillWrite();
-  // Focusing the select can refresh its options without replacing the node.
+  // Focusing can refresh options or expose the other funding category.
+  const afterFocus = getPanoramaLotWidget();
   if (
     !field.isConnected ||
-    getPanoramaLotWidget()?.select !== field ||
+    afterFocus?.select !== field ||
+    !hasOnlyPanoramaLotFunding(afterFocus, lotValue, funding) ||
     findPanoramaLotChoice(
       panoramaLotSelectOptions(field),
       (option) => option.text,
-      lotValue
+      lotValue,
+      funding
     ) !== matched ||
     matched.disabled
   )
@@ -2475,13 +2542,17 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
   if (!panel.isConnected || getPanoramaLotWidget()?.panel !== panel)
     return false;
 
+  const fundingChoices = getPanoramaLotFundingChoices(widget, lotValue);
+  if (fundingChoices.length !== 1) return false;
+  const [funding] = fundingChoices;
   const items = panoramaLotPanelItems(panel);
   // A filtered-out exact option still matters when deciding whether a
   // similar-looking label is safe to use.
   const matched = findPanoramaLotChoice(
     items,
     panoramaLotPanelItemText,
-    lotValue
+    lotValue,
+    funding
   );
   const available =
     matched &&
@@ -2491,12 +2562,15 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
   if (!available) return false;
   const options = panoramaLotSelectOptions(widget.select);
   if (
-    options.some((option) => panoramaLotLabelMatches(option.text, lotValue))
+    options.some((option) =>
+      panoramaLotLabelMatches(option.text, lotValue, funding)
+    )
   ) {
     const nativeMatch = findPanoramaLotChoice(
       options,
       (option) => option.text,
-      lotValue
+      lotValue,
+      funding
     );
     if (
       !nativeMatch ||
@@ -2511,14 +2585,17 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
     matched.dispatchEvent(new MouseEvent(type, { bubbles: true }));
   }
   assertPanoramaAutofillWrite();
+  const beforeClick = getPanoramaLotWidget();
   if (
     !matched.isConnected ||
     !isVisible(matched) ||
-    getPanoramaLotWidget()?.panel !== panel ||
+    beforeClick?.panel !== panel ||
+    !hasOnlyPanoramaLotFunding(beforeClick, lotValue, funding) ||
     findPanoramaLotChoice(
       panoramaLotPanelItems(panel),
       panoramaLotPanelItemText,
-      lotValue
+      lotValue,
+      funding
     ) !== matched
   )
     return false;
