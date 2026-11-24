@@ -23,7 +23,7 @@ Designate one browser and one profile for scanning on each clinic workstation. E
 
 Open **Settings** using the gear in the popup. Choose **Setup** in the Scanner section.
 
-![VaxLink Settings with the Scanner section above the autofill preferences](images/settings.png)
+![VaxLink Settings with Setup in the Scanner section above Autofill](images/settings.png)
 
 Choose **Connect scanner** to open the browser’s device chooser.
 

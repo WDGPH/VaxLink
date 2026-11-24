@@ -63,7 +63,7 @@ Local records are kept in the browser profile. VaxLink adds no encryption of its
 
 ### What staff see in Local Activity
 
-The popup compares **Today** and **All time** on this installation. **Days tracked** counts days with recorded activity.
+The popup compares **Today** and **All time** on this installation.
 
 | Group             | What the numbers mean                                                                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -74,7 +74,7 @@ The popup compares **Today** and **All time** on this installation. **Days track
 
 ### What the activity export includes
 
-The downloaded JSON file contains all retained days and combined totals. Its date range is independent of which column staff were reading. A generated device ID, any saved workstation label, the number of days, and first-use, last-event and export times can connect several exports to one station.
+The downloaded JSON file contains all retained days, the number of days with activity and combined totals. Its date range is independent of which column staff were reading. A generated device ID, any saved workstation label and first-use, last-event and export times can connect several exports to one station.
 
 | Daily output            | Details in the file                                                                                                                                                                                                                      |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
