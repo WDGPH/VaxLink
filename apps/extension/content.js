@@ -36,6 +36,7 @@ const ADMIN_TIME_AUTOFILL_KEY = 'vaxlink_administered_time_autofill_v1';
 const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
 const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
+const AUTO_RESOLVE_FUNDING_KEY = 'vaxlink_auto_resolve_funding_v1';
 const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
@@ -356,6 +357,7 @@ function setupMessageListener() {
         sendResponse({
           success: isAutofillSuccess(result),
           pending: isAutofillPending(result),
+          reason: result?.reason || '',
           status: result?.status || 'failed',
           error: result?.error || ''
         });
@@ -870,6 +872,7 @@ async function handleHandsFreeScan(
     }
   }
 
+  parsed._vaxlinkResultSource = source;
   logAnalyticsEvent('autofill_attempt', {
     workflow: activeWorkflowMode,
     source,
@@ -885,15 +888,15 @@ async function handleHandsFreeScan(
     lastHandledScanAt = Date.now();
     lastHandledScanOwner = parsed._vaxlinkOwner;
   }
-  logAnalyticsEvent('autofill_result', {
-    workflow: activeWorkflowMode,
-    source,
-    success,
-    pending,
-    vaccineLabel: parsed.tradename || parsed.generic_name || '',
-    manufacturer: parsed.manufacturer || '',
-    expiryFlag: finalExpiryFlag
-  });
+  if (!pending)
+    logAnalyticsEvent('autofill_result', {
+      workflow: activeWorkflowMode,
+      source,
+      success,
+      vaccineLabel: parsed.tradename || parsed.generic_name || '',
+      manufacturer: parsed.manufacturer || '',
+      expiryFlag: finalExpiryFlag
+    });
   if (success) {
     showVaxlinkToast(parsed);
   } else if (!pending) {
@@ -961,6 +964,7 @@ function initHandsFreeScanner() {
       LEGACY_REASON_CONSENT_AUTOFILL_KEY,
       REASON_AUTOFILL_KEY,
       CONSENT_AUTOFILL_KEY,
+      AUTO_RESOLVE_FUNDING_KEY,
       AUDIO_FEEDBACK_KEY
     ],
     (stored) => {
@@ -1004,6 +1008,7 @@ function initHandsFreeScanner() {
       !(LEGACY_REASON_CONSENT_AUTOFILL_KEY in changes) &&
       !(REASON_AUTOFILL_KEY in changes) &&
       !(CONSENT_AUTOFILL_KEY in changes) &&
+      !(AUTO_RESOLVE_FUNDING_KEY in changes) &&
       !(AUDIO_FEEDBACK_KEY in changes)
     ) {
       return;
@@ -1049,6 +1054,10 @@ function initHandsFreeScanner() {
         CONSENT_AUTOFILL_KEY in changes
           ? changes[CONSENT_AUTOFILL_KEY].newValue
           : autofillSettings[CONSENT_AUTOFILL_KEY],
+      [AUTO_RESOLVE_FUNDING_KEY]:
+        AUTO_RESOLVE_FUNDING_KEY in changes
+          ? changes[AUTO_RESOLVE_FUNDING_KEY].newValue
+          : autofillSettings[AUTO_RESOLVE_FUNDING_KEY],
       [AUDIO_FEEDBACK_KEY]:
         AUDIO_FEEDBACK_KEY in changes
           ? changes[AUDIO_FEEDBACK_KEY].newValue
@@ -2091,55 +2100,18 @@ function normalizePanoramaLotToken(value) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
-// Inventory confirmed these product families can legitimately carry the same
-// lot in both Panorama funding buckets. For them, falling back to SHOW_ALL can
-// silently select the wrong funding row, so VaxLink must keep funding explicit.
-const PANORAMA_SHARED_FUNDING_LOT_PRODUCTS = Object.freeze([
-  { label: 'Arexvy', terms: ['arexvy'] },
-  { label: 'Bexsero', terms: ['bexsero'] },
-  { label: 'Engerix B', terms: ['engerix b'] },
-  { label: 'Gardasil 9', terms: ['gardasil 9'] },
-  { label: 'Havrix', terms: ['havrix 1440', 'havrix 720', 'havrix'] },
-  { label: 'Avaxim', terms: ['avaxim'] },
-  { label: 'Nimenrix', terms: ['nimenrix'] },
-  { label: 'Prevnar', terms: ['prevnar', 'prevenar'] },
-  { label: 'RabAvert', terms: ['rabavert'] },
-  { label: 'Imovax Rabies', terms: ['imovax rabies'] },
-  { label: 'Shingrix', terms: ['shingrix'] },
-  { label: 'Tubersol', terms: ['tubersol'] }
-]);
+const PANORAMA_FUNDING_CHOICES = ['PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED'];
 
-function buildPanoramaFundingSourceText(data) {
-  return normalizeForMatch(
-    [data?.name, data?.tradename, data?.generic_name].filter(Boolean).join(' ')
+function getPanoramaFundingRadios() {
+  const form =
+    panoramaWritingData?._vaxlinkOwner?.form || getPanoramaAutofillForm();
+  return Array.from(
+    form?.querySelectorAll?.('input[id*="fundedRadio:selectOneRadio"]') || []
   );
 }
 
-function getPanoramaSharedFundingLotProductLabel(data) {
-  const source = buildPanoramaFundingSourceText(data);
-  if (!source) return '';
-  for (const product of PANORAMA_SHARED_FUNDING_LOT_PRODUCTS) {
-    if (
-      (product.terms || []).some((term) =>
-        source.includes(normalizeForMatch(term))
-      )
-    ) {
-      return product.label;
-    }
-  }
-  return '';
-}
-
-const PANORAMA_FUNDING_CHOICES = ['PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED'];
-
-function hasPanoramaFundedRadio() {
-  return !!document.querySelector('input[id*="fundedRadio:selectOneRadio"]');
-}
-
 function getPanoramaFundedRadioValue() {
-  const checked = Array.from(
-    document.querySelectorAll('input[id*="fundedRadio:selectOneRadio"]')
-  ).find((radio) => radio && radio.checked);
+  const checked = getPanoramaFundingRadios().find((radio) => radio.checked);
   return String(checked?.value || '').trim();
 }
 
@@ -2183,6 +2155,15 @@ function readPanoramaLotLabel(optionText) {
 
 function getPanoramaLotText(optionText) {
   return readPanoramaLotLabel(optionText).lot;
+}
+
+function getPanoramaNonemptyLotLabel(value) {
+  const lot = getPanoramaLotText(value);
+  return /^(?:[-–— ]*(?:SELECT(?: ONE)?|NO RECORDS(?: FOUND)?)?[-–— ]*)$/.test(
+    lot
+  )
+    ? ''
+    : lot;
 }
 
 function getPanoramaManufacturerLotText(optionText, funding) {
@@ -2398,8 +2379,8 @@ function fillPanoramaLotFromSelect(widget, lotValue) {
 
 function setPanoramaFundedRadioValue(value) {
   const desired = String(value || '').trim();
-  const radio = document.querySelector(
-    `input[id*="fundedRadio:selectOneRadio"][value="${desired}"]`
+  const radio = getPanoramaFundingRadios().find(
+    (radio) => radio.value === desired
   );
   if (!radio) return 'not_found';
   if (radio.checked) return 'already';
@@ -2451,10 +2432,6 @@ function setPanoramaFundedRadioValue(value) {
   return 'clicked';
 }
 
-function resetPanoramaFundedRadioToShowAll() {
-  return setPanoramaFundedRadioValue('SHOW_ALL');
-}
-
 function blockIneligibleChartUse(data) {
   if (!globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return null;
   const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(data);
@@ -2475,20 +2452,6 @@ function blockIneligibleChartUse(data) {
       ? 'This lot is saved for reference only.'
       : 'Expired vaccine. Autofill stopped.'
   };
-}
-
-// After the nurse answers the PF/NPF prompt we thread their pick through the
-// fill data as _fundedRadioChoice. Panorama's post-selection AJAX can re-render
-// the funded-radio group and momentarily drop the checked state; if a later fill
-// pass re-detects a non-explicit value we must re-apply the nurse's answer rather
-// than re-summon the persistent chooser (which would otherwise linger on screen
-// until "Not now" is clicked). Returns the setPanoramaFundedRadioValue result, or
-// null when no answer has been recorded yet.
-function reapplyAnsweredPanoramaFundingChoice(data) {
-  const choice = data && data._fundedRadioChoice;
-  if (!isExplicitPanoramaFundingValue(choice)) return null;
-  if (getPanoramaFundedRadioValue() === choice) return 'already';
-  return setPanoramaFundedRadioValue(choice);
 }
 
 const LOT_DROPDOWN_OPEN_COOLDOWN_MS = 2000;
@@ -2699,6 +2662,8 @@ function beginPanoramaAutofill(
       mode: activeWorkflowMode,
       automatic,
       startBy,
+      autoResolveFunding: autofillSettings[AUTO_RESOLVE_FUNDING_KEY] !== false,
+      fundingBucketsChecked: new Set(),
       cancelled: false
     };
   }
@@ -2802,6 +2767,24 @@ function assertPanoramaAutofillWrite() {
   panoramaWritingData._vaxlinkOwner.writeAttempted = true;
 }
 
+function recordFundingComparison(data, outcome) {
+  const owner = data._vaxlinkOwner;
+  const funding = getPanoramaFundedRadioValue();
+  if (
+    !owner.autoResolveFunding ||
+    owner.fundingComparisonRecorded ||
+    data._fundedRadioChoice ||
+    isExplicitPanoramaFundingValue(funding) ||
+    (funding !== 'SHOW_ALL' && getPanoramaFundingRadios().length)
+  )
+    return;
+  owner.fundingComparisonRecorded = true;
+  logAnalyticsEvent('funding_comparison', {
+    workflow: data._vaxlinkQueueContext?.workflow || owner.mode,
+    outcome
+  });
+}
+
 function schedulePanoramaLotOrTradeSelection(
   data,
   initialDelayMs = 0,
@@ -2837,28 +2820,10 @@ function schedulePanoramaLotOrTradeSelection(
   let timerAt = Infinity;
   let observer;
   let stopped = false;
-  let fundedRadioEnsured = !!options.fundedRadioEnsured;
-  const preserveFundingFilter = options.preserveFundingFilter === true;
-  let sharedFundingMisses = 0;
-  // isPrimeFacesAjaxBusy() cannot see the page's PrimeFaces queue from the
-  // isolated content-script world, so attempts are NOT actually gated while a
-  // radio or checkbox refreshes the options. Space counted misses out to
-  // give that refresh time before asking staff to try the other category.
-  const SHARED_FUNDING_MISS_GAP_MS = 1200;
-  // Panorama re-renders can momentarily drop the funded radio's checked state.
-  // Re-clicking it on each pass stacks radio AJAX requests.
-  // Re-apply at most once per cooldown.
-  const FUNDING_REAPPLY_COOLDOWN_MS = 2500;
-  let lastFundingReapplyClickAt = -Infinity;
-  // While a fillable lot select exists, lot filling is silent and lands in one
-  // action once the options refresh. Only if it stays unresolved this long do
-  // we start driving the visible dropdown as a rescue.
-  const PANEL_RESCUE_AFTER_MS = 5000;
-  let lastSharedFundingMissAt = -Infinity;
-  const restartSharedFundingMissWindow = (now) => {
-    sharedFundingMisses = 0;
-    lastSharedFundingMissAt = now;
-  };
+  let triedManualFilter = false;
+  let lastFundingChangeAt = -Infinity;
+  let usableMiss;
+
   let finalizeOnResolved = options.finalizeOnResolved === true;
 
   const stop = () => {
@@ -2872,12 +2837,33 @@ function schedulePanoramaLotOrTradeSelection(
   };
   stopPanoramaLotTradeWatcher = stop;
 
+  function finishLotMiss() {
+    const owner = data._vaxlinkOwner;
+    const choice = data._fundedRadioChoice;
+    if (choice) owner.fundingBucketsChecked.add(choice);
+    if (
+      choice &&
+      owner.fundingBucketsChecked.size < PANORAMA_FUNDING_CHOICES.length
+    ) {
+      showVaxlinkToast({ ...data, _fundingChoiceRequired: 'other' });
+    } else {
+      recordDeferredAutofillResult(data, false);
+      showVaxlinkToast({
+        ...data,
+        _fillFeedback: choice ? 'funding_exhausted' : 'lot_not_matched'
+      });
+    }
+    stop();
+  }
+
   const attempt = (now) => {
     if (blockIneligibleChartUse(data)) {
+      if (finalizeOnResolved) recordDeferredAutofillResult(data, false);
       stop();
       return;
     }
     if (isPrimeFacesAjaxBusy() || isPanoramaLotListAwaitingRefresh(data)) {
+      usableMiss = undefined;
       stableSince = null;
       return;
     }
@@ -2885,12 +2871,8 @@ function schedulePanoramaLotOrTradeSelection(
     let hasResolvedAgent = panoramaDetailAgentMatches(data);
     if (!hasResolvedAgent) {
       stableSince = null;
-      const previousList =
-        hasLot &&
-        (preserveFundingFilter ||
-          getPanoramaCurrentAgentSelectionText(owner.form))
-          ? readPanoramaLotList()
-          : null;
+      usableMiss = undefined;
+      const previousList = hasLot ? readPanoramaLotList() : null;
       const started = tryFillPanoramaAgent(data);
       hasResolvedAgent = panoramaDetailAgentMatches(data);
       if (previousList && (started || hasResolvedAgent)) {
@@ -2899,92 +2881,83 @@ function schedulePanoramaLotOrTradeSelection(
       }
     }
 
-    let resolved = !shouldTryLotOrTrade;
-    if (!resolved && hasResolvedAgent) {
-      resolved = hasPanoramaLotOrTradeSelection(data);
-    }
-    if (!resolved && hasResolvedAgent && !isPrimeFacesAjaxBusy()) {
-      stableSince = null;
-      if (preserveFundingFilter && hasLot && hasPanoramaFundedRadio()) {
-        const fundedValue = getPanoramaFundedRadioValue();
-        if (!isExplicitPanoramaFundingValue(fundedValue)) {
-          if (now - lastFundingReapplyClickAt < FUNDING_REAPPLY_COOLDOWN_MS) {
-            return; // a reapply click is still settling — don't stack another radio AJAX
-          }
-          const previousList = readPanoramaLotList();
-          const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
-          if (!reapplied) {
-            showVaxlinkToast(
-              {
-                ...data,
-                _sharedFundingLotFilterRequired: true,
-                _sharedFundingLotLabel:
-                  getPanoramaSharedFundingLotProductLabel(data),
-                _fundedRadioValue: fundedValue
-              },
-              12000
-            );
-            stop();
-            return;
-          }
-          if (reapplied === 'clicked') {
-            lastFundingReapplyClickAt = now;
-            restartSharedFundingMissWindow(now);
-            owner.lotListBeforeRefresh = previousList;
-            return;
-          }
-        }
-      }
-
-      const panelRescue = now - scheduleStartedAt >= PANEL_RESCUE_AFTER_MS;
-
-      // Try lot fill with the current radio state first — avoids triggering a
-      // funded-radio AJAX that can reset the agent and create a re-fill cascade.
-      if (panoramaDetailAgentMatches(data) && !isPrimeFacesAjaxBusy()) {
-        tryFillPanoramaLotOrTrade(data, { panelRescue });
-      }
-      resolved = hasPanoramaLotOrTradeSelection(data);
-      if (
-        !resolved &&
-        preserveFundingFilter &&
-        hasLot &&
-        hasPanoramaFundedRadio()
-      ) {
-        if (now - lastSharedFundingMissAt >= SHARED_FUNDING_MISS_GAP_MS) {
-          lastSharedFundingMissAt = now;
-          sharedFundingMisses += 1;
-          if (sharedFundingMisses >= 3) {
-            showVaxlinkToast(
-              {
-                ...data,
-                _sharedFundingLotSwitchFilter: true,
-                _sharedFundingLotLabel:
-                  getPanoramaSharedFundingLotProductLabel(data),
-                _fundedRadioValue: getPanoramaFundedRadioValue()
-              },
-              12000
-            );
-            stop();
-            return;
-          }
-        }
-      } else if (resolved) {
-        if (hasLot) owner.consentReadyAt = now + 700;
-        sharedFundingMisses = 0;
-      }
-      if (!resolved && !fundedRadioEnsured && !preserveFundingFilter) {
-        fundedRadioEnsured = true;
-        const previousList = hasLot ? readPanoramaLotList() : null;
-        const radioResult = resetPanoramaFundedRadioToShowAll();
-        if (radioResult === 'clicked') {
+    const choice = data._fundedRadioChoice;
+    const currentFunding = hasLot ? getPanoramaFundedRadioValue() : '';
+    if (hasLot && hasResolvedAgent && choice && !isPrimeFacesAjaxBusy()) {
+      const conflicting =
+        isExplicitPanoramaFundingValue(currentFunding) &&
+        currentFunding !== choice;
+      const chooseFromShowAll =
+        !owner.autoResolveFunding &&
+        currentFunding === 'SHOW_ALL' &&
+        !triedManualFilter;
+      if (conflicting || chooseFromShowAll) {
+        usableMiss = undefined;
+        stableSince = null;
+        if (now - lastFundingChangeAt < 2500) return;
+        triedManualFilter = true;
+        const previousList = readPanoramaLotList();
+        if (setPanoramaFundedRadioValue(choice) === 'clicked') {
           owner.lotListBeforeRefresh = previousList;
+          lastFundingChangeAt = now;
           return;
         }
-        // Radio was already at SHOW_ALL or not found — retry immediately
-        if (panoramaDetailAgentMatches(data) && !isPrimeFacesAjaxBusy()) {
-          tryFillPanoramaLotOrTrade(data, { panelRescue });
-        }
+        if (conflicting) return;
+      }
+    }
+
+    let resolved = !shouldTryLotOrTrade;
+    if (!resolved && hasResolvedAgent) {
+      const widget = hasLot ? getPanoramaLotWidget() : null;
+      const funding = hasLot
+        ? getPanoramaLotFundingChoices(widget, data.lot)
+        : [];
+      if (funding.length === 2 && !isPrimeFacesAjaxBusy()) {
+        recordFundingComparison(data, 'both');
+        showVaxlinkToast({ ...data, _fundingChoiceRequired: 'both' });
+        stop();
+        return;
+      }
+
+      resolved = hasPanoramaLotOrTradeSelection(data);
+      const panelRescue = now - scheduleStartedAt >= 2000;
+      if (!resolved && !isPrimeFacesAjaxBusy()) {
+        stableSince = null;
+        tryFillPanoramaLotOrTrade(data, { panelRescue });
         resolved = hasPanoramaLotOrTradeSelection(data);
+        if (hasLot && resolved) owner.consentReadyAt = now + 700;
+      }
+      if (resolved) {
+        usableMiss = undefined;
+        if (funding.length === 1) recordFundingComparison(data, 'single');
+      } else if (hasLot && panelRescue && !isPrimeFacesAjaxBusy()) {
+        const list = readPanoramaLotList();
+        const labels = list?.rows
+          .filter(
+            ({ disabled, text }) =>
+              !disabled && getPanoramaNonemptyLotLabel(text)
+          )
+          .map(({ text, value }) => [text, value]);
+        const currentWidget = getPanoramaLotWidget();
+        if (
+          labels?.length &&
+          (list.control !== currentWidget?.panel || isVisible(list.control))
+        ) {
+          const signature = JSON.stringify(labels);
+          if (
+            usableMiss?.control !== list.control ||
+            usableMiss.signature !== signature
+          ) {
+            usableMiss = { control: list.control, signature, since: now };
+          } else if (now - usableMiss.since >= 3000) {
+            if (!getPanoramaLotFundingChoices(currentWidget, data.lot).length)
+              recordFundingComparison(data, 'unmatched');
+            finishLotMiss();
+            return;
+          }
+        } else {
+          usableMiss = undefined;
+        }
       }
     }
 
@@ -3024,6 +2997,7 @@ function schedulePanoramaLotOrTradeSelection(
   };
 
   const runDeferredPass = () => {
+    if (globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return;
     try {
       runPanoramaAutofill(data, () => fillPanoramaDeferredDetailFields(data));
     } catch (error) {
@@ -3055,6 +3029,10 @@ function schedulePanoramaLotOrTradeSelection(
     }
     const now = performance.now();
     if (now >= deadline) {
+      if (finalizeOnResolved) {
+        recordDeferredAutofillResult(data, false);
+        showVaxlinkToast({ ...data, _fillFeedback: 'deadline' });
+      }
       stop();
       return;
     }
@@ -3073,6 +3051,8 @@ function schedulePanoramaLotOrTradeSelection(
     try {
       runPanoramaAutofill(data, () => attempt(now));
     } catch (error) {
+      if (finalizeOnResolved && isPanoramaAutofillCurrent(data))
+        recordDeferredAutofillResult(data, false);
       stop();
       vlog(error.message);
     }
@@ -3264,70 +3244,34 @@ function isPanoramaImmunizationPage() {
 function fillPanoramaImmunizationFields(data) {
   const blocked = blockIneligibleChartUse(data);
   if (blocked) return blocked;
-  const sharedFundingProductLabel =
-    getPanoramaSharedFundingLotProductLabel(data);
-  const preserveFundingFilter = !!(
-    sharedFundingProductLabel && String(data?.lot || '').trim()
-  );
   const owner = data._vaxlinkOwner;
-  const fundedValue = getPanoramaFundedRadioValue();
-  if (
-    preserveFundingFilter &&
-    hasPanoramaFundedRadio() &&
-    !isExplicitPanoramaFundingValue(fundedValue)
-  ) {
-    // If the nurse already answered the chooser, re-apply their pick rather than
-    // re-prompting; only summon the chooser when there is no recorded answer yet.
-    const previousList = readPanoramaLotList();
-    const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
-    if (reapplied === 'clicked') owner.lotListBeforeRefresh = previousList;
-    if (!reapplied) {
-      showVaxlinkToast(
-        {
-          ...data,
-          _sharedFundingLotFilterRequired: true,
-          _sharedFundingLotLabel: sharedFundingProductLabel,
-          _fundedRadioValue: fundedValue
-        },
-        12000
-      );
+  if (data.lot) {
+    const selectedFunding = getPanoramaFundedRadioValue();
+    if (
+      !data._fundedRadioChoice &&
+      isExplicitPanoramaFundingValue(selectedFunding)
+    )
+      data._fundedRadioChoice = selectedFunding;
+    if (!owner.autoResolveFunding && !data._fundedRadioChoice) {
+      showVaxlinkToast({ ...data, _fundingChoiceRequired: 'manual' });
       return createAutofillResult('pending', {
         reason: 'funding_choice_required'
       });
     }
+    markPanoramaAutofillStarted(data);
+    schedulePanoramaLotOrTradeSelection(data, 0, { finalizeOnResolved: true });
+    return createAutofillResult('pending', {
+      reason: 'waiting_for_required_selection'
+    });
   }
 
   markPanoramaAutofillStarted(data);
 
-  // Switch to SHOW_ALL early, before the agent/lot AJAX settles, so the radio's
-  // own AJAX cascade doesn't land mid-fill and reset the agent (issue: lot and
-  // expiry not selected after selecting the agent). The scheduler below only
-  // falls back to resetting it again if this attempt found no radio at all.
-  const previousList =
-    data.lot &&
-    !preserveFundingFilter &&
-    fundedValue !== 'SHOW_ALL' &&
-    hasPanoramaFundedRadio()
-      ? readPanoramaLotList()
-      : null;
-  const radioResult = preserveFundingFilter
-    ? 'preserved'
-    : resetPanoramaFundedRadioToShowAll();
-  if (radioResult === 'clicked') owner.lotListBeforeRefresh = previousList;
-
   const agentRequested = getPanoramaAgentCandidates(data).length > 0;
   let agentMatches = hasPanoramaAgentSelection(data);
   if (agentRequested && !agentMatches && !isPrimeFacesAjaxBusy()) {
-    const priorAgent =
-      data.lot && getPanoramaCurrentAgentSelectionText(owner.form);
-    const priorLotList =
-      priorAgent || (data.lot && preserveFundingFilter)
-        ? readPanoramaLotList()
-        : null;
-    const started = tryFillPanoramaAgent(data);
+    tryFillPanoramaAgent(data);
     agentMatches = hasPanoramaAgentSelection(data);
-    if (priorLotList && (started || agentMatches))
-      owner.lotListBeforeRefresh = priorLotList;
   }
 
   const productRequested =
@@ -3359,8 +3303,6 @@ function fillPanoramaImmunizationFields(data) {
     hasPanoramaDeferredDetailData(data)
   ) {
     schedulePanoramaLotOrTradeSelection(data, agentMatches ? 200 : 100, {
-      fundedRadioEnsured: !preserveFundingFilter && radioResult !== 'not_found',
-      preserveFundingFilter,
       finalizeOnResolved: waitingForSelection
     });
   }
@@ -3608,18 +3550,36 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
   return { record, queueSizeAfter: nextRows.length };
 }
 
+function recordDeferredAutofillResult(data, success) {
+  const owner = data._vaxlinkOwner;
+  if (owner.detailOutcomeRecorded) return;
+  owner.detailOutcomeRecorded = true;
+  logAnalyticsEvent('autofill_result', {
+    workflow: data._vaxlinkQueueContext?.workflow || owner.mode,
+    source:
+      data._vaxlinkQueueContext?.source ||
+      data._vaxlinkResultSource ||
+      'popup_button',
+    success
+  });
+}
+
 async function finalizeDeferredPanoramaAutofill(data) {
   if (!isPanoramaAutofillCurrent(data) || data._vaxlinkDeferredFinalized) {
     return;
   }
   data._vaxlinkDeferredFinalized = true;
 
+  let consumed;
   try {
-    await consumeQueueRecordAfterDeferredAutofill(data._vaxlinkQueueContext);
+    consumed = await consumeQueueRecordAfterDeferredAutofill(
+      data._vaxlinkQueueContext
+    );
   } catch (error) {
     console.warn('VaxLink deferred queue finalize failed:', error);
   }
-
+  if (consumed) data._vaxlinkOwner.detailOutcomeRecorded = true;
+  else recordDeferredAutofillResult(data, true);
   if (isPanoramaAutofillCurrent(data)) showVaxlinkToast(data);
 }
 
@@ -3869,96 +3829,92 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  if (
-    data._sharedFundingLotFilterRequired ||
-    data._sharedFundingLotSwitchFilter
-  ) {
-    const productLabel =
-      data._sharedFundingLotLabel ||
-      data.tradename ||
-      data.generic_name ||
-      data.name ||
-      'This product';
-    const needsInitialChoice = !!data._sharedFundingLotFilterRequired;
-    const title = needsInitialChoice
-      ? 'Choose PF or NPF'
-      : 'Try the other funding bucket';
-    const detail = needsInitialChoice
-      ? `${productLabel} can use the same lot in both Panorama funding buckets.`
-      : `${productLabel}${data.lot ? ` lot ${data.lot}` : ''} was not found under ${getPanoramaFundingLabel(data._fundedRadioValue)}.`;
-    const followUp = needsInitialChoice
-      ? `Pick Publicly Funded or Non-Publicly Funded and VaxLink will continue automatically.`
-      : 'Pick the funding bucket to try and VaxLink will continue automatically.';
+  if (data._fillFeedback) {
+    const title =
+      data._fillFeedback === 'deadline'
+        ? 'Autofill needs review'
+        : data._fillFeedback === 'funding_exhausted'
+          ? 'Lot not found in either funding category'
+          : 'Lot not found in Panorama';
+    showRoutineToast(
+      `<div class="vl-toast info show"><div class="vl-toast-title">${title}</div><div class="vl-toast-detail">Check the Agent and Lot in Panorama.</div></div>`,
+      9000
+    );
+    return;
+  }
 
+  if (data._fundingChoiceRequired) {
+    const owner = data._vaxlinkOwner;
+    const workflow = data._vaxlinkQueueContext?.workflow || owner.mode;
+    const reason = data._fundingChoiceRequired;
+    const options = PANORAMA_FUNDING_CHOICES.filter(
+      (choice) => !owner.fundingBucketsChecked.has(choice)
+    );
+    const title =
+      reason === 'other'
+        ? 'Try the other funding category'
+        : 'Choose vaccine funding';
+    const detail =
+      reason === 'both'
+        ? 'Panorama lists this lot under both funding categories. Choose one to continue.'
+        : reason === 'other'
+          ? `VaxLink could not verify this lot as ${getPanoramaFundingLabel(data._fundedRadioChoice)}.`
+          : 'Choose the funding category to check in Panorama.';
+    const buttons = options
+      .map(
+        (choice) =>
+          `<button class="vl-toast-action" type="button" data-vl-funded-choice="${choice}">${getPanoramaFundingLabel(choice)}</button>`
+      )
+      .join('');
     showRoutineToast(
       `<div class="vl-toast info persistent show">
-      <div class="vl-toast-title">${escapeToastHtml(title)}</div>
-      <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
-      <div class="vl-toast-detail">${escapeToastHtml(followUp)}</div>
-      <div class="vl-toast-actions">
-        <button class="vl-toast-action" type="button" data-vl-funded-choice="PUBLICLY_FUNDED">Publicly Funded</button>
-        <button class="vl-toast-action" type="button" data-vl-funded-choice="NON_PUBLICLY_FUNDED">Non-Publicly Funded</button>
-        <button class="vl-toast-action secondary" type="button" data-vl-funded-choice-dismiss="true">Not now</button>
-      </div>
-    </div>`,
+        <div class="vl-toast-title">${title}</div>
+        <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
+        <div class="vl-toast-actions">${buttons}
+          <button class="vl-toast-action secondary" type="button" data-vl-funded-choice-dismiss>Not now</button>
+        </div>
+      </div>`,
       durationMs,
       { persistent: true }
     );
-
+    logAnalyticsEvent('funding_prompt_shown', { workflow });
+    let answered = false;
     toastRoutineSlot
       .querySelectorAll('[data-vl-funded-choice]')
       .forEach((button) => {
         button.addEventListener('click', async () => {
-          const fundedChoice = button.getAttribute('data-vl-funded-choice');
-          if (toastDismissTimer) {
-            clearTimeout(toastDismissTimer);
-            toastDismissTimer = null;
-          }
+          const funding = button.getAttribute('data-vl-funded-choice');
+          if (
+            answered ||
+            !options.includes(funding) ||
+            !isPanoramaAutofillCurrent(data)
+          )
+            return;
+          answered = true;
           toastRoutineSlot.innerHTML = '';
-          if (!isPanoramaAutofillCurrent(data) || blockIneligibleChartUse(data))
-            return;
-          const radioResult = runPanoramaAutofill(data, () =>
-            setPanoramaFundedRadioValue(fundedChoice)
-          );
-          if (radioResult === 'not_found') {
-            showRoutineToast(
-              `<div class="vl-toast info show">
-            <div class="vl-toast-title">Funding selector not found</div>
-            <div class="vl-toast-detail">Panorama did not expose the PF/NPF selector yet. Try again once the lot section finishes loading.</div>
-          </div>`,
-              7000
-            );
+          if (blockIneligibleChartUse(data)) {
+            recordDeferredAutofillResult(data, false);
             return;
           }
-          // Drop the chooser flags now that the nurse has answered. Otherwise the
-          // deferred finalize (and any success toast) re-runs showVaxlinkToast with
-          // _sharedFundingLotFilterRequired still set and re-summons this same
-          // persistent prompt, which then only "Not now" can clear.
-          const {
-            _sharedFundingLotFilterRequired,
-            _sharedFundingLotSwitchFilter,
-            _sharedFundingLotLabel,
-            _fundedRadioValue,
-            ...rest
-          } = data;
-          // Record the nurse's answer so any later fill pass re-applies it instead
-          // of re-summoning this persistent chooser (which then only "Not now"
-          // could clear).
-          const fillData = { ...rest, _fundedRadioChoice: fundedChoice };
-          const autofillResult = autoFillPanorama(fillData);
-          if (isAutofillSuccess(autofillResult)) {
-            await finalizeDeferredPanoramaAutofill(fillData);
-          }
+          logAnalyticsEvent('funding_choice_made', { workflow });
+          const { _fundingChoiceRequired, ...rest } = data;
+          const next = { ...rest, _fundedRadioChoice: funding };
+          const result = autoFillPanorama(next);
+          if (isAutofillSuccess(result))
+            await finalizeDeferredPanoramaAutofill(next);
+          else if (
+            !isAutofillPending(result) &&
+            isPanoramaAutofillCurrent(next)
+          )
+            recordDeferredAutofillResult(next, false);
         });
       });
-    const dismissBtn = toastRoutineSlot.querySelector(
-      '[data-vl-funded-choice-dismiss]'
-    );
-    if (dismissBtn) {
-      dismissBtn.addEventListener('click', () =>
-        dismissToast(toastRoutineSlot)
-      );
-    }
+    toastRoutineSlot
+      .querySelector('[data-vl-funded-choice-dismiss]')
+      ?.addEventListener('click', () => {
+        answered = true;
+        dismissToast(toastRoutineSlot);
+      });
     return;
   }
 
@@ -4778,15 +4734,15 @@ async function applyNextQueueItem(options = {}) {
         { id: record.id }
       ));
     }
-    logAnalyticsEvent('autofill_result', {
-      workflow: 'multiple',
-      source: 'hud',
-      success,
-      pending,
-      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-      manufacturer: record.manufacturer || '',
-      expiryFlag: record.expiry_flag || ''
-    });
+    if (!pending)
+      logAnalyticsEvent('autofill_result', {
+        workflow: 'multiple',
+        source: 'hud',
+        success,
+        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
+        manufacturer: record.manufacturer || '',
+        expiryFlag: record.expiry_flag || ''
+      });
     if (success) {
       logAnalyticsEvent('queue_used', {
         workflow: 'multiple',

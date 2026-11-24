@@ -234,7 +234,6 @@ test('only current product readback permits Date and another refresh stops Time'
     hasPanoramaAgentSelection: () => agentMatches,
     tryFillPanoramaAgent: () => true,
     getPanoramaFundedRadioValue: () => 'SHOW_ALL',
-    resetPanoramaFundedRadioToShowAll: () => 'not_found',
     schedulePanoramaLotOrTradeSelection() {},
     getPanoramaAdministeredDateTimeFields: () => ({
       dateField: date,
@@ -252,7 +251,10 @@ test('only current product readback permits Date and another refresh stops Time'
   assert.deepEqual(writes, []);
   assert.equal(lot.value, '');
   agentMatches = true;
-  assert.equal(f.context.autoFillPanorama(owned).status, 'pending');
+  f.context.runPanoramaAutofill(owned, () => {
+    assert.equal(f.context.tryFillPanoramaLot(owned.lot), true);
+    f.context.fillPanoramaDeferredDetailFields(owned);
+  });
   assert.deepEqual(writes, [date]);
   assert.equal(time.value, '');
 });

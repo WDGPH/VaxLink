@@ -94,6 +94,7 @@ const ADMIN_TIME_AUTOFILL_KEY = 'vaxlink_administered_time_autofill_v1';
 const LEGACY_REASON_CONSENT_AUTOFILL_KEY = 'vaxlink_reason_consent_autofill_v1';
 const REASON_AUTOFILL_KEY = 'vaxlink_reason_autofill_v1';
 const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
+const AUTO_RESOLVE_FUNDING_KEY = 'vaxlink_auto_resolve_funding_v1';
 
 const MODE_CONFIG = {
   single: {
@@ -269,6 +270,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             : inventoryEntryToggleBtn;
       target?.focus();
     });
+  document
+    .getElementById('autoResolveFundingToggle')
+    ?.addEventListener('change', (event) => {
+      void setAutofillSetting(AUTO_RESOLVE_FUNDING_KEY, event.target.checked);
+    });
   adminDateAutofillToggle?.addEventListener('change', () => {
     void setAutofillSetting(
       ADMIN_DATE_AUTOFILL_KEY,
@@ -333,20 +339,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         const response = await sendAutoFillToActiveTab(parsedData);
         if (response && response.pending) {
-          logAnalyticsEvent('autofill_result', {
-            workflow: activeMode,
-            source: 'popup_button',
-            success: false,
-            pending: true,
-            vaccineLabel: globalThis.vaxlinkVaccineLabel(parsedData),
-            manufacturer: parsedData.manufacturer || '',
-            expiryFlag:
-              parsedData.expiry_flag ||
-              getExpiryStatus(parsedData.inventory_expiry || parsedData.expiry)
-                .flag
-          });
           writeOutput(
-            'Choose Publicly Funded or Non-Publicly Funded on the chart to continue.',
+            response.reason === 'funding_choice_required'
+              ? 'Choose the funding category in Panorama to continue.'
+              : 'VaxLink is checking the lot and chart fields in Panorama.',
             'info'
           );
           return;
@@ -588,6 +584,8 @@ async function renderHeldScannerScans() {
 }
 
 function handlePopupStorageChanged(changes, area) {
+  if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
+    void loadAutofillSettings();
   if (area === 'local' && changes.vaxlink_pending_scan_inbox_v1)
     void renderHeldScannerScans();
   if (area === 'local' && INVENTORY_BATCH_KEY in changes) {
@@ -710,6 +708,10 @@ function applyPopupPanel(panel) {
 async function loadAutofillSettings() {
   const preferences = [
     [
+      document.getElementById('autoResolveFundingToggle'),
+      AUTO_RESOLVE_FUNDING_KEY
+    ],
+    [
       adminDateAutofillToggle,
       ADMIN_DATE_AUTOFILL_KEY,
       LEGACY_ADMIN_DATETIME_AUTOFILL_KEY
@@ -733,7 +735,9 @@ async function loadAutofillSettings() {
   let stored = {};
   try {
     stored = await getLocalStorage(
-      preferences.flatMap(([, key, legacyKey]) => [key, legacyKey])
+      preferences.flatMap(([, key, legacyKey]) =>
+        legacyKey ? [key, legacyKey] : [key]
+      )
     );
   } catch (_) {}
   for (const [toggle, key, legacyKey] of preferences) {
@@ -809,8 +813,17 @@ function renderAnalyticsSummary(summary) {
         total + (day.workflows?.[workflow]?.popupParses || 0),
       0
     );
+    const funding = day.funding || {};
+    const matched = (funding.single || 0) + (funding.both || 0);
+    const share = (count) =>
+      matched ? `${Math.round(((count || 0) / matched) * 100)}%` : '—';
     return {
       Scans: scannerCaptures + manualEntries,
+      'Funding prompts': funding.prompts || 0,
+      'Funding choices': funding.choices || 0,
+      'One funding category matched': share(funding.single),
+      'Both funding categories matched': share(funding.both),
+      'No funding category matched': funding.unmatched || 0,
       'Forms filled': day.autofill?.success || 0,
       'Inventory exports': day.exports?.inventoryCount || 0,
       'Expiry warnings':
@@ -834,6 +847,16 @@ function renderAnalyticsSummary(summary) {
       ['Scans', 'Scanner captures', 'Manual entries', 'Expiry warnings']
     ],
     ['Charting', ['Forms filled', 'Tray to chart']],
+    [
+      'Funding',
+      [
+        'Funding prompts',
+        'Funding choices',
+        'One funding category matched',
+        'Both funding categories matched',
+        'No funding category matched'
+      ]
+    ],
     ['Trays & exports', ['Immunization tray adds', 'Inventory exports']]
   ];
   analyticsSummaryDiv.innerHTML = `
@@ -855,6 +878,7 @@ function renderAnalyticsSummary(summary) {
 }
 
 function formatAnalyticsNumber(value) {
+  if (typeof value === 'string') return value;
   const num = Number(value) || 0;
   return num.toLocaleString();
 }
@@ -1470,19 +1494,10 @@ async function handleUseMultipleInjectRecord(record) {
     });
     const response = await sendAutoFillToActiveTab(data);
     if (response && response.pending) {
-      logAnalyticsEvent('autofill_result', {
-        workflow: 'multiple',
-        source: 'queue',
-        success: false,
-        pending: true,
-        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-        manufacturer: record.manufacturer || '',
-        expiryFlag:
-          record.expiry_flag ||
-          getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
-      });
       writeOutput(
-        'Choose Publicly Funded or Non-Publicly Funded on the chart to continue. The tray item will update after the lot is resolved.',
+        response.reason === 'funding_choice_required'
+          ? 'Choose the funding category in Panorama to continue.'
+          : 'VaxLink is checking the lot and chart fields in Panorama.',
         'info'
       );
       return;

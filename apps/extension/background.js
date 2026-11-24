@@ -1491,6 +1491,7 @@ function createAnalyticsDay(dayKey) {
     parsing: { success: 0, error: 0, missingLot: 0 },
     lookup: { success: 0, error: 0 },
     autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
+    funding: { prompts: 0, choices: 0, single: 0, both: 0, unmatched: 0 },
     queues: {
       multipleSaved: 0,
       multipleUsed: 0,
@@ -1668,7 +1669,23 @@ function applyAnalyticsEvent(day, event) {
     case 'autofill_attempt':
       day.autofill.attempts += count;
       break;
+    case 'funding_prompt_shown':
+    case 'funding_choice_made':
+    case 'funding_comparison': {
+      const metric =
+        event.eventType === 'funding_prompt_shown'
+          ? 'prompts'
+          : event.eventType === 'funding_choice_made'
+            ? 'choices'
+            : event.outcome;
+      if (metric) {
+        day.funding ??= {};
+        day.funding[metric] = (day.funding[metric] || 0) + 1;
+      }
+      break;
+    }
     case 'autofill_result':
+      if (event.pending) break;
       if (event.success) {
         day.autofill.success += count;
         day.workflows[workflow].autofillSuccess += count;
@@ -1705,6 +1722,10 @@ function makeAnalyticsEvent(eventType, payload = {}) {
     queue: payload.queue ? normalizeQueueKey(payload.queue) : '',
     source: trimAnalyticsLabel(payload.source, 40),
     success: !!payload.success,
+    pending: payload.pending === true,
+    outcome: ['single', 'both', 'unmatched'].includes(payload.outcome)
+      ? payload.outcome
+      : '',
     count: safeAnalyticsCount(payload.count, 1),
     rows: safeAnalyticsCount(payload.rows, 0),
     queueSizeAfter: safeAnalyticsCount(payload.queueSizeAfter, 0),
@@ -1766,10 +1787,7 @@ function aggregateAnalyticsDays(days) {
     });
     sumObjectCounters(rollup.parsing, day.parsing);
     sumObjectCounters(rollup.lookup, day.lookup);
-    if (day.funding) {
-      rollup.funding ??= {};
-      sumObjectCounters(rollup.funding, day.funding);
-    }
+    sumObjectCounters(rollup.funding, day.funding);
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });

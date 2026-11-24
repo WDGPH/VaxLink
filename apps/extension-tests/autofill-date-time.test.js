@@ -35,9 +35,7 @@ function fixture(settings = {}) {
     getPanoramaFormContext: () => ({ kind: 'provider_single' }),
     getPanoramaMultiStepIndicatorKey: () => '',
     isPanoramaImmunizationPage: () => true,
-    getPanoramaSharedFundingLotProductLabel: () => '',
     getPanoramaFundedRadioValue: () => 'SHOW_ALL',
-    resetPanoramaFundedRadioToShowAll: () => 'not_found',
     hasPanoramaAgentSelection: () => false,
     tryFillPanoramaAgent: () => true,
     tryFillPanoramaLot(lot) {
@@ -45,7 +43,12 @@ function fixture(settings = {}) {
       return true;
     },
     hasPanoramaLotSelection: (lot) => lot === selectedLot,
-    schedulePanoramaLotOrTradeSelection() {},
+    schedulePanoramaLotOrTradeSelection(data) {
+      context.runPanoramaAutofill(data, () => {
+        context.tryFillPanoramaLot(data.lot);
+        context.fillPanoramaDeferredDetailFields(data);
+      });
+    },
     canFillPanoramaControl: () => true,
     isVisible: () => true,
     getFields: (selectors) =>
@@ -76,7 +79,7 @@ function fixture(settings = {}) {
     },
     fill(data) {
       const owned = context.beginPanoramaAutofill(data);
-      assert.equal(context.autoFillPanorama(owned).status, 'success');
+      assert.equal(context.autoFillPanorama(owned).status, 'pending');
       return owned;
     }
   };
@@ -133,7 +136,7 @@ test('live and old tray fills use fill time, keep it through retries, and renew 
     f.fields.date.value = f.fields.time.value = '';
     const owned = f.context.beginPanoramaAutofill(payload);
     f.clock.now = '2026-06-12T04:01:00Z';
-    assert.equal(f.context.autoFillPanorama(owned).status, 'success');
+    assert.equal(f.context.autoFillPanorama(owned).status, 'pending');
     assert.equal(f.fields.date.value, '2026/06/12');
     assert.equal(f.fields.time.value, '00:01');
     f.clock.now = '2026-06-13T04:04:00Z';

@@ -243,13 +243,16 @@ test('a funding click cannot fall through to a stale radio write', () => {
     }
   };
   const radio = {
+    value: 'PUBLICLY_FUNDED',
     checked: false,
     closest: () => ({ querySelector: () => box })
   };
-  f.context.document.querySelector = () => radio;
+  f.form.querySelectorAll = () => [radio];
   assert.throws(
     () =>
-      f.runPanoramaAutofill(data, () => f.setPanoramaFundedRadioValue('PF')),
+      f.runPanoramaAutofill(data, () =>
+        f.setPanoramaFundedRadioValue(radio.value)
+      ),
     /Autofill stopped/
   );
   assert.equal(radio.checked, false);
@@ -491,4 +494,138 @@ test('one pending watcher restarts its stable interval after repairing details',
     f.state.timers.map((timer) => timer.delay),
     [1500, 3500]
   );
+});
+
+test('a chosen funding category waits for its Lot list and a miss can try the other category once', async () => {
+  const f = fixture();
+  const events = [];
+  const handlers = new Map();
+  const selected = { funding: 'SHOW_ALL', lot: false };
+  const select = { options: [{ text: 'OLD', value: 'other-lot' }] };
+  let searches = 0;
+  const slot = {
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll() {
+      return ['PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED']
+        .filter((choice) =>
+          this.innerHTML.includes(`data-vl-funded-choice="${choice}"`)
+        )
+        .map((choice) => ({
+          getAttribute: () => choice,
+          addEventListener: (_event, callback) => handlers.set(choice, callback)
+        }));
+    }
+  };
+  Object.assign(f.context, {
+    testSlot: slot,
+    ensureToastHost() {},
+    escapeToastHtml: (text) => text,
+    isPanoramaImmunizationPage: () => true,
+    getPanoramaFundedRadioValue: () => selected.funding,
+    setPanoramaFundedRadioValue: (choice) => {
+      selected.funding = choice;
+      return 'clicked';
+    },
+    getPanoramaLotWidget: () => ({ select }),
+    hasPanoramaLotSelection: () => selected.lot,
+    tryFillPanoramaLotOrTrade() {
+      searches++;
+      selected.lot = select.options[0].text === 'N-TRAIN';
+      return selected.lot;
+    },
+    logAnalyticsEvent: (event, payload) => events.push({ event, payload }),
+    playAudioCue() {},
+    isAutofillSuccess: (result) => result?.status === 'success',
+    isAutofillPending: (result) => result?.status === 'pending'
+  });
+  // Use the actual autofill entry point for the initial and alternate choices.
+  f.context.autoFillPanorama = (data) =>
+    f.context.runPanoramaAutofill(data, () =>
+      f.context.fillPanoramaImmunizationFields(data)
+    );
+  vm.runInContext('toastRoutineSlot = testSlot;', f.context);
+  f.context.applyAutofillSettings({ vaxlink_auto_resolve_funding_v1: false });
+  f.state.resolved = true;
+  const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+  const initial = f.context.autoFillPanorama(data);
+  assert.equal(initial.reason, 'funding_choice_required');
+  assert.equal(searches, 0);
+  const choosePublic = handlers.get('PUBLICLY_FUNDED');
+  await choosePublic();
+  await choosePublic();
+  f.runTimer();
+  f.runTimer();
+  assert.equal(searches, 0, 'the old list is still on the form');
+  select.options[0].text = 'DIFFERENT LOT';
+  for (let attempt = 0; attempt < 15 && f.state.timers.length; attempt++)
+    f.runTimer();
+  assert.match(slot.innerHTML, /Try the other funding category/);
+  assert.doesNotMatch(
+    slot.innerHTML,
+    /data-vl-funded-choice="PUBLICLY_FUNDED"/
+  );
+  assert.equal(
+    events.filter(({ event }) => event === 'autofill_result').length,
+    0
+  );
+  await handlers.get('NON_PUBLICLY_FUNDED')();
+  f.runTimer();
+  select.options[0].text = 'N-TRAIN';
+  for (let attempt = 0; attempt < 8 && f.state.timers.length; attempt++)
+    f.runTimer();
+  await Promise.resolve();
+  assert.equal(
+    events.filter(({ event }) => event === 'funding_prompt_shown').length,
+    2
+  );
+  assert.equal(
+    events.filter(({ event }) => event === 'funding_choice_made').length,
+    2
+  );
+  assert.equal(
+    events.filter(({ event }) => event === 'funding_comparison').length,
+    0
+  );
+  assert.deepEqual(
+    events
+      .filter(({ event }) => event === 'autofill_result')
+      .map(({ payload }) => payload.success),
+    [true]
+  );
+});
+
+test('automatic comparison waits for the Agent refresh before offering both funding choices', () => {
+  const f = fixture();
+  const select = {
+    options: [
+      { text: 'TRAIN', value: 'public' },
+      { text: 'N-TRAIN', value: 'private' }
+    ]
+  };
+  const reports = [];
+  const prompts = [];
+  let agentMatches = false;
+  Object.assign(f.context, {
+    panoramaDetailAgentMatches: () => agentMatches,
+    tryFillPanoramaAgent: () => (agentMatches = true),
+    getPanoramaLotWidget: () => ({ select }),
+    getPanoramaFundedRadioValue: () => 'SHOW_ALL',
+    tryFillPanoramaLotOrTrade: () =>
+      assert.fail('both entries need staff choice'),
+    showVaxlinkToast: (data) => prompts.push(data._fundingChoiceRequired),
+    logAnalyticsEvent: (event, payload) =>
+      reports.push([event, payload.outcome])
+  });
+  f.schedulePanoramaLotOrTradeSelection(
+    f.beginPanoramaAutofill({ lot: 'TRAIN' })
+  );
+  f.runTimer();
+  f.runTimer();
+  assert.deepEqual(prompts, []);
+  select.options[0].text = 'TRAIN - Exp. 2099-01-31';
+  f.runTimer();
+  assert.deepEqual(prompts, ['both']);
+  assert.deepEqual(reports, [['funding_comparison', 'both']]);
+  assert.equal(f.state.timers.length, 0);
 });

@@ -144,3 +144,33 @@ test('Activity accepts older product names and skips barcode identifiers used as
     'Trade name'
   );
 });
+
+test('funding actions and comparisons are separate from completed autofill outcomes', async () => {
+  const worker = createBackgroundHarness(makeTestNvcBundle());
+  for (const [eventType, payload] of [
+    ['autofill_attempt', {}],
+    ['funding_prompt_shown', {}],
+    ['funding_comparison', { outcome: 'both' }],
+    ['funding_choice_made', {}],
+    ['autofill_result', { pending: true }],
+    ['autofill_result', { success: true }]
+  ]) {
+    assert.equal(
+      (
+        await worker.sendMessage({
+          action: 'logAnalyticsEvent',
+          eventType,
+          payload
+        })
+      ).success,
+      true
+    );
+  }
+  const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });
+  assert.equal(data.rollup.funding.prompts, 1);
+  assert.equal(data.rollup.funding.choices, 1);
+  assert.equal(data.rollup.funding.both, 1);
+  assert.equal(data.rollup.autofill.attempts, 1);
+  assert.equal(data.rollup.autofill.success, 1);
+  assert.equal(data.rollup.autofill.failure, 0);
+});

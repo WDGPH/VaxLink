@@ -160,6 +160,12 @@ history and is not used as the administration timestamp. The Multiple
 Immunizations entry grid fills only its date field; detail forms can fill both
 fields. Disabled fields keep their existing values.
 
+The Autofill settings can ask for funding before VaxLink searches for a lot.
+With automatic funding enabled, VaxLink checks the current Lot list and uses
+a sole match. If both funding categories list the lot, staff choose one.
+VaxLink keeps an existing category and waits for the Lot list to change after
+a category change. After a miss in one category, staff can try the other.
+
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
