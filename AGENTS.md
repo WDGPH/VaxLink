@@ -209,7 +209,7 @@ GitHub Actions:
   catalogue skip if it cannot be downloaded. Uploads Alpha ZIPs for prereleases
   and both channel ZIPs for stable versions. Web Store uploads are manual.
 - `.github/workflows/docs.yml` — runs the locked, strict MkDocs documentation check on pushes to `main`/`alpha` and on PRs; it does not publish.
-- `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `README.md` for token setup and historical release reconciliation.
+- `.github/workflows/docs-hub-notify.yml` — opt-in notifications to `WDGPH/docs` for main and stable-tag changes. See `CONTRIBUTING.md` for token setup and historical release reconciliation.
 
 ## Important Constraints
 
