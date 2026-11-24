@@ -1,6 +1,7 @@
 import './shared/nvc-lot-report.js';
 import './shared/tray-doses.js';
 import { buildLegacyQueueRecord } from './queue-record.js';
+import { getExpiryStatus, parseDateToLocal } from './popup-parser.js';
 import { escapeHtml } from './popup-ui.js';
 
 export const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
@@ -52,28 +53,6 @@ function normalizeDoseCount(value, fallback = null) {
     return fallback;
   }
   return parsed;
-}
-
-function getTotalDoseCount(row) {
-  return normalizeDoseCount(row && row.total_doses, null);
-}
-
-function formatDoseSummary(row) {
-  if (row.dose_tracking === 'retained') return 'Pinned for reuse';
-  const remaining = getTrayRemainingDoses(row);
-  if (remaining === null) {
-    // No dose count known — vial is treated as unlimited (multi-dose)
-    return 'multi-dose';
-  }
-  const total = getTotalDoseCount(row);
-  if (!Number.isFinite(remaining) || remaining <= 0) {
-    return '';
-  }
-  if (total && total > 1) {
-    const clampedRemaining = remaining > total ? total : remaining;
-    return `${clampedRemaining}/${total} dose(s) remaining`;
-  }
-  return `${remaining} dose(s) remaining`;
 }
 
 function getLocalStorage(keys) {
@@ -320,6 +299,7 @@ export class ScanQueueManager {
       }
     }
     if (!this.rows.length) {
+      this.summaryEl.hidden = false;
       this.summaryEl.textContent = this.emptySummary;
       this.listEl.innerHTML = this.emptyMessage
         ? `<div class="inventory-empty">${escapeHtml(this.emptyMessage)}</div>`
@@ -328,18 +308,22 @@ export class ScanQueueManager {
       return;
     }
 
+    this.summaryEl.hidden = true;
     this.summaryEl.textContent = this.summaryBuilder(this.rows);
 
-    this.listEl.innerHTML = this.rows
-      .map((row, index) =>
-        buildQueueItemMarkup(row, index, {
-          isActive: row.id && row.id === this.activeUseId,
-          selected: this.selectedIds.has(row.id),
-          showUseAction: this.showUseAction,
-          useButtonLabel: this.useButtonLabel
-        })
-      )
-      .join('');
+    const headings = `<div class="inventory-list-heading" aria-hidden="true"><span>Vaccine</span><span>Qty</span></div>`;
+    this.listEl.innerHTML =
+      headings +
+      this.rows
+        .map((row, index) =>
+          buildQueueItemMarkup(row, index, {
+            isActive: row.id && row.id === this.activeUseId,
+            selected: this.selectedIds.has(row.id),
+            showUseAction: this.showUseAction,
+            useButtonLabel: this.useButtonLabel
+          })
+        )
+        .join('');
 
     this.listEl.querySelectorAll('[data-remove-id]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -551,61 +535,68 @@ function buildQueueItemMarkup(row, index, options) {
       row.lot ||
       `Scan ${index + 1}`
   );
-  const lot = escapeHtml(row.lot || 'N/A');
-  const expiry = escapeHtml(
-    row.inventory_expiry || row.barcode_expiry || 'N/A'
+  const lot = escapeHtml(row.lot || 'Unknown');
+  const expiredDate = options.showUseAction
+    ? globalThis.VaxLinkExpiryDate.expiredVaccineDate(row)
+    : null;
+  const expiry =
+    expiredDate ||
+    row.inventory_expiry ||
+    row.barcode_expiry ||
+    row.nvc_lot_expiry;
+  const date = parseDateToLocal(expiry);
+  const { flag } = getExpiryStatus(expiry);
+  const expired = flag === 'expired' || row.expiry_flag === 'expired';
+  const tone = expired ? 'expired' : flag;
+  let expiryText = expired ? 'Expired · Date unknown' : 'Expiry unknown';
+  if (date) {
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    expiryText = `${expired ? 'Expired' : 'Expires'} ${date.getFullYear()}-${month}-${day}`;
+  }
+  const description = escapeHtml(
+    [row.manufacturer, formatInventoryTimestamp(row.scanned_at)]
+      .filter(Boolean)
+      .join(' · ')
   );
-  const manufacturer = escapeHtml(row.manufacturer || 'N/A');
-  const status = escapeHtml(formatInventoryStatus(row));
-  const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
   const id = escapeHtml(row.id || '');
   const reportUrl = globalThis.VaxLinkNvcLotReport.makeDraft(row);
   const lookupMessage = reportUrl
     ? 'Lot missing from the catalogue'
     : row.lookup_error;
-  const doseText = formatDoseSummary(row);
   const held =
     Array.isArray(row.dose_reservations) && row.dose_reservations.length > 0;
   const useActionMarkup =
     options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
-      ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
+      ? `<button class="inventory-use" type="button" data-use-id="${id}" aria-label="Use ${title}, lot ${lot}, for chart">${escapeHtml(options.useButtonLabel)}</button>`
       : '';
   const pinned = row.dose_tracking === 'retained';
   const quantity = getTrayRemainingDoses(row) ?? '';
   const pinMarkup =
     useActionMarkup && canPinTrayDose(row)
-      ? `<button class="inventory-dose-set" type="button" data-pin-dose-id="${id}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${title}, lot ${lot}">${pinned ? 'Unpin' : 'Pin'}</button>`
+      ? `<button class="tray-tool tray-pin" type="button" data-pin-dose-id="${id}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${title}, lot ${lot}" title="${pinned ? 'Unpin' : 'Pin for reuse'}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m16 3 5 5-3 1-3 4v4l-3 1-6-6 1-3h4l4-3 1-3ZM9 15l-6 6"/></svg></button>`
       : '';
 
   return `
-    <div class="inventory-item${options.isActive ? ' active' : ''}" data-tray-row-id="${id}">
-      <div class="inventory-item-top">
-        <div>
-          <div class="inventory-item-title">
-            ${
-              id
-                ? `<input type="checkbox" data-select-id="${id}" aria-label="Select ${title}, lot ${lot}" ${options.selected ? 'checked' : ''}>
-            <button type="button" draggable="true" data-reorder-id="${id}" aria-label="Reorder ${title}, lot ${lot}. Drag or press up or down." title="Drag or use the up and down arrow keys">↕</button>`
-                : ''
-            }
-            ${title}
-          </div>
-          <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}${row.reference_only ? ' | Reference only' : ''}</div>
-        </div>
-        <div class="inventory-item-actions">
-          ${useActionMarkup}
-          <input class="inventory-quantity" type="text" inputmode="numeric" value="${quantity}" placeholder="Qty" data-set-doses-id="${id}" data-dose-fields="${escapeHtml(getTrayDoseFields(row))}" aria-label="Remaining doses for ${title}, lot ${lot}" title="Press Enter to save or Escape to cancel">
-          ${pinMarkup}
-          <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
-        </div>
+    <div class="inventory-item ${tone}${options.isActive ? ' active' : ''}" data-tray-row-id="${id}">
+      ${
+        id
+          ? `<input type="checkbox" data-select-id="${id}" aria-label="Select ${title}, lot ${lot}" ${options.selected ? 'checked' : ''}>
+        <button class="tray-tool tray-drag" type="button" draggable="true" data-reorder-id="${id}" aria-label="Reorder ${title}, lot ${lot}. Drag or press up or down." title="Drag or use the up and down arrow keys"></button>`
+          : '<span></span><span></span>'
+      }
+      <div class="inventory-item-details" title="${description}">
+        <div class="inventory-item-title">${title}</div>
+        <div class="inventory-item-meta">Lot ${lot} · <span class="inventory-item-expiry"${tone === 'expiring_soon' ? ' title="Expiring soon"' : ''}>${escapeHtml(expiryText)}</span></div>
       </div>
-      <div class="inventory-item-grid">
-        <span class="inventory-chip">Expiry ${expiry}</span>
-        <span class="inventory-chip">Status ${status}</span>
-        <span class="inventory-chip">Mfr ${manufacturer}</span>
-        ${doseText ? `<span class="inventory-chip">${escapeHtml(doseText)}</span>` : ''}
-        ${held ? '<span class="inventory-chip">Review dose on chart</span>' : ''}
+      <input class="inventory-quantity" type="text" inputmode="numeric" value="${quantity}" placeholder="${pinned ? '∞' : '—'}" data-set-doses-id="${id}" data-dose-fields="${escapeHtml(getTrayDoseFields(row))}" aria-label="Remaining doses for ${title}, lot ${lot}" title="Press Enter to save or Escape to cancel">
+      <div class="inventory-item-actions">
+        ${useActionMarkup}
+        ${pinMarkup}
+        <button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>
       </div>
+      ${row.reference_only ? '<div class="inventory-lot-report">Reference only</div>' : ''}
+      ${held ? '<div class="inventory-lot-report">Review dose on chart</div>' : ''}
       ${lookupMessage ? `<div class="inventory-lot-report"><span>${escapeHtml(lookupMessage)}</span>${reportUrl ? `<a href="${escapeHtml(reportUrl)}">Email lot report</a>` : ''}</div>` : ''}
     </div>
   `;
@@ -620,14 +611,6 @@ function formatInventoryTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
-}
-
-function formatInventoryStatus(row) {
-  const flag = row && row.expiry_flag ? row.expiry_flag : 'unknown';
-  if (flag === 'expired') return 'Expired';
-  if (flag === 'expiring_soon') return 'Expiring soon';
-  if (flag === 'valid') return 'Valid';
-  return 'Unknown';
 }
 
 function csvEscape(value) {

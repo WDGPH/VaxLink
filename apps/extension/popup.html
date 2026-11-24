@@ -10,6 +10,8 @@
         --line: #d4dce6;
         --accent: #0f8b8d;
         --ring: rgba(15, 139, 141, 0.22);
+        --tray-line: #dbe6ed;
+        --tray-accent: #0e6575;
       }
 
       button,
@@ -313,11 +315,6 @@
         transform: none;
       }
 
-      #exportCsvBtn {
-        background: #164e63;
-        color: #fff;
-      }
-
       #refreshNvcBtn {
         width: auto;
         padding: 7px 10px;
@@ -374,172 +371,299 @@
       }
 
       .inventory {
-        flex: 1;
-        margin-top: 12px;
-        padding: 10px 11px;
-        border-radius: 16px;
-        border: 1px solid #c8d9e8;
-        background: linear-gradient(180deg, #fbfdff 0%, #f4f9fc 100%);
+        margin-top: 4px;
       }
 
       .inventory-summary {
+        color: var(--subtle);
         font-size: 12px;
-        line-height: 1.45;
-        color: #4a6275;
       }
 
       .inventory-list {
-        margin-top: 10px;
-        display: grid;
-        gap: 8px;
-        padding-right: 2px;
+        --tray-columns: 16px 22px minmax(0, 1fr) 44px 88px;
       }
 
       .inventory-empty {
-        padding: 10px 2px 2px;
+        padding: 6px 2px;
         font-size: 12px;
-        line-height: 1.45;
-        color: #64748b;
+        color: var(--subtle);
+      }
+
+      .inventory-list-heading,
+      .inventory-item {
+        display: grid;
+        grid-template-columns: var(--tray-columns);
+        gap: 4px 6px;
+        align-items: center;
+      }
+
+      .inventory-list-heading {
+        border-bottom: 1px solid var(--tray-line);
+      }
+
+      .inventory-list-heading span {
+        grid-column: 3;
+        color: var(--subtle);
+        font-size: 11px;
+        padding: 5px 0 6px;
+      }
+
+      .inventory-list-heading span + span {
+        grid-column: 4;
+        text-align: center;
       }
 
       .inventory-item {
-        border: 1px solid #dbe7f0;
-        border-radius: 14px;
-        padding: 10px;
-        background: #ffffff;
-        box-shadow: 0 6px 16px rgba(16, 33, 53, 0.05);
+        padding: 7px 0;
+        color: var(--ink);
       }
 
       .inventory-item.active {
-        border-color: #8fd3d1;
-        box-shadow: 0 0 0 3px rgba(15, 139, 141, 0.12);
-        background: linear-gradient(180deg, #ffffff 0%, #f1fbfa 100%);
+        background: #e8f5f6;
+      }
+      .inventory-item [data-select-id] {
+        width: 14px;
+        height: 14px;
+        margin: 0;
+        accent-color: var(--accent);
       }
 
-      .inventory-item-top {
-        display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        align-items: flex-start;
-      }
-
-      .inventory-item-actions {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-        flex: 0 0 auto;
+      .inventory-item-details {
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
 
       .inventory-item-title {
         font-size: 13px;
-        font-weight: 800;
-        color: #12364a;
+        font-weight: 700;
       }
 
       .inventory-item-meta {
-        margin-top: 3px;
+        margin-top: 2px;
         font-size: 11px;
-        color: #64748b;
+        color: var(--subtle);
+      }
+
+      .inventory-item-expiry {
+        overflow-wrap: normal;
+        white-space: nowrap;
+      }
+
+      .expired .inventory-item-expiry {
+        color: #a52b27;
+        font-weight: 700;
+      }
+
+      .expiring_soon .inventory-item-expiry {
+        color: #8d4615;
+        font-weight: 700;
+      }
+
+      .inventory-item-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 3px;
+      }
+
+      .tray-tool {
+        display: inline-grid;
+        place-items: center;
+        width: 24px;
+        min-height: 24px;
+        padding: 0;
+        border-radius: 5px;
+        background: transparent;
+        color: #527083;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      .tray-drag {
+        width: 18px;
+        color: #728697;
+        cursor: grab;
+      }
+      .tray-drag::before {
+        content: '';
+        width: 9px;
+        height: 13px;
+        background: radial-gradient(circle, currentColor 1px, transparent 1.7px)
+          0 0 / 4.5px 4.3px;
+      }
+
+      .tray-drag:hover,
+      .tray-drag:focus-visible,
+      .tray-pin:hover,
+      .tray-pin[aria-pressed='true'] {
+        color: #0e6878;
+      }
+      .tray-drag:active {
+        cursor: grabbing;
+      }
+
+      .tray-pin[aria-pressed='true'] svg {
+        fill: #c1dee3;
+      }
+
+      .tray-remove {
+        color: var(--ink);
+        font-size: 17px;
+        font-weight: 400;
+      }
+      .tray-remove:hover {
+        color: #a52b27;
+      }
+
+      .inventory-use,
+      input.inventory-quantity[type='text'] {
+        min-height: 24px;
+        padding: 2px 4px;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--ink);
+        font-size: 13px;
       }
 
       .inventory-use {
         width: auto;
-        padding: 6px 10px;
-        border-radius: 999px;
-        background: #0f8b8d;
-        color: #fff;
-        font-size: 11px;
+        margin-right: auto;
+        padding-inline: 7px;
+        color: var(--tray-accent);
       }
 
-      .inventory-item-actions .inventory-quantity {
-        width: 4em;
-        margin: 0;
-        padding: 5px;
+      .inventory-use:hover:not(:disabled) {
+        background: #edf7f6;
+      }
+
+      input.inventory-quantity[type='text'] {
+        justify-self: center;
+        width: 40px;
         text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+
+      input.inventory-quantity[type='text']:hover:not(:focus) {
+        border-color: var(--line);
+      }
+
+      input.inventory-quantity::placeholder {
+        color: var(--subtle);
+        opacity: 1;
+      }
+
+      .inventory-lot-report {
+        grid-column: 3 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+        margin-top: 2px;
+        color: #345067;
         font-size: 12px;
       }
 
-      .inventory-dose-set {
-        width: auto;
-        padding: 6px 9px;
-        border-radius: 999px;
-        background: #fde68a;
-        border: 1px solid #fcd34d;
-        color: #78350f;
-        font-size: 11px;
-      }
-
-      .inventory-item-grid {
-        margin-top: 9px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-
-      .inventory-chip {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #eef6fb;
-        color: #345067;
-        font-size: 11px;
+      .inventory-lot-report a {
+        padding: 4px 9px;
+        border: 1px solid #b8d5db;
+        border-radius: 6px;
+        background: #f4fafb;
+        color: #0e7186;
         font-weight: 700;
+        text-decoration: none;
       }
 
-      .inventory-remove {
-        width: auto;
-        padding: 6px 9px;
-        border-radius: 999px;
-        background: #f8fafc;
-        border: 1px solid #d7e3ed;
-        color: #52667a;
-        font-size: 11px;
+      .inventory-lot-report a:hover {
+        background: #e5f3f5;
       }
 
       .queue-heading {
         display: flex;
         align-items: center;
         gap: 8px;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
       }
 
       .queue-heading .result-heading {
         margin: 0;
+        color: var(--ink);
         text-transform: none;
-        font-size: 13px;
+        letter-spacing: 0;
+        font-size: 16px;
       }
 
       .queue-count {
-        padding: 3px 7px;
-        border-radius: 8px;
-        background: #e7f1f6;
-        color: #597081;
-        font-size: 11px;
-        font-weight: 700;
+        color: var(--subtle);
+        font-size: 13px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
       }
 
-      #clearMultipleBtn,
-      #clearInventoryBtn {
+      .tray-menu {
+        position: relative;
         margin-left: auto;
-        width: auto;
-        padding: 6px;
-        background: transparent;
-        color: #597081;
-        font-size: 11px;
       }
 
-      #queueEntryToggleBtn,
-      #inventoryEntryToggleBtn {
-        width: 30px;
-        height: 30px;
-        padding: 0;
-        border-radius: 9px;
-        background: #0e8495;
-        color: #fff;
-        font-size: 24px;
-        font-weight: 400;
+      .mode-panel:has(.tray-menu[open]) {
+        min-height: 184px;
+      }
+
+      .tray-menu summary {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        list-style: none;
+        cursor: pointer;
+        font-size: 19px;
         line-height: 1;
+      }
+
+      .tray-menu summary:hover,
+      .tray-menu[open] summary {
+        background: #f1f6f8;
+      }
+
+      .tray-menu-options {
+        position: absolute;
+        z-index: 1;
+        top: calc(100% + 3px);
+        right: 0;
+        min-width: 158px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: 0 3px 12px rgb(16 33 53 / 14%);
+      }
+
+      .tray-menu-options button {
+        display: block;
+        width: 100%;
+        min-height: 30px;
+        padding: 5px 9px;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--ink);
+        font-size: 12px;
+        font-weight: 500;
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      .tray-menu-options button:hover:not(:disabled) {
+        background: #edf7f6;
+      }
+
+      .tray-menu-options button:last-child:not(:disabled):hover {
+        color: #a52b27;
+      }
+
+      .tray-menu-options button:focus-visible,
+      .tray-menu summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
       }
 
       .queue-entry[hidden],
@@ -799,35 +923,70 @@
         padding: 8px 6px;
         line-height: 1.35;
       }
-      .inventory-lot-report {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: space-between;
-        gap: 6px 12px;
-        margin-top: 8px;
-        color: var(--ink);
+      .tray-history {
+        margin-top: 12px;
         font-size: 12px;
+        color: var(--subtle);
       }
-      .inventory-lot-report a {
-        color: inherit;
-        font-weight: 600;
+      .tray-history summary {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 4px;
+        list-style: none;
+        cursor: pointer;
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 700;
       }
 
-      .recent-chart-lots h3 {
-        font-size: 13px;
-        margin: 12px 0 5px;
+      .tray-history summary::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border: solid currentColor;
+        border-width: 0 1.5px 1.5px 0;
+        transform: rotate(-45deg);
       }
-      .recent-chart-lots ul {
+
+      .tray-history[open] summary::before {
+        transform: rotate(45deg);
+      }
+      .tray-history ul {
+        list-style: none;
         margin: 0;
         padding: 0;
-        list-style: none;
       }
-      .recent-chart-lots li {
+      .tray-history li {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 4px 0;
+        padding: 7px 0 7px 24px;
+        border-top: 1px solid var(--tray-line);
+      }
+      .tray-history li > div {
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .tray-history strong {
+        color: var(--ink);
+        font-size: 13px;
+      }
+
+      .tray-history button {
+        width: auto;
+        padding: 4px 7px;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--tray-accent);
+        white-space: nowrap;
+      }
+
+      .tray-history button:hover {
+        background: #edf7f6;
       }
 
       .tray-dialog {
@@ -1109,34 +1268,46 @@
             <div id="multipleModeSection" class="mode-panel">
               <div class="inventory">
                 <div class="queue-heading">
-                  <h3 class="result-heading">Tray</h3>
+                  <h3 class="result-heading">Immunization Tray</h3>
                   <span
                     id="multipleQueueCount"
                     class="queue-count"
                     aria-label="Saved vaccines"
                     >0</span
                   >
-                  <button
-                    id="clearMultipleBtn"
-                    type="button"
-                    aria-label="Clear tray"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    id="queueEntryToggleBtn"
-                    type="button"
-                    disabled
-                    aria-label="Add a vaccine as text"
-                    title="Add a vaccine as text"
-                    aria-expanded="false"
-                    aria-controls="queueEntryPanel"
-                  >
-                    +
-                  </button>
+                  <details id="immunizationTrayMenu" class="tray-menu">
+                    <summary
+                      aria-label="Immunization Tray actions"
+                      title="Immunization Tray actions"
+                    >
+                      ⋯
+                    </summary>
+                    <div class="tray-menu-options">
+                      <button
+                        id="queueEntryToggleBtn"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="queueEntryPanel"
+                        disabled
+                      >
+                        Add to tray
+                      </button>
+                      <button id="moveToInventoryBtn" type="button" disabled>
+                        Move selected to Inventory
+                      </button>
+                      <button
+                        id="clearMultipleBtn"
+                        type="button"
+                        aria-label="Clear Immunization Tray"
+                        disabled
+                      >
+                        Clear tray
+                      </button>
+                    </div>
+                  </details>
                 </div>
                 <div id="multipleQueueSummary" class="inventory-summary">
-                  Scan a vaccine barcode or select + to add it as text.
+                  Scan a vaccine barcode or choose Add to tray.
                 </div>
                 <div id="queueEntryPanel" class="queue-entry" hidden>
                   <label for="queueBarcodeInput">Barcode</label>
@@ -1152,48 +1323,60 @@
                     <button id="addQueueBtn" type="button">Add to Tray</button>
                   </div>
                 </div>
-                <button id="moveToInventoryBtn" type="button" disabled>
-                  Move selected to Inventory
-                </button>
                 <div id="multipleQueueList" class="inventory-list"></div>
-                <section class="recent-chart-lots">
-                  <h3>Recent chart lots</h3>
-                  <ul id="immunizationRecentChartLots"></ul>
-                </section>
               </div>
+              <details class="tray-history">
+                <summary>Recent Scans</summary>
+                <ul id="immunizationRecentChartLots"></ul>
+              </details>
             </div>
 
             <div id="inventoryModeSection" class="mode-panel" hidden>
               <div class="inventory">
                 <div class="queue-heading">
-                  <h3 class="result-heading">Tray</h3>
+                  <h3 class="result-heading">Inventory Tray</h3>
                   <span
                     id="inventoryQueueCount"
                     class="queue-count"
                     aria-label="Saved inventory scans"
                     >0</span
                   >
-                  <button
-                    id="clearInventoryBtn"
-                    type="button"
-                    aria-label="Clear inventory tray"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    id="inventoryEntryToggleBtn"
-                    type="button"
-                    disabled
-                    aria-label="Add a vaccine as text"
-                    title="Add a vaccine as text"
-                    aria-expanded="false"
-                    aria-controls="inventoryEntryPanel"
-                  >
-                    +
-                  </button>
+                  <details id="inventoryTrayMenu" class="tray-menu">
+                    <summary
+                      aria-label="Inventory Tray actions"
+                      title="Inventory Tray actions"
+                    >
+                      ⋯
+                    </summary>
+                    <div class="tray-menu-options">
+                      <button
+                        id="inventoryEntryToggleBtn"
+                        type="button"
+                        aria-expanded="false"
+                        aria-controls="inventoryEntryPanel"
+                        disabled
+                      >
+                        Add to tray
+                      </button>
+                      <button id="moveToImmunizationBtn" type="button" disabled>
+                        Move selected to Immunization
+                      </button>
+                      <button id="exportCsvBtn" type="button" disabled>
+                        Export CSV
+                      </button>
+                      <button
+                        id="clearInventoryBtn"
+                        type="button"
+                        aria-label="Clear Inventory Tray"
+                        disabled
+                      >
+                        Clear tray
+                      </button>
+                    </div>
+                  </details>
                 </div>
                 <div id="inventorySummary" class="inventory-summary">
-                  Scan a vaccine barcode or select + to add it as text.
+                  Scan a vaccine barcode or choose Add to tray.
                 </div>
                 <div id="inventoryEntryPanel" class="queue-entry" hidden>
                   <label for="inventoryBarcodeInput">Barcode</label>
@@ -1209,18 +1392,12 @@
                     <button id="addBatchBtn" type="button">Add to Tray</button>
                   </div>
                 </div>
-                <button id="moveToImmunizationBtn" type="button" disabled>
-                  Move selected to Immunization
-                </button>
                 <div id="inventoryList" class="inventory-list"></div>
-                <section class="recent-chart-lots">
-                  <h3>Recent chart lots</h3>
-                  <ul id="inventoryRecentChartLots"></ul>
-                </section>
               </div>
-              <div class="actions">
-                <button id="exportCsvBtn">Export CSV</button>
-              </div>
+              <details class="tray-history">
+                <summary>Recent Scans</summary>
+                <ul id="inventoryRecentChartLots"></ul>
+              </details>
             </div>
           </div>
 

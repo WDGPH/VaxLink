@@ -149,8 +149,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     onUseRecord: handleUseMultipleInjectRecord,
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     showUseAction: true,
-    useButtonLabel: 'Use for Chart',
-    emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
+    useButtonLabel: 'Use',
+    emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
     emptyMessage: '',
     summaryBuilder: buildMultipleInjectSummary
   });
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     onCount: renderInventoryCount,
     exportButton: exportCsvBtn,
     onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
-    emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
+    emptySummary: 'Scan a vaccine barcode or choose Add to tray.',
     emptyMessage: '',
     summaryBuilder: buildInventorySummary,
     exportFilenamePrefix: 'vaxlink-inventory'
@@ -181,6 +181,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
   chrome.storage.onChanged.addListener(handlePopupStorageChanged);
+
+  for (const id of ['immunizationTrayMenu', 'inventoryTrayMenu']) {
+    const menu = document.getElementById(id);
+    if (!menu) continue;
+    const summary = menu.querySelector('summary');
+    menu.addEventListener('click', (event) => {
+      if (event.target.closest('button')) {
+        if (menu.contains(document.activeElement)) summary.focus();
+        menu.open = false;
+      }
+    });
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && menu.open) {
+        event.preventDefault();
+        menu.open = false;
+        summary.focus();
+      }
+    });
+  }
 
   if (immunizationModeBtn) {
     immunizationModeBtn.addEventListener('click', () =>
@@ -575,18 +594,22 @@ function renderRecentChartLots(history) {
     if (!list) continue;
     if (!recent.length) {
       const empty = document.createElement('li');
-      empty.textContent = 'No recent chart lots.';
+      empty.textContent = 'No recent scans.';
       list.replaceChildren(empty);
       continue;
     }
     list.replaceChildren(
       ...recent.map((row) => {
         const item = document.createElement('li');
-        const label = document.createElement('span');
+        const label = document.createElement('div');
         const name = row.tradename || row.generic_name || row.name;
+        const title = document.createElement('strong');
+        title.textContent = name;
         const expiry =
           row.inventory_expiry || row.barcode_expiry || row.nvc_lot_expiry;
-        label.textContent = `${name} · Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}`;
+        const details = document.createElement('div');
+        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}`;
+        label.append(title, details);
         const add = document.createElement('button');
         add.type = 'button';
         add.textContent = 'Add again';
@@ -1129,28 +1152,34 @@ function clearQueueSaveFailure(version) {
   }
 }
 
+function setTrayEntryOpen(panel, toggle, input, open) {
+  if (!panel || !toggle) return;
+  panel.hidden = !open;
+  toggle.textContent = open ? 'Close barcode entry' : 'Add to tray';
+  toggle.setAttribute('aria-expanded', String(open));
+  if (open) input?.focus();
+  else {
+    const menuTrigger = toggle.closest?.('details')?.querySelector('summary');
+    (menuTrigger || toggle).focus();
+  }
+}
+
 function setInventoryEntryOpen(open) {
-  if (!inventoryEntryPanel || !inventoryEntryToggleBtn) return;
-  inventoryEntryPanel.hidden = !open;
-  inventoryEntryToggleBtn.textContent = open ? '×' : '+';
-  inventoryEntryToggleBtn.setAttribute('aria-expanded', String(open));
-  const label = open ? 'Close barcode entry' : 'Add a vaccine as text';
-  inventoryEntryToggleBtn.setAttribute('aria-label', label);
-  inventoryEntryToggleBtn.title = label;
-  if (open) inventoryBarcodeInput?.focus();
-  else inventoryEntryToggleBtn.focus();
+  setTrayEntryOpen(
+    inventoryEntryPanel,
+    inventoryEntryToggleBtn,
+    inventoryBarcodeInput,
+    open
+  );
 }
 
 function setQueueEntryOpen(open) {
-  if (!queueEntryPanel || !queueEntryToggleBtn) return;
-  queueEntryPanel.hidden = !open;
-  queueEntryToggleBtn.textContent = open ? '×' : '+';
-  queueEntryToggleBtn.setAttribute('aria-expanded', String(open));
-  const label = open ? 'Close barcode entry' : 'Add a vaccine as text';
-  queueEntryToggleBtn.setAttribute('aria-label', label);
-  queueEntryToggleBtn.title = label;
-  if (open) queueBarcodeInput?.focus();
-  else queueEntryToggleBtn.focus();
+  setTrayEntryOpen(
+    queueEntryPanel,
+    queueEntryToggleBtn,
+    queueBarcodeInput,
+    open
+  );
 }
 
 function bindTrayTransfer(button, source, destination) {
