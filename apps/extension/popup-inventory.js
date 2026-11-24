@@ -306,7 +306,9 @@ export class ScanQueueManager {
 
     this.listEl.querySelectorAll('[data-remove-id]').forEach((button) => {
       button.addEventListener('click', () => {
-        this.remove(button.getAttribute('data-remove-id'));
+        void this.remove(button.getAttribute('data-remove-id')).catch((error) =>
+          this.onNotice(error.message)
+        );
       });
     });
 
@@ -483,6 +485,8 @@ function buildQueueItemMarkup(row, index, options) {
     ? 'Lot missing from the catalogue'
     : row.lookup_error;
   const doseText = formatDoseSummary(row);
+  const held =
+    Array.isArray(row.dose_reservations) && row.dose_reservations.length > 0;
   const useActionMarkup =
     options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
       ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
@@ -513,6 +517,7 @@ function buildQueueItemMarkup(row, index, options) {
         <span class="inventory-chip">Status ${status}</span>
         <span class="inventory-chip">Mfr ${manufacturer}</span>
         ${doseText ? `<span class="inventory-chip">${escapeHtml(doseText)}</span>` : ''}
+        ${held ? '<span class="inventory-chip">Review dose on chart</span>' : ''}
       </div>
       ${lookupMessage ? `<div class="inventory-lot-report"><span>${escapeHtml(lookupMessage)}</span>${reportUrl ? `<a href="${escapeHtml(reportUrl)}">Email lot report</a>` : ''}</div>` : ''}
     </div>

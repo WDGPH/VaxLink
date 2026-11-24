@@ -684,6 +684,45 @@ function withDoseReservations(row, reservations) {
   return updated;
 }
 
+async function findInactiveDoseDocument(storageKey, payload) {
+  if (
+    storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+    typeof payload?.id !== 'string' ||
+    typeof payload.token !== 'string' ||
+    typeof payload.used !== 'boolean'
+  )
+    return null;
+  const stored = await getStorage([storageKey]);
+  const rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  const row = rows.find((row) => row?.id === payload.id);
+  const reservation = doseReservations(row).find(
+    ({ token }) => token === payload.token
+  );
+  if (!reservation || reservation.review) return null;
+
+  // Ask the original document outside the queue writer. An inactive or frozen
+  // tab cannot delay an unrelated capture.
+  const inactive = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 900);
+    chrome.tabs.sendMessage(
+      reservation.tabId,
+      { action: 'isDoseReservationActive', token: reservation.token },
+      { documentId: reservation.documentId },
+      (response) => {
+        clearTimeout(timer);
+        const error = chrome.runtime.lastError;
+        // An absent reply does not tell us whether the original chart is done.
+        resolve(
+          error
+            ? /No (?:tab|document) with id/i.test(error.message)
+            : response?.active === false
+        );
+      }
+    );
+  });
+  return inactive ? reservation : null;
+}
+
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
 function mutateQueue(
@@ -691,7 +730,8 @@ function mutateQueue(
   operation,
   payload = {},
   popup = false,
-  chart = null
+  chart = null,
+  inactiveDose = null
 ) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
@@ -821,7 +861,15 @@ function mutateQueue(
             );
           if (!reservation || reservation.review) return { rows };
         } else {
-          if (typeof payload.used !== 'boolean' || !reservation?.review)
+          const inactiveOriginal =
+            inactiveDose?.token === reservation?.token &&
+            inactiveDose?.tabId === reservation?.tabId &&
+            inactiveDose?.documentId === reservation?.documentId;
+          if (
+            typeof payload.used !== 'boolean' ||
+            !reservation ||
+            (!reservation.review && !inactiveOriginal)
+          )
             throw new Error(
               'Check the original chart before resolving this dose.'
             );
@@ -3886,13 +3934,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    mutateQueue(
-      request.storageKey,
-      request.operation,
-      request.payload,
-      popup,
-      popup ? null : sender
-    )
+    const change = (inactiveDose) =>
+      mutateQueue(
+        request.storageKey,
+        request.operation,
+        request.payload,
+        popup,
+        popup ? null : sender,
+        inactiveDose
+      );
+    const changed =
+      request.operation === 'review_dose'
+        ? findInactiveDoseDocument(request.storageKey, request.payload).then(
+            change
+          )
+        : change();
+    changed
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;

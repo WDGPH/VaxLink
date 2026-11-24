@@ -381,7 +381,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (clearMultipleBtn) {
     clearMultipleBtn.addEventListener('click', async () => {
-      await multipleInjectManager.clear();
+      try {
+        await multipleInjectManager.clear();
+      } catch (error) {
+        writeOutput(escapeHtml(error.message), 'error');
+        return;
+      }
       logAnalyticsEvent('queue_cleared', {
         workflow: 'multiple',
         queue: 'multiple',

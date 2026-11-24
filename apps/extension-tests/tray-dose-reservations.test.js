@@ -24,8 +24,9 @@ function chart(tabId, documentId = `document-${tabId}`) {
   };
 }
 
-function tray(rows) {
+function tray(rows, options = {}) {
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    ...options,
     storage: { [key]: rows }
   });
   return {
@@ -172,5 +173,40 @@ test('pinned and uncounted rows bypass counting only when the lot is eligible', 
       )
     ).success,
     false
+  );
+});
+
+test('review of a silent reservation requires confirmation from the original browser document', async () => {
+  let originalReply;
+  const token = randomUUID();
+  const { change, get } = tray(
+    [{ id: 'held', lot: 'LOT1', dose_tracking: 'single_use' }],
+    {
+      tabsApi: {
+        sendMessage(tabId, message, options, reply) {
+          assert.equal(tabId, 1);
+          assert.equal(message.action, 'isDoseReservationActive');
+          assert.equal(message.token, token);
+          assert.equal(options.documentId, 'document-1');
+          reply(originalReply);
+        }
+      }
+    }
+  );
+  assert.equal(
+    (await change(chart(1), 'reserve_dose', 'held', token)).reserved,
+    true
+  );
+  for (const response of [undefined, { active: true }, { active: false }]) {
+    originalReply = response;
+    const result = await change(chart(2), 'review_dose', 'held', token, {
+      used: false
+    });
+    assert.equal(result.success, response?.active === false);
+    assert.equal(!!get('held').dose_reservations, response?.active !== false);
+  }
+  assert.equal(
+    (await change(chart(2), 'reserve_dose', 'held', randomUUID())).reserved,
+    true
   );
 });

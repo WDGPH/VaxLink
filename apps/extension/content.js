@@ -4766,7 +4766,9 @@ function initHud() {
     if (hudClearBtn.dataset.confirming === 'true') {
       delete hudClearBtn.dataset.confirming;
       hudClearBtn.textContent = 'Clear';
-      void clearHudQueue();
+      void clearHudQueue().catch((error) =>
+        showVaxlinkToast({ _entryWarning: error.message })
+      );
       return;
     }
     hudClearBtn.dataset.confirming = 'true';
@@ -4991,6 +4993,24 @@ function renderHudQueueList(rows, visible) {
       label.title += ' — EXPIRED';
     }
 
+    item.appendChild(label);
+    const heldDose =
+      row.dose_reservations?.find((dose) => dose.review) ||
+      row.dose_reservations?.[0];
+    if (heldDose) {
+      const review = document.createElement('button');
+      review.type = 'button';
+      review.className = 'vl-hud-btn';
+      review.textContent = 'Review dose';
+      review.setAttribute('aria-label', `Review dose for ${label.textContent}`);
+      review.addEventListener('click', () =>
+        showDoseReview(row, heldDose.token)
+      );
+      item.appendChild(review);
+      hudQueueListEl.appendChild(item);
+      continue;
+    }
+
     const removeBtn = document.createElement('button');
     removeBtn.className = 'vl-hud-item-remove';
     removeBtn.textContent = '×';
@@ -5000,10 +5020,45 @@ function renderHudQueueList(rows, visible) {
       void removeHudQueueRow(row.id);
     });
 
-    item.appendChild(label);
     item.appendChild(removeBtn);
     hudQueueListEl.appendChild(item);
   }
+}
+
+function showDoseReview(row, token) {
+  ensureToastHost();
+  const product = row.tradename || row.generic_name || row.name || 'Vaccine';
+  const description = [product, row.lot].filter(Boolean).join(' · ');
+  toastWarningSlot.innerHTML = `<div class="vl-toast expired persistent show" role="alert">
+    <div class="vl-toast-title">${escapeToastHtml(description)}</div>
+    <div class="vl-toast-detail">Check the original chart to see whether this dose was used.</div>
+    <div class="vl-toast-actions">
+      <button class="vl-toast-action" data-used="true" type="button">Dose used</button>
+      <button class="vl-toast-action" data-used="false" type="button">Dose unused</button>
+      <button class="vl-toast-dismiss" type="button">Not now</button>
+    </div>
+  </div>`;
+  toastWarningSlot.querySelectorAll('[data-used]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await mutateQueueViaBackground(
+          MULTIPLE_INJECT_QUEUE_KEY,
+          'review_dose',
+          {
+            id: row.id,
+            token,
+            used: button.dataset.used === 'true'
+          }
+        );
+        dismissToast(toastWarningSlot);
+      } catch (error) {
+        showVaxlinkToast({ _entryWarning: error.message });
+      }
+    });
+  });
+  toastWarningSlot
+    .querySelector('.vl-toast-dismiss')
+    .addEventListener('click', () => dismissToast(toastWarningSlot));
 }
 
 async function removeHudQueueRow(id) {

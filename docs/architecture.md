@@ -173,7 +173,10 @@ The background can reserve a counted dose for one chart document. It accepts
 another reservation only when the saved quantity still covers it. A chart
 can release its own reservation before it touches any fields. If a field may
 have changed, staff check the original chart before returning the dose or
-recording it as used. A missing response leaves the dose held.
+recording it as used. A missing response leaves the dose held. The chart tray
+offers **Review dose** and asks whether it was used. When the original chart has
+yet to confirm that its operation stopped, the background checks that browser
+document before accepting review.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
