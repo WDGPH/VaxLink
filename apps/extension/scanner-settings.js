@@ -20,6 +20,8 @@ export function initializeScannerSettings() {
     'requestPortBtn',
     'connectGrantedBtn',
     'disconnectBtn',
+    'forgetScannerBtn',
+    'scannerActionNotice',
     'connectionStatus',
     'scannerIdentity'
   ].forEach((id) => {
@@ -56,11 +58,12 @@ function bindEvents() {
     void reconnectGrantedPort();
   });
 
-  els.disconnectBtn?.addEventListener('click', () => {
-    void disconnectActivePort().catch((error) =>
-      setStatus(els.connectionStatus, error.message, 'error')
-    );
-  });
+  els.disconnectBtn?.addEventListener('click', () =>
+    stopScanner(SCANNER_DAEMON_ACTIONS.DISCONNECT)
+  );
+  els.forgetScannerBtn?.addEventListener('click', () =>
+    stopScanner(SCANNER_DAEMON_ACTIONS.FORGET)
+  );
 }
 
 function sendScannerDaemonCommand(action, payload = {}) {
@@ -137,6 +140,10 @@ function applyDaemonStatus(status, source = 'live') {
     stopping ||
     retryStop;
   els.disconnectBtn.hidden = !(canStop || stopping);
+  if (els.forgetScannerBtn) {
+    els.forgetScannerBtn.hidden = !identityKnown;
+    els.forgetScannerBtn.disabled = stopping;
+  }
 }
 
 async function refreshStatus() {
@@ -176,6 +183,7 @@ function openPairingWindow() {
 }
 
 async function reconnectGrantedPort() {
+  setStatus(els.scannerActionNotice, '');
   setButtons({ canConnect: false, canDisconnect: true });
   setStatus(els.connectionStatus, 'Connecting…', 'info');
   try {
@@ -189,8 +197,23 @@ async function reconnectGrantedPort() {
   }
 }
 
-async function disconnectActivePort() {
-  await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.DISCONNECT);
+async function stopScanner(action) {
+  setStatus(els.scannerActionNotice, '');
+  setButtons({ canConnect: false, canDisconnect: false });
+  if (els.forgetScannerBtn) els.forgetScannerBtn.disabled = true;
+  try {
+    const result = await sendScannerDaemonCommand(action);
+    if (action === SCANNER_DAEMON_ACTIONS.FORGET) {
+      setStatus(
+        els.scannerActionNotice,
+        result.permissionRemoved
+          ? 'Saved scanner and browser permission cleared.'
+          : 'Saved scanner cleared. You can remove any remaining serial port permission in your browser’s site settings.'
+      );
+    }
+  } catch (error) {
+    setStatus(els.scannerActionNotice, error.message, 'error');
+  }
   await refreshStatus();
 }
 

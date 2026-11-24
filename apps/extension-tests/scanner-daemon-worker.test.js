@@ -21,12 +21,16 @@ test('scanner reads and disconnects even when optional control signals fail', as
     }
   };
   let closeCount = 0;
+  let forgetCount = 0;
   const port = {
     get readable() {
       return readable;
     },
     writable: null,
     getInfo: () => ({ usbVendorId: 0x05e0, usbProductId: 0x1200 }),
+    async forget() {
+      forgetCount += 1;
+    },
     open: async () => undefined,
     setSignals: async () => {
       throw new DOMException('Failed to set control signals.', 'NetworkError');
@@ -90,6 +94,17 @@ test('scanner reads and disconnects even when optional control signals fail', as
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(closeCount, 1);
   assert.equal(workerMessages.at(-1).status.state, 'disabled');
+
+  for (const ambiguous of [true, false]) {
+    ports = ambiguous ? [port, { getInfo: port.getInfo }] : [port, unrelated];
+    workerListeners.get('message')({
+      data: { type: 'disconnect', forget: true, portInfo: port.getInfo() }
+    });
+    await new Promise(setImmediate);
+    assert.equal(workerMessages.at(-1).permissionRemoved, !ambiguous);
+    assert.equal(forgetCount, ambiguous ? 0 : 1);
+    assert.equal(workerMessages.at(-1).status.state, 'never_configured');
+  }
 
   delete globalThis.self;
   delete globalThis.navigator;

@@ -80,7 +80,10 @@ Settings has three sections, in order: Scanner, Autofill, and National Vaccine C
 `scanner-settings.js` provides connection controls directly within the Scanner
 section. It shows the saved device and gets current connection status from the
 reader. When the reader does not reply, Settings shows the last known capture
-time if available. The popup sends connection requests to the background.
+time if available. The popup sends connection requests to the background. **Reconnect** resumes
+capture with the saved device. **Disconnect** stops capture and keeps the
+selection. **Forget** clears the selection after a confirmed stop and removes
+the browser's grant if it can identify exactly one matching port.
 
 **Scanner setup** opens a temporary standard browser window
 (`scanner-pairing.html` and `scanner-pairing.js`). Chromium needs its extensions

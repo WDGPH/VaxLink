@@ -441,10 +441,11 @@ async function startConfiguredScanner(trigger) {
   return { started: true, status: response?.status || bootstrap.status };
 }
 
-async function stopConfiguredScanner() {
-  const reply = await sendScannerDaemonMessage({
-    action: SCANNER_DAEMON_ACTIONS.DISCONNECT
-  });
+async function stopConfiguredScanner(
+  action = SCANNER_DAEMON_ACTIONS.DISCONNECT,
+  portInfo
+) {
+  const reply = await sendScannerDaemonMessage({ action, portInfo });
   if (!reply?.success) {
     throw new Error(
       reply?.error || 'Could not confirm that the scanner stopped.'
@@ -3236,10 +3237,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT ||
+    request.action === SCANNER_DAEMON_ACTIONS.FORGET
+  ) {
     queueScannerControl(async () => {
+      const forgetting = request.action === SCANNER_DAEMON_ACTIONS.FORGET;
+      const { portInfo } = await getScannerBootstrapState();
+      // An interrupted or failed close must not restart capture on startup.
       await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false });
-      return stopConfiguredScanner();
+      const reply = await stopConfiguredScanner(request.action, portInfo);
+      if (forgetting) {
+        await scannerStatusWriteQueue.catch(() => undefined);
+        await setStorage({
+          [SCANNER_PROFILE_STORAGE_KEY]: '',
+          [SCANNER_PORT_INFO_STORAGE_KEY]: null
+        });
+      }
+      return reply;
     }).then(sendResponse, (error) =>
       sendResponse({ success: false, error: error.message })
     );

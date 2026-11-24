@@ -13,6 +13,7 @@
     CONNECT_GRANTED: 'scannerDaemon.connectGranted',
     SELECT: 'scannerDaemon.select',
     DISCONNECT: 'scannerDaemon.disconnect',
+    FORGET: 'scannerDaemon.forget',
     ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
     STATUS_CHANGED: 'scannerDaemon.statusChanged',
     SCAN_ECHO: 'scannerDaemon.scanEcho',

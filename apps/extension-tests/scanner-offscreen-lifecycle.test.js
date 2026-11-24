@@ -220,4 +220,22 @@ test('selecting a replacement waits for the old reader before saving and startin
     ),
     [firstScan]
   );
+  stopping = new Promise((resolve) => {
+    reportStop = resolve;
+  });
+  const disconnect = harness.sendMessage({
+    action: 'scannerDaemon.disconnect'
+  });
+  await stopping;
+  assert.equal(harness.storageData.get(enabledKey), false);
+  stop({ success: false, error: 'Close failed' });
+  assert.equal((await disconnect).success, false);
+  assert.equal(harness.storageData.get(portKey).usbProductId, 2);
+
+  const forget = await harness.sendMessage({ action: 'scannerDaemon.forget' });
+  assert.equal(forget.success, true);
+  assert.equal(readerCalls.at(-1).portInfo.usbProductId, 2);
+  assert.equal(harness.storageData.get(enabledKey), false);
+  assert.equal(harness.storageData.get(profileKey), '');
+  assert.equal(harness.storageData.get(portKey), null);
 });

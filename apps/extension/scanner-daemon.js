@@ -152,13 +152,13 @@ function requestConnect(message = {}) {
   });
 }
 
-function requestWorker(worker, type, timeoutMs) {
+function requestWorker(worker, message, timeoutMs) {
   return new Promise((resolve) => {
     const requestId = ++nextRequestId;
-    const finish = ({ status, error }) => {
+    const finish = ({ requestId: _, type: __, ...reply }) => {
       clearTimeout(timer);
       workerRequests.delete(requestId);
-      resolve(error ? { success: false, error } : { success: true, status });
+      resolve({ ...reply, success: !reply.error });
     };
     const timer = timeoutMs
       ? setTimeout(
@@ -167,20 +167,21 @@ function requestWorker(worker, type, timeoutMs) {
         )
       : null;
     workerRequests.set(requestId, finish);
-    worker.postMessage({ type, requestId });
+    worker.postMessage({ ...message, requestId });
   });
 }
 
-async function requestDisconnect() {
+async function requestDisconnect({ action, portInfo }) {
   desiredConnection = null;
   clearRestartTimer();
   stopping = true;
   applyStatus({ ...currentStatus, state: SCANNER_STATUS_STATES.STOPPING });
   try {
-    const reply = await requestWorker(
-      ensureWorker(),
-      SCANNER_WORKER_MESSAGES.DISCONNECT
-    );
+    const reply = await requestWorker(ensureWorker(), {
+      type: SCANNER_WORKER_MESSAGES.DISCONNECT,
+      forget: action === SCANNER_DAEMON_ACTIONS.FORGET,
+      portInfo
+    });
     applyStatus(
       reply.success
         ? reply.status
@@ -219,7 +220,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
   }
 
-  if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT ||
+    request.action === SCANNER_DAEMON_ACTIONS.FORGET
+  ) {
     if (stopping) {
       sendResponse({
         success: false,
@@ -227,7 +231,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    requestDisconnect().then(sendResponse, (error) =>
+    requestDisconnect(request).then(sendResponse, (error) =>
       sendResponse({ success: false, error: error.message })
     );
     return true;
@@ -238,9 +242,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: false, error: 'Scanner status unavailable' });
       return false;
     }
-    requestWorker(daemonWorker, SCANNER_WORKER_MESSAGES.GET_STATUS, 900).then(
-      sendResponse
-    );
+    requestWorker(
+      daemonWorker,
+      { type: SCANNER_WORKER_MESSAGES.GET_STATUS },
+      900
+    ).then(sendResponse);
     return true;
   }
 

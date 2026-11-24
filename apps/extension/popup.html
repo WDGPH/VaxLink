@@ -772,7 +772,8 @@
         border: 1px solid #bddadd;
         color: #14505f;
       }
-      #disconnectBtn {
+      #disconnectBtn,
+      #forgetScannerBtn {
         background: transparent;
         border: 1px solid #f4cda5;
         color: #9a3412;
@@ -970,6 +971,9 @@
                   <button id="disconnectBtn" type="button" hidden disabled>
                     Disconnect
                   </button>
+                  <button id="forgetScannerBtn" type="button" hidden disabled>
+                    Forget
+                  </button>
                 </div>
               </div>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
@@ -987,6 +991,7 @@
                 Checking scanner connection…
               </div>
               <p id="scannerIdentity" hidden></p>
+              <p id="scannerActionNotice" role="status" hidden></p>
             </section>
             <section
               id="autofillSettingsSection"

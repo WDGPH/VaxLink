@@ -6,6 +6,7 @@ import {
   getScannerReconnectDelayMs,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
+  portInfoMatches,
   selectGrantedPort
 } from './scanner-daemon-shared.js';
 import {
@@ -265,7 +266,7 @@ function reply(requestId, fields) {
   postToHost({ type: SCANNER_WORKER_MESSAGES.REPLY, requestId, ...fields });
 }
 
-async function disconnectScanner(requestId) {
+async function disconnectScanner({ requestId, forget, portInfo }) {
   desiredConnected = false;
   stopping = true;
   recoverAttemptCount = 0;
@@ -275,14 +276,24 @@ async function disconnectScanner(requestId) {
   try {
     await openingPromise;
     await closeActiveConnection();
+    let permissionRemoved = false;
+    if (forget) {
+      permissionRemoved = await forgetPortPermission(portInfo);
+      desiredProfileId = '';
+      preferredPortInfo = null;
+    }
     updateStatus({
-      state: SCANNER_STATUS_STATES.DISABLED,
+      state: forget
+        ? SCANNER_STATUS_STATES.NEVER_CONFIGURED
+        : SCANNER_STATUS_STATES.DISABLED,
+      profileId: desiredProfileId,
+      selectionRequired: false,
       portInfo: preferredPortInfo,
       lastDisconnectedAt: new Date().toISOString(),
       lastError: '',
       recoverAttemptCount: 0
     });
-    reply(requestId, { status: currentStatus });
+    reply(requestId, { status: currentStatus, permissionRemoved });
   } catch {
     updateStatus({
       state: SCANNER_STATUS_STATES.UNAVAILABLE,
@@ -291,6 +302,23 @@ async function disconnectScanner(requestId) {
     reply(requestId, { error: currentStatus.lastError });
   } finally {
     stopping = false;
+  }
+}
+
+async function forgetPortPermission(info) {
+  if (!info) return false;
+  try {
+    const ports = await getGrantedSerialScannerPorts();
+    const matches = ports.filter((port) =>
+      portInfoMatches(info, port.getInfo())
+    );
+    if (matches.length !== 1 || typeof matches[0].forget !== 'function')
+      return false;
+    await matches[0].forget();
+    return true;
+  } catch {
+    // A disconnected device may no longer expose its browser grant.
+    return false;
   }
 }
 
@@ -327,7 +355,7 @@ self.addEventListener('message', (event) => {
       if (stopping) {
         reply(data.requestId, { error: 'The scanner is already stopping.' });
       } else {
-        void disconnectScanner(data.requestId);
+        void disconnectScanner(data);
       }
       break;
     case SCANNER_WORKER_MESSAGES.REFRESH_PORTS:
