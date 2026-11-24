@@ -2101,73 +2101,181 @@ function getPanoramaFundingLabel(value) {
   return 'funding filter';
 }
 
-function optionTextMatchesLotExactly(optionText, lotValue) {
-  const lotToken = normalizePanoramaLotToken(lotValue);
-  if (!lotToken) return false;
-  const rawText = String(optionText || '');
-  // Panorama options look like "LOT123 - Exp. 2026-01-31"; the lot is the
-  // left-of-dash token. Exact equality avoids "ABC1" selecting "ABC12".
-  const leftPart = rawText.split('-')[0] || rawText;
-  return normalizePanoramaLotToken(leftPart) === lotToken;
+function getPanoramaLotText(optionText) {
+  // Labels can add expiry and funding. A dash inside the Lot is part of
+  // its identity, including segments such as PF in ABC1-PF-2.
+  const expiry = /(?:\s+(?:[-–—|,]\s*)?|\s*\(\s*)exp(?:iry|iration)?[.\s:]/i;
+  const funding =
+    /(?:\s+(?:[-–—|,]\s*)?|\s*\(\s*)(?:npf|pf|(?:non[-_ ]?)?publicly[ _-]+funded)\s*\)?$/i;
+  const [lotAndFunding] = String(optionText || '')
+    .trim()
+    .split(expiry, 1);
+  return lotAndFunding.trim().replace(funding, '').trim().toUpperCase();
 }
 
-function optionTextContainsLot(optionText, lotValue) {
+function panoramaLotLabelMatches(optionText, lotValue) {
   const lotToken = normalizePanoramaLotToken(lotValue);
-  if (!lotToken) return false;
-  const rawText = String(optionText || '');
-  const fullToken = normalizePanoramaLotToken(rawText);
-  if (fullToken.includes(lotToken)) return true;
-  const leftPart = rawText.split('-')[0] || rawText;
-  const leftToken = normalizePanoramaLotToken(leftPart);
-  return leftToken === lotToken || leftToken.includes(lotToken);
-}
-
-// Prefer an exact lot match across all candidates before falling back to a
-// substring match, so a scanned lot that prefixes a longer lot in the
-// dropdown never selects the wrong one.
-function findBestLotMatch(candidates, getText, lotValue) {
   return (
-    candidates.find((c) => optionTextMatchesLotExactly(getText(c), lotValue)) ||
-    candidates.find((c) => optionTextContainsLot(getText(c), lotValue)) ||
-    null
+    !!lotToken &&
+    normalizePanoramaLotToken(getPanoramaLotText(optionText)) === lotToken
   );
 }
 
-function fillPanoramaLotFromSelect(lotValue) {
-  const selectors = [
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ];
-  const fields = getFields(selectors).filter(canFillPanoramaControl);
-  for (const field of fields) {
-    const options = Array.from(field.options || []).filter(
-      (opt) => opt && opt.value !== ''
+function findPanoramaLotChoice(items, textOf, lotValue) {
+  const exact = String(lotValue || '')
+    .trim()
+    .toUpperCase();
+  if (!exact) return null;
+  const exactMatches = items.filter(
+    (item) => getPanoramaLotText(textOf(item)) === exact
+  );
+  if (exactMatches.length)
+    return exactMatches.length === 1 ? exactMatches[0] : null;
+  const similar = items.filter((item) =>
+    panoramaLotLabelMatches(textOf(item), lotValue)
+  );
+  return similar.length === 1 ? similar[0] : null;
+}
+
+function panoramaLotSelectOptions(field) {
+  return Array.from(field?.options || []).filter((option) => option.value);
+}
+
+function panoramaLotPanelItemText(item) {
+  return String(
+    item.getAttribute('data-label') ||
+      item.getAttribute('title') ||
+      item.textContent ||
+      ''
+  ).trim();
+}
+
+function panoramaLotPanelItems(panel) {
+  return [
+    ...(panel?.querySelectorAll('li[id], .ui-selectonemenu-item') || [])
+  ].filter(panoramaLotPanelItemText);
+}
+
+function panoramaLotSelectionMatches(widget, lotValue) {
+  if (!widget) return false;
+  const options = panoramaLotSelectOptions(widget.select);
+  if (options.length) {
+    const matched = findPanoramaLotChoice(
+      options,
+      (option) => option.text,
+      lotValue
     );
-    const matched = findBestLotMatch(options, (opt) => opt.text, lotValue);
-    if (!matched) continue;
-
-    assertPanoramaAutofillWrite();
-    field.focus();
-    assertPanoramaAutofillWrite();
-    field.value = matched.value;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    field.dispatchEvent(new Event('change', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    field.blur();
-    assertPanoramaAutofillWrite();
-
-    if (field.id && field.id.endsWith('_input')) {
-      const labelId = `${field.id.slice(0, -6)}_label`;
-      const label = document.getElementById(labelId);
-      if (label) {
-        label.textContent = matched.text;
-      }
-    }
-    return true;
+    return !!matched && widget.select.value === matched.value;
   }
-  return false;
+  const selected = getPanoramaLotText(readPanoramaLotSelection(widget));
+  if (!selected) return false;
+  const items = panoramaLotPanelItems(widget.panel);
+  if (!items.length)
+    return (
+      selected ===
+      String(lotValue || '')
+        .trim()
+        .toUpperCase()
+    );
+  const matched = findPanoramaLotChoice(
+    items,
+    panoramaLotPanelItemText,
+    lotValue
+  );
+  return (
+    !!matched &&
+    selected === getPanoramaLotText(panoramaLotPanelItemText(matched))
+  );
+}
+
+function getPanoramaLotWidget(form = getPanoramaAutofillForm()) {
+  if (!form?.isConnected) return null;
+  const suffix = 'LotInfo:lotNumberSelect:selectOneMenu';
+  const controls = [
+    ...form.querySelectorAll(`[id$="${suffix}"], select[id$="${suffix}_input"]`)
+  ];
+  const ids = new Set(controls.map((node) => node.id.replace(/_input$/, '')));
+  if (ids.size !== 1) return null;
+  const [id] = ids;
+  const roots = controls.filter((node) => node.id === id);
+  const selects = controls.filter((node) => node.id === `${id}_input`);
+  if (roots.length > 1 || selects.length > 1) return null;
+  const [root] = roots;
+  const select = selects.find((node) => !root || root.contains(node));
+  if (!root && !canFillPanoramaControl(select)) return null;
+  const label = root && findPanoramaLotPart(root, suffix, id, 'label');
+  const panel = findPanoramaLotPart(document, suffix, id, 'panel');
+  return {
+    id,
+    root,
+    select,
+    label,
+    panel: panel?.isConnected ? panel : null
+  };
+}
+
+function findPanoramaLotPart(scope, suffix, id, part) {
+  const exact = [...scope.querySelectorAll(`[id$="${suffix}_${part}"]`)].filter(
+    (node) => node.id === `${id}_${part}`
+  );
+  return exact.length === 1 ? exact[0] : null;
+}
+
+function readPanoramaLotSelection(widget) {
+  if (!widget) return '';
+  if (widget.select && panoramaLotSelectOptions(widget.select).length) {
+    return widget.select.value ? getFieldFilledText(widget.select) : '';
+  }
+  return widget.label?.textContent || '';
+}
+
+function fillPanoramaLotFromSelect(widget, lotValue) {
+  const field = widget.select;
+  if (!canFillPanoramaControl(field)) return false;
+  const options = panoramaLotSelectOptions(field);
+  const matched = findPanoramaLotChoice(
+    options,
+    (option) => option.text,
+    lotValue
+  );
+  if (!matched || matched.disabled) return false;
+
+  assertPanoramaAutofillWrite();
+  field.focus();
+  assertPanoramaAutofillWrite();
+  // Focusing the select can refresh its options without replacing the node.
+  if (
+    !field.isConnected ||
+    getPanoramaLotWidget()?.select !== field ||
+    findPanoramaLotChoice(
+      panoramaLotSelectOptions(field),
+      (option) => option.text,
+      lotValue
+    ) !== matched ||
+    matched.disabled
+  )
+    return false;
+  field.value = matched.value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  assertPanoramaAutofillWrite();
+  if (field.isConnected)
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  assertPanoramaAutofillWrite();
+  if (field.isConnected) field.blur();
+  assertPanoramaAutofillWrite();
+
+  const current = getPanoramaLotWidget();
+  if (
+    current?.id !== widget.id ||
+    !panoramaLotSelectionMatches(current, lotValue)
+  )
+    return false;
+  if (current.select === field && current.label) {
+    // The native value proves the match. Keep the visible label in sync while
+    // Panorama processes the change and refreshes the dependent fields.
+    current.label.textContent = readPanoramaLotSelection(current);
+  }
+  return true;
 }
 
 function setPanoramaFundedRadioValue(value) {
@@ -2268,144 +2376,124 @@ function reapplyAnsweredPanoramaFundingChoice(data) {
 const LOT_DROPDOWN_OPEN_COOLDOWN_MS = 2000;
 let lastLotDropdownOpenClickAt = 0;
 
-function openPanoramaLotDropdown() {
-  // A PrimeFaces trigger click TOGGLES the panel: clicking again while it is
-  // open closes it. Retry passes reach this several times a second, so an
-  // unconditional click flickers the dropdown open/closed and the lot can
-  // never be picked from the panel. Only click while the panel is closed,
-  // and at most once per cooldown — Panorama re-renders close the panel, and
-  // reopening it on every pass flickers the form just the same.
-  const openPanel = Array.from(
-    document.querySelectorAll(
-      '.ui-selectonemenu-panel[id*="LotInfo:lotNumberSelect"]'
-    )
-  ).some(isVisible);
-  if (openPanel) return true;
+function openPanoramaLotDropdown(widget) {
+  if (isVisible(widget.panel)) return;
   const now = Date.now();
-  if (now - lastLotDropdownOpenClickAt < LOT_DROPDOWN_OPEN_COOLDOWN_MS)
-    return false;
+  if (now - lastLotDropdownOpenClickAt < LOT_DROPDOWN_OPEN_COOLDOWN_MS) return;
+  const trigger = widget.root?.querySelector('.ui-selectonemenu-trigger');
+  if (!isVisible(trigger)) return;
 
-  const selectors = [
-    '[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
-    '[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger',
-    '[id*="LotInfo:lotNumberSelect:selectOneMenu"] .ui-selectonemenu-trigger'
-  ];
-  const triggers = getFields(selectors).filter(isVisible);
-  for (const trigger of triggers) {
-    lastLotDropdownOpenClickAt = now;
-    assertPanoramaAutofillWrite();
-    trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    trigger.click();
-    return true;
-  }
-  return false;
+  // Use the visible widget only when the native select path is unavailable.
+  lastLotDropdownOpenClickAt = now;
+  assertPanoramaAutofillWrite();
+  trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+  assertPanoramaAutofillWrite();
+  if (trigger.isConnected) trigger.click();
 }
 
-function fillPanoramaLotFromPanelItems(lotValue) {
-  const filterSelectors = [
-    'input[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_filter"]',
-    'input[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_filter"]',
-    'input[id*="LotInfo:lotNumberSelect:selectOneMenu_filter"]'
-  ];
+function fillPanoramaLotFromPanelItems(widget, lotValue) {
+  const panel = widget.panel;
+  if (!panel) return false;
+  const filter = document.getElementById(`${widget.id}_filter`);
   const lotText = String(lotValue || '');
-  const lotToken = normalizePanoramaLotToken(lotText);
-  const filters = getFields(filterSelectors).filter(canFillPanoramaControl);
-  for (const filterInput of filters) {
-    // Retyping the same filter on every retry pass re-filters the panel and
-    // steals focus several times a second — visible churn with no progress.
-    if (String(filterInput.value || '') === lotText) continue;
+  if (
+    panel.contains(filter) &&
+    canFillPanoramaControl(filter) &&
+    filter.value !== lotText
+  ) {
+    // Reusing the existing filter text avoids stealing focus on each retry.
     assertPanoramaAutofillWrite();
-    filterInput.focus();
+    filter.focus();
     assertPanoramaAutofillWrite();
-    filterInput.value = lotText;
-    filterInput.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!filter.isConnected) return false;
+    filter.value = lotText;
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
     assertPanoramaAutofillWrite();
-    filterInput.dispatchEvent(
+    if (!filter.isConnected) return false;
+    filter.dispatchEvent(
       new KeyboardEvent('keyup', {
         key: lotText.slice(-1) || 'a',
         bubbles: true
       })
     );
     assertPanoramaAutofillWrite();
-    filterInput.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!filter.isConnected) return false;
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    assertPanoramaAutofillWrite();
   }
+  if (!panel.isConnected || getPanoramaLotWidget()?.panel !== panel)
+    return false;
 
-  const itemSelectors = [
-    'li[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_"]',
-    'li[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_"]',
-    'li[id*="LotInfo:lotNumberSelect:selectOneMenu_"]',
-    '.ui-selectonemenu-panel .ui-selectonemenu-item'
-  ];
-  for (const selector of itemSelectors) {
-    const items = Array.from(document.querySelectorAll(selector)).filter(
-      (item) => {
-        if (!item) return false;
-        if (item.classList && item.classList.contains('ui-helper-hidden'))
-          return false;
-        const text = String(
-          item.getAttribute?.('data-label') ||
-            item.getAttribute?.('title') ||
-            item.textContent ||
-            ''
-        ).trim();
-        return isVisible(item) && text.length > 0;
-      }
+  const items = panoramaLotPanelItems(panel);
+  // A filtered-out exact option still matters when deciding whether a
+  // similar-looking label is safe to use.
+  const matched = findPanoramaLotChoice(
+    items,
+    panoramaLotPanelItemText,
+    lotValue
+  );
+  const available =
+    matched &&
+    !matched.classList.contains('ui-helper-hidden') &&
+    matched.getAttribute('aria-disabled') !== 'true' &&
+    isVisible(matched);
+  if (!available) return false;
+  const options = panoramaLotSelectOptions(widget.select);
+  if (
+    options.some((option) => panoramaLotLabelMatches(option.text, lotValue))
+  ) {
+    const nativeMatch = findPanoramaLotChoice(
+      options,
+      (option) => option.text,
+      lotValue
     );
-    const getItemText = (item) =>
-      String(
-        item.getAttribute?.('data-label') ||
-          item.getAttribute?.('title') ||
-          item.textContent ||
-          ''
-      );
-    const matched = findBestLotMatch(items, getItemText, lotValue);
-    if (!matched) continue;
-    assertPanoramaAutofillWrite();
-    matched.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    matched.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    matched.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-    assertPanoramaAutofillWrite();
-    matched.click();
-    const selectedLotLabels = getFields([
-      'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-      'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-      'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
-    ]);
-    const confirmed = selectedLotLabels.some((label) =>
-      normalizePanoramaLotToken(label?.textContent || '').includes(lotToken)
-    );
-    if (confirmed) {
-      return true;
-    }
-    return true;
+    if (
+      !nativeMatch ||
+      getPanoramaLotText(nativeMatch.text) !==
+        getPanoramaLotText(panoramaLotPanelItemText(matched))
+    )
+      return false;
   }
-  return false;
-}
+  for (const type of ['mouseover', 'mousedown', 'mouseup']) {
+    assertPanoramaAutofillWrite();
+    if (!matched.isConnected) return false;
+    matched.dispatchEvent(new MouseEvent(type, { bubbles: true }));
+  }
+  assertPanoramaAutofillWrite();
+  if (
+    !matched.isConnected ||
+    !isVisible(matched) ||
+    getPanoramaLotWidget()?.panel !== panel ||
+    findPanoramaLotChoice(
+      panoramaLotPanelItems(panel),
+      panoramaLotPanelItemText,
+      lotValue
+    ) !== matched
+  )
+    return false;
+  matched.click();
+  assertPanoramaAutofillWrite();
 
-function hasFillablePanoramaLotSelect() {
-  return getFields([
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).some(canFillPanoramaControl);
+  const current = getPanoramaLotWidget();
+  return (
+    current?.id === widget.id && panoramaLotSelectionMatches(current, lotValue)
+  );
 }
 
 function tryFillPanoramaLot(lotValue, { panelRescue = false } = {}) {
   if (!lotValue) return false;
-  if (fillPanoramaLotFromSelect(lotValue)) return true;
-  // When a fillable native select exists, a missing option just means the lot
-  // list is still refreshing — the select path lands it silently (and exactly
-  // once) on the pass right after the options arrive. Driving the visible
-  // dropdown (open, filter, click) here only shows the nurse failed retries,
-  // so it is reserved for layouts without a fillable select and, as a late
-  // rescue, for the case where the silent select change never registered.
-  if (hasFillablePanoramaLotSelect() && !panelRescue) return false;
-  openPanoramaLotDropdown();
-  if (fillPanoramaLotFromPanelItems(lotValue)) return true;
-  return false;
+  const widget = getPanoramaLotWidget();
+  if (!widget) return false;
+  if (panoramaLotSelectionMatches(widget, lotValue)) return true;
+  if (fillPanoramaLotFromSelect(widget, lotValue)) return true;
+  // Let the native options refresh before driving the visible panel.
+  if (canFillPanoramaControl(widget.select) && !panelRescue) return false;
+  openPanoramaLotDropdown(widget);
+  const current = getPanoramaLotWidget();
+  return (
+    current?.id === widget.id &&
+    fillPanoramaLotFromPanelItems(current, lotValue)
+  );
 }
 
 function tryFillPanoramaLotOrTrade(data, options) {
@@ -2415,29 +2503,7 @@ function tryFillPanoramaLotOrTrade(data, options) {
 }
 
 function hasPanoramaLotSelection(lotValue) {
-  if (!lotValue) return false;
-
-  const selectFields = getFields([
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).filter(canFillPanoramaControl);
-  if (
-    selectFields.some((field) =>
-      optionTextContainsLot(getFieldFilledText(field), lotValue)
-    )
-  ) {
-    return true;
-  }
-
-  const selectedLotLabels = getFields([
-    'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-    'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-    'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
-  ]);
-  return selectedLotLabels.some((label) =>
-    optionTextContainsLot(label?.textContent || '', lotValue)
-  );
+  return panoramaLotSelectionMatches(getPanoramaLotWidget(), lotValue);
 }
 
 function hasPanoramaLotOrTradeSelection(data) {
@@ -2771,7 +2837,7 @@ function schedulePanoramaLotOrTradeSelection(
       hasLot &&
       hasResolvedAgent &&
       !busy &&
-      (!hasFillablePanoramaLotSelect() ||
+      (!canFillPanoramaControl(getPanoramaLotWidget()?.select) ||
         now - scheduleStartedAt >= PANEL_RESCUE_AFTER_MS)
     ) {
       if (!hasPanoramaLotSelection(data?.lot)) {
@@ -4849,36 +4915,10 @@ function getPanoramaCurrentTradeSelectionText(scope) {
 }
 
 function getPanoramaCurrentLotSelectionText(scope) {
-  const selectFields = getFields(
-    [
-      'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-      'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-      'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-    ],
-    scope
-  ).filter(canFillPanoramaControl);
-  for (const field of selectFields) {
-    const text = normalizeForMatch(getFieldFilledText(field));
-    if (text && text !== 'select') {
-      return text;
-    }
-  }
-
-  const selectedLotLabels = getFields(
-    [
-      'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-      'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-      'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
-    ],
-    scope
+  const value = normalizeForMatch(
+    readPanoramaLotSelection(getPanoramaLotWidget(scope))
   );
-  for (const label of selectedLotLabels) {
-    const text = normalizeForMatch(label?.textContent || '');
-    if (text && text !== 'select') {
-      return text;
-    }
-  }
-  return '';
+  return value === 'select' || value === 'select one' ? '' : value;
 }
 
 function getPanoramaMultiStepIndicatorKey({

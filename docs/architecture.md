@@ -72,7 +72,10 @@ its delivery token. A new form, workflow or step retires the old token.
 Vaccine rules match the Panorama Agent for the formulation. For example, MMR
 and MMR with varicella use different Agents, as do adult and pediatric
 hepatitis B products. Where Panorama provides a native select, VaxLink reads
-its selected value because the visible widget label can lag a refresh.
+its selected value because the visible widget label can lag a refresh. The Lot
+must match the current chart widget. An exact Lot takes priority, and a
+punctuation-only difference is allowed only when it identifies one choice.
+VaxLink reads the current selection after Panorama handles the field event.
 
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
