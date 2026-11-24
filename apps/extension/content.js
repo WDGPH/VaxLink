@@ -35,7 +35,6 @@ const {
   normalizeWorkflowMode
 } = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
-const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
   'vaxlink_administered_datetime_autofill_v1';
 const ADMIN_DATE_AUTOFILL_KEY = 'vaxlink_administered_date_autofill_v1';
@@ -165,16 +164,6 @@ function playAudioCue(kind) {
     playTone(980, 110, 'square', 0.06, 0);
     playTone(980, 110, 'square', 0.06, 170);
   }
-}
-
-function getQueueStorageKeyForWorkflow(mode) {
-  if (mode === 'multiple') {
-    return MULTIPLE_INJECT_QUEUE_KEY;
-  }
-  if (mode === 'inventory') {
-    return INVENTORY_BATCH_KEY;
-  }
-  return '';
 }
 
 function logAnalyticsEvent(eventType, payload = {}) {
@@ -424,7 +413,6 @@ function setupMessageListener() {
         handleHandsFreeScan(
           request.scan?.rawText || '',
           request.scan?.source || 'scanner-channel',
-          request.scannerRoute.startBy,
           {
             captureId: request.scan.captureId,
             contextToken: request.contextToken,
@@ -447,10 +435,8 @@ function setupMessageListener() {
             status: result?.status || (result?.success ? 'success' : 'failed'),
             error: result?.error || '',
             chartNeedsReview: result?.chartNeedsReview === true,
-            queued: !!result?.queued,
             duplicate_ignored: !!result?.duplicate_ignored,
-            command_handled: !!result?.command_handled,
-            queueSizeAfter: result?.queueSizeAfter || 0
+            command_handled: !!result?.command_handled
           });
         })
         .catch((error) =>
@@ -539,25 +525,6 @@ function setLocalStorage(values) {
   });
 }
 
-function appendQueueRecordViaBackground(storageKey, record) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { action: 'appendQueueRecord', storageKey, record },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        if (!response || !response.success) {
-          reject(new Error(response?.error || 'Tray save failed'));
-          return;
-        }
-        resolve(response.record || null);
-      }
-    );
-  });
-}
-
 function getExpiryStatus(value) {
   const expiry = globalThis.VaxLinkExpiryDate.parseDateToLocal(value);
   if (!expiry) {
@@ -576,74 +543,6 @@ function getExpiryStatus(value) {
     return { flag: 'expiring_soon', daysRemaining };
   }
   return { flag: 'valid', daysRemaining };
-}
-
-function buildInventoryRecordFromParsed(data, rawBarcode) {
-  const totalDoses = getPositiveInt(data.total_doses, null);
-  const fallbackDose = getPositiveInt(totalDoses, null);
-  const inventoryExpiry =
-    data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
-  const expiryStatus = getExpiryStatus(inventoryExpiry);
-  const barcodeExpiry = data.barcode_expiry ?? data.expiry ?? '';
-  const expirySource = barcodeExpiry
-    ? 'barcode'
-    : data.nvc_lot_expiry
-      ? 'nvc'
-      : data.expiry_source || 'none';
-
-  return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    scanned_at: data.scanned_at || new Date().toISOString(),
-    raw_barcode: rawBarcode || '',
-    name: data.name || data.generic_name || data.tradename || data.din || '',
-    tradename: data.tradename || '',
-    generic_name: data.generic_name || '',
-    disease: data.disease || '',
-    antigen: data.antigen || '',
-    manufacturer: data.manufacturer || '',
-    gtin: data.gtin || '',
-    lot: data.lot || '',
-    serial: data.serial || '',
-    barcode_expiry: barcodeExpiry,
-    inventory_expiry: inventoryExpiry,
-    nvc_lot_expiry: data.nvc_lot_expiry || '',
-    expiry_flag: data.expiry_flag || expiryStatus.flag || '',
-    expiry_days_remaining: expiryStatus.daysRemaining ?? '',
-    expiry_source: expirySource,
-    route: data.route || '',
-    strength: data.strength || '',
-    dose_value: data.dose_value || '',
-    dose_unit: data.dose_unit || '',
-    total_doses: totalDoses,
-    remaining_doses: getPositiveInt(data.remaining_doses, fallbackDose),
-    dose_tracking: data.dose_tracking || 'manual',
-    din: data.din || '',
-    drug_code: data.drug_code || data.din || '',
-    lookup_error: data.lookup_error || '',
-    lookup_error_category: data.lookup_error_category || '',
-    nvc_catalogue_version: data.nvc_catalogue_version || '',
-    nvc_lot_matched: data.nvc_lot_matched === true
-  };
-}
-
-function getPositiveInt(value, fallback = null) {
-  if (value === null || value === undefined || value === '') {
-    return fallback;
-  }
-  const parsed = Number.parseInt(String(value).trim(), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
-  }
-  return parsed;
-}
-
-async function saveScanToQueue(data, rawBarcode, storageKey) {
-  if (!storageKey) {
-    throw new Error('No storage key configured for queued scan mode');
-  }
-  const record = buildInventoryRecordFromParsed(data, rawBarcode);
-  const appended = await appendQueueRecordViaBackground(storageKey, record);
-  return appended || record;
 }
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
@@ -678,20 +577,15 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
 
 async function handleHandsFreeScan(
   scanValue,
-  source = 'unknown',
-  startBy = null,
-  scannerDelivery = null,
-  activity = null
+  source,
+  scannerDelivery,
+  activity
 ) {
-  if (!isHandsFreeSupportedPage()) {
-    return {
-      accepted: false,
-      success: false,
-      status: 'unsupported_page',
-      error: 'Unsupported chart page'
-    };
-  }
-
+  const {
+    contextToken,
+    scannerRoute: { startBy }
+  } = scannerDelivery;
+  const workflow = 'immunization';
   const trimmed = String(scanValue || '').trim();
   if (!trimmed) {
     return {
@@ -702,7 +596,7 @@ async function handleHandsFreeScan(
     };
   }
 
-  if (startBy !== null && (!isPanoramaChartActive() || Date.now() >= startBy)) {
+  if (!isPanoramaChartActive() || Date.now() >= startBy) {
     return {
       accepted: false,
       success: false,
@@ -720,32 +614,28 @@ async function handleHandsFreeScan(
     };
   }
 
-  if (activeWorkflowMode === 'immunization') {
-    const entryBlocked = panoramaEntryBlockReason();
-    if (entryBlocked) {
-      warnPanoramaEntryBlocked(entryBlocked);
-      return {
-        accepted: false,
-        success: false,
-        status: 'entry_blocked',
-        error: entryBlocked
-      };
-    }
+  const entryBlocked = panoramaEntryBlockReason();
+  if (entryBlocked) {
+    warnPanoramaEntryBlocked(entryBlocked);
+    return {
+      accepted: false,
+      success: false,
+      status: 'entry_blocked',
+      error: entryBlocked
+    };
   }
 
   const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', {
     source,
-    length: trimmed.length,
-    preview: trimmed.slice(0, 80)
+    length: trimmed.length
   });
 
   const now = Date.now();
   if (
     trimmed === lastHandledScanValue &&
     now - lastHandledScanAt < 1500 &&
-    (activeWorkflowMode !== 'immunization' ||
-      isPanoramaAutofillCurrent({ _vaxlinkOwner: lastHandledScanOwner }))
+    isPanoramaAutofillCurrent({ _vaxlinkOwner: lastHandledScanOwner })
   ) {
     return {
       accepted: true,
@@ -754,23 +644,11 @@ async function handleHandsFreeScan(
       duplicate_ignored: true
     };
   }
-  if (activeWorkflowMode !== 'immunization') {
-    lastHandledScanValue = trimmed;
-    lastHandledScanAt = now;
-  }
-  const fillData =
-    activeWorkflowMode === 'immunization' && !scannerDelivery
-      ? beginPanoramaAutofill({}, true, { automatic: true, startBy })
-      : null;
-  if (activity && fillData) fillData._vaxlinkOwner.activity = activity;
-
-  const immunization = activeWorkflowMode !== 'inventory';
   let parsed;
   try {
-    parsed =
-      immunization && globalThis.VaxLinkGS1Parser.isRetailBarcode(trimmed)
-        ? {}
-        : parseGS1BarcodeFromScanner(trimmed);
+    parsed = globalThis.VaxLinkGS1Parser.isRetailBarcode(trimmed)
+      ? {}
+      : parseGS1BarcodeFromScanner(trimmed);
   } catch (error) {
     chartActivity?.record(activity, 'barcode', {
       result: 'malformed',
@@ -778,9 +656,9 @@ async function handleHandsFreeScan(
     });
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
     playAudioCue('error');
-    if (immunization) showVaxlinkToast({ _barcodeFeedback: 'parse_error' });
+    showVaxlinkToast({ _barcodeFeedback: 'parse_error' });
     logAnalyticsEvent('parse_error', {
-      workflow: activeWorkflowMode,
+      workflow,
       source
     });
     return {
@@ -790,7 +668,7 @@ async function handleHandsFreeScan(
       error: error.message || 'Scan was not valid GS1'
     };
   }
-  if (immunization && !String(parsed.lot || '').trim()) {
+  if (!String(parsed.lot || '').trim()) {
     if (chartActivity?.isCurrent(activity)) {
       chartActivity.record(activity, 'barcode', {
         result: 'missing_lot',
@@ -802,7 +680,7 @@ async function handleHandsFreeScan(
       });
     }
     logAnalyticsEvent('barcode_missing_lot', {
-      workflow: activeWorkflowMode,
+      workflow,
       source
     });
     showVaxlinkToast({ _barcodeFeedback: 'missing_lot' });
@@ -819,7 +697,7 @@ async function handleHandsFreeScan(
       barcode: globalThis.VaxLinkRecentActivity.scannedBarcode(trimmed)
     });
   logAnalyticsEvent('parse_success', {
-    workflow: activeWorkflowMode,
+    workflow,
     source,
     expiryFlag: getExpiryStatus(parsed.expiry).flag
   });
@@ -829,15 +707,12 @@ async function handleHandsFreeScan(
   try {
     let vaccineInfo = null;
     let lookupAttempted = false;
-    if (
-      parsed.lot &&
-      !(immunization && globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed))
-    ) {
+    if (!globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed)) {
       lookupAttempted = true;
       const lookup = await lookupVaccineInfoByLot(
         parsed.lot,
         parsed.gtin,
-        activeWorkflowMode !== 'inventory'
+        true
       );
       if (chartActivity?.isCurrent(activity)) {
         const diagnostics = globalThis.VaxLinkRecentActivity;
@@ -877,7 +752,7 @@ async function handleHandsFreeScan(
         playAudioCue('error');
       }
       logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
-        workflow: activeWorkflowMode,
+        workflow,
         source,
         vaccineLabel: parsed.tradename || parsed.generic_name || '',
         manufacturer: parsed.manufacturer || '',
@@ -891,31 +766,23 @@ async function handleHandsFreeScan(
     });
     console.warn('Hands-free lookup error:', error);
     logAnalyticsEvent('lookup_error', {
-      workflow: activeWorkflowMode,
+      workflow,
       source
     });
   }
 
+  // The saved scan still belongs to its original Single form while lookup runs.
   if (
-    (fillData && !isPanoramaAutofillCurrent(fillData)) ||
-    (scannerDelivery &&
-      (!isPanoramaChartActive() ||
-        !isScannerDeliveryContextCurrent(scannerDelivery.contextToken)))
+    !isPanoramaChartActive() ||
+    Date.now() >= startBy ||
+    !canAutomaticallyFillPanoramaSingle(contextToken)
   ) {
     return {
       accepted: false,
       success: false,
       status: 'cancelled',
-      error: 'Autofill stopped: form changed or manual takeover'
+      error: 'Chart context changed. The scan was held.'
     };
-  }
-  if (fillData) parsed._vaxlinkOwner = fillData._vaxlinkOwner;
-
-  if (!parsed.lot && !parsed.expiry && !parsed.serial) {
-    console.warn(
-      'Hands-free scan parsed GTIN only (no AI10 lot / AI17 expiry / AI21 serial). Configure scanner for full GS1 payload.',
-      parsed
-    );
   }
 
   const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed);
@@ -923,128 +790,50 @@ async function handleHandsFreeScan(
     ? 'expired'
     : getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
   logAnalyticsEvent('scan_captured', {
-    workflow: activeWorkflowMode,
+    workflow,
     source,
     vaccineLabel: parsed.tradename || parsed.generic_name || '',
     manufacturer: parsed.manufacturer || '',
     expiryFlag: finalExpiryFlag
   });
 
-  if (immunization) {
-    const blocked = blockIneligibleChartUse(parsed);
-    if (blocked) return { accepted: true, ...blocked };
-  }
-  const queueStorageKey = getQueueStorageKeyForWorkflow(activeWorkflowMode);
-  if (queueStorageKey) {
-    try {
-      const record = await saveScanToQueue(
-        { ...parsed, expiry_flag: finalExpiryFlag },
-        trimmed,
-        queueStorageKey
-      );
-      const queueKey =
-        activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
-      if (record.duplicate_ignored) {
-        playAudioCue('duplicate');
-        showVaxlinkToast({ ...parsed, _duplicateIgnored: true });
-        vlog('duplicate scan ignored', {
-          mode: activeWorkflowMode,
-          source,
-          lot: record.lot
-        });
-        logAnalyticsEvent('queue_duplicate_ignored', {
-          workflow: activeWorkflowMode,
-          queue: queueKey,
-          source,
-          vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-          manufacturer: record.manufacturer || '',
-          expiryFlag: record.expiry_flag || finalExpiryFlag
-        });
-        return {
-          accepted: true,
-          success: true,
-          queued: true,
-          duplicate_ignored: true,
-          status: 'duplicate_ignored',
-          queueSizeAfter: record.queueSizeAfter || 0
-        };
-      }
-      // Expired records get the expiry_warning cue from the persistent toast.
-      if (record.expiry_flag !== 'expired') {
-        playAudioCue('success');
-      }
-      showVaxlinkToast({ ...parsed, _queuedCount: record.queueSizeAfter || 0 });
-      vlog('workflow scan saved to queue', {
-        mode: activeWorkflowMode,
-        source,
-        id: record.id,
-        lot: record.lot,
-        tradename: record.tradename
-      });
-      logAnalyticsEvent('queue_saved', {
-        workflow: activeWorkflowMode,
-        queue: queueKey,
-        source,
-        count: 1,
-        queueSizeAfter: record.queueSizeAfter || 0,
-        vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-        manufacturer: record.manufacturer || '',
-        expiryFlag: record.expiry_flag || finalExpiryFlag
-      });
-      return {
-        accepted: true,
-        success: true,
-        queued: true,
-        status: 'queued',
-        queueSizeAfter: record.queueSizeAfter || 0
-      };
-    } catch (error) {
-      console.warn('Workflow queue save failed:', error);
-      playAudioCue('error');
-      return {
-        accepted: true,
-        success: false,
-        status: 'queue_failed',
-        error: error?.message || 'Workflow queue save failed'
-      };
-    }
-  }
+  const blocked = blockIneligibleChartUse(parsed);
+  if (blocked) return { accepted: true, ...blocked };
 
-  if (scannerDelivery) {
-    if (parsed.lot && !getPanoramaAgentCandidates(parsed).length) {
-      const warning =
-        'VaxLink could not identify the Agent for this lot. The scan was held. Verify the vaccine before entering it.';
-      warnPanoramaEntryBlocked(warning);
-      return {
-        accepted: false,
-        success: false,
-        status: 'unknown_agent',
-        error: warning
-      };
-    }
-    if (
-      !(await checkPanoramaScannerRoute(scannerDelivery)) ||
-      !isPanoramaChartActive() ||
-      Date.now() >= startBy ||
-      !canAutomaticallyFillPanoramaSingle(scannerDelivery.contextToken)
-    ) {
-      return {
-        accepted: false,
-        success: false,
-        status: 'cancelled',
-        error: 'Chart context changed. The scan was held.'
-      };
-    }
-    const owned = beginPanoramaAutofill(parsed, true, {
-      automatic: true,
-      startBy
-    });
-    owned._vaxlinkOwner.scannerDelivery = scannerDelivery;
+  if (!getPanoramaAgentCandidates(parsed).length) {
+    const warning =
+      'VaxLink could not identify the Agent for this lot. The scan was held. Verify the vaccine before entering it.';
+    warnPanoramaEntryBlocked(warning);
+    return {
+      accepted: false,
+      success: false,
+      status: 'unknown_agent',
+      error: warning
+    };
   }
+  if (
+    !(await checkPanoramaScannerRoute(scannerDelivery)) ||
+    !isPanoramaChartActive() ||
+    Date.now() >= startBy ||
+    !canAutomaticallyFillPanoramaSingle(contextToken)
+  ) {
+    return {
+      accepted: false,
+      success: false,
+      status: 'cancelled',
+      error: 'Chart context changed. The scan was held.'
+    };
+  }
+  const owned = beginPanoramaAutofill(parsed, true, {
+    automatic: true,
+    startBy
+  });
+  owned._vaxlinkOwner.scannerDelivery = scannerDelivery;
+  owned._vaxlinkOwner.activity = activity;
 
   parsed._vaxlinkResultSource = source;
   logAnalyticsEvent('autofill_attempt', {
-    workflow: activeWorkflowMode,
+    workflow,
     source,
     vaccineLabel: parsed.tradename || parsed.generic_name || '',
     manufacturer: parsed.manufacturer || '',
@@ -1060,7 +849,7 @@ async function handleHandsFreeScan(
   }
   if (!pending)
     logAnalyticsEvent('autofill_result', {
-      workflow: activeWorkflowMode,
+      workflow,
       source,
       success,
       vaccineLabel: parsed.tradename || parsed.generic_name || '',
@@ -1073,7 +862,7 @@ async function handleHandsFreeScan(
     playAudioCue('error');
     if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
-  vlog('hands-free autofill', autofillResult?.status, { source, parsed });
+  vlog('hands-free autofill', autofillResult?.status, { source });
   return {
     accepted: true,
     success,

@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {
   createBackgroundHarness,
   createContentHarness,
+  deliverScannerScanToChart,
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
@@ -181,7 +182,11 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
     setTimeout: () => 1,
     clearTimeout() {}
   });
-  const { context, storageListeners, windowListeners } = integration;
+  const { context, storageListeners, windowListeners, storageReads } =
+    integration;
+  storageReads
+    .find(({ keys }) => keys.includes('vaxlink_workflow_mode_v1'))
+    .callback({});
   const toast = {
     innerHTML: '',
     querySelector: () => null,
@@ -191,8 +196,9 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
   Object.assign(context, {
     toast,
     getPanoramaAutofillForm: () => form,
-    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
+    getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
     getPanoramaMultiStepIndicatorKey: () => '',
+    getPanoramaAgentCandidates: () => ['Training vaccine'],
     ensureToastHost() {},
     escapeToastHtml: (text) => text,
     playAudioCue() {},
@@ -200,11 +206,12 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
   });
   vm.runInContext('toastRoutineSlot = toast;', context);
   context.chrome.runtime.sendMessage = (message, done) => {
+    if (message.action === 'checkScannerChart')
+      return Promise.resolve({ success: true });
     const response = worker.sendMessage(message, chart);
     requests.push(done ? response.then(done) : response);
     return response;
   };
-  const recorder = vm.runInContext('chartActivity', context);
   context.applyAutofillSettings({ vaxlink_auto_resolve_funding_v1: false });
   const setDebug = async (enabled) => {
     await worker.manage('setRecentActivity', { enabled });
@@ -218,15 +225,12 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
     [true, 'TRAIN-ON']
   ]) {
     await setDebug(enabled);
-    const activity = recorder.begin('single', 'detail');
-    const result = await context.handleHandsFreeScan(
-      `01001234567890121799123110${lot}`,
-      'web-serial',
-      null,
-      null,
-      activity
+    const result = await deliverScannerScanToChart(
+      integration,
+      `01001234567890121799123110${lot}`
     );
-    assert.equal(result.pending, true);
+    assert.equal(result.activityRecording, enabled);
+    assert.equal(result.pending, true, result.error);
     assert.match(toast.innerHTML, /Choose vaccine funding/);
     if (!enabled)
       assert.equal((await worker.manage('getRecentActivity')).retained, 0);
@@ -236,7 +240,7 @@ test('a missing-lot lookup and funding prompt can be retained without adding ide
   const exported = await worker.manage('exportRecentActivity');
   assert.deepEqual(
     Array.from(exported.rows, (row) => row.event),
-    ['barcode', 'nvc_lookup', 'funding_prompt']
+    ['barcode', 'nvc_lookup', 'funding_prompt', 'scan']
   );
   assert.equal(
     new Set(Array.from(exported.rows, (row) => row.operation)).size,

@@ -222,6 +222,27 @@ export function createContentHarness(globals = {}) {
   };
 }
 
+// Deliver through the chart's frame and worker-sender checks.
+export function deliverScannerScanToChart(
+  { context, messageListeners },
+  rawText,
+  startBy = Date.now() + 1500
+) {
+  const message = {
+    action: 'vaxlinkScanCaptured',
+    scan: { captureId: 'training-capture', rawText, source: 'web-serial' },
+    contextToken: context.getScannerDeliveryContext('provider_single'),
+    scannerRoute: { startBy }
+  };
+  return new Promise((resolve) => {
+    const handled = messageListeners.some(
+      (listener) =>
+        listener(message, { id: context.chrome.runtime.id }, resolve) === true
+    );
+    if (!handled) throw new Error('Chart did not handle the scanner message');
+  });
+}
+
 export function makeTestNvcBundle(code = 'TESTLOT') {
   return {
     resourceType: 'Bundle',

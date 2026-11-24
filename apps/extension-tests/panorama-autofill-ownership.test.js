@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import { createContentHarness } from './helpers/clinic-sim.js';
+import {
+  createContentHarness,
+  deliverScannerScanToChart
+} from './helpers/clinic-sim.js';
 
 function fixture() {
   const form = {
@@ -53,7 +56,6 @@ function fixture() {
     logAnalyticsEvent: () => {},
     vlog: () => {},
     playAudioCue: () => {},
-    getQueueStorageKeyForWorkflow: () => null,
     autoFillPanorama: () => {
       state.fills++;
       return { status: 'filled' };
@@ -80,13 +82,22 @@ function fixture() {
     },
     console
   };
-  const { context, documentListeners, windowListeners, storageListeners } =
-    createContentHarness(globals);
+  const {
+    context,
+    documentListeners,
+    windowListeners,
+    storageListeners,
+    messageListeners,
+    storageReads
+  } = createContentHarness(globals);
   // Replace only the page/catalogue dependencies for each case. Ownership and
   // its initial state come from the complete production script above.
   const { document, ...dependencies } = globals;
   Object.assign(context, dependencies);
   Object.assign(context.document, document);
+  storageReads
+    .find(({ keys }) => keys.includes('vaxlink_workflow_mode_v1'))
+    .callback({});
   vm.runInContext(
     'adminDateAutofillEnabled = false; adminTimeAutofillEnabled = false;',
     context
@@ -99,6 +110,7 @@ function fixture() {
     documentListeners,
     windowListeners,
     storageListeners,
+    messageListeners,
     runTimer(callback = state.timers[0]) {
       assert.ok(callback, 'expected a pending check');
       state.timers = state.timers.filter((timer) => timer !== callback);
@@ -265,7 +277,7 @@ test('a scan lookup resolving after manual takeover cannot start a fill', async 
   f.state.lookup = new Promise((done) => {
     resolve = done;
   });
-  const pending = f.handleHandsFreeScan('scan');
+  const pending = deliverScannerScanToChart(f, 'scan', 1100);
   interaction(f);
   resolve({});
   const result = await pending;
@@ -500,7 +512,7 @@ test('formulation-specific vaccines do not match the broader Agent on a detail s
   }
 });
 
-test('a scanner lookup cannot start writing after losing focus or its first-write deadline', async () => {
+test('a scanner lookup stays held after focus, workflow, or deadline changes', async () => {
   for (const interrupt of [
     (f) => {
       const token = f.getScannerDeliveryContext();
@@ -508,6 +520,7 @@ test('a scanner lookup cannot start writing after losing focus or its first-writ
       // The chart reports focus again before the catalogue reply arrives.
       assert.equal(f.isScannerDeliveryContextCurrent(token), false);
     },
+    (f) => f.setMode('inventory'),
     (f) => {
       f.state.now += 100;
     }
@@ -517,13 +530,19 @@ test('a scanner lookup cannot start writing after losing focus or its first-writ
     f.state.lookup = new Promise((done) => {
       resolve = done;
     });
-    const pending = f.handleHandsFreeScan('scan', 'web-serial', 1100);
+    const actions = [];
+    f.context.chrome.runtime.sendMessage = async ({ action }) => {
+      actions.push(action);
+      return { success: true };
+    };
+    const pending = deliverScannerScanToChart(f, 'scan', 1100);
     interrupt(f);
     resolve({});
     const result = await pending;
     assert.equal(result.accepted, false);
     assert.equal(result.status, 'cancelled');
     assert.equal(f.state.fills, 0);
+    assert.deepEqual(actions, []);
   }
 });
 

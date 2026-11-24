@@ -1,20 +1,28 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import { createContentHarness } from './helpers/clinic-sim.js';
+import {
+  createContentHarness,
+  deliverScannerScanToChart
+} from './helpers/clinic-sim.js';
 
 test('failed chart fill still shows the NVC failure and retains barcode fields', async () => {
   for (const error of [
     'NVC catalogue is unavailable',
     'Lot not found in the NVC catalogue'
   ]) {
-    const { context } = createContentHarness();
+    const chart = createContentHarness();
+    const { context, storageReads } = chart;
+    storageReads
+      .find(({ keys }) => keys.includes('vaxlink_workflow_mode_v1'))
+      .callback({});
     const form = { isConnected: true };
     const notices = [];
     let fillPayload;
     Object.assign(context, {
       getPanoramaAutofillForm: () => form,
       getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
+      getPanoramaAgentCandidates: () => ['Training vaccine'],
       getPanoramaMultiStepIndicatorKey: () => '',
       playAudioCue() {},
       showVaxlinkToast: (data) => notices.push(data),
@@ -24,9 +32,13 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
       }
     });
     context.chrome.runtime.sendMessage = (request, done) => {
-      done(request.action === 'lookupVaccineInfo' ? { error } : {});
+      const response =
+        request.action === 'lookupVaccineInfo' ? { error } : { success: true };
+      if (done) done(response);
+      return Promise.resolve(response);
     };
-    const result = await context.handleHandsFreeScan(
+    const result = await deliverScannerScanToChart(
+      chart,
       '01001234567890121799123110TRAININGLOT'
     );
     assert.equal(result.success, false);
