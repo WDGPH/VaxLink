@@ -368,7 +368,20 @@ test('the chart tray can review a reserved dose and use any remaining dose', asy
     vm.runInContext('hudQueueListEl = list;', context);
     context.renderHudQueueList(worker.storageData.get(key), true);
     const controls = list.children[0].children;
-    controls.find((control) => control.textContent === 'Review dose').click();
+    assert.equal(
+      controls.find((control) => control.textContent === 'In progress')
+        .disabled,
+      true
+    );
+    const held = structuredClone(worker.storageData.get(key));
+    held[0].dose_reservations[0].review = true;
+    context.renderHudQueueList(held, true);
+    list.children
+      .at(-1)
+      .children.find(
+        (control) => control.textContent === 'Check original chart'
+      )
+      .click();
     assert.equal(reviewToken, first);
     const use = controls.find((control) => control.textContent === 'Use');
     assert.ok(use, 'a reservation cannot hide Use');

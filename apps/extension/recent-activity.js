@@ -83,6 +83,29 @@
     funding_choice: {
       funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED')
     },
+    grid_handoff: {
+      row: integer(1, 100000),
+      step: integer(0, 100000),
+      result: choices(
+        'date_missing',
+        'detail_disabled',
+        'assigned',
+        'superseded',
+        'route_changed',
+        'context_changed',
+        'row_replaced',
+        'row_changed',
+        'duplicate_agent',
+        'enter_details',
+        'row_missing',
+        'detail_timeout',
+        'manual_use',
+        'skipped',
+        'detail_identity_unmatched',
+        'detail_not_ready',
+        'detail_matched'
+      )
+    },
     detail_position: { step: integer(1, 9999), total: integer(1, 9999) },
     detail_readback: {
       funding,

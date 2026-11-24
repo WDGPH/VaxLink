@@ -596,7 +596,7 @@ function buildQueueItemMarkup(row, index, options) {
         <button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>
       </div>
       ${row.reference_only ? '<div class="inventory-lot-report">Reference only</div>' : ''}
-      ${held ? '<div class="inventory-lot-report">Review dose on chart</div>' : ''}
+      ${held ? `<div class="inventory-lot-report">${row.dose_reservations.some((dose) => dose.review) ? 'Check original chart' : 'Reserved on chart'}</div>` : ''}
       ${lookupMessage ? `<div class="inventory-lot-report"><span>${escapeHtml(lookupMessage)}</span>${reportUrl ? `<a href="${escapeHtml(reportUrl)}">Email lot report</a>` : ''}</div>` : ''}
     </div>
   `;

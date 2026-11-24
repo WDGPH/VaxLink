@@ -2648,6 +2648,8 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
   for (const type of ['mouseover', 'mousedown', 'mouseup']) {
     assertPanoramaAutofillWrite();
     if (!matched.isConnected) return false;
+    if (panoramaWritingData?._vaxlinkOwner?.trayDose)
+      panoramaWritingData._vaxlinkOwner.sawMatchingLot = true;
     matched.dispatchEvent(new MouseEvent(type, { bubbles: true }));
   }
   assertPanoramaAutofillWrite();
@@ -3177,6 +3179,34 @@ function schedulePanoramaLotOrTradeSelection(
         return;
       }
       recordDeferredAutofillResult(data, false);
+      if (
+        !unreadable &&
+        owner.kind === 'multiple_detail' &&
+        owner.trayDose?.reserved &&
+        cleanup === 'empty' &&
+        !owner.initialLot &&
+        !owner.lotSelectionWidgetId &&
+        !owner.sawMatchingLot &&
+        getPanoramaLotWidget()?.select?.isConnected
+      ) {
+        // Funding and dropdown interactions can mark a write before any Lot
+        // was selected. This uninterrupted check established an empty detail.
+        void stopTrayDose(owner, true).then((released) => {
+          if (
+            released &&
+            panoramaAutofillOwner === owner &&
+            owner.form === getPanoramaAutofillForm() &&
+            owner.step ===
+              getPanoramaMultiStepIndicatorKey({ visibleOnly: true })
+          )
+            showVaxlinkToast({
+              ...feedback,
+              _fillFeedback: reason,
+              _doseKept: true
+            });
+        });
+        return;
+      }
       showVaxlinkToast({
         ...feedback,
         _fillFeedback: reason
@@ -3306,6 +3336,7 @@ function schedulePanoramaLotOrTradeSelection(
         resolved = hasPanoramaLotOrTradeSelection(data);
       }
       if (resolved) {
+        if (hasLot && owner.trayDose) owner.sawMatchingLot = true;
         // A prefilled Lot can be verified before its dependent menu settles.
         if (hasLot) owner.consentReadyAt ??= performance.now() + 700;
         usableMiss = undefined;
@@ -4115,7 +4146,7 @@ async function fillReservedTrayRecord(
   owner.trayDose = dose;
   activeTrayReservations.add(dose.token);
   let keepReservation = false;
-  let verifiedGridAssignment = false;
+  let confirmedNoProductWrite = false;
   try {
     const { record, reserved } = await mutateQueueViaBackground(
       MULTIPLE_INJECT_QUEUE_KEY,
@@ -4188,10 +4219,12 @@ async function fillReservedTrayRecord(
       chartActivity?.record(owner.activity, 'stop', {
         reason: 'lot_not_matched'
       });
-      if (result === 'cleared')
+      if (result === 'cleared') {
+        confirmedNoProductWrite = true;
         throw new Error(
           'Panorama selected a different lot. VaxLink cleared it. Check the chart before continuing.'
         );
+      }
       throw new Error(DIFFERENT_GRID_DETAIL_LOT);
     }
     data._vaxlinkQueueContext = {
@@ -4206,7 +4239,7 @@ async function fillReservedTrayRecord(
       const assignment = runPanoramaAutofill(data, () =>
         assignTrayVaccineToGrid(data)
       );
-      verifiedGridAssignment = !!assignment;
+      confirmedNoProductWrite = !!assignment;
       keepReservation =
         assignment && rememberGridAssignment(assignment, dose, record, source);
       return assignment
@@ -4230,7 +4263,7 @@ async function fillReservedTrayRecord(
     return result;
   } finally {
     if (!keepReservation) {
-      if (dose.reserved) await stopTrayDose(owner, verifiedGridAssignment);
+      if (dose.reserved) await stopTrayDose(owner, confirmedNoProductWrite);
       else activeTrayReservations.delete(dose.token);
     }
   }
@@ -4238,7 +4271,7 @@ async function fillReservedTrayRecord(
 
 async function stopTrayDose(
   owner,
-  verifiedGridAssignment = false,
+  confirmedNoProductWrite = false,
   dose = owner?.trayDose
 ) {
   if (
@@ -4250,14 +4283,23 @@ async function stopTrayDose(
     return;
   owner.cancelled = true;
   dose.stopping = true;
-  const written = owner.writeAttempted === true && !verifiedGridAssignment;
+  const written = owner.writeAttempted === true && !confirmedNoProductWrite;
   try {
-    await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'stop_dose', {
-      id: dose.recordId,
-      token: dose.token,
-      written
-    });
-    if (!written) return;
+    const reply = await mutateQueueViaBackground(
+      MULTIPLE_INJECT_QUEUE_KEY,
+      'stop_dose',
+      {
+        id: dose.recordId,
+        token: dose.token,
+        written
+      }
+    );
+    if (!written)
+      return reply.rows?.some(
+        (row) =>
+          row.id === dose.recordId &&
+          !row.dose_reservations?.some((saved) => saved.token === dose.token)
+      );
   } catch (error) {
     console.warn('VaxLink could not confirm the tray stop:', error);
   } finally {
@@ -4672,6 +4714,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? `Check the ${new Intl.ListFormat('en').format(data._reviewFields.map((field) => PANORAMA_DETAIL_FIELD_LABELS[field]))} in Panorama.`
         : 'Review the autofilled fields in Panorama.';
     }
+    if (data._doseKept) title = 'Lot unavailable · dose kept in tray';
     const catalogueStatus = catalogueMiss
       ? 'The lot was missing from the National Vaccine Catalogue.'
       : catalogueMatched
@@ -5244,6 +5287,7 @@ function initHud() {
     }
   });
 
+  window.addEventListener('focus', updateHudState);
   // Restore saved position and hidden state
   chrome.storage.local.get([HUD_POSITION_KEY, HUD_HIDDEN_KEY], (stored) => {
     if (stored && stored[HUD_POSITION_KEY]) {
@@ -5376,18 +5420,41 @@ function renderHudQueueList(rows, visible) {
     item.appendChild(use);
 
     // The worker checks whether another counted dose is available.
-    const heldDose =
-      row.dose_reservations?.find((dose) => dose.review) ||
-      row.dose_reservations?.[0];
-    if (heldDose) {
+    const reservations = row.dose_reservations || [];
+    if (reservations.length) {
       const review = document.createElement('button');
       review.type = 'button';
       review.className = 'vl-hud-btn';
-      review.textContent = 'Review dose';
-      review.setAttribute('aria-label', `Review dose for ${label.textContent}`);
-      review.addEventListener('click', () =>
-        showDoseReview(row, heldDose.token)
-      );
+      review.disabled = true;
+      review.textContent = 'In progress';
+      const allowReview = (dose) => {
+        if (!review.disabled) return;
+        review.disabled = false;
+        review.textContent = 'Check original chart';
+        review.setAttribute(
+          'aria-label',
+          `Check original chart for ${label.textContent}`
+        );
+        review.addEventListener('click', () => showDoseReview(row, dose.token));
+      };
+      const uncertain = reservations.find((dose) => dose.review);
+      if (uncertain) allowReview(uncertain);
+      else
+        for (const dose of reservations) {
+          if (activeTrayReservations.has(dose.token)) continue;
+          // A closed original document cannot change its saved reservation.
+          // The worker checks ownership again when staff resolve it.
+          chrome.runtime.sendMessage(
+            {
+              action: 'checkDoseReview',
+              payload: { id: row.id, token: dose.token }
+            },
+            (reply) => {
+              if (!chrome.runtime.lastError && reply?.reviewable)
+                allowReview(dose);
+            }
+          );
+        }
       item.appendChild(review);
       hudQueueListEl.appendChild(item);
       continue;
@@ -5413,10 +5480,10 @@ function showDoseReview(row, token) {
   const description = [product, row.lot].filter(Boolean).join(' · ');
   toastWarningSlot.innerHTML = `<div class="vl-toast expired persistent show" role="alert">
     <div class="vl-toast-title">${escapeToastHtml(description)}</div>
-    <div class="vl-toast-detail">Check the original chart to see whether this dose was used.</div>
+    <div class="vl-toast-detail">Check whether the original immunization record includes this vaccine and lot. If it does, remove one dose from the tray.</div>
     <div class="vl-toast-actions">
-      <button class="vl-toast-action" data-used="true" type="button">Dose used</button>
-      <button class="vl-toast-action" data-used="false" type="button">Dose unused</button>
+      <button class="vl-toast-action" data-used="true" type="button">Remove one from tray</button>
+      <button class="vl-toast-action" data-used="false" type="button">Keep in tray</button>
       <button class="vl-toast-dismiss" type="button">Not now</button>
     </div>
   </div>`;
@@ -5659,9 +5726,22 @@ async function readGridAssignmentRoute() {
 }
 
 function rememberGridAssignment(assignment, dose, record, source) {
-  if (!assignment.date || autofillSettings[GRID_DETAIL_AUTOFILL_KEY] === false)
-    return false;
   const { owner } = dose;
+  const trace = chartActivity?.begin('multiple', 'grid');
+  const log = (result, step = 0) =>
+    chartActivity?.record(trace, 'grid_handoff', {
+      row: Number(assignment.index) + 1,
+      step,
+      result
+    });
+  if (
+    !assignment.date ||
+    autofillSettings[GRID_DETAIL_AUTOFILL_KEY] === false
+  ) {
+    log(!assignment.date ? 'date_missing' : 'detail_disabled');
+    return false;
+  }
+  log('assigned');
   const route = owner.scannerRoute
     ? Promise.resolve({
         epoch: owner.scannerRoute.epoch,
@@ -5669,9 +5749,11 @@ function rememberGridAssignment(assignment, dose, record, source) {
       })
     : readGridAssignmentRoute();
   const prior = gridAssignments.get(assignment.index);
-  if (prior) void releaseGridAssignment(prior);
+  if (prior) void releaseGridAssignment(prior, 'superseded');
   const entry = {
     ...assignment,
+    trace,
+    log,
     form: owner.form,
     url: owner.url,
     route,
@@ -5686,19 +5768,20 @@ function rememberGridAssignment(assignment, dose, record, source) {
   void route.then((active) => {
     if (!active && gridAssignments.get(entry.index) === entry) {
       gridAssignments.delete(entry.index);
-      void releaseGridAssignment(entry);
+      void releaseGridAssignment(entry, 'route_changed');
     }
   });
   return true;
 }
 
-function releaseGridAssignment(entry) {
+function releaseGridAssignment(entry, reason = 'context_changed', step = 0) {
+  entry.log(reason, step);
   return stopTrayDose(entry.dose.owner, true, entry.dose);
 }
 
-function clearGridCarry() {
+function clearGridCarry(reason = 'context_changed') {
   for (const entry of gridAssignments.values())
-    void releaseGridAssignment(entry);
+    void releaseGridAssignment(entry, reason);
   gridAssignments.clear();
   const handoff = gridDetailHandoff;
   if (!handoff) return;
@@ -5706,7 +5789,7 @@ function clearGridCarry() {
   handoff.observer.disconnect();
   clearTimeout(handoff.opening);
   for (const row of handoff.rows)
-    if (row.entry) void releaseGridAssignment(row.entry);
+    if (row.entry) void releaseGridAssignment(row.entry, reason);
 }
 
 function visiblePopulatedGridRows() {
@@ -5765,18 +5848,24 @@ function startGridHandoff(event) {
   const rows = visiblePopulatedGridRows();
   for (const row of rows) {
     const entry = gridAssignments.get(row.index);
-    if (
-      entry?.form !== form ||
-      entry.url !== location.href ||
-      !sameGridAssignment(row, entry)
-    )
+    if (!entry) continue;
+    let reason;
+    if (entry.form !== form || entry.url !== location.href)
+      reason = 'context_changed';
+    else if (row.row !== entry.row) reason = 'row_replaced';
+    else if (!sameGridAssignment(row, entry)) reason = 'row_changed';
+    else if (rows.some((other) => other !== row && other.agent === row.agent))
+      reason = 'duplicate_agent';
+    if (reason) {
+      gridAssignments.delete(row.index);
+      void releaseGridAssignment(entry, reason);
       continue;
-    if (rows.some((other) => other !== row && other.agent === row.agent))
-      continue;
+    }
+    entry.log('enter_details');
     row.entry = entry;
     gridAssignments.delete(row.index);
   }
-  clearGridCarry();
+  clearGridCarry('row_missing');
   if (!rows.some((row) => row.entry)) return;
 
   const observer = new MutationObserver(() => {
@@ -5792,7 +5881,8 @@ function startGridHandoff(event) {
   };
   gridDetailHandoff = handoff;
   handoff.opening = setTimeout(() => {
-    if (gridDetailHandoff === handoff && !handoff.step) clearGridCarry();
+    if (gridDetailHandoff === handoff && !handoff.step)
+      clearGridCarry('detail_timeout');
   }, 16000);
   observer.observe(document.body, {
     subtree: true,
@@ -5879,7 +5969,7 @@ async function releaseGridDetailStep() {
   if (!row?.entry) return;
   const entry = row.entry;
   row.entry = null;
-  await releaseGridAssignment(entry);
+  await releaseGridAssignment(entry, 'manual_use', step);
 }
 
 async function advanceGridHandoff() {
@@ -5906,7 +5996,7 @@ async function advanceGridHandoff() {
       )
         originalIndex += 1;
       if (originalIndex === handoff.rows.length) {
-        clearGridCarry();
+        clearGridCarry('row_changed');
         return;
       }
       originalIndex += 1;
@@ -5928,9 +6018,24 @@ async function advanceGridHandoff() {
   if (!(step > 0 && step <= total)) return;
   handoff.step = step;
   clearTimeout(handoff.opening);
-  if (!context.ready || handoff.attempted === step) return;
-  const row = findGridDetailRow(handoff, form, step, total);
-  if (!row) return;
+  if (handoff.attempted === step) return;
+  const row = context.ready && findGridDetailRow(handoff, form, step, total);
+  if (!row) {
+    // A detail can open before its Agent and date are readable. Record why
+    // this step is waiting without discarding a later, valid match.
+    const reason = context.ready
+      ? 'detail_identity_unmatched'
+      : 'detail_not_ready';
+    if (handoff.lastWait !== `${step}:${reason}`) {
+      handoff.lastWait = `${step}:${reason}`;
+      for (const candidate of handoff.rows.slice(
+        step - 1,
+        step + handoff.rows.length - total
+      ))
+        candidate.entry?.log(reason, step);
+    }
+    return;
+  }
   const entry = row.entry;
   const checking = handoff.checking;
   if (
@@ -5950,7 +6055,7 @@ async function advanceGridHandoff() {
       route && (await checkPanoramaScannerRoute({ scannerRoute: route }));
     if (gridDetailHandoff !== handoff || handoff.checking !== check) return;
     if (!active) {
-      clearGridCarry();
+      clearGridCarry('route_changed');
       return;
     }
     const current = getPanoramaFormContext();
@@ -5976,7 +6081,7 @@ async function advanceGridHandoff() {
     for (const earlier of handoff.rows) {
       if (earlier === row) break;
       if (!earlier.entry) continue;
-      void releaseGridAssignment(earlier.entry);
+      void releaseGridAssignment(earlier.entry, 'skipped', step);
       earlier.entry = null;
     }
 
@@ -5984,6 +6089,12 @@ async function advanceGridHandoff() {
     if (!isPanoramaAutofillCurrent(data)) return;
     data._vaxlinkOwner.scannerRoute = route;
     data._vaxlinkOwner.gridDetail = entry;
+    entry.log('detail_matched', step);
+    if (entry.trace)
+      data._vaxlinkOwner.activity = {
+        ...entry.trace,
+        stage: 'detail'
+      };
     row.entry = null;
     await fillReservedTrayRecord(
       entry.dose.recordId,

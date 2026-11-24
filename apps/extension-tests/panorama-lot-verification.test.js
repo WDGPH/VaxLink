@@ -734,8 +734,10 @@ test('Enter Details carries only the exact grid row and foreground route', async
     }
     if (['sole_lot', 'navigate_during_cleanup'].includes(scenario)) {
       assert.equal(soleLot.value, '');
-      if (scenario === 'sole_lot') assert.match(warnings.at(-1), /cleared/);
-      assert.equal(saved().dose_reservations[0].review, true);
+      if (scenario === 'sole_lot') {
+        assert.match(warnings.at(-1), /cleared/);
+        assert.equal(saved().dose_reservations, undefined);
+      } else assert.equal(saved().dose_reservations[0].review, true);
     } else assert.equal(saved().dose_reservations, undefined, scenario);
   }
 });

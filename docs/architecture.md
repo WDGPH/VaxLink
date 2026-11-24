@@ -201,10 +201,14 @@ The background can reserve a counted dose for one chart document. It accepts
 another reservation only when the saved quantity still covers it. A chart
 can release its own reservation before it touches any fields. If a field may
 have changed, staff check the original chart before returning the dose or
-recording it as used. A missing response leaves the dose held. The chart tray
-offers **Review dose** and asks whether it was used. When the original chart has
-yet to confirm that its operation stopped, the background checks that browser
-document before accepting review.
+recording it as used. A missing response leaves the dose held. The chart tray shows **In progress** for an active reservation.
+**Check original chart** lets staff remove one dose from the tray or keep it
+when a write is uncertain or the original document is confirmed inactive.
+An uninterrupted Multiple detail Lot miss can release a counted dose after
+confirming an empty Lot and no prior target selection. A verified fill updates
+the tray count. Panorama save confirmation is separate.
+Debug records the numbered grid row, whether it carried into Enter Details,
+and the matching detail step or the reason the assignment was released.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background saves it to a tray or retains it in the

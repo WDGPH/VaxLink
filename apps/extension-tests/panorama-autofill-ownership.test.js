@@ -937,6 +937,48 @@ test('a Lot miss first observed late uses the current list at the deadline', () 
   }
 });
 
+test('a counted detail miss releases a blank Lot only before a possible product selection', async () => {
+  for (const selected of [false, true]) {
+    const f = fixture();
+    const notices = [],
+      changes = [];
+    const select = {
+      isConnected: true,
+      options: [{ text: 'OTHER', value: 'other' }]
+    };
+    Object.assign(f.context, {
+      getPanoramaFormContext: () => ({ kind: 'multiple_detail', ready: true }),
+      getPanoramaCurrentAgentSelectionText: () => 'Training',
+      getPanoramaLotWidget: () => ({ select }),
+      hasPanoramaLotSelection: () => false,
+      tryFillPanoramaLotOrTrade: () => false,
+      cleanUpPanoramaLotMiss: () => 'empty',
+      showVaxlinkToast: (data) => notices.push(data),
+      mutateQueueViaBackground: async (_key, op, payload) => {
+        changes.push([op, payload.written]);
+        return { rows: [{ id: 'record' }] };
+      }
+    });
+    const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+    Object.assign(data._vaxlinkOwner, {
+      trayDose: { reserved: true, token: 'dose', recordId: 'record' },
+      writeAttempted: true,
+      sawMatchingLot: selected
+    });
+    vm.runInContext("activeTrayReservations.add('dose')", f.context);
+    f.schedulePanoramaLotOrTradeSelection(data, 0, {
+      finalizeOnResolved: true
+    });
+    while (f.state.timers.length) await f.runTimer();
+    await new Promise(setImmediate);
+    assert.deepEqual(changes, [['stop_dose', selected]]);
+    assert.equal(
+      notices.some((n) => n._doseKept),
+      !selected
+    );
+  }
+});
+
 test('a repeatedly repaired Time shows detail progress after the Lot matches', () => {
   const f = fixture();
   const notices = [];

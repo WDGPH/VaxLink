@@ -733,8 +733,7 @@ async function findInactiveDoseDocument(storageKey, payload) {
   if (
     storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
     typeof payload?.id !== 'string' ||
-    typeof payload.token !== 'string' ||
-    typeof payload.used !== 'boolean'
+    typeof payload.token !== 'string'
   )
     return null;
   const stored = await getStorage([storageKey]);
@@ -4476,6 +4475,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       error: 'Queue changes require the popup or a supported chart'
     });
     return false;
+  }
+
+  if (request.action === 'checkDoseReview') {
+    if (!isChartMessageSender(sender)) {
+      sendResponse({ reviewable: false });
+      return false;
+    }
+    findInactiveDoseDocument(MULTIPLE_INJECT_QUEUE_KEY, request.payload).then(
+      (dose) => sendResponse({ reviewable: !!dose }),
+      () => sendResponse({ reviewable: false })
+    );
+    return true;
   }
 
   if (request.action === 'mutateQueue') {
