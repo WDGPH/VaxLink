@@ -16,6 +16,11 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       'openScannerSettingsBtn',
       'continueWithoutScannerBtn',
       'settingsPanel',
+      'recentActivitySettings',
+      'recentActivityToggle',
+      'recentActivityStatus',
+      'recentActivityNotice',
+      'exportRecentActivityBtn',
       'workflowHeader',
       'panelHeader',
       'panelTitle',
@@ -54,6 +59,8 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       }
     ])
   );
+  nodes.recentActivityToggle.disabled = true;
+  nodes.recentActivityToggle.checked = false;
   let focusedTitle = false;
   let scrolledSection = false;
   nodes.scannerSettingsTitle.focus = () => {
@@ -88,7 +95,8 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     }
   };
   const background = createBackgroundHarness(makeTestNvcBundle(), {
-    storage: localData
+    storage: localData,
+    manifestName: 'VaxLink Alpha'
   });
   let runtimeListener;
   globalThis.document = {
@@ -108,7 +116,14 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       },
       sendMessage(message, done) {
         messages.push(message);
-        requests.push(background.sendMessage(message).then(done));
+        requests.push(
+          background
+            .sendMessage(message, {
+              id: 'vaxlink-test',
+              url: 'chrome-extension://vaxlink-test/popup.html'
+            })
+            .then(done)
+        );
       }
     },
     storage: {
@@ -150,6 +165,24 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);
+
+    listeners['settingsToggleBtn:click']();
+    await Promise.all(requests);
+    assert.equal(nodes.recentActivityToggle.disabled, false);
+    assert.equal(nodes.recentActivityToggle.checked, true);
+    assert.equal(nodes.recentActivityStatus.textContent, '0 events');
+    assert.equal(nodes.exportRecentActivityBtn.disabled, true);
+    nodes.recentActivityToggle.checked = false;
+    listeners['recentActivityToggle:change']();
+    await Promise.all(requests);
+    assert.equal(
+      background.storageData.get('vaxlink_recent_activity_enabled'),
+      false
+    );
+    assert.equal(nodes.recentActivityToggle.checked, false);
+    assert.equal(nodes.recentActivityToggle.disabled, false);
+    listeners['closePanelBtn:click']();
+
     for (const mode of ['immunization', 'inventory']) {
       await listeners[`${mode}ModeBtn:click`]();
       assert.equal(nodes.scannerSetupPrompt.hidden, false);

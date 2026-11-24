@@ -175,10 +175,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindTrayTransfer(moveToInventory, multipleInjectManager, 'Inventory');
   bindTrayTransfer(moveToImmunization, inventoryManager, 'Immunization');
   await loadWorkflowMode();
+  refreshRecentActivity = setupRecentActivityControls();
   await loadSettingsPanelState();
   await loadAutofillSettings();
   await loadAnalyticsSummary();
-  refreshRecentActivity = setupRecentActivityControls();
   await loadScannerStatus();
   logAnalyticsEvent('popup_open', { workflow: activeMode, source: 'popup' });
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
@@ -775,7 +775,10 @@ function applyPopupPanel(panel) {
   if (panelTitle) panelTitle.textContent = title;
   closeButton?.setAttribute('aria-label', `Close ${title}`);
   closeButton?.setAttribute('title', `Close ${title}`);
-  if (panel === 'settings') initializeScannerSettings();
+  if (panel === 'settings') {
+    initializeScannerSettings();
+    void refreshRecentActivity?.();
+  }
   if (settingsPanel) {
     settingsPanel.hidden = panel !== 'settings';
   }
