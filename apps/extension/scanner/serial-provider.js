@@ -30,6 +30,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     typeof handlers.onStatus === 'function' ? handlers.onStatus : () => {};
   const onError =
     typeof handlers.onError === 'function' ? handlers.onError : () => {};
+  const { signal } = handlers;
   const decoder = createLineFrameDecoder(profile.decoder || {});
   const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;
@@ -67,24 +68,39 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     if (!idleFlushMs || !decoder.hasBufferedData()) return;
     idleFlushTimer = setTimeout(() => {
       idleFlushTimer = null;
-      if (!keepReading || !decoder.hasBufferedData()) return;
+      if (!keepReading || signal?.aborted || !decoder.hasBufferedData()) return;
       emitFrames(decoder.flush());
     }, idleFlushMs);
   };
 
-  await port.open(profile.serialOptions || { baudRate: 9600 });
-  if (profile.signals && typeof port.setSignals === 'function') {
-    await port.setSignals(profile.signals).catch((error) => onError(error));
+  if (signal?.aborted) return null;
+  try {
+    await port.open(profile.serialOptions || { baudRate: 9600 });
+  } catch (error) {
+    if (signal?.aborted) return null;
+    throw error;
+  }
+  if (
+    !signal?.aborted &&
+    profile.signals &&
+    typeof port.setSignals === 'function'
+  ) {
+    await port.setSignals(profile.signals).catch(() => undefined);
+  }
+  // Web Serial cannot cancel open(). Close before any reader can receive bytes.
+  if (signal?.aborted) {
+    await port.close();
+    return null;
   }
   onStatus({ state: 'open', profile, portInfo: port.getInfo() });
 
   const readLoop = (async () => {
-    while (keepReading && port.readable) {
+    while (keepReading && !signal?.aborted && port.readable) {
       activeReader = port.readable.getReader();
       try {
         while (keepReading) {
           const { value, done } = await activeReader.read();
-          if (done) break;
+          if (done || !keepReading || signal?.aborted) break;
           const frames = decoder.push(value);
           emitFrames(frames);
           scheduleIdleFlush();
@@ -125,7 +141,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
       }
       await readLoop.catch(() => undefined);
       if (port.readable || port.writable) {
-        await port.close().catch(() => undefined);
+        await port.close();
       }
       onStatus({ state: 'closed', profile });
     }
