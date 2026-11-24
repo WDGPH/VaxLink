@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   createBackgroundHarness,
+  createContentHarness,
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
@@ -298,4 +300,87 @@ test('recent lots preserve legacy expiry and lookup confirmation for named vacci
   assert.equal(record.expiry, '12/31/2099');
   assert.equal(record.nvc_lot_matched, true);
   assert.equal(record.nvc_catalogue_version, 'test-version');
+});
+
+test('the chart tray can review a reserved dose and use any remaining dose', async () => {
+  function node() {
+    return {
+      children: [],
+      classList: { toggle() {} },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      setAttribute() {},
+      addEventListener(type, callback) {
+        this[type] = callback;
+      }
+    };
+  }
+
+  for (const remaining_doses of [1, 2]) {
+    const form = { isConnected: true };
+    const list = node();
+    const { context } = createContentHarness({
+      document: { createElement: node }
+    });
+    const worker = createBackgroundHarness(makeTestNvcBundle(), {
+      storage: { [key]: [{ id: 'chosen', lot: 'LOT', remaining_doses }] }
+    });
+    const original = chart(1);
+    const first = randomUUID();
+    const initial = await worker.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey: key,
+        operation: 'reserve_dose',
+        payload: { id: 'chosen', token: first }
+      },
+      original
+    );
+    assert.equal(initial.reserved, true);
+    const second = chart(2);
+    second.url = second.tab.url = context.location.href;
+    context.chrome.runtime.sendMessage = (message, reply) =>
+      void worker.sendMessage(message, second).then(reply);
+
+    const useTrayVaccine = context.useTrayVaccine;
+    let pending;
+    let writes = 0;
+    let reviewToken;
+    Object.assign(context, {
+      list,
+      getPanoramaAutofillForm: () => form,
+      getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
+      getPanoramaMultiStepIndicatorKey: () => '',
+      autoFillPanorama() {
+        writes += 1;
+        return { status: 'pending' };
+      },
+      useTrayVaccine(...args) {
+        pending = useTrayVaccine(...args);
+        return pending;
+      },
+      showDoseReview(row, token) {
+        reviewToken = token;
+      },
+      warnPanoramaEntryBlocked() {}
+    });
+    vm.runInContext('hudQueueListEl = list;', context);
+    context.renderHudQueueList(worker.storageData.get(key), true);
+    const controls = list.children[0].children;
+    controls.find((control) => control.textContent === 'Review dose').click();
+    assert.equal(reviewToken, first);
+    const use = controls.find((control) => control.textContent === 'Use');
+    assert.ok(use, 'a reservation cannot hide Use');
+    use.click();
+    if (remaining_doses === 2) {
+      assert.equal((await pending).status, 'pending');
+      assert.equal(writes, 1);
+      assert.equal(worker.storageData.get(key)[0].dose_reservations.length, 2);
+    } else {
+      await assert.rejects(pending, /already in use in another chart/);
+      assert.equal(writes, 0);
+      assert.equal(worker.storageData.get(key)[0].dose_reservations.length, 1);
+    }
+  }
 });

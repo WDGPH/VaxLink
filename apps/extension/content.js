@@ -5054,23 +5054,6 @@ function renderHudQueueList(rows, visible) {
     }
 
     item.appendChild(label);
-    const heldDose =
-      row.dose_reservations?.find((dose) => dose.review) ||
-      row.dose_reservations?.[0];
-    if (heldDose) {
-      const review = document.createElement('button');
-      review.type = 'button';
-      review.className = 'vl-hud-btn';
-      review.textContent = 'Review dose';
-      review.setAttribute('aria-label', `Review dose for ${label.textContent}`);
-      review.addEventListener('click', () =>
-        showDoseReview(row, heldDose.token)
-      );
-      item.appendChild(review);
-      hudQueueListEl.appendChild(item);
-      continue;
-    }
-
     const use = document.createElement('button');
     use.type = 'button';
     use.className = 'vl-hud-btn';
@@ -5092,6 +5075,25 @@ function renderHudQueueList(rows, visible) {
         .catch((error) => warnPanoramaEntryBlocked(error.message));
     });
     item.appendChild(use);
+
+    // The worker checks whether another counted dose is available.
+    const heldDose =
+      row.dose_reservations?.find((dose) => dose.review) ||
+      row.dose_reservations?.[0];
+    if (heldDose) {
+      const review = document.createElement('button');
+      review.type = 'button';
+      review.className = 'vl-hud-btn';
+      review.textContent = 'Review dose';
+      review.setAttribute('aria-label', `Review dose for ${label.textContent}`);
+      review.addEventListener('click', () =>
+        showDoseReview(row, heldDose.token)
+      );
+      item.appendChild(review);
+      hudQueueListEl.appendChild(item);
+      continue;
+    }
+
     const removeBtn = document.createElement('button');
     removeBtn.className = 'vl-hud-item-remove';
     removeBtn.textContent = '×';
