@@ -2570,9 +2570,43 @@ function openPanoramaLotDropdown(widget) {
   // Use the visible widget only when the native select path is unavailable.
   lastLotDropdownOpenClickAt = now;
   assertPanoramaAutofillWrite();
+  if (panoramaWritingData?._vaxlinkOwner)
+    panoramaWritingData._vaxlinkOwner.openedLotWidget = widget.root;
   trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   assertPanoramaAutofillWrite();
-  if (trigger.isConnected) trigger.click();
+  if (trigger.isConnected && !isVisible(widget.panel)) trigger.click();
+}
+
+function closePanoramaLotSearch(data) {
+  const owner = data._vaxlinkOwner;
+  const widget = getPanoramaLotWidget();
+  if (!widget?.panel || !isPanoramaAutofillCurrent(data)) return;
+  const filter = owner.lotSearchFilter;
+  const searched =
+    filter &&
+    widget.panel.contains(filter) &&
+    filter.value === String(data.lot);
+  if (!searched && (!widget.root || owner.openedLotWidget !== widget.root))
+    return;
+  if (searched) {
+    filter.value = '';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    if (
+      !isPanoramaAutofillCurrent(data) ||
+      getPanoramaLotWidget()?.panel !== widget.panel
+    )
+      return;
+    filter.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'Backspace', bubbles: true })
+    );
+  }
+  if (
+    isPanoramaAutofillCurrent(data) &&
+    getPanoramaLotWidget()?.panel === widget.panel &&
+    isVisible(widget.panel)
+  ) {
+    widget.root?.querySelector('.ui-selectonemenu-trigger')?.click();
+  }
 }
 
 function fillPanoramaLotFromPanelItems(widget, lotValue) {
@@ -2590,6 +2624,8 @@ function fillPanoramaLotFromPanelItems(widget, lotValue) {
     filter.focus();
     assertPanoramaAutofillWrite();
     if (!filter.isConnected) return false;
+    if (panoramaWritingData?._vaxlinkOwner)
+      panoramaWritingData._vaxlinkOwner.lotSearchFilter = filter;
     filter.value = lotText;
     filter.dispatchEvent(new Event('input', { bubbles: true }));
     assertPanoramaAutofillWrite();
@@ -3154,6 +3190,11 @@ function schedulePanoramaLotOrTradeSelection(
       !unreadable &&
       choice &&
       owner.fundingBucketsChecked.size < PANORAMA_FUNDING_CHOICES.length;
+    closePanoramaLotSearch(data);
+    if (!isPanoramaAutofillCurrent(data)) {
+      stopUnverified();
+      return;
+    }
     const cleanup = cleanUpPanoramaLotMiss(data, !tryOther);
     const reason = unreadable
       ? 'deadline'
@@ -4683,13 +4724,16 @@ function showVaxlinkToast(data, durationMs = 4000) {
     panoramaMiss && location.hostname === PANORAMA_TRAINING_HOST;
   const catalogueMatched =
     panoramaMiss && globalThis.VaxLinkNvcLotReport.hasCatalogueMatch(data);
-  const reportUrl = globalThis.VaxLinkNvcLotReport.makeDraft(data, {
-    panorama: catalogueMatched,
-    training: trainingMiss,
-    bothFundingCategories: data._fillFeedback === 'funding_exhausted'
-  });
+  const reportUrl =
+    trainingMiss && catalogueMatched
+      ? ''
+      : globalThis.VaxLinkNvcLotReport.makeDraft(data, {
+          panorama: catalogueMatched,
+          training: trainingMiss,
+          bothFundingCategories: data._fillFeedback === 'funding_exhausted'
+        });
   const reportMarkup = reportUrl
-    ? `<a class="vl-toast-action vl-toast-report" href="${escapeToastHtml(reportUrl)}">${catalogueMatched ? 'Email Panorama lot report' : 'Email lot report'}</a>`
+    ? `<a class="vl-toast-action vl-toast-report" href="${escapeToastHtml(reportUrl)}">${catalogueMatched ? 'Draft email to PRC' : 'Email lot report'}</a>`
     : '';
 
   const lotReviewMarkup = data._lotNeedsReview
@@ -4700,7 +4744,12 @@ function showVaxlinkToast(data, durationMs = 4000) {
     const catalogueMiss = data.lookup_error_category === 'not_found';
     let title = 'Autofill needs review';
     let detail = 'Check the Agent and Lot in Panorama.';
-    if (panoramaMiss) {
+    if (catalogueMatched) {
+      title = 'Lot found in NVC. No match in Panorama lookup.';
+      detail = trainingMiss
+        ? 'This can happen in Panorama training because its lot list may be incomplete.'
+        : 'Email your Panorama Resolution Coordinator (PRC) about the missing lot.';
+    } else if (panoramaMiss) {
       title = trainingMiss
         ? 'Lot not found in Panorama training'
         : 'Lot not found in Panorama';
@@ -4714,18 +4763,19 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? `Check the ${new Intl.ListFormat('en').format(data._reviewFields.map((field) => PANORAMA_DETAIL_FIELD_LABELS[field]))} in Panorama.`
         : 'Review the autofilled fields in Panorama.';
     }
-    if (data._doseKept) title = 'Lot unavailable · dose kept in tray';
+    const multipleDetailMiss =
+      panoramaMiss && data._vaxlinkOwner?.kind === 'multiple_detail';
     const catalogueStatus = catalogueMiss
       ? 'The lot was missing from the National Vaccine Catalogue.'
-      : catalogueMatched
-        ? 'Found in the National Vaccine Catalogue.'
-        : data.lookup_error || '';
+      : data.lookup_error || '';
     showRoutineToast(
       `<div class="vl-toast info show" role="status">
         <div class="vl-toast-title">${escapeToastHtml(title)}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
         ${lotReviewMarkup}
         ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
+        ${multipleDetailMiss ? '<div class="vl-toast-detail">You may need to delete this entry to complete the other immunizations.</div>' : ''}
+        ${data._doseKept ? '<div class="vl-toast-detail">Dose kept in tray.</div>' : ''}
         ${reportMarkup}
       </div>`,
       reportUrl ? 12000 : 9000
@@ -5928,6 +5978,27 @@ function sameGridDate(left, right) {
   return !!left && canonical(left) === canonical(right);
 }
 
+// A funding choice can be necessary before Panorama can select the Lot.
+// Accept an exact manufacturer lot in the available options to start that
+// workflow. A conflicting existing selection still belongs to the chart.
+function gridDetailLotAvailable(lot, allowEmptyFinalLot) {
+  const widget = getPanoramaLotWidget();
+  if (panoramaLotSelectionMatches(widget, lot)) return true;
+  const target = String(lot || '')
+    .trim()
+    .toUpperCase();
+  if (!target || !widget) return false;
+  const displayed = getPanoramaDisplayedLot(widget);
+  if (displayed && getPanoramaManufacturerLotText(displayed) !== target)
+    return false;
+  if (!displayed && allowEmptyFinalLot && widget.select?.isConnected)
+    return true;
+  return panoramaLotSelectOptions(widget.select).some(
+    (option) =>
+      !option.disabled && getPanoramaManufacturerLotText(option.text) === target
+  );
+}
+
 function matchesGridDetail(entry) {
   const detail = readGridDetailIdentity(getPanoramaAutofillForm());
   const sameAgent = panoramaAgentIdentity(detail.agent) === entry.agent;
@@ -5935,8 +6006,8 @@ function matchesGridDetail(entry) {
     sameGridDate(detail.date, entry.date) &&
     (sameAgent ||
       queueRecordMatchesPanoramaAgentText(entry.dose.record, detail.agent)) &&
-    ((!entry.requireSelectedLot && sameAgent) ||
-      panoramaLotSelectionMatches(getPanoramaLotWidget(), entry.lot))
+    ((!entry.requireLotEvidence && sameAgent) ||
+      gridDetailLotAvailable(entry.lot, entry.allowEmptyFinalLot && sameAgent))
   );
 }
 
@@ -5959,17 +6030,24 @@ function identifyGridDetail(handoff, form, step, total) {
     return { reason: 'detail_date_unmatched' };
   const index = handoff.rows.indexOf(row);
   // A different display order or Agent label needs independent confirmation
-  // from the Lot already selected on this detail.
-  const requireSelectedLot =
+  // from the Lot selected or offered on this detail.
+  const requireLotEvidence =
     row.agent !== agent ||
     index < step - 1 ||
     index > step - 1 + handoff.rows.length - total;
+  // All other assignments have been handled. A blank Lot on the final,
+  // exact Agent/date can go through the ordinary Lot search and miss feedback.
+  const allowEmptyFinalLot =
+    requireLotEvidence &&
+    step === total &&
+    row.agent === agent &&
+    handoff.rows.every((other) => other === row || !other.entry);
   if (
-    requireSelectedLot &&
-    !panoramaLotSelectionMatches(getPanoramaLotWidget(), row.entry.lot)
+    requireLotEvidence &&
+    !gridDetailLotAvailable(row.entry.lot, allowEmptyFinalLot)
   )
     return { reason: 'detail_lot_unconfirmed' };
-  return { row, requireSelectedLot };
+  return { row, requireLotEvidence, allowEmptyFinalLot };
 }
 
 const DIFFERENT_GRID_DETAIL_LOT =
@@ -6051,7 +6129,7 @@ async function advanceGridHandoff() {
   handoff.step = step;
   clearTimeout(handoff.opening);
   if (handoff.attempted === step) return;
-  const { row, reason, requireSelectedLot } = context.ready
+  const { row, reason, requireLotEvidence, allowEmptyFinalLot } = context.ready
     ? identifyGridDetail(handoff, form, step, total)
     : { reason: 'detail_not_ready' };
   if (!row) {
@@ -6126,7 +6204,11 @@ async function advanceGridHandoff() {
     const data = beginPanoramaAutofill({}, true, { automatic: true });
     if (!isPanoramaAutofillCurrent(data)) return;
     data._vaxlinkOwner.scannerRoute = route;
-    data._vaxlinkOwner.gridDetail = { ...entry, requireSelectedLot };
+    data._vaxlinkOwner.gridDetail = {
+      ...entry,
+      requireLotEvidence,
+      allowEmptyFinalLot
+    };
     entry.log('detail_matched', step);
     if (entry.trace)
       data._vaxlinkOwner.activity = {

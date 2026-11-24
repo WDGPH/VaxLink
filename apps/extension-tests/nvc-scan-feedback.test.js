@@ -103,14 +103,37 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     nvc_lot_matched: true,
     nvc_catalogue_version: '1.138'
   };
-  context.showVaxlinkToast({
-    ...catalogueMatch,
-    _fillFeedback: 'funding_exhausted'
-  });
-  assert.match(routine.innerHTML, /Found in the National Vaccine Catalogue/);
-  assert.equal(draft().pathname, '');
-  assert.match(draft().searchParams.get('subject'), /Panorama training/);
-  assert.equal(draft().searchParams.get('cc'), 'innovation@wdgpublichealth.ca');
+  for (const training of [true, false]) {
+    context.location.hostname = training
+      ? 'trpanoramadhir.prod.ehealthontario.ca'
+      : 'panorama.prod.ehealthontario.ca';
+    for (const multiple of [true, false]) {
+      context.showVaxlinkToast({
+        ...catalogueMatch,
+        _vaxlinkOwner: {
+          kind: multiple ? 'multiple_detail' : 'provider_single'
+        },
+        _fillFeedback: training ? 'lot_not_matched' : 'funding_exhausted',
+        _doseKept: multiple
+      });
+      assert.match(
+        routine.innerHTML,
+        /vl-toast-title">Lot found in NVC\. No match in Panorama lookup\./
+      );
+      assert.equal(routine.innerHTML.includes('Panorama training'), training);
+      assert.equal(routine.innerHTML.includes('Draft email to PRC'), !training);
+      assert.equal(routine.innerHTML.includes('mailto:'), !training);
+      assert.equal(routine.innerHTML.includes('delete this entry'), multiple);
+      assert.equal(routine.innerHTML.includes('Dose kept in tray'), multiple);
+      if (!training) {
+        assert.equal(draft().pathname, '');
+        assert.equal(
+          draft().searchParams.get('cc'),
+          'innovation@wdgpublichealth.ca'
+        );
+      }
+    }
+  }
   context.showVaxlinkToast({
     ...catalogueMatch,
     _fillFeedback: 'deadline_details'

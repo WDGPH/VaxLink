@@ -109,6 +109,71 @@ function fixture() {
   return { context, state, select, run, panel, label, root };
 }
 
+test('the last reordered assignment can enter an empty detail after reservation is checked again', () => {
+  const f = fixture();
+  const { context } = f;
+  const field = f.select('OTHER');
+  f.state.controls = [f.root, field];
+  context.getPanoramaCurrentAgentSelectionText = () => 'RSV';
+  context.getPanoramaAdministeredDateTimeFields = () => ({
+    dateField: { value: '2026/11/24' }
+  });
+  const entry = {
+    agent: 'rsv',
+    lot: 'TARGET',
+    date: '2026/11/24',
+    dose: { record: { generic_name: 'RSV' } }
+  };
+  const rows = [
+    { agent: 'rsv', date: entry.date, entry },
+    { agent: 'other' },
+    { agent: 'third' }
+  ];
+  const match = context.identifyGridDetail(
+    { rows },
+    context.getPanoramaAutofillForm(),
+    3,
+    3
+  );
+  assert.equal(match.allowEmptyFinalLot, true);
+  assert.equal(context.matchesGridDetail({ ...entry, ...match }), true);
+  field.value = 'lot-option';
+  assert.equal(context.matchesGridDetail({ ...entry, ...match }), false);
+});
+
+test('a terminal miss clears the owned filter and closes only the same open Lot menu', () => {
+  for (const replaced of [false, true]) {
+    const f = fixture();
+    const data = f.context.beginPanoramaAutofill({ lot: 'TRAIN' });
+    const events = [];
+    const filter = {
+      value: 'TRAIN',
+      dispatchEvent(event) {
+        events.push(event.type);
+        if (replaced) current = null;
+      }
+    };
+    const panel = {
+      contains: (node) => node === filter,
+      getBoundingClientRect: shown
+    };
+    const widget = {
+      panel,
+      root: { querySelector: () => ({ click: () => events.push('close') }) }
+    };
+    let current = widget;
+    f.context.getPanoramaLotWidget = () => current;
+    f.context.KeyboardEvent = f.context.Event;
+    data._vaxlinkOwner.lotSearchFilter = filter;
+    f.context.closePanoramaLotSearch(data);
+    assert.equal(filter.value, '');
+    assert.deepEqual(
+      events,
+      replaced ? ['input'] : ['input', 'keyup', 'close']
+    );
+  }
+});
+
 test('Lot labels distinguish prefix lots and preserve expiry, funding, and punctuation formats', () => {
   const { context } = fixture();
   for (const text of [
@@ -816,6 +881,14 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       getPanoramaAdministeredDateTimeFields: () => ({
         dateField: { value: detailDate }
       }),
+      getPanoramaLotWidget: () => ({
+        select: {
+          options: [
+            { text: 'SAMPLE-2', value: 'pf' },
+            { text: 'N-SAMPLE-2', value: 'npf' }
+          ]
+        }
+      }),
       getPanoramaDisplayedLot: () => selectedLot,
       panoramaLotSelectionMatches: (_widget, lot) =>
         !!lot && selectedLot === lot,
@@ -860,7 +933,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         0,
         'a different Lot cannot authorize a reordered detail'
       );
-      selectedLot = 'SAMPLE-2';
+      selectedLot = ''; // Both funding buckets offer the target, neither is selected.
       retry();
       await new Promise(setImmediate);
     } else await context.advanceGridHandoff();

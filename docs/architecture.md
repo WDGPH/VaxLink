@@ -78,9 +78,16 @@ foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
 that assignment when the matching detail step opens. If Panorama skips a
 step, its dose stays in the tray. Later steps can still use their assignments
 when the Agent and date identify a single grid row. A detail outside its expected
-position also needs the scanned Lot already selected in Panorama. The same Lot
+position also needs evidence of the scanned Lot. An exact available Lot can open the
+funding prompt before selection when the field is blank. The same Lot
 check applies when a catalogue Agent alias connects the grid and detail labels.
-VaxLink keeps unvisited assignments available for later steps.
+VaxLink keeps unvisited assignments available for later steps. On the final
+step, the sole remaining assignment with an exact Agent and date can search an
+empty Lot field. A confirmed miss clears VaxLink’s Lot search and closes its
+menu. When NVC recognizes the missing Lot, training explains the gap in its lot list.
+Production offers a draft email to the Panorama Resolution Coordinator. Multiple
+detail also explains that completing the other immunizations may require deleting
+the current entry.
 Changing the grid row, the Lot or the active route stops automatic carry.
 Staff can still select a dose deliberately on the detail step. The grid
 assignment itself does not use a dose.
