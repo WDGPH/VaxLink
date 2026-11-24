@@ -144,17 +144,20 @@ async function routeScannerScan(scan) {
 }
 
 function requestConnect(message = {}) {
-  const worker = ensureWorker();
   desiredConnection = {
     profileId: String(message.profileId || '').trim(),
     preferredPortInfo: normalizeScannerPortInfo(message.preferredPortInfo),
     trigger: message.trigger || 'manual',
     testing: message.testing === true
   };
-  worker.postMessage({
-    type: SCANNER_WORKER_MESSAGES.CONNECT_GRANTED,
-    ...desiredConnection
-  });
+  if (daemonWorker) {
+    daemonWorker.postMessage({
+      type: SCANNER_WORKER_MESSAGES.CONNECT_GRANTED,
+      ...desiredConnection
+    });
+  } else {
+    ensureWorker();
+  }
 }
 
 function requestWorker(worker, message, timeoutMs) {

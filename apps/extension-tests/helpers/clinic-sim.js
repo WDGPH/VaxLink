@@ -256,7 +256,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     storageData.set(key, value);
   }
 
-  const sessionData = new Map();
+  const sessionData = options.sessionStorage || new Map();
   const tabRemovedListeners = [];
   const changedListeners = [];
   const messageListeners = [];
@@ -316,6 +316,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       },
       onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
     },
+    windows: options.windows,
     tabs: {
       onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
       async get(tabId) {
@@ -339,7 +340,8 @@ export function createBackgroundHarness(bundle, options = {}) {
         if (options.delayTabMessage?.(tabId, message, () => callback(response)))
           return;
         queueMicrotask(() => callback(response));
-      }
+      },
+      ...options.tabsApi
     },
     alarms: {
       create: (name, info) => alarms.push({ name, info }),

@@ -87,7 +87,8 @@ the browser's grant if it can identify exactly one matching port.
 
 **Scanner setup** opens a temporary standard browser window
 (`scanner-pairing.html` and `scanner-pairing.js`). Chromium needs its extensions
-toolbar to display the device chooser. Staff click **Connect scanner** and choose a
+toolbar to display the device chooser. Opening setup again brings the same
+setup page forward while it is still open. Staff click **Connect scanner** and choose a
 device. Cancelling the chooser leaves the current scanner connected. When
 replacing a scanner, the background waits for the existing port to close before
 saving the new device and starting capture. The setup window closes after the

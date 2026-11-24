@@ -4,10 +4,7 @@ import {
   normalizeScannerStatusSnapshot,
   getScannerConnectionLabel
 } from './scanner/scanner-daemon-shared.js';
-import {
-  formatUsbId,
-  getSerialScannerProfile
-} from './scanner/serial-profiles.js';
+import { formatUsbId, ZEBRA_USB_VENDOR_ID } from './scanner/serial-profiles.js';
 import { isWebSerialSupported } from './scanner/serial-provider.js';
 
 let statusChangeVersion = 0;
@@ -51,7 +48,7 @@ export function initializeScannerSettings() {
 
 function bindEvents() {
   els.requestPortBtn?.addEventListener('click', () => {
-    openPairingWindow();
+    void openPairingWindow();
   });
 
   els.connectGrantedBtn?.addEventListener('click', () => {
@@ -84,7 +81,6 @@ function sendScannerDaemonCommand(action, payload = {}) {
 
 function applyDaemonStatus(status, source = 'live') {
   const scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
-  const profile = getSerialScannerProfile(scannerStatusSnapshot.profileId);
   const state = scannerStatusSnapshot.state;
   const connected =
     state === SCANNER_STATUS_STATES.CONNECTED &&
@@ -113,13 +109,17 @@ function applyDaemonStatus(status, source = 'live') {
   );
   const identityKnown = !!scannerStatusSnapshot.profileId;
   const { usbVendorId, usbProductId } = scannerStatusSnapshot.portInfo || {};
-  const usb =
-    usbVendorId != null && usbProductId != null
-      ? ` [USB ${formatUsbId(usbVendorId)}:${formatUsbId(usbProductId)}]`
-      : '';
-  els.scannerIdentity.hidden = !identityKnown;
-  els.scannerIdentity.textContent = identityKnown
-    ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label}${usb}`
+  const vendor = formatUsbId(usbVendorId);
+  const product = formatUsbId(usbProductId);
+  const usb = vendor && product ? `[USB ${vendor}:${product}]` : '';
+  const name = usbVendorId === ZEBRA_USB_VENDOR_ID ? 'Zebra' : '';
+  const description = [name, usb].filter(Boolean).join(' ');
+  els.scannerIdentity.hidden = !description;
+  els.scannerIdentity.textContent = description
+    ? `${connected ? 'Scanner' : 'Saved scanner'} ${description}`
+    : '';
+  els.scannerIdentity.title = usb
+    ? 'USB vendor and product code. Different scanners can share this code.'
     : '';
   const stopping = state === SCANNER_STATUS_STATES.STOPPING;
   const starting = state === SCANNER_STATUS_STATES.STARTING;
@@ -138,6 +138,7 @@ function applyDaemonStatus(status, source = 'live') {
     canConnect: !stopping && !starting && !retryStop && !testing,
     canDisconnect: canStop && !stopping
   });
+  els.requestPortBtn.disabled = stopping || starting;
   els.connectGrantedBtn.hidden =
     connected ||
     !identityKnown ||
@@ -167,26 +168,12 @@ async function refreshStatus() {
   }
 }
 
-function openPairingWindow() {
-  // Chrome anchors extension device choosers to its extensions toolbar.
-  // A popup window lacks that toolbar, so use a standard browser window.
-  chrome.windows.create(
-    {
-      url: chrome.runtime.getURL('scanner-pairing.html'),
-      type: 'normal',
-      width: 500,
-      height: 440,
-      focused: true
-    },
-    () => {
-      if (chrome.runtime.lastError)
-        setStatus(
-          els.connectionStatus,
-          chrome.runtime.lastError.message,
-          'error'
-        );
-    }
-  );
+async function openPairingWindow() {
+  try {
+    await sendScannerDaemonCommand('scannerPairing.open');
+  } catch (error) {
+    setStatus(els.scannerActionNotice, error.message, 'error');
+  }
 }
 
 async function reconnectGrantedPort() {

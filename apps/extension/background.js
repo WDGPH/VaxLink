@@ -87,6 +87,8 @@ const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
 const PENDING_SCAN_INBOX_LIMIT = 250;
 const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
+const SCANNER_PAIRING_TAB_KEY = 'vaxlink_scanner_pairing_tab';
+let scannerPairingRequest;
 const SCANNER_TEST_OWNER_KEY = 'vaxlink_scanner_test_owner_v1';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
@@ -749,6 +751,93 @@ function queryTabs(queryInfo) {
       resolve(Array.isArray(tabs) ? tabs : []);
     });
   });
+}
+
+function waitForScannerPairingTab(tabId) {
+  return new Promise((resolve, reject) => {
+    const finish = (error) => {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (id, change) => {
+      if (id === tabId && change.status === 'complete') finish();
+    };
+    const onRemoved = (id) => {
+      if (id === tabId) finish();
+    };
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new Error('Scanner setup is still loading. Try opening it again.')
+        ),
+      2000
+    );
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    // The load or closure may have finished before the listeners were added.
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status !== 'loading') finish();
+      },
+      () => finish()
+    );
+  });
+}
+
+async function getScannerPairingTab(tabId) {
+  if (!Number.isInteger(tabId)) return null;
+  let tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab?.status === 'loading') {
+    await waitForScannerPairingTab(tabId);
+    tab = await chrome.tabs.get(tabId).catch(() => null);
+  }
+  if (!tab) return null;
+  // The page answers directly so we can verify it without access to tab URLs.
+  const reply = await chrome.tabs
+    .sendMessage(tabId, { action: 'scannerPairing.isOpen' })
+    .catch(() => null);
+  return reply?.pairing === true ? tab : null;
+}
+
+async function showScannerPairingWindow() {
+  const session = chrome.storage.session;
+  const { [SCANNER_PAIRING_TAB_KEY]: tabId } = await session.get(
+    SCANNER_PAIRING_TAB_KEY
+  );
+  const existing = await getScannerPairingTab(tabId);
+  if (existing) {
+    let focusError;
+    try {
+      const tab = existing.active
+        ? existing
+        : await chrome.tabs.update(tabId, { active: true });
+      const window = await chrome.windows.get(tab.windowId);
+      await chrome.windows.update(tab.windowId, {
+        focused: true,
+        ...(window.state === 'minimized' ? { state: 'normal' } : {})
+      });
+    } catch (error) {
+      focusError = error;
+    }
+    // A window can survive closing the pairing tab if it contains other tabs.
+    if (await getScannerPairingTab(tabId)) {
+      if (focusError) throw focusError;
+      return;
+    }
+  }
+
+  // Chrome displays the device chooser from the standard window's toolbar.
+  const { tabs } = await chrome.windows.create({
+    url: chrome.runtime.getURL('scanner-pairing.html'),
+    type: 'normal',
+    width: 500,
+    height: 440,
+    focused: true
+  });
+  await session.set({ [SCANNER_PAIRING_TAB_KEY]: tabs[0].id });
 }
 
 function queryMachineIdleState() {
@@ -3210,6 +3299,27 @@ async function getWorkstationHealth(tabId) {
 
 // Listen for requests from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request?.action === 'scannerPairing.open') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('popup.html')
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Open Scanner setup from Settings.'
+      });
+      return false;
+    }
+    // Share a pending open across popups so two requests cannot open two windows.
+    scannerPairingRequest ??= showScannerPairingWindow().finally(() => {
+      scannerPairingRequest = null;
+    });
+    scannerPairingRequest.then(
+      () => sendResponse({ success: true }),
+      (error) => sendResponse({ success: false, error: error.message })
+    );
+    return true;
+  }
   bgLog('Background received message:', request);
   if (request?.target === SCANNER_DAEMON_TARGET) {
     return false;

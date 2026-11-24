@@ -49,7 +49,14 @@ window.addEventListener('pagehide', () => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (
+    message?.action === 'scannerPairing.isOpen' &&
+    sender.id === chrome.runtime.id
+  ) {
+    reply({ pairing: true });
+    return;
+  }
   if (
     testing &&
     !finishing &&

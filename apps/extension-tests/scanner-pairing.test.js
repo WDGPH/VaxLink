@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 test('pairing needs a click, preserves cancellation, and waits for connection handoff', async () => {
   const saved = Object.getOwnPropertyDescriptors(globalThis);
@@ -162,4 +166,149 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       else delete globalThis[key];
     }
   }
+});
+
+test('Scanner setup shares an in-flight window and restores the same open page after worker restart', async () => {
+  const sessionStorage = new Map();
+  const tabs = new Map();
+  const updates = [];
+  const updatedListeners = new Set();
+  const removedListeners = new Set();
+  let observeLoad;
+  let closeOnFocus = false;
+  let created = 0;
+  let releaseCreate;
+  let observeCreate;
+  const creating = new Promise((resolve) => {
+    observeCreate = resolve;
+  });
+  const options = {
+    sessionStorage,
+    tabsApi: {
+      onUpdated: {
+        addListener(listener) {
+          updatedListeners.add(listener);
+          observeLoad?.();
+        },
+        removeListener(listener) {
+          updatedListeners.delete(listener);
+        }
+      },
+      onRemoved: {
+        addListener(listener) {
+          removedListeners.add(listener);
+        },
+        removeListener(listener) {
+          removedListeners.delete(listener);
+        }
+      },
+      async get(id) {
+        const tab = tabs.get(id);
+        if (!tab) throw new Error('No tab');
+        return tab;
+      },
+      async sendMessage(id, message) {
+        assert.equal(message.action, 'scannerPairing.isOpen');
+        if (!tabs.get(id)?.pairing) throw new Error('No receiver');
+        return { pairing: true };
+      },
+      async update(id, details) {
+        assert.equal(details.active, true);
+        return this.get(id);
+      }
+    },
+    windows: {
+      async create(details) {
+        const id = ++created;
+        assert.equal(details.type, 'normal');
+        assert.equal(
+          details.url,
+          'chrome-extension://vaxlink-test/scanner-pairing.html'
+        );
+        if (id === 1)
+          await new Promise((resolve) => {
+            releaseCreate = resolve;
+            observeCreate();
+          });
+        const tab = {
+          id,
+          windowId: id + 100,
+          pairing: true,
+          status: 'loading'
+        };
+        tabs.set(id, tab);
+        return { tabs: [tab] };
+      },
+      async get(id) {
+        return { id, state: 'minimized' };
+      },
+      async update(id, details) {
+        updates.push({ id, focused: details.focused, state: details.state });
+        if (closeOnFocus) tabs.delete(id - 100);
+      }
+    }
+  };
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  const request = {
+    action: 'scannerPairing.open',
+    profileId: 'zebra-ds8178-usb-cdc'
+  };
+  const harness = createBackgroundHarness(makeTestNvcBundle(), options);
+  assert.equal((await harness.sendMessage(request)).success, false);
+  assert.equal(created, 0);
+  const first = harness.sendMessage(request, sender);
+  await creating;
+  const repeated = harness.sendMessage(request, sender);
+  releaseCreate();
+  assert.ok(
+    (await Promise.all([first, repeated])).every((response) => response.success)
+  );
+  assert.equal(created, 1);
+
+  tabs.get(1).status = 'complete';
+  const restarted = createBackgroundHarness(makeTestNvcBundle(), options);
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(created, 1);
+  assert.deepEqual(updates.at(-1), { id: 101, focused: true, state: 'normal' });
+  tabs.get(1).pairing = false;
+  tabs.get(1).status = 'loading';
+  const waiting = new Promise((resolve) => {
+    observeLoad = resolve;
+  });
+  const navigated = restarted.sendMessage(request, sender);
+  await waiting;
+  assert.equal(
+    updates.length,
+    1,
+    'do not focus a tab while its page is unknown'
+  );
+  assert.equal(created, 1);
+  tabs.get(1).status = 'complete';
+  for (const listener of updatedListeners) listener(1, { status: 'complete' });
+  assert.equal((await navigated).success, true);
+  assert.equal(
+    created,
+    2,
+    'leave another page alone if the tab navigated away'
+  );
+  assert.equal(updatedListeners.size, 0);
+  assert.equal(
+    removedListeners.size,
+    2,
+    'only the permanent test-close listeners remain'
+  );
+  tabs.get(2).status = 'complete';
+  closeOnFocus = true;
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(
+    created,
+    3,
+    'open a replacement if the pairing tab closes during focus'
+  );
+  tabs.delete(3);
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(created, 4, 'open a fresh pairing page after closure');
 });

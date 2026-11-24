@@ -79,6 +79,6 @@ export function portMatchesProfile(port, profile) {
 }
 
 export function formatUsbId(value) {
-  if (value === undefined || value === null) return 'unknown';
-  return `0x${Number(value).toString(16).padStart(4, '0')}`;
+  if (!Number.isInteger(value) || value < 0 || value > 0xffff) return '';
+  return value.toString(16).toUpperCase().padStart(4, '0');
 }
