@@ -175,3 +175,84 @@ test('Inventory captures stay in Inventory while the machine is locked', async (
   );
   assert.equal(harness.storageData.has(PENDING_KEY), false);
 });
+
+const LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
+const STATUS_KEY = 'vaxlink_scanner_status_snapshot_v1';
+
+function delayFirstLock() {
+  let signal;
+  const started = new Promise((resolve) => (signal = resolve));
+  let delayed = false;
+  return {
+    started,
+    delayStorageSet(values, resume) {
+      if (delayed || values[LOCK_SESSION_KEY]?.state !== 'locked') return;
+      delayed = true;
+      signal(resume);
+      return true;
+    }
+  };
+}
+
+for (const [workflow, storageKey] of [
+  ['immunization', PENDING_KEY],
+  ['inventory', INVENTORY_KEY]
+]) {
+  test(`${workflow} preserves repeated captures when unlock overtakes lock storage`, async () => {
+    const lock = delayFirstLock();
+    const harness = createBackgroundHarness(EMPTY_BUNDLE, {
+      idleState: 'active',
+      storage: { vaxlink_workflow_mode_v1: workflow },
+      delayStorageSet: lock.delayStorageSet
+    });
+    harness.setIdleState('locked');
+    const resume = await lock.started;
+    const scans = [
+      harness.captureScannerScan(makeScan('2026-07-28T12:25:00.000Z')),
+      harness.captureScannerScan(makeScan('2026-07-28T12:25:01.000Z'))
+    ];
+    harness.setIdleState('active');
+    resume();
+
+    const responses = await Promise.all(scans);
+    assert.ok(
+      responses.every((response) => response.success && response.locked)
+    );
+    const session = harness.storageData.get(LOCK_SESSION_KEY);
+    const rows = harness.storageData.get(storageKey);
+    assert.equal(session.state, 'active');
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every((row) => row.lock_session_id === session.id));
+    assert.equal(
+      harness.tabMessages.some(
+        ({ message }) => message.action === 'vaxlinkScanCaptured'
+      ),
+      false
+    );
+  });
+}
+
+test('a reader interruption received while locked survives a delayed lock and unlock without captures', async () => {
+  const lock = delayFirstLock();
+  const harness = createBackgroundHarness(EMPTY_BUNDLE, {
+    idleState: 'active',
+    storage: { [STATUS_KEY]: { state: 'connected' } },
+    delayStorageSet: lock.delayStorageSet
+  });
+  harness.setIdleState('locked');
+  const resume = await lock.started;
+  const status = harness.sendMessage({
+    target: 'scannerDaemonBackground',
+    action: 'scannerDaemon.statusUpdate',
+    status: { state: 'recovering' }
+  });
+  harness.setIdleState('active');
+  resume();
+
+  assert.equal((await status).success, true);
+  const session = harness.storageData.get(LOCK_SESSION_KEY);
+  assert.equal(session.state, 'active');
+  assert.equal(session.interrupted, true);
+  assert.equal(harness.storageData.has(PENDING_KEY), false);
+  assert.equal(harness.storageData.has(INVENTORY_KEY), false);
+});

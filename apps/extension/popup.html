@@ -1113,6 +1113,16 @@
             </div>
           </div>
           <div id="mainWorkflowPanel">
+            <section id="unlockReview" class="settings-card" hidden>
+              <h3>Scans from the last lock</h3>
+              <p id="unlockReviewText" role="status"></p>
+              <p id="unlockInterruption" hidden>
+                Scanner connection was interrupted. Check for missing scans.
+              </p>
+              <button id="dismissUnlockReview" type="button">
+                Dismiss summary
+              </button>
+            </section>
             <div
               class="mode-switch"
               role="tablist"

@@ -81,6 +81,10 @@ let inventoryManager;
 let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
+let unlockReviewRead = 0;
+const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
+const REVIEWED_LOCK_SESSION_KEY = 'vaxlink_reviewed_lock_id';
+const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
 
 const {
   WORKFLOW_MODE_KEY,
@@ -525,8 +529,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('queueSaveNotice').hidden = true;
     });
 
+  document
+    .getElementById('dismissUnlockReview')
+    ?.addEventListener('click', async () => {
+      const sessionId =
+        document.getElementById('unlockReview')?.dataset.session;
+      if (!sessionId) return;
+      try {
+        await setLocalStorage({ [REVIEWED_LOCK_SESSION_KEY]: sessionId });
+      } catch (error) {
+        writeOutput(
+          error.message || 'Could not dismiss the lock summary.',
+          'error'
+        );
+      }
+    });
   loadNVCStatus();
   void renderHeldScannerScans();
+  void loadUnlockReview();
 });
 
 function handleRuntimeMessage(request) {
@@ -612,10 +632,55 @@ async function renderHeldScannerScans() {
   }
 }
 
+async function loadUnlockReview() {
+  const panel = document.getElementById('unlockReview');
+  if (!panel) return;
+  const read = ++unlockReviewRead;
+  try {
+    const stored = await getLocalStorage([
+      SCANNER_LOCK_SESSION_KEY,
+      REVIEWED_LOCK_SESSION_KEY,
+      HELD_SCANS_KEY,
+      INVENTORY_BATCH_KEY
+    ]);
+    if (read !== unlockReviewRead) return;
+    const session = stored[SCANNER_LOCK_SESSION_KEY];
+    const count = (rows) =>
+      Array.isArray(rows)
+        ? rows.filter((row) => row.lock_session_id === session?.id).length
+        : 0;
+    const held = count(stored[HELD_SCANS_KEY]);
+    const inventory = count(stored[INVENTORY_BATCH_KEY]);
+    panel.hidden =
+      !session?.id ||
+      session.state !== 'active' ||
+      session.id === stored[REVIEWED_LOCK_SESSION_KEY] ||
+      (!held && !inventory && !session.interrupted);
+    if (panel.hidden) return;
+    panel.dataset.session = session.id;
+    document.getElementById('unlockReviewText').textContent =
+      `${held} in Held scanner scans · ${inventory} in the Inventory tray`;
+    document.getElementById('unlockInterruption').hidden = !session.interrupted;
+  } catch (error) {
+    if (read === unlockReviewRead)
+      writeOutput(error.message || 'Could not read the lock summary.', 'error');
+  }
+}
+
 function handlePopupStorageChanged(changes, area) {
   if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
     void loadAutofillSettings();
-  if (area === 'local' && changes.vaxlink_pending_scan_inbox_v1)
+  if (
+    area === 'local' &&
+    [
+      SCANNER_LOCK_SESSION_KEY,
+      REVIEWED_LOCK_SESSION_KEY,
+      HELD_SCANS_KEY,
+      INVENTORY_BATCH_KEY
+    ].some((key) => key in changes)
+  )
+    void loadUnlockReview();
+  if (area === 'local' && HELD_SCANS_KEY in changes)
     void renderHeldScannerScans();
   if (area === 'local' && INVENTORY_BATCH_KEY in changes) {
     const rows = changes[INVENTORY_BATCH_KEY]?.newValue;

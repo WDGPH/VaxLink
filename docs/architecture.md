@@ -305,6 +305,13 @@ popup. Held scans never replay automatically, including after unlock. Field
 verification reflects what the browser observed. Staff still verify and save
 the record in Panorama.
 
+While the workstation is locked, Immunization captures stay held and
+Inventory captures stay in Inventory. Repeated physical scans are kept.
+Lock and unlock changes save in order, and captures retain the session they
+started in even if storage is slow. The popup shows the remaining scans from
+the last lock and warns if capture was interrupted, even when no barcode was
+saved. Unlocking does not start a chart fill.
+
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan
 was not saved. Storage errors also leave a capture warning. Check pending scans

@@ -88,7 +88,8 @@ const activeScannerDeliveries = new Map();
 const SCANNER_CHART_RESPONSE_MS = 10000;
 let scannerStatusWriteQueue = Promise.resolve();
 let scannerControlQueue = Promise.resolve();
-let scannerLockSessionPromise = null;
+let scannerLockStateWrites = Promise.resolve();
+let lastScannerIdleState = null;
 let iconInitPromise = null;
 const {
   WORKFLOW_MODE_KEY,
@@ -305,6 +306,14 @@ async function getScannerBootstrapState() {
 }
 
 function persistScannerStatusSnapshot(snapshot) {
+  const normalized = normalizeScannerStatusSnapshot(snapshot);
+  const interruptedSession =
+    normalized.state !== SCANNER_STATUS_STATES.CONNECTED
+      ? withScannerLockSession((session) =>
+          isLockedScannerSession(session) ? session.id : null
+        ).catch(() => null)
+      : null;
+
   const result = scannerStatusWriteQueue
     .catch(() => undefined)
     .then(async () => {
@@ -316,7 +325,20 @@ function persistScannerStatusSnapshot(snapshot) {
       const previous = normalizeScannerStatusSnapshot(
         stored[SCANNER_STATUS_SNAPSHOT_KEY]
       );
-      const normalized = normalizeScannerStatusSnapshot(snapshot);
+      if (
+        previous.state === SCANNER_STATUS_STATES.CONNECTED &&
+        !previous.testing &&
+        interruptedSession
+      ) {
+        const interruptedId = await interruptedSession;
+        if (interruptedId)
+          await withScannerLockSession((session) => {
+            if (session?.id === interruptedId && !session.interrupted)
+              return setStorage({
+                [SCANNER_LOCK_SESSION_KEY]: { ...session, interrupted: true }
+              });
+          }).catch(() => {});
+      }
       normalized.lastKnownCaptureAt =
         [
           previous.lastKnownCaptureAt,
@@ -1138,44 +1160,52 @@ function queryMachineIdleState() {
   });
 }
 
-async function getLockedScannerSession() {
-  const stored = await getStorage([SCANNER_LOCK_SESSION_KEY]);
-  return stored && stored[SCANNER_LOCK_SESSION_KEY];
+// Lock, unlock and a capture's session snapshot follow the order they arrive.
+function withScannerLockSession(action) {
+  const result = scannerLockStateWrites.then(async () => {
+    const stored = await getStorage([SCANNER_LOCK_SESSION_KEY]);
+    return action(stored[SCANNER_LOCK_SESSION_KEY]);
+  });
+  scannerLockStateWrites = result.catch(() => {});
+  return result;
 }
 
-async function beginLockedScannerSession() {
-  if (!scannerLockSessionPromise) {
-    scannerLockSessionPromise = (async () => {
-      const existing = await getLockedScannerSession();
-      if (isLockedScannerSession(existing)) return existing;
-      const activeTabs = await queryTabs({ active: true, currentWindow: true });
-      const activeChartTab = activeTabs.find(tabMayBeSupportedChart) || null;
-      const session = createLockedScannerSession({ activeTab: activeChartTab });
-      await setStorage({
-        [SCANNER_LOCK_STATE_KEY]: 'locked',
-        [SCANNER_LOCK_SESSION_KEY]: session
-      });
-      return session;
-    })().finally(() => {
-      scannerLockSessionPromise = null;
-    });
-  }
-  return scannerLockSessionPromise;
+async function ensureLockedScannerSession(existing) {
+  if (isLockedScannerSession(existing)) return existing;
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const activeTab = activeTabs.find(tabMayBeSupportedChart) || null;
+  const session = createLockedScannerSession({ activeTab });
+  await setStorage({
+    [SCANNER_LOCK_STATE_KEY]: 'locked',
+    [SCANNER_LOCK_SESSION_KEY]: session
+  });
+  return session;
 }
 
-async function updateScannerLockState(state) {
+function updateScannerLockState(state) {
   const normalized = normalizeMachineIdleState(state);
-  if (normalized === 'locked') {
-    return beginLockedScannerSession();
-  }
-  const existing = await getLockedScannerSession();
-  const wasLocked = isLockedScannerSession(existing);
-  const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
-  if (wasLocked) {
-    values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
-  }
-  await setStorage(values);
-  return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
+  return withScannerLockSession(async (existing) => {
+    if (normalized === 'locked') return ensureLockedScannerSession(existing);
+    const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
+    if (isLockedScannerSession(existing))
+      values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
+    await setStorage(values);
+  });
+}
+
+function observeScannerLockAtCapture() {
+  // The lock event can arrive before its storage write completes.
+  const idle =
+    lastScannerIdleState === 'locked'
+      ? Promise.resolve('locked')
+      : queryMachineIdleState();
+  return withScannerLockSession(async (existing) => {
+    const idleState = await idle;
+    const lockSession = shouldQueueScannerScan(idleState)
+      ? await ensureLockedScannerSession(existing)
+      : null;
+    return { idleState, lockSession };
+  });
 }
 
 function initializeScannerLockMonitoring() {
@@ -1186,6 +1216,7 @@ function initializeScannerLockMonitoring() {
   chrome.windows?.onFocusChanged?.addListener(invalidateChartRoute);
   if (chrome.idle?.onStateChanged) {
     chrome.idle.onStateChanged.addListener((state) => {
+      lastScannerIdleState = normalizeMachineIdleState(state);
       if (state === 'locked') invalidateChartRoute();
       void updateScannerLockState(state).catch((error) => {
         console.warn('Could not update scanner lock state:', error);
@@ -1197,8 +1228,13 @@ function initializeScannerLockMonitoring() {
 function synchronizeScannerLockState() {
   void queryMachineIdleState()
     .then((state) => {
-      if (['active', 'idle', 'locked'].includes(state))
-        return updateScannerLockState(state);
+      if (
+        lastScannerIdleState !== null ||
+        !['active', 'idle', 'locked'].includes(state)
+      )
+        return;
+      lastScannerIdleState = state;
+      return updateScannerLockState(state);
     })
     .catch((error) =>
       console.warn('Could not initialize scanner lock state:', error)
@@ -1656,21 +1692,25 @@ async function routeScanToActiveSupportedTab(rawScan) {
     epoch: scannerRoutingEpoch,
     generation: scannerChartFocusGeneration
   };
-  const idlePromise = queryMachineIdleState();
-  const destination = await getFocusedScannerTab();
-  const contextPromise =
-    destination && scannerRouteMatches(scannerRoute)
-      ? getScannerDestinationContext(destination.id)
-      : Promise.resolve(null);
-  const idleState = await idlePromise;
-  const storedWorkflow = await getStorage([
-    WORKFLOW_MODE_KEY,
-    LEGACY_POPUP_MODE_KEY,
-    SINGLE_SCAN_AUTOFILL_KEY,
-    GRID_SCAN_AUTOFILL_KEY
+  const [captureLock, routeContext] = await Promise.all([
+    observeScannerLockAtCapture(),
+    getFocusedScannerTab().then(async (destination) => {
+      const context =
+        destination && scannerRouteMatches(scannerRoute)
+          ? getScannerDestinationContext(destination.id)
+          : Promise.resolve(null);
+      const storedWorkflow = await getStorage([
+        WORKFLOW_MODE_KEY,
+        LEGACY_POPUP_MODE_KEY,
+        SINGLE_SCAN_AUTOFILL_KEY,
+        GRID_SCAN_AUTOFILL_KEY
+      ]);
+      return { destination, chart: await context, storedWorkflow };
+    })
   ]);
+  const { idleState, lockSession } = captureLock;
+  const { destination, chart, storedWorkflow } = routeContext;
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
-  const chart = await contextPromise;
   const contextToken = chart?.contextToken || null;
   const immunization = workflowMode === 'immunization';
   const readyKind =
@@ -1684,8 +1724,7 @@ async function routeScanToActiveSupportedTab(rawScan) {
     storedWorkflow[GRID_SCAN_AUTOFILL_KEY] !== false &&
     readyKind === 'multiple_grid';
 
-  if (shouldQueueScannerScan(idleState)) {
-    const lockSession = await beginLockedScannerSession();
+  if (lockSession) {
     if (immunization) {
       const pendingCount = await enqueuePendingScan({
         ...scan,
