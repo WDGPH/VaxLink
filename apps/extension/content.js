@@ -56,8 +56,6 @@ let consentAutofillEnabled = true;
 let autofillSettings = {};
 let audioFeedbackEnabled = true;
 let hudInitialized = false;
-let lastAutoDrainAt = 0;
-let lastVaxlinkFillAt = 0;
 let lastHandledScanValue = '';
 let lastHandledScanAt = 0;
 let audioContextRef = null;
@@ -1768,12 +1766,6 @@ function matchesExactPanoramaAgent(agentText, candidates, mappedAgents) {
   return compatible.some(
     (candidate) => normalizeForMatch(candidate) === selected
   );
-}
-
-function findMatchingQueueRecordIndexForPanoramaAgent(rows, agentText) {
-  const raw = String(agentText || '').trim();
-  if (!raw || !Array.isArray(rows) || !rows.length) return -1;
-  return rows.findIndex((row) => queueRecordMatchesPanoramaAgentText(row, raw));
 }
 
 function tryFillPanoramaAgent(data) {
@@ -3998,7 +3990,6 @@ function autoFillPanorama(data) {
         fillPanoramaImmunizationFields(data)
       );
       vlog('Panorama autofill result', panoramaResult?.status, panoramaResult);
-      lastVaxlinkFillAt = Date.now();
       return panoramaResult;
     }
 
@@ -4235,28 +4226,6 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  if (data._queueEmpty) {
-    showRoutineToast(
-      `<div class="vl-toast info show">
-      <div class="vl-toast-title">Tray empty</div>
-      <div class="vl-toast-detail">Scan more vaccines or switch to Single mode</div>
-    </div>`,
-      durationMs
-    );
-    return;
-  }
-
-  if (data._stepMatchMissing) {
-    showRoutineToast(
-      `<div class="vl-toast info show">
-      <div class="vl-toast-title">No tray match for this agent</div>
-      <div class="vl-toast-detail">Panorama selected an agent that is not represented in the tray. VaxLink left the tray unchanged.</div>
-    </div>`,
-      durationMs + 2000
-    );
-    return;
-  }
-
   const panoramaMiss =
     data._fillFeedback === 'lot_not_matched' ||
     data._fillFeedback === 'funding_exhausted';
@@ -4487,9 +4456,7 @@ function escapeToastHtml(text) {
 let hudHost = null;
 let hudShadow = null;
 let hudCountEl = null;
-let hudApplyBtn = null;
 let hudContainer = null;
-let hudModeToggleBtn = null;
 let hudQueueWrap = null;
 let hudQueueListEl = null;
 let hudClearBtn = null;
@@ -4506,45 +4473,6 @@ let hudMiniDragOffsetX = 0;
 let hudMiniDragOffsetY = 0;
 let hudMiniDownX = 0;
 let hudMiniDownY = 0;
-
-function setHudModeToggleState(button, activeMode) {
-  if (!button) return;
-  const mode = activeMode === 'multiple' ? 'multiple' : 'single';
-  const nextMode = mode === 'multiple' ? 'single' : 'multiple';
-  const label = mode === 'multiple' ? 'Multiple' : 'Single';
-  const targetLabel = nextMode === 'multiple' ? 'Multiple' : 'Single';
-  button.innerHTML = `
-    <span class="vl-hud-mode-top">Chart Mode</span>
-    <span class="vl-hud-mode-main">
-      <span class="vl-hud-mode-current">${label}</span>
-      <span class="vl-hud-mode-next">Switch to ${targetLabel}</span>
-    </span>
-  `;
-  button.dataset.mode = mode;
-  button.setAttribute('aria-label', `Switch to ${targetLabel} mode`);
-  button.setAttribute('title', `Switch to ${targetLabel} mode`);
-}
-
-async function setHudWorkflowMode(newMode) {
-  const nextMode = newMode === 'multiple' ? 'multiple' : 'single';
-  if (activeWorkflowMode === nextMode) {
-    updateHudState();
-    return;
-  }
-
-  updatePanoramaWorkflowMode(nextMode);
-  updateHudState();
-  try {
-    await setLocalStorage({ [WORKFLOW_MODE_KEY]: nextMode });
-    logAnalyticsEvent('workflow_mode_set', {
-      workflow: nextMode,
-      source: 'hud_toggle'
-    });
-    showVaxlinkToast({ _commandMode: nextMode, _commandSource: 'hud' });
-  } catch (error) {
-    console.warn('VaxLink HUD mode switch error:', error);
-  }
-}
 
 function initHud() {
   if (hudInitialized) return;
@@ -4674,45 +4602,10 @@ function initHud() {
       letter-spacing: .01em;
       transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease;
     }
-    .vl-hud-mode-toggle {
-      width: 100%;
-      position: relative;
-      overflow: hidden;
-      text-align: left;
-      padding: 11px 12px 12px;
-      background: linear-gradient(180deg, rgba(240, 253, 255, .18) 0%, rgba(224, 247, 250, .08) 100%);
-      color: #f4fbff;
-      box-shadow:
-        inset 0 0 0 1px rgba(255,255,255,.12),
-        0 10px 22px rgba(7, 29, 40, .22);
-    }
-    .vl-hud-mode-toggle[data-mode="multiple"] {
-      background: linear-gradient(180deg, rgba(236, 254, 255, .98) 0%, rgba(194, 244, 248, .94) 100%);
-      color: #0f4357;
-      box-shadow: 0 12px 22px rgba(8, 58, 77, .18);
-    }
-    .vl-hud-mode-toggle::before {
-      content: "";
-      position: absolute;
-      inset: auto -18% -42% auto;
-      width: 118px;
-      height: 118px;
-      border-radius: 999px;
-      background: rgba(125, 211, 252, .14);
-      pointer-events: none;
-    }
     .vl-hud-btn:hover {
       background: #fff;
       transform: translateY(-1px);
       box-shadow: 0 8px 18px rgba(9, 40, 53, .18);
-    }
-    .vl-hud-mode-toggle:hover {
-      background: linear-gradient(180deg, rgba(240, 253, 255, .24) 0%, rgba(224, 247, 250, .12) 100%);
-      color: #f4fbff;
-    }
-    .vl-hud-mode-toggle[data-mode="multiple"]:hover {
-      background: linear-gradient(180deg, rgba(255, 255, 255, 1) 0%, rgba(214, 248, 251, .98) 100%);
-      color: #0f4357;
     }
     .vl-hud-btn:disabled { opacity: .5; cursor: default; }
     .vl-hud-btn:active { transform: translateY(0); }
@@ -4721,37 +4614,6 @@ function initHud() {
       letter-spacing: .03em;
       text-transform: uppercase;
       color: rgba(232, 249, 253, .82);
-    }
-    .vl-hud-mode-top {
-      display: block;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      opacity: .72;
-      margin-bottom: 5px;
-    }
-    .vl-hud-mode-main {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-      position: relative;
-      z-index: 1;
-    }
-    .vl-hud-mode-current {
-      display: inline-block;
-      font-size: 18px;
-      line-height: 1;
-      font-weight: 800;
-      letter-spacing: -.02em;
-    }
-    .vl-hud-mode-next {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      opacity: .78;
-      white-space: nowrap;
     }
     .vl-hud-head {
       cursor: grab;
@@ -5165,154 +5027,15 @@ function showDoseReview(row, token) {
 }
 
 async function removeHudQueueRow(id) {
-  if (!id || applyQueueInFlight) return;
+  if (!id) return;
   await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'remove', { id });
   updateHudState();
 }
 
 async function clearHudQueue() {
-  if (applyQueueInFlight) return;
   await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'clear');
   updateHudState();
 }
-
-// Guards the read-match-write sequence below: tryAutoDrain, the multi-step
-// observer, and the HUD apply button can all fire close together, and without
-// this flag two callers could consume the same queued record (double-fill) or
-// clobber each other's setLocalStorage (dropped record).
-let applyQueueInFlight = false;
-
-async function applyNextQueueItem(options = {}) {
-  if (applyQueueInFlight) return;
-  const entryBlocked = panoramaEntryBlockReason();
-  if (entryBlocked) {
-    if (options.automatic !== true) warnPanoramaEntryBlocked(entryBlocked);
-    return;
-  }
-  const ownerData =
-    options.ownerData || beginPanoramaAutofill({}, options.automatic !== true);
-  if (!isPanoramaAutofillCurrent(ownerData)) return;
-  applyQueueInFlight = true;
-  if (hudApplyBtn) hudApplyBtn.disabled = true;
-  try {
-    const matchCurrentAgent = options.matchCurrentAgent === true;
-    const suppressQueueEmptyToast = options.suppressQueueEmptyToast === true;
-    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    if (!isPanoramaAutofillCurrent(ownerData)) return;
-    const rows =
-      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
-        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
-        : [];
-    if (!rows.length) {
-      if (!suppressQueueEmptyToast) {
-        showVaxlinkToast({ _queueEmpty: true });
-      }
-      updateHudState();
-      return 'queue_empty';
-    }
-
-    const currentAgentText = getPanoramaCurrentAgentSelectionText();
-    const shouldRespectPanoramaAgent =
-      !!currentAgentText && isPanoramaImmunizationPage();
-
-    let recordIndex = 0;
-    if (matchCurrentAgent || shouldRespectPanoramaAgent) {
-      recordIndex = findMatchingQueueRecordIndexForPanoramaAgent(
-        rows,
-        currentAgentText
-      );
-      if (recordIndex < 0) {
-        vlog(
-          'auto-fill skipped: no queued vaccine matches current Panorama agent',
-          currentAgentText
-        );
-        showVaxlinkToast({ _stepMatchMissing: true });
-        updateHudState();
-        return 'no_match';
-      }
-    }
-
-    const result = await fillReservedTrayRecord(
-      rows[recordIndex].id,
-      ownerData,
-      'hud'
-    );
-    if (result.status === 'expired') return 'expired';
-    if (isAutofillSuccess(result)) {
-      updateHudState();
-      return 'success';
-    }
-    if (isAutofillPending(result)) {
-      updateHudState();
-      return 'pending';
-    }
-    updateHudState();
-    return 'fill_failed';
-  } catch (error) {
-    console.warn('VaxLink HUD apply error:', error);
-    if (hudApplyBtn) hudApplyBtn.disabled = false;
-    return 'error';
-  } finally {
-    applyQueueInFlight = false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Auto-drain: auto-apply queue head when an empty immunization form is detected
-// ---------------------------------------------------------------------------
-
-function isImmunizationFormEmpty() {
-  const agentSelectors = getPanoramaAgentSelectors();
-  const fields = getFields(agentSelectors).filter(canFillPanoramaControl);
-  for (const field of fields) {
-    const filled = getFieldFilledText(field);
-    if (
-      filled &&
-      filled !== '--' &&
-      filled.toLowerCase() !== 'select' &&
-      filled.length > 1
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-async function tryAutoDrain() {
-  if (activeWorkflowMode !== 'multiple') return;
-  if (!isPanoramaImmunizationPage()) return;
-  // Never pop queue items while the multi-immunization grid page is active.
-  // That page uses maybeAutoFillPanoramaMultipleGrid to read queue items by
-  // index WITHOUT consuming them.  Popping here shifts all entries down by one,
-  // so the next grid repaint (triggered by any PrimeFaces DOM mutation) fills
-  // every row with the vaccine that belongs one position later → wrong agents.
-  if (isPanoramaMultipleImmunizationGridPage()) return;
-  if (isPrimeFacesAjaxBusy()) return;
-
-  const now = Date.now();
-  if (now - lastAutoDrainAt < 3000) return;
-  if (now - lastVaxlinkFillAt < 2000) return;
-
-  if (!isImmunizationFormEmpty()) return;
-
-  lastAutoDrainAt = now;
-  vlog('auto-drain: empty form detected, applying queue head');
-  await applyNextQueueItem({ automatic: true });
-}
-
-// ---------------------------------------------------------------------------
-// Post-save auto-advance: watch for agent field reset after Panorama save
-// ---------------------------------------------------------------------------
-
-let postSaveObserver = null;
-let lastAgentFilledState = false;
-let multiGridObserver = null;
-let multiGridFillPending = false;
-let multiStepObserver = null;
-let lastObservedPanoramaStepKey = '';
-let lastAutoFilledPanoramaStepKey = '';
-let lastSkippedPanoramaAgentKey = '';
-let multiStepAutoFillPending = false;
 
 function isPanoramaMultipleImmunizationGridPage({ visibleOnly = false } = {}) {
   if (!isHandsFreeSupportedPage()) return false;
@@ -5507,43 +5230,6 @@ function assignTrayVaccineToGrid(data) {
   return assignment;
 }
 
-async function maybeAutoFillPanoramaMultipleGrid() {
-  if (multiGridFillPending) return;
-  if (activeWorkflowMode !== 'multiple') return;
-  if (!isPanoramaMultipleImmunizationGridPage()) return;
-  if (isPrimeFacesAjaxBusy()) return;
-
-  const ownerData = beginPanoramaAutofill({}, false);
-  if (!isPanoramaAutofillCurrent(ownerData)) return;
-  multiGridFillPending = true;
-  try {
-    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    if (!isPanoramaAutofillCurrent(ownerData)) return;
-    const rows =
-      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
-        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
-        : [];
-    if (!rows.length) return;
-    if (!isPanoramaMultipleImmunizationGridPage()) return;
-
-    const gridRows = getPanoramaMultipleGridRows();
-    if (!gridRows.length) return;
-
-    const limit = Math.min(rows.length, gridRows.length);
-    for (let rowIndex = 0; rowIndex < limit; rowIndex += 1) {
-      const payload = buildAutofillPayloadFromQueueRecord(rows[rowIndex]);
-      if (!payload) continue;
-      runPanoramaAutofill(ownerData, () =>
-        fillPanoramaMultipleGridRow(rowIndex, payload)
-      );
-    }
-  } catch (error) {
-    console.warn('VaxLink multi-grid autofill error:', error);
-  } finally {
-    multiGridFillPending = false;
-  }
-}
-
 function getPanoramaCurrentTradeSelectionText(scope) {
   const fields = getFields(getPanoramaTradeSelectors(), scope);
   for (const field of panoramaSelectionControls(fields)) {
@@ -5584,184 +5270,6 @@ function getPanoramaMultiStepIndicatorKey({
     }
   }
   return '';
-}
-
-function isPanoramaMultiStepDetailPageReadyForAutofill() {
-  if (activeWorkflowMode !== 'multiple') return false;
-  if (!isPanoramaImmunizationPage()) return false;
-  if (isPrimeFacesAjaxBusy()) return false;
-  if (!getPanoramaMultiStepIndicatorKey()) return false;
-  if (!hasPanoramaAgentSelection(null)) return false;
-
-  const { dateField, timeField } = getPanoramaAdministeredDateTimeFields();
-  const hasDateTime =
-    !!String(dateField?.value || '').trim() ||
-    !!String(timeField?.value || '').trim();
-  if (!hasDateTime) return false;
-
-  const hasTrade = !!getPanoramaCurrentTradeSelectionText();
-  const hasLot = !!getPanoramaCurrentLotSelectionText();
-  return !hasTrade && !hasLot;
-}
-
-async function maybeAutoFillPanoramaMultiStepDetailPage() {
-  if (multiStepAutoFillPending) return;
-  if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
-
-  const stepKey = getPanoramaMultiStepIndicatorKey();
-  const currentAgentKey = normalizeForMatch(
-    getPanoramaCurrentAgentSelectionText()
-  );
-  const attemptKey = currentAgentKey
-    ? `${stepKey}|${currentAgentKey}`
-    : stepKey;
-  if (
-    !stepKey ||
-    stepKey === lastAutoFilledPanoramaStepKey ||
-    attemptKey === lastSkippedPanoramaAgentKey
-  )
-    return;
-  if (Date.now() - lastVaxlinkFillAt < 1200) return;
-
-  const ownerData = beginPanoramaAutofill({}, false);
-  if (!isPanoramaAutofillCurrent(ownerData)) return;
-  multiStepAutoFillPending = true;
-  try {
-    const stored = await getLocalStorage([MULTIPLE_INJECT_QUEUE_KEY]);
-    if (!isPanoramaAutofillCurrent(ownerData)) return;
-    const rows =
-      stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
-        ? stored[MULTIPLE_INJECT_QUEUE_KEY]
-        : [];
-    if (!rows.length) return;
-    if (!isPanoramaMultiStepDetailPageReadyForAutofill()) return;
-
-    const result = await applyNextQueueItem({
-      ownerData,
-      matchCurrentAgent: true,
-      suppressQueueEmptyToast: true
-    });
-    if (result === 'success') {
-      lastAutoFilledPanoramaStepKey = stepKey;
-      lastSkippedPanoramaAgentKey = '';
-    } else if (result === 'no_match') {
-      lastSkippedPanoramaAgentKey = attemptKey;
-    }
-  } catch (error) {
-    console.warn('VaxLink multi-step autofill error:', error);
-  } finally {
-    multiStepAutoFillPending = false;
-  }
-}
-
-function initPostSaveWatcher() {
-  if (!isHandsFreeSupportedPage()) return;
-  if (postSaveObserver) return;
-
-  const checkAgentTransition = () => {
-    if (activeWorkflowMode !== 'multiple') return;
-    if (!isPanoramaImmunizationPage()) return;
-
-    const wasFilledBefore = lastAgentFilledState;
-    const isEmptyNow = isImmunizationFormEmpty();
-    lastAgentFilledState = !isEmptyNow;
-
-    // Detect filled -> empty transition (Panorama form reset after save)
-    if (wasFilledBefore && isEmptyNow) {
-      const now = Date.now();
-      if (now - lastVaxlinkFillAt < 2000) return;
-      vlog('post-save: agent field reset detected, auto-advancing');
-      setTimeout(() => tryAutoDrain(), 800);
-    }
-  };
-
-  const targetNode = document.body;
-  if (!targetNode) return;
-
-  postSaveObserver = new MutationObserver(() => {
-    checkAgentTransition();
-  });
-  postSaveObserver.observe(targetNode, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ['class', 'value', 'aria-expanded']
-  });
-}
-
-function initPanoramaMultipleGridWatcher() {
-  if (!isHandsFreeSupportedPage()) return;
-  if (multiGridObserver) return;
-
-  const checkGrid = () => {
-    if (activeWorkflowMode !== 'multiple') return;
-    if (!isPanoramaMultipleImmunizationGridPage()) return;
-    setTimeout(() => {
-      void maybeAutoFillPanoramaMultipleGrid();
-    }, 250);
-  };
-
-  const targetNode = document.body;
-  if (!targetNode) return;
-
-  multiGridObserver = new MutationObserver(() => {
-    checkGrid();
-  });
-  multiGridObserver.observe(targetNode, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ['class', 'value', 'aria-expanded']
-  });
-
-  checkGrid();
-}
-
-function initPanoramaMultiStepWatcher() {
-  if (!isHandsFreeSupportedPage()) return;
-  if (multiStepObserver) return;
-
-  const checkForStepTransition = () => {
-    if (activeWorkflowMode !== 'multiple') return;
-
-    const stepKey = getPanoramaMultiStepIndicatorKey();
-    if (!stepKey) {
-      lastObservedPanoramaStepKey = '';
-      return;
-    }
-
-    if (stepKey !== lastObservedPanoramaStepKey) {
-      lastObservedPanoramaStepKey = stepKey;
-      setTimeout(() => {
-        void maybeAutoFillPanoramaMultiStepDetailPage();
-      }, 350);
-      return;
-    }
-
-    if (
-      stepKey !== lastAutoFilledPanoramaStepKey &&
-      isPanoramaMultiStepDetailPageReadyForAutofill()
-    ) {
-      setTimeout(() => {
-        void maybeAutoFillPanoramaMultiStepDetailPage();
-      }, 200);
-    }
-  };
-
-  const targetNode = document.body;
-  if (!targetNode) return;
-
-  multiStepObserver = new MutationObserver(() => {
-    checkForStepTransition();
-  });
-  multiStepObserver.observe(targetNode, {
-    subtree: true,
-    childList: true,
-    attributes: true,
-    attributeFilter: ['class', 'value', 'aria-expanded']
-  });
-
-  checkForStepTransition();
 }
 
 // ---------------------------------------------------------------------------
