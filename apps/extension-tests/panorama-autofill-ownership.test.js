@@ -614,6 +614,7 @@ test('one pending watcher restarts stability and records only actual late repair
 test('a chosen funding category waits for its Lot list and a miss can try the other category once', async () => {
   const f = fixture();
   const events = [];
+  const cleanupModes = [];
   const handlers = new Map();
   const selected = { funding: 'SHOW_ALL', lot: false };
   const select = { options: [{ text: 'OLD', value: 'other-lot' }] };
@@ -651,6 +652,10 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
       selected.lot = select.options[0].text === 'N-TRAIN';
       return selected.lot;
     },
+    clearPanoramaNonMatchingLot(_data, { resetAgent }) {
+      cleanupModes.push(resetAgent);
+      return 'review';
+    },
     logAnalyticsEvent: (event, payload) => events.push({ event, payload }),
     playAudioCue() {},
     isAutofillSuccess: (result) => result?.status === 'success',
@@ -678,6 +683,8 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
   for (let attempt = 0; attempt < 15 && f.state.timers.length; attempt++)
     f.runTimer();
   assert.match(slot.innerHTML, /Try the other funding category/);
+  assert.deepEqual(cleanupModes, [false]);
+  assert.match(slot.innerHTML, /The Lot field still needs review/);
   assert.equal(rescueStartedAt, 3000, 'panel rescue starts after two seconds');
   assert.equal(
     f.state.now - rescueStartedAt,

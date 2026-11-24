@@ -188,3 +188,51 @@ test('the visible consent menu uses the matching item at most twice', () => {
   );
   assert.deepEqual(f.writes, []);
 });
+
+test('a prefilled Lot still waits before writing blank Consent', () => {
+  const { context, fields, state, writes } = fixture({});
+  const form = { isConnected: true, querySelectorAll: () => [] };
+  const dateField = { value: '2026/11/24' };
+  const timeField = { value: '09:42' };
+  fields.reason.value = 'staff';
+  fields.consent.isConnected = true;
+  const timers = new Set();
+  Object.assign(context, {
+    getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
+    getPanoramaMultiStepIndicatorKey: () => '',
+    hasPanoramaLotSelection: () => true,
+    getPanoramaAdministeredDateTimeValues: () => ({
+      date: '2026/11/24',
+      time: '09:42'
+    }),
+    getPanoramaAdministeredDateTimeFields: () => ({ dateField, timeField }),
+    showVaxlinkToast() {},
+    setTimeout(callback, delay) {
+      const timer = { callback, at: state.now + delay };
+      timers.add(timer);
+      return timer;
+    },
+    clearTimeout: (timer) => timers.delete(timer)
+  });
+  const runNext = () => {
+    const [timer] = timers;
+    assert.ok(timer);
+    timers.delete(timer);
+    state.now = timer.at;
+    timer.callback();
+  };
+
+  const data = context.beginPanoramaAutofill({ lot: 'PREFILLED' });
+  context.schedulePanoramaLotOrTradeSelection(data);
+  runNext();
+  runNext();
+  assert.equal(state.now, 1500);
+  assert.deepEqual(writes, []);
+  runNext();
+  assert.equal(state.now, 2000);
+  assert.deepEqual(writes, ['Consent obtained']);
+  assert.equal(dateField.value, '2026/11/24');
+  assert.equal(timeField.value, '09:42');
+  assert.equal(fields.reason.value, 'staff');
+});

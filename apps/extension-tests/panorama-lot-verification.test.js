@@ -377,14 +377,14 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   const owner = data._vaxlinkOwner;
   const events = [];
   field.dispatchEvent = (event) => events.push(event.type);
-  const cleanup = () =>
+  const cleanup = (options) =>
     f.context.runPanoramaAutofill(data, () =>
-      f.context.clearPanoramaNonMatchingLot(data)
+      f.context.clearPanoramaNonMatchingLot(data, options)
     );
 
   owner.initialLot = 'WRONG';
   owner.lotSelectionWidgetId = id;
-  assert.equal(cleanup(), 'review');
+  assert.equal(cleanup({ resetAgent: false }), 'review');
   assert.equal(field.value, 'lot-option');
   owner.initialLot = '';
   owner.lotSelectionWidgetId = undefined;
@@ -394,6 +394,25 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   assert.equal(cleanup(), 'cleared');
   assert.equal(field.value, '');
   assert.deepEqual(events, ['input', 'change']);
+
+  const agent = f.select('Owned Agent', 'lot-option');
+  agent.dispatchEvent = ({ type }) => {
+    if (type === 'change') field.value = '';
+  };
+  f.context.getPanoramaDetailAgentFields = () => [agent];
+  f.context.getPanoramaCurrentAgentSelectionText = () =>
+    agent.value ? 'owned agent' : '';
+  owner.initialAgent = '';
+  owner.filledAgent = 'owned agent';
+  owner.lotSelectionWidgetId = undefined;
+  field.value = 'lot-option';
+  assert.equal(cleanup({ resetAgent: false }), 'cleared');
+  assert.equal(field.value, '');
+  assert.equal(
+    agent.value,
+    'lot-option',
+    'the Agent stays for the alternate search'
+  );
 });
 
 test('explicit grid Use assigns only the chosen dose and leaves it for Details', async () => {
