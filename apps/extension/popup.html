@@ -1130,8 +1130,12 @@
               <div class="settings-overview">
                 <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
                 <div class="settings-controls">
-                  <button id="requestPortBtn" type="button">
-                    Scanner setup
+                  <button
+                    id="requestPortBtn"
+                    type="button"
+                    aria-label="Setup scanner"
+                  >
+                    Setup
                   </button>
                   <button id="connectGrantedBtn" type="button" hidden>
                     Reconnect
@@ -1139,8 +1143,14 @@
                   <button id="disconnectBtn" type="button" hidden disabled>
                     Disconnect
                   </button>
-                  <button id="forgetScannerBtn" type="button" hidden disabled>
-                    Forget scanner
+                  <button
+                    id="forgetScannerBtn"
+                    type="button"
+                    aria-label="Forget scanner"
+                    hidden
+                    disabled
+                  >
+                    Forget
                   </button>
                 </div>
               </div>
@@ -1153,8 +1163,12 @@
                   and the chart before rescanning.
                 </p>
                 <div class="actions">
-                  <button id="acknowledgeScannerErrorBtn" type="button">
-                    Acknowledge scanner warning
+                  <button
+                    id="acknowledgeScannerErrorBtn"
+                    type="button"
+                    aria-label="Acknowledge scanner warning"
+                  >
+                    Acknowledge
                   </button>
                 </div>
               </div>
@@ -1268,11 +1282,19 @@
               Loading activity...
             </div>
             <div class="activity-actions">
-              <button id="exportAllAnalyticsBtn" type="button">
-                Export Activity
+              <button
+                id="exportAllAnalyticsBtn"
+                type="button"
+                aria-label="Export activity"
+              >
+                Export
               </button>
-              <button id="resetAnalyticsBtn" type="button">
-                Reset Activity
+              <button
+                id="resetAnalyticsBtn"
+                type="button"
+                aria-label="Reset activity"
+              >
+                Reset
               </button>
             </div>
           </div>
@@ -1283,8 +1305,12 @@
               <p id="unlockInterruption" hidden>
                 Scanner connection was interrupted. Check for missing scans.
               </p>
-              <button id="dismissUnlockReview" type="button">
-                Dismiss summary
+              <button
+                id="dismissUnlockReview"
+                type="button"
+                aria-label="Dismiss lock summary"
+              >
+                Dismiss
               </button>
             </section>
             <div
@@ -1392,7 +1418,13 @@
                     <button id="cancelQueueEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addQueueBtn" type="button">Add to Tray</button>
+                    <button
+                      id="addQueueBtn"
+                      type="button"
+                      aria-label="Add to Immunization tray"
+                    >
+                      Add
+                    </button>
                   </div>
                 </div>
                 <div id="multipleQueueList" class="inventory-list"></div>
@@ -1461,7 +1493,13 @@
                     <button id="cancelInventoryEntryBtn" type="button">
                       Cancel
                     </button>
-                    <button id="addBatchBtn" type="button">Add to Tray</button>
+                    <button
+                      id="addBatchBtn"
+                      type="button"
+                      aria-label="Add to Inventory tray"
+                    >
+                      Add
+                    </button>
                   </div>
                 </div>
                 <div id="inventoryList" class="inventory-list"></div>

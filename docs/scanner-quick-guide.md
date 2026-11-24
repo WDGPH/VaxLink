@@ -80,6 +80,6 @@ For support, start with the software version, scanner model, training or product
 
 Choose **Disconnect** before moving the USB plug. Wait for the reader to stop. Moving a cable, hub or dock breaks its open connection. After reconnecting, check Settings. The browser may ask you to choose the scanner again.
 
-Open **Scanner setup**, choose **Connect scanner**, then select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
+In **Settings → Scanner**, choose **Setup**, then **Connect scanner** and select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
 
 Use **Forget** when retiring the device. Keep it plugged in so VaxLink can remove the browser permission. If it is already gone, follow the permission instructions in Settings.
