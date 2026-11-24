@@ -144,10 +144,11 @@ export function createContentHarness(globals = {}) {
   const storageReads = [];
   const storageListeners = [];
   const windowListeners = new Map();
+  const chartAttributes = new Map();
   const location =
     globals.location ||
     new URL(
-      'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+      'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
     );
   const window = {
     location,
@@ -160,11 +161,20 @@ export function createContentHarness(globals = {}) {
   const context = vm.createContext({
     console,
     crypto: globalThis.crypto,
+    performance,
     ...globals,
     location,
     window,
     document: {
       readyState: 'loading',
+      visibilityState: 'visible',
+      hasFocus: () => true,
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      documentElement: {
+        getAttribute: (key) => chartAttributes.get(key) || null,
+        setAttribute: (key, value) => chartAttributes.set(key, value)
+      },
       ...globals.document,
       addEventListener(type, callback) {
         if (!documentListeners.has(type)) documentListeners.set(type, []);
@@ -173,6 +183,7 @@ export function createContentHarness(globals = {}) {
     },
     chrome: {
       runtime: {
+        id: 'vaxlink-test',
         getManifest: () => manifest,
         onMessage: {
           addListener: (listener) => messageListeners.push(listener)
@@ -180,7 +191,10 @@ export function createContentHarness(globals = {}) {
       },
       storage: {
         local: {
-          get: (keys, callback) => storageReads.push({ keys, callback })
+          get(keys, callback) {
+            if (!callback) return Promise.resolve({});
+            storageReads.push({ keys, callback });
+          }
         },
         onChanged: {
           addListener: (listener) => storageListeners.push(listener)
@@ -206,6 +220,27 @@ export function createContentHarness(globals = {}) {
     storageReads,
     storageListeners
   };
+}
+
+// Deliver through the chart's frame and worker-sender checks.
+export function deliverScannerScanToChart(
+  { context, messageListeners },
+  rawText,
+  startBy = Date.now() + 1500
+) {
+  const message = {
+    action: 'vaxlinkScanCaptured',
+    scan: { captureId: 'training-capture', rawText, source: 'web-serial' },
+    contextToken: context.getScannerDeliveryContext('provider_single'),
+    scannerRoute: { startBy }
+  };
+  return new Promise((resolve) => {
+    const handled = messageListeners.some(
+      (listener) =>
+        listener(message, { id: context.chrome.runtime.id }, resolve) === true
+    );
+    if (!handled) throw new Error('Chart did not handle the scanner message');
+  });
 }
 
 export function makeTestNvcBundle(code = 'TESTLOT') {
@@ -256,6 +291,10 @@ export function createBackgroundHarness(bundle, options = {}) {
     storageData.set(key, value);
   }
 
+  const sessionData = options.sessionStorage || new Map();
+  const tabRemovedListeners = [];
+  const tabActivatedListeners = [];
+  const windowFocusListeners = [];
   const changedListeners = [];
   const messageListeners = [];
   const startupListeners = [];
@@ -292,7 +331,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       getManifest: () => ({
         version: '1.1.5',
         version_name: '1.2.0-alpha',
-        name: 'VaxLink Alpha'
+        name: options.manifestName || 'VaxLink Alpha'
       }),
       async getContexts() {
         return offscreenExists ? [{ contextType: 'OFFSCREEN_DOCUMENT' }] : [];
@@ -310,11 +349,36 @@ export function createBackgroundHarness(bundle, options = {}) {
     },
     idle: {
       queryState(_intervalSeconds, callback) {
-        queueMicrotask(() => callback(idleState));
+        queueMicrotask(() => {
+          if (options.idleError)
+            chrome.runtime.lastError = { message: options.idleError };
+          try {
+            callback(idleState);
+          } finally {
+            chrome.runtime.lastError = null;
+          }
+        });
       },
       onStateChanged: { addListener: (fn) => idleListeners.push(fn) }
     },
+    windows: {
+      async getLastFocused() {
+        return {
+          focused: options.windowFocused !== false,
+          tabs: options.tabs || []
+        };
+      },
+      onFocusChanged: { addListener: (fn) => windowFocusListeners.push(fn) },
+      ...options.windows
+    },
     tabs: {
+      onActivated: { addListener: (fn) => tabActivatedListeners.push(fn) },
+      onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
+      async get(tabId) {
+        const tab = options.tabs?.find(({ id }) => id === tabId);
+        if (!tab) throw new Error('Tab not found');
+        return tab;
+      },
       query(queryInfo, callback) {
         let tabs = Array.isArray(options.tabs) ? options.tabs : [];
         if (queryInfo?.active) tabs = tabs.filter((tab) => tab.active === true);
@@ -328,10 +392,25 @@ export function createBackgroundHarness(bundle, options = {}) {
           success: false,
           error: 'No content tab in clinic-sim harness'
         };
-        if (options.delayTabMessage?.(tabId, message, () => callback(response)))
+        const reply =
+          message.action === 'getPanoramaIntegration' && response.contextToken
+            ? {
+                ready: true,
+                formContext: { kind: 'provider_single', ready: true },
+                buildAtLoad: {
+                  name: chrome.runtime.getManifest().name,
+                  version: chrome.runtime.getManifest().version,
+                  versionName: chrome.runtime.getManifest().version_name,
+                  fingerprint: options.buildId || null
+                },
+                ...response
+              }
+            : response;
+        if (options.delayTabMessage?.(tabId, message, () => callback(reply)))
           return;
-        queueMicrotask(() => callback(response));
-      }
+        queueMicrotask(() => callback(reply));
+      },
+      ...options.tabsApi
     },
     alarms: {
       create: (name, info) => alarms.push({ name, info }),
@@ -345,6 +424,22 @@ export function createBackgroundHarness(bundle, options = {}) {
       setBadgeBackgroundColor() {}
     },
     storage: {
+      session: {
+        async get(key) {
+          return sessionData.has(key)
+            ? { [key]: structuredClone(sessionData.get(key)) }
+            : {};
+        },
+        async set(values) {
+          await options.beforeSessionSet?.(values);
+          for (const [key, value] of Object.entries(values))
+            sessionData.set(key, structuredClone(value));
+        },
+        async remove(key) {
+          await options.beforeSessionRemove?.(key);
+          sessionData.delete(key);
+        }
+      },
       onChanged: { addListener: (fn) => changedListeners.push(fn) },
       local: {
         get(keys, callback) {
@@ -406,6 +501,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       (() => Promise.reject(new Error('network disabled in clinic-sim tests'))),
     crypto: globalThis.crypto,
     TextEncoder,
+    performance,
     URL,
     AbortController,
     setTimeout: options.setTimeout || setTimeout,
@@ -462,8 +558,31 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    captureScannerScan(scan) {
+      return sendMessage(
+        { action: 'scannerScanCaptured', scan },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
+        }
+      );
+    },
+    appendQueueRecord(storageKey, record) {
+      return sendMessage(
+        { action: 'appendQueueRecord', storageKey, record },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/popup.html'
+        }
+      );
+    },
     startup: () => startupListeners.forEach((fn) => fn()),
     install: () => installListeners.forEach((fn) => fn()),
+    removeTab: (id) => tabRemovedListeners.forEach((fn) => fn(id)),
+    activateTab: (tabId) => {
+      for (const tab of options.tabs || []) tab.active = tab.id === tabId;
+      for (const listener of tabActivatedListeners) listener({ tabId });
+    },
     storageData,
     alarms,
     consoleLines,

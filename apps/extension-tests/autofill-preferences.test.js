@@ -7,21 +7,49 @@ const reasonKey = 'vaxlink_reason_autofill_v1';
 const consentKey = 'vaxlink_consent_autofill_v1';
 
 function fixture(settings) {
-  const harness = createContentHarness();
-  const { context, storageReads, storageListeners } = harness;
-  const fields = {
-    reason: {
-      tagName: 'SELECT',
-      options: [{ text: 'Staff choice' }, { text: 'Routine' }],
-      selectedIndex: 0
-    },
-    consent: {
-      tagName: 'SELECT',
-      options: [{ text: 'Staff choice' }, { text: 'Consent obtained' }],
-      selectedIndex: 0
+  const state = { now: 1000 };
+  const harness = createContentHarness({
+    performance: { now: () => state.now },
+    Event: class {
+      constructor(type) {
+        this.type = type;
+      }
     }
-  };
+  });
+  const { context, storageReads, storageListeners } = harness;
   const writes = [];
+  const select = (text) => {
+    const options = [
+      { value: '', text: 'Select' },
+      { value: 'default', text },
+      { value: 'staff', text: 'Staff choice' }
+    ];
+    return {
+      tagName: 'SELECT',
+      options,
+      selectedIndex: 0,
+      get value() {
+        return options[this.selectedIndex].value;
+      },
+      set value(value) {
+        this.selectedIndex = options.findIndex(
+          (option) => option.value === value
+        );
+      },
+      closest: () => null,
+      getBoundingClientRect: () => ({ width: 100, height: 20 }),
+      focus() {},
+      blur() {},
+      dispatchEvent(event) {
+        if (event.type === 'change')
+          writes.push(options[this.selectedIndex].text);
+      }
+    };
+  };
+  const fields = {
+    reason: select('Routine'),
+    consent: select('Consent obtained')
+  };
   context.getFields = (selectors) => {
     if (
       selectors.some((selector) =>
@@ -38,21 +66,15 @@ function fixture(settings) {
     return [];
   };
   context.canFillPanoramaControl = () => true;
-  // Replace the page write only. Use the production preference, default-value,
-  // deferred-work, and completion checks from the complete content script.
-  context.fillFirstMatchingField = (selectors, value) => {
-    const field = context.getFields(selectors)[0];
-    field.selectedIndex = field.options.findIndex(
-      (option) => option.text === value
-    );
-    writes.push(value);
-    return true;
-  };
   storageReads[0].callback({
     vaxlink_administered_datetime_autofill_v1: false,
     ...settings
   });
   return {
+    context,
+    fields,
+    state,
+    writes,
     fill(reason, consent) {
       fields.reason.selectedIndex = fields.consent.selectedIndex = 0;
       writes.length = 0;
@@ -108,4 +130,109 @@ test('open chart tabs follow separate changes without losing the other preferenc
     f.change(key, value);
     f.fill(reason, consent);
   }
+});
+
+test('prefilled Reason and Consent satisfy the watcher without being overwritten', () => {
+  const f = fixture({});
+  f.fields.reason.value = f.fields.consent.value = 'staff';
+  assert.equal(f.context.hasPanoramaDeferredDetailFieldsFilled({}), true);
+  assert.equal(f.context.fillPanoramaReasonForImmunization({}), 0);
+  assert.equal(f.context.fillPanoramaConsentReason({}), 0);
+  assert.deepEqual(f.writes, []);
+});
+
+test('the visible consent menu uses the matching item at most twice', () => {
+  const f = fixture({});
+  const consent = f.fields.consent;
+  const id = 'recordImms:consentReadinessReasonSelect:iTermSelectOneMenu';
+  const visible = () => ({ width: 100, height: 20 });
+  let opened = false;
+  let clicks = 0;
+  const item = {
+    classList: { contains: () => false },
+    getAttribute: () => null,
+    textContent: 'Consent obtained',
+    getBoundingClientRect: visible,
+    click() {
+      clicks++;
+    }
+  };
+  const panel = {
+    id: id + '_panel',
+    getBoundingClientRect: () => (opened ? visible() : { width: 0, height: 0 }),
+    querySelectorAll: () => [item]
+  };
+  consent.id = id + '_input';
+  consent.closest = () => ({
+    querySelector: () => ({
+      getBoundingClientRect: visible,
+      click() {
+        opened = true;
+      }
+    })
+  });
+  f.context.document.querySelectorAll = () => [panel];
+  const data = { _vaxlinkOwner: {} };
+  const fill = () => f.context.fillPanoramaConsentReason(data);
+  assert.equal(fill(), 1);
+  assert.equal(fill(), 0);
+  f.state.now += 700;
+  assert.equal(fill(), 1);
+  f.state.now += 700;
+  assert.equal(fill(), 0);
+  assert.equal(clicks, 2);
+  assert.equal(
+    consent.value,
+    '',
+    'the widget, rather than VaxLink, sets the value'
+  );
+  assert.deepEqual(f.writes, []);
+});
+
+test('a prefilled Lot still waits before writing blank Consent', () => {
+  const { context, fields, state, writes } = fixture({});
+  const form = { isConnected: true, querySelectorAll: () => [] };
+  const dateField = { value: '2026/11/24' };
+  const timeField = { value: '09:42' };
+  fields.reason.value = 'staff';
+  fields.consent.isConnected = true;
+  const timers = new Set();
+  Object.assign(context, {
+    getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
+    getPanoramaMultiStepIndicatorKey: () => '',
+    hasPanoramaLotSelection: () => true,
+    getPanoramaAdministeredDateTimeValues: () => ({
+      date: '2026/11/24',
+      time: '09:42'
+    }),
+    getPanoramaAdministeredDateTimeFields: () => ({ dateField, timeField }),
+    showVaxlinkToast() {},
+    setTimeout(callback, delay) {
+      const timer = { callback, at: state.now + delay };
+      timers.add(timer);
+      return timer;
+    },
+    clearTimeout: (timer) => timers.delete(timer)
+  });
+  const runNext = () => {
+    const [timer] = timers;
+    assert.ok(timer);
+    timers.delete(timer);
+    state.now = timer.at;
+    timer.callback();
+  };
+
+  const data = context.beginPanoramaAutofill({ lot: 'PREFILLED' });
+  context.schedulePanoramaLotOrTradeSelection(data);
+  runNext();
+  runNext();
+  assert.equal(state.now, 1500);
+  assert.deepEqual(writes, []);
+  runNext();
+  assert.equal(state.now, 2000);
+  assert.deepEqual(writes, ['Consent obtained']);
+  assert.equal(dateField.value, '2026/11/24');
+  assert.equal(timeField.value, '09:42');
+  assert.equal(fields.reason.value, 'staff');
 });

@@ -1,127 +1,26 @@
-export const SCANNER_DAEMON_ENABLED_KEY = 'vaxlink_scanner_daemon_enabled_v1';
-export const SCANNER_STATUS_SNAPSHOT_KEY = 'vaxlink_scanner_status_snapshot_v1';
-export const SCANNER_DAEMON_OFFSCREEN_PATH = 'scanner-daemon.html';
-export const SCANNER_DAEMON_TARGET = 'scannerDaemon';
-export const SCANNER_DAEMON_BACKGROUND_TARGET = 'scannerDaemonBackground';
+import './scanner-daemon-protocol.js';
 
-export const SCANNER_DAEMON_ACTIONS = Object.freeze({
-  ENSURE: 'scannerDaemon.ensure',
-  GET_STATUS: 'scannerDaemon.getStatus',
-  CONNECT_GRANTED: 'scannerDaemon.connectGranted',
-  DISCONNECT: 'scannerDaemon.disconnect',
-  ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
-  STATUS_CHANGED: 'scannerDaemon.statusChanged',
-  SCAN_ECHO: 'scannerDaemon.scanEcho',
-  STATUS_UPDATE: 'scannerDaemon.statusUpdate'
-});
+export const {
+  SCANNER_DAEMON_ENABLED_KEY,
+  SCANNER_STATUS_SNAPSHOT_KEY,
+  SCANNER_DAEMON_OFFSCREEN_PATH,
+  SCANNER_DAEMON_TARGET,
+  SCANNER_DAEMON_BACKGROUND_TARGET,
+  SCANNER_DAEMON_ACTIONS,
+  SCANNER_WORKER_MESSAGES,
+  SCANNER_STATUS_STATES,
+  normalizeScannerPortInfo,
+  createScannerStatusSnapshot,
+  normalizeScannerStatusSnapshot,
+  buildDefaultScannerStatus
+} = globalThis.VaxLinkScannerDaemon;
 
-export const SCANNER_STATUS_STATES = Object.freeze({
-  NEVER_CONFIGURED: 'never_configured',
-  STARTING: 'starting',
-  CONNECTED: 'connected',
-  RECOVERING: 'recovering',
-  WAITING_FOR_DEVICE: 'waiting_for_device',
-  PERMISSION_LOST: 'permission_lost',
-  BUSY: 'busy',
-  ERROR: 'error',
-  DISABLED: 'disabled'
-});
-
-const VALID_SCANNER_STATES = new Set(Object.values(SCANNER_STATUS_STATES));
 const RECONNECT_DELAYS_MS = [0, 1000, 3000, 10000, 30000, 60000];
 
-function normalizeIsoTimestamp(value) {
-  if (!value) return '';
-  const parsed = new Date(String(value).trim());
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
-}
-
-export function normalizeScannerPortInfo(info) {
-  if (!info || typeof info !== 'object') return null;
-  const normalized = {};
-  if (
-    info.usbVendorId !== undefined &&
-    info.usbVendorId !== null &&
-    info.usbVendorId !== ''
-  ) {
-    const vendorId = Number(info.usbVendorId);
-    if (Number.isFinite(vendorId)) normalized.usbVendorId = vendorId;
-  }
-  if (
-    info.usbProductId !== undefined &&
-    info.usbProductId !== null &&
-    info.usbProductId !== ''
-  ) {
-    const productId = Number(info.usbProductId);
-    if (Number.isFinite(productId)) normalized.usbProductId = productId;
-  }
-  if (info.bluetoothServiceClassId) {
-    normalized.bluetoothServiceClassId = String(info.bluetoothServiceClassId);
-  }
-  return Object.keys(normalized).length ? normalized : null;
-}
-
-export function createScannerStatusSnapshot(overrides = {}) {
-  return normalizeScannerStatusSnapshot({
-    state: SCANNER_STATUS_STATES.NEVER_CONFIGURED,
-    profileId: '',
-    portInfo: null,
-    lastConnectedAt: '',
-    lastDisconnectedAt: '',
-    lastCaptureAt: '',
-    lastKnownCaptureAt: '',
-    captureCount: 0,
-    selectionRequired: false,
-    lastError: '',
-    recoverAttemptCount: 0,
-    ...overrides
-  });
-}
-
-export function normalizeScannerStatusSnapshot(snapshot) {
-  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
-  return {
-    state: VALID_SCANNER_STATES.has(source.state)
-      ? source.state
-      : SCANNER_STATUS_STATES.NEVER_CONFIGURED,
-    profileId: String(source.profileId || '').trim(),
-    portInfo: normalizeScannerPortInfo(source.portInfo),
-    lastConnectedAt: normalizeIsoTimestamp(source.lastConnectedAt),
-    lastDisconnectedAt: normalizeIsoTimestamp(source.lastDisconnectedAt),
-    lastCaptureAt: normalizeIsoTimestamp(source.lastCaptureAt),
-    lastKnownCaptureAt: normalizeIsoTimestamp(source.lastKnownCaptureAt),
-    captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
-    selectionRequired: source.selectionRequired === true,
-    lastError: String(source.lastError || '').trim(),
-    recoverAttemptCount: Math.max(
-      0,
-      Number.parseInt(source.recoverAttemptCount, 10) || 0
-    )
-  };
-}
-
-export function buildDefaultScannerStatus({
-  enabled = false,
-  profileId = '',
-  portInfo = null
-} = {}) {
-  const normalizedProfileId = String(profileId || '').trim();
-  if (!normalizedProfileId) {
-    return createScannerStatusSnapshot();
-  }
-  return createScannerStatusSnapshot({
-    state: enabled
-      ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
-      : SCANNER_STATUS_STATES.DISABLED,
-    profileId: normalizedProfileId,
-    portInfo: normalizeScannerPortInfo(portInfo)
-  });
-}
-
 export function isScannerConnected(status) {
+  const snapshot = normalizeScannerStatusSnapshot(status);
   return (
-    normalizeScannerStatusSnapshot(status).state ===
-    SCANNER_STATUS_STATES.CONNECTED
+    snapshot.state === SCANNER_STATUS_STATES.CONNECTED && !snapshot.testing
   );
 }
 
@@ -138,6 +37,9 @@ export function getScannerConnectionLabel(status, source = 'live') {
     state === SCANNER_STATUS_STATES.RECOVERING
   )
     return 'Checking';
+  if (state === SCANNER_STATUS_STATES.STOPPING) return 'Disconnecting';
+  if (state === SCANNER_STATUS_STATES.UNAVAILABLE) return 'Connection unknown';
+  if (snapshot.testing) return 'Scanner test in progress';
   if (state === SCANNER_STATUS_STATES.BUSY) return 'In use elsewhere';
   return 'Disconnected';
 }
@@ -391,6 +293,13 @@ export function buildScannerStatusDescriptor(status) {
       break;
     default:
       break;
+  }
+
+  if (snapshot.testing && snapshot.state === SCANNER_STATUS_STATES.CONNECTED) {
+    descriptor.label = 'Scanner test in progress';
+    descriptor.detail = 'Regular capture is paused during the scanner test.';
+    descriptor.bannerText = descriptor.detail;
+    descriptor.tone = 'info';
   }
 
   if (!canBanner) {

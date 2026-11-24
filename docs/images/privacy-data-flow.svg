@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="580" height="448" viewBox="0 0 580 448" role="img" aria-labelledby="title desc">
+  <title id="title">Where vaccine information goes</title>
+  <desc id="desc">The scanner sends product data and the public catalogue supplies reference data to the clinic browser. The browser stores trays and activity locally. Staff can fill the open Panorama chart or choose to export, copy or open an email draft.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#185668"/></marker>
+  </defs>
+  <rect width="580" height="448" rx="12" fill="#f3f8f9"/>
+  <g fill="white" stroke="#8caab1" stroke-width="1.5">
+    <rect x="12" y="16" width="264" height="68" rx="8"/>
+    <rect x="304" y="16" width="264" height="68" rx="8"/>
+    <rect x="12" y="290" width="264" height="78" rx="8"/>
+    <rect x="304" y="290" width="264" height="78" rx="8"/>
+  </g>
+  <rect x="90" y="140" width="400" height="90" rx="8" fill="#103549"/>
+  <g fill="none" stroke="#185668" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M144 84V137"/><path d="M436 84V137"/>
+    <path d="M144 230V287"/><path d="M436 230V287"/>
+    <path d="M144 368V395"/>
+  </g>
+  <g text-anchor="middle" font-family="Arial, sans-serif" fill="#103549">
+    <g font-weight="bold" font-size="19">
+      <text x="144" y="45">Product label</text><text x="436" y="45">Public catalogue</text>
+      <text x="290" y="174" fill="white">Clinic browser</text>
+      <text x="144" y="321">Open Panorama chart</text><text x="436" y="321">Files, clipboard or email</text>
+      <text x="144" y="424">Saved clinical record</text>
+    </g>
+    <g font-size="16">
+      <text x="144" y="69">Scanned or entered by hand</text><text x="436" y="69">Reference data download</text>
+      <text x="290" y="203" fill="white">Local lookup, trays and activity</text>
+      <text x="144" y="348">Immunization fields</text><text x="436" y="348">When staff export, copy or share</text>
+      <text x="194" y="390">Staff save</text>
+    </g>
+  </g>
+</svg>

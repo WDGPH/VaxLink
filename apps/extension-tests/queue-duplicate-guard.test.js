@@ -40,11 +40,7 @@ function makeRecord(overrides = {}) {
 }
 
 async function append(harness, storageKey, record) {
-  const response = await harness.sendMessage({
-    action: 'appendQueueRecord',
-    storageKey,
-    record
-  });
+  const response = await harness.appendQueueRecord(storageKey, record);
   assert.equal(response.success, true, 'append message must succeed');
   return response.record;
 }

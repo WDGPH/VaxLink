@@ -1,25 +1,13 @@
 import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
-  normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
-  selectGrantedPort,
   getScannerConnectionLabel
 } from './scanner/scanner-daemon-shared.js';
-import {
-  SCANNER_PORT_INFO_STORAGE_KEY,
-  SCANNER_PROFILE_STORAGE_KEY,
-  getSerialScannerProfile,
-  portMatchesProfile
-} from './scanner/serial-profiles.js';
-import {
-  getGrantedSerialScannerPorts,
-  isWebSerialSupported
-} from './scanner/serial-provider.js';
+import { formatUsbId, ZEBRA_USB_VENDOR_ID } from './scanner/serial-profiles.js';
+import { isWebSerialSupported } from './scanner/serial-provider.js';
 
-let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let statusChangeVersion = 0;
-let configuredProfileId;
 
 const els = {};
 export function initializeScannerSettings() {
@@ -29,37 +17,50 @@ export function initializeScannerSettings() {
     'requestPortBtn',
     'connectGrantedBtn',
     'disconnectBtn',
+    'forgetScannerBtn',
+    'scannerActionNotice',
     'connectionStatus',
     'scannerIdentity'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
   bindEvents();
+  if (!isWebSerialSupported()) {
+    setStatus(
+      els.connectionStatus,
+      'Web Serial is not available in this browser.',
+      'error'
+    );
+    setButtons({ canConnect: false, canDisconnect: false });
+    return;
+  }
   chrome.runtime.onMessage.addListener((request) => {
     if (
       request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED &&
       request.status
     ) {
-      statusChangeVersion++;
-      applyDaemonStatus(request.status);
+      void refreshStatus();
     }
     return false;
   });
-  loadScannerConnection();
+  void refreshStatus();
 }
 
 function bindEvents() {
   els.requestPortBtn?.addEventListener('click', () => {
-    openPairingWindow();
+    void openPairingWindow();
   });
 
   els.connectGrantedBtn?.addEventListener('click', () => {
     void reconnectGrantedPort();
   });
 
-  els.disconnectBtn?.addEventListener('click', () => {
-    void disconnectActivePort();
-  });
+  els.disconnectBtn?.addEventListener('click', () =>
+    stopScanner(SCANNER_DAEMON_ACTIONS.DISCONNECT)
+  );
+  els.forgetScannerBtn?.addEventListener('click', () =>
+    stopScanner(SCANNER_DAEMON_ACTIONS.FORGET)
+  );
 }
 
 function sendScannerDaemonCommand(action, payload = {}) {
@@ -79,177 +80,135 @@ function sendScannerDaemonCommand(action, payload = {}) {
 }
 
 function applyDaemonStatus(status, source = 'live') {
-  scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
-  const profile = getSerialScannerProfile(
-    scannerStatusSnapshot.profileId || getSelectedProfile()?.id
-  );
+  const scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
   const state = scannerStatusSnapshot.state;
   const connected =
-    state === SCANNER_STATUS_STATES.CONNECTED && source === 'live';
+    state === SCANNER_STATUS_STATES.CONNECTED &&
+    source === 'live' &&
+    !scannerStatusSnapshot.testing;
   const tone = connected
     ? 'success'
     : source === 'live' &&
         (state === SCANNER_STATUS_STATES.ERROR ||
-          state === SCANNER_STATUS_STATES.BUSY)
+          state === SCANNER_STATUS_STATES.BUSY ||
+          state === SCANNER_STATUS_STATES.UNAVAILABLE)
       ? 'error'
       : 'info';
   setStatus(
     els.connectionStatus,
     [
       getScannerConnectionLabel(status, source),
-      source === 'live' ? scannerStatusSnapshot.lastError : ''
+      source === 'live' ? scannerStatusSnapshot.lastError : '',
+      source !== 'live' && scannerStatusSnapshot.lastKnownCaptureAt
+        ? `Last known capture ${new Date(scannerStatusSnapshot.lastKnownCaptureAt).toLocaleString()}.`
+        : ''
     ]
       .filter(Boolean)
       .join(': '),
     tone
   );
   const identityKnown = !!scannerStatusSnapshot.profileId;
-  els.scannerIdentity.hidden = !identityKnown;
-  els.scannerIdentity.textContent = identityKnown
-    ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label} (Web Serial)`
+  const { usbVendorId, usbProductId } = scannerStatusSnapshot.portInfo || {};
+  const vendor = formatUsbId(usbVendorId);
+  const product = formatUsbId(usbProductId);
+  const usb = vendor && product ? `[USB ${vendor}:${product}]` : '';
+  const name = usbVendorId === ZEBRA_USB_VENDOR_ID ? 'Zebra' : '';
+  const description = [name, usb].filter(Boolean).join(' ');
+  els.scannerIdentity.hidden = !description;
+  els.scannerIdentity.textContent = description
+    ? `${connected ? 'Scanner' : 'Saved scanner'} ${description}`
     : '';
-  setButtons({ canConnect: !connected, canDisconnect: connected });
-  els.requestPortBtn.hidden = connected;
+  els.scannerIdentity.title = usb
+    ? 'USB vendor and product code. Different scanners can share this code.'
+    : '';
+  const stopping = state === SCANNER_STATUS_STATES.STOPPING;
+  const starting = state === SCANNER_STATUS_STATES.STARTING;
+  const retryStop = state === SCANNER_STATUS_STATES.UNAVAILABLE;
+  const needsSetup =
+    state === SCANNER_STATUS_STATES.PERMISSION_LOST ||
+    scannerStatusSnapshot.selectionRequired;
+  const testing = scannerStatusSnapshot.testing;
+  const canStop =
+    retryStop ||
+    (identityKnown &&
+      !testing &&
+      !needsSetup &&
+      state !== SCANNER_STATUS_STATES.DISABLED);
+  setButtons({
+    canConnect: !stopping && !starting && !retryStop && !testing,
+    canDisconnect: canStop && !stopping
+  });
+  els.requestPortBtn.disabled = stopping || starting;
   els.connectGrantedBtn.hidden =
     connected ||
-    (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !identityKnown);
-  els.disconnectBtn.hidden = !connected;
-}
-
-function loadScannerConnection() {
-  if (!isWebSerialSupported()) {
-    setStatus(
-      els.connectionStatus,
-      'Web Serial is not available in this browser context.',
-      'error'
-    );
-    setButtons({ canConnect: false, canDisconnect: false });
-    return;
+    !identityKnown ||
+    needsSetup ||
+    starting ||
+    stopping ||
+    retryStop ||
+    testing;
+  els.disconnectBtn.hidden = !(canStop || stopping);
+  if (els.forgetScannerBtn) {
+    els.forgetScannerBtn.hidden = !identityKnown;
+    els.forgetScannerBtn.disabled = stopping || testing;
   }
-
-  chrome.storage.local.get(
-    [SCANNER_PROFILE_STORAGE_KEY, SCANNER_PORT_INFO_STORAGE_KEY],
-    (stored) => {
-      const profile = getSerialScannerProfile(
-        stored && stored[SCANNER_PROFILE_STORAGE_KEY]
-      );
-      const portInfo = normalizeScannerPortInfo(
-        stored && stored[SCANNER_PORT_INFO_STORAGE_KEY]
-      );
-      configuredProfileId = profile.id;
-      if (portInfo) {
-        els.scannerIdentity.hidden = false;
-        els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
-      }
-      void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
-        .then((response) => {
-          applyDaemonStatus(response.status, response.source);
-        })
-        .catch((error) =>
-          setStatus(els.connectionStatus, error.message, 'error')
-        );
-    }
-  );
-
-  navigator.serial.addEventListener('connect', () => {
-    setStatus(
-      els.connectionStatus,
-      'Scanner detected. Choose Reconnect or Pair.',
-      'info'
-    );
-  });
-
-  navigator.serial.addEventListener('disconnect', () => {
-    setStatus(
-      els.connectionStatus,
-      'Serial device disconnected. The background daemon will retry automatically.',
-      'warning'
-    );
-  });
-
-  setStatus(els.connectionStatus, 'Checking scanner connection…', 'info');
-  setButtons({ canConnect: true, canDisconnect: false });
 }
 
-function getSelectedProfile() {
-  return getSerialScannerProfile(
-    scannerStatusSnapshot.profileId || configuredProfileId
-  );
+async function refreshStatus() {
+  const version = ++statusChangeVersion;
+  try {
+    const result = await sendScannerDaemonCommand(
+      SCANNER_DAEMON_ACTIONS.GET_STATUS
+    );
+    if (version === statusChangeVersion)
+      applyDaemonStatus(result.status, result.source);
+  } catch (error) {
+    if (version === statusChangeVersion)
+      setStatus(els.connectionStatus, error.message, 'error');
+  }
 }
 
-function openPairingWindow() {
-  const profile = getSelectedProfile();
-  // Chrome anchors extension device choosers to its extensions toolbar.
-  // A popup window lacks that toolbar, so use a standard browser window.
-  chrome.windows.create(
-    {
-      url: chrome.runtime.getURL(`scanner-pairing.html?profile=${profile.id}`),
-      type: 'normal',
-      width: 500,
-      height: 440,
-      focused: true
-    },
-    () => {
-      if (chrome.runtime.lastError)
-        setStatus(
-          els.connectionStatus,
-          chrome.runtime.lastError.message,
-          'error'
-        );
-    }
-  );
+async function openPairingWindow() {
+  try {
+    await sendScannerDaemonCommand('scannerPairing.open');
+  } catch (error) {
+    setStatus(els.scannerActionNotice, error.message, 'error');
+  }
 }
 
 async function reconnectGrantedPort() {
-  const profile = getSelectedProfile();
+  setStatus(els.scannerActionNotice, '');
+  setButtons({ canConnect: false, canDisconnect: true });
+  setStatus(els.connectionStatus, 'Connecting…', 'info');
   try {
-    setButtons({ canConnect: false, canDisconnect: false });
-    const ports = await getGrantedSerialScannerPorts();
-    const selection = selectGrantedPort(
-      ports,
-      profile,
-      scannerStatusSnapshot.portInfo,
-      portMatchesProfile
-    );
-    const port = selection.port;
-    if (!port) {
-      throw new Error(
-        selection.reason === 'ambiguous'
-          ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
-          : 'The selected scanner could not be identified. Reconnect it or use Pair.'
-      );
-    }
-    const versionAtRequest = statusChangeVersion;
     await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
-      profileId: profile.id,
-      preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
-      enableAutostart: true,
-      trigger: 'setup_reconnect'
+      enableAutostart: true
     });
-    if (statusChangeVersion === versionAtRequest)
-      setStatus(
-        els.connectionStatus,
-        'Reconnect requested. Checking connection…',
-        'info'
-      );
+    await refreshStatus();
   } catch (error) {
-    const message = error.message || 'Reconnect failed.';
-    setStatus(els.connectionStatus, message, 'error');
+    setStatus(els.connectionStatus, error.message, 'error');
     setButtons({ canConnect: true, canDisconnect: false });
   }
 }
 
-async function disconnectActivePort(options = {}) {
-  await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.DISCONNECT, {
-    trigger: 'setup_disconnect'
-  });
-  setButtons({ canConnect: true, canDisconnect: false });
-  if (!options.quiet)
-    setStatus(
-      els.connectionStatus,
-      'Background scanner disconnected.',
-      'warning'
-    );
+async function stopScanner(action) {
+  setStatus(els.scannerActionNotice, '');
+  setButtons({ canConnect: false, canDisconnect: false });
+  if (els.forgetScannerBtn) els.forgetScannerBtn.disabled = true;
+  try {
+    const result = await sendScannerDaemonCommand(action);
+    if (action === SCANNER_DAEMON_ACTIONS.FORGET) {
+      setStatus(
+        els.scannerActionNotice,
+        result.permissionRemoved
+          ? 'Saved scanner and browser permission cleared.'
+          : 'Saved scanner cleared. You can remove any remaining serial port permission in your browser’s site settings.'
+      );
+    }
+  } catch (error) {
+    setStatus(els.scannerActionNotice, error.message, 'error');
+  }
+  await refreshStatus();
 }
 
 function setButtons({ canConnect, canDisconnect }) {

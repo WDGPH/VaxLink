@@ -1,6 +1,7 @@
 # VaxLink Extension
 
-Chrome extension for GS1 vaccine barcode parsing, NVC enrichment, and CHR autofill.
+VaxLink reads vaccine barcodes, looks up lots in the National Vaccine Catalogue,
+and fills supported Panorama forms.
 
 ## Panorama Training Site
 
@@ -16,50 +17,26 @@ immunization page with `/recordImms/` in its path. Runtime page detection requir
 HTTPS, matching the manifest. Reload an already-open training page after
 installing or updating the extension.
 
-Check Single Immunization, Multiple Immunizations, Inventory, and lock-screen capture/replay
-in the training environment before moving to production.
+Check **Immunization** on single provider-recorded and non-provider-recorded forms and on the multiple
+immunizations grid and detail steps. Check **Inventory**, then capture a scan
+while the workstation is locked and review it after unlock.
 Automated URL and routing tests do not verify the live training site's DOM,
 scanner hardware, or organization-specific access.
 
 ## Main Pieces
 
-- `popup.js` drives popup workflow state, scan parsing, queue management, and inventory page launch.
-- `popup-inventory.js` manages the popup-side multiple-inject and inventory trays stored in `chrome.storage.local`.
-- `content.js` handles scan routing, autofill, and workflow automation on supported chart pages.
-- `background.js` owns NVC bundle refresh, lot lookup, analytics logging, and queue append helpers.
+- `popup.js` shows the Immunization and Inventory tabs, Settings, and Local Activity.
+- `popup-inventory.js` renders the trays, requests changes, and exports Inventory to CSV.
+- `content.js` identifies supported Panorama forms and fills chart fields.
+- `background.js` routes and saves scans, refreshes the catalogue, looks up lots, and records usage counts.
 - `scanner-settings.js` provides scanner connection controls within the popup Settings view.
-- `inventory-manager.html` + `inventory-manager.js` open the full inventory operations page in its own extension tab.
-
-## Inventory Architecture
-
-The inventory page was split out of the old monolithic `inventory-manager.js` into domain modules under `apps/extension/inventory/`.
-
-- `page-controller.js` wires the page, events, exports, and status updates.
-- `repository.js` is the inventory source of truth for the page and persists operational data in IndexedDB.
-- `model.js` defines normalized inventory items, transactions, reconciliation snapshots, FEFO ordering, and legacy row conversion.
-- `receive.js` parses receive input and enriches scans through `lookupVaccineInfo`.
-- `render.js` renders the summary table, FEFO board, reconciliation grid, lot quarantine banner, and ledger.
-- `exports.js` builds CSV/JSON handoff files and preserves stable inventory export columns.
-- `audio.js`, `runtime.js`, `constants.js`, and `utils.js` hold the shared support code.
 
 ## Storage Model
 
-Extension data is kept locally in two browser stores:
-
-- `chrome.storage.local`
-  Used by the popup and scanner flows for the legacy queue keys, scanner settings, workflow settings, analytics, and small extension preferences.
-- IndexedDB
-  Used by the inventory manager page for normalized inventory items, transactions, incidents, reconciliation sign-offs, and lot quarantine flags.
-
-The page keeps `inventory_scan_batch_v1` mirrored for compatibility, so popup inventory mode and content-script inventory capture continue to work without a coordinated rewrite.
-
-## Inventory Keys
-
-- Legacy queue key: `inventory_scan_batch_v1`
-- Scanner settings: `inventory_ultrafast_scanner_v1`, `inventory_scanner_beeps_v1`
-- Serial scanner profile: `vaxlink_serial_scanner_profile_v1`
-- Pending dedicated-channel scans: `vaxlink_pending_scan_inbox_v1`
-- IndexedDB database: `vaxlink_inventory_ops_v2`
+The trays, scanner settings, catalogue, and usage counts are stored on the
+current browser profile. Troubleshooting details are kept in browser
+session storage. See the [architecture guide](../../docs/architecture.md)
+for storage keys and which part of VaxLink writes each one.
 
 ## Dedicated Scanner Channel
 
@@ -67,7 +44,10 @@ Scanner capture uses a Chrome offscreen document and dedicated worker instead of
 
 This channel requires Chrome 114 or newer because it uses the offscreen `WORKERS` lifecycle reason.
 
-While Windows is locked, Single Immunization scans are held for replay after unlock. Scans in other modes are saved to the Multiple Immunizations queue. VaxLink does not fill the chart while locked. The computer must stay awake; scans cannot be captured while it is sleeping or hibernating.
+While Windows is locked, Immunization scans are held for review. Inventory
+scans stay in the Inventory Tray. After unlocking, check the chart before
+using any held barcode. Scans cannot be captured while the computer sleeps
+or hibernates.
 
 The first hardware profile is `Zebra DS8178 / USB CDC` with Zebra vendor ID `0x05e0`, CR/LF framing, and ASCII scan payloads. The scanner/cradle must be configured for USB CDC / virtual COM mode and must not emit HID keyboard wedge output while the dedicated channel is in use.
 
@@ -89,4 +69,5 @@ cd apps/extension-tests
 npm test
 ```
 
-Current automated coverage checks: GS1 barcode parsing, Panorama autofill flows, multiple-inject queue ordering and dedup, and inventory export contracts.
+Automated checks cover barcode parsing, Panorama form detection and autofill,
+scan delivery and recovery, repeated scans, tray updates, and Inventory exports.

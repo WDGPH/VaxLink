@@ -35,6 +35,10 @@ plugins:
 
 nav:
   - Home: index.md
+  - Staff scanner guide: scanner-quick-guide.md
+  - Privacy assessment guide: privacy-assessment.md
+  - Workstation setup: workstation-setup.md
+  - Scanner acceptance checks: fixes/browser-only-locked-scanner-poc.md
   - Architecture: architecture.md
   - Release Process: RELEASING.md
   - Contributing: contributing.md

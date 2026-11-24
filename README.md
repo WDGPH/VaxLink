@@ -12,6 +12,7 @@ inventory management workflow for lot/expiry tracking. The extension
 documentation site.
 
 - 📚 **Documentation:** <https://docs.phiz.ca/vaxlink/>
+- [Privacy assessment guide for adopting clinics](docs/privacy-assessment.md)
 - 🧩 **Extension:** `apps/extension`
 
 ## Repository Layout
@@ -31,7 +32,7 @@ documentation site.
 - Selects Panorama agent and lot, lets Panorama derive vaccine details, and fills enabled date/time, reason, and consent fields for staff review
 - Shows expiry state (`Expired`, `Expiring soon`, `Valid`)
 - Captures scans through Web Serial, including while the workstation is locked
-- Supports single-fill, multiple-inject queue, and full inventory (receive, FEFO board, reconciliation, lot quarantine) workflows, with CSV/JSON export
+- Follows the active Panorama form in Immunization and exports Inventory scans to CSV
 
 ### Installation
 
@@ -55,8 +56,10 @@ For local development, load the unpacked extension:
 
 First test VaxLink in the Panorama training environment with synthetic training
 records. Reload supported Panorama tabs after installing or updating the extension.
-Check Single Inject, Multiple Inject, Inventory, and lock-screen capture/replay
-before moving to production.
+Check Immunization on single provider-recorded and non-provider-recorded forms and on the multiple
+immunizations grid and detail steps. Check Inventory and verify that a scan
+held during lock stays available for review after unlock. Follow the
+[workstation setup guide](docs/workstation-setup.md).
 
 ### Data update model
 
@@ -68,7 +71,6 @@ before moving to production.
 ### Inventory
 
 - Popup and hands-free inventory capture write to the `chrome.storage.local` queue key `inventory_scan_batch_v1`
-- The full inventory operations page (`inventory-manager.html`) persists normalized items, transactions, and reconciliation snapshots in IndexedDB
 - Detailed extension notes live in `apps/extension/README.md`
 
 ### Extension Checks

@@ -27,8 +27,8 @@ Note: Panorama uses `dateAdministedDate` (misspelled). Keep selectors aligned to
 
 - Agent `change` causes async updates of lot options and vaccine details sections.
 - Lot `change` triggers defaults for trade/dose/site/route/manufacturer.
-- Prefer waiting for PrimeFaces queue idle before writing lot/date fields.
-- Keep retry watcher active long enough to survive rerenders.
+- Check for visible PrimeFaces activity before writing Lot or date fields.
+- Read the Agent and Lot back from the active form. The content script cannot see every page-side refresh.
 
 ## Troubleshooting order
 

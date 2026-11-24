@@ -20,7 +20,7 @@ extension events and can stop it when idle. It coordinates:
 - Looking up a vaccine by lot and barcode product identifier (GTIN).
 - Routing scans to supported chart tabs or retaining them when delivery fails.
 - Saving Single scans before one delivery attempt, retaining uncertain scans,
-  and handling queue appends in order.
+  and writing tray and held-scan changes in order.
 - Saving scanner capture warnings and analytics, and updating the icon and badge.
 - Creating the hidden scanner host and passing scanner control requests to it.
 
@@ -33,7 +33,10 @@ closing the popup does not end that worker. It passes control
 requests to the worker and forwards scans and status to the background program.
 It remembers the requested connection so it can restart a failed worker.
 
-The host passes messages; the scanner worker opens and reads the device.
+The scanner worker opens and reads the device. The host stops routing scans
+as soon as Disconnect is requested and waits for the reader to confirm the
+port closed. Chrome can finish opening a port after cancellation. The reader
+closes that port without reading from it and retains a failed close for retry.
 
 ### Scanner reader: `scanner/scanner-daemon-worker.js`
 
@@ -47,47 +50,83 @@ This stage reads scanner messages; parsing their vaccine fields happens later.
 
 ### Panorama integration: `content.js`
 
-Chrome loads this content script into supported Panorama tabs. It can read and
-change the page's HTML fields, but its JavaScript variables are separate from
-Panorama's own variables. This separation is why a page-library variable may be
-unavailable even when the page is still updating.
+Chrome loads this content script on the immunization entry paths declared for
+the three Panorama hosts in `manifest.json`. If a chart opened before VaxLink
+was installed or updated, refresh the chart to load the integration.
+The script can read and change the page's HTML fields. Its JavaScript variables
+are separate from Panorama's own variables. This separation is why a
+page-library variable may be unavailable even when the page is still updating.
 
-The script receives routed scans, shows the floating VaxLink controls, and fills
-the immunization form. Each fill keeps the document, form, URL, workflow, and
-visible immunization step that started it. A newer fill, navigation, form
-replacement, workflow change, or meaningful manual interaction with that form
-stops its delayed writes. Clearly linked PrimeFaces dropdowns count as part of
-the form; unrelated controls do not. Automatic attempts keep a cancelled owner
-until an explicit fill or a new context starts work again. This does not detect
-a patient change that preserves the same document, URL, and form without a
-visible step change.
-It reads workflow settings from local storage.
+The integration records the extension's public ID on the chart document. When
+two copies are present, both stop filling. Disable the extra copy and refresh
+the chart after checking unsaved work. Development and Alpha can fill training
+charts. The packaged production build can also fill production charts. Scanner
+capture and local trays remain available while chart entry is blocked.
+
+The chart integration reports the visible form and its readiness to callers.
+It distinguishes provider and non-provider single forms, the Multiple grid and
+the Multiple detail step. Conflicting headings or controls and unavailable
+fields explain why a form is unready. Reading the same form repeatedly keeps
+its delivery token. A new form, workflow or step retires the old token.
+
+The [Panorama autofill sequence](#panorama-autofill-sequence) explains how the
+integration verifies the product, stops when chart ownership changes, and
+consumes a confirmed tray dose.
+
+A verified grid assignment keeps its exact saved dose, row, Agent, date and
+foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
+that assignment when the matching detail step opens. If Panorama skips a
+step, its dose stays in the tray. Later steps can still use their assignments
+when the Agent and date identify a single grid row. A detail outside its expected
+position also needs evidence of the scanned Lot. An exact available Lot can open the
+funding prompt before selection when the field is blank. The same Lot
+check applies when a catalogue Agent alias connects the grid and detail labels.
+VaxLink keeps unvisited assignments available for later steps. On the final
+step, the sole remaining assignment with an exact Agent and date can search an
+empty Lot field. A confirmed miss clears VaxLink’s Lot search and closes its
+menu. When NVC recognizes the missing Lot, training explains the gap in its lot list.
+Production offers a draft email to the Panorama Resolution Coordinator. Multiple
+detail also explains that completing the other immunizations may require deleting
+the current entry.
+Changing the grid row, the Lot or the active route stops automatic carry.
+Staff can still select a dose deliberately on the detail step. The grid
+assignment itself does not use a dose.
 
 ### User controls: popup
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
 scan input and preview, workflow selection, queue and inventory controls, CSV
-export, and scanner status. The popup sends fill requests to
-the selected Panorama integration.
+export, and scanner status. The popup sends fill requests to the Panorama
+integration already loaded in the selected tab. Opening the popup grants no
+access to the page in the current tab.
 
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
-Settings has three sections, in order: Scanner, Autofill, and National Vaccine Catalogue.
+Settings includes Scanner, Autofill, National Vaccine Catalogue, and Debug mode.
 `scanner-settings.js` provides connection controls directly within the Scanner
-section. It shows connection status and the saved scanner name, with pairing,
-reconnect, and disconnect controls. Cached status cannot confirm a live
-connection. Actual connection errors remain visible. The popup sends connection
-requests to the background; it does not run the ongoing scanner reader.
+section. It shows the saved device and gets current connection status from the
+reader. When the reader does not reply, Settings shows the last known capture
+time if available. The popup sends connection requests to the background. **Reconnect** resumes
+capture with the saved device. **Disconnect** stops capture and keeps the
+selection. **Forget** clears the selection after a confirmed stop and removes
+the browser's grant if it can identify exactly one matching port.
 
-Pair opens a small temporary standard browser window (`scanner-pairing.html` and
-`scanner-pairing.js`). Chromium needs its extensions toolbar to display the device
-chooser; a popup window does not provide it. Staff click Choose scanner in the
-standard window to grant Web Serial access. The window sends the
-selected port identity to the background reader and closes when the connection
-request is accepted. This acknowledgement does not confirm a live connection.
-Cancellation leaves the window open for another choice. Scanner settings and
-live connection status remain in the popup.
+**Scanner setup** opens a temporary standard browser window
+(`scanner-pairing.html` and `scanner-pairing.js`). Chromium needs its extensions
+toolbar to display the device chooser. Opening setup again brings the same
+setup page forward while it is still open. Staff click **Connect scanner** and choose a
+device. Cancelling the chooser leaves the current scanner connected. When
+replacing a scanner, the background waits for the existing port to close before
+saving the new device and starting capture. The setup window closes after the
+hidden reader accepts the request. Settings confirms when it is connected.
+
+After connecting a device, reopen Scanner setup and choose **Test saved
+scanner**. The reader pauses regular capture and checks for a sample barcode.
+It only reports whether a sample arrived. Sample scans stay out of charts and
+trays. **Finish test** and closing the window both restore the previous capture
+setting, even if no sample arrived. If capture was off, the scanner stays
+disconnected.
 
 National Vaccine Catalogue shows its version, publication date, and last checked
 date, with a Refresh button. Loading and refresh errors stay visible.
@@ -101,11 +140,48 @@ history and is not used as the administration timestamp. The Multiple
 Immunizations entry grid fills only its date field; detail forms can fill both
 fields. Disabled fields keep their existing values.
 
+The Autofill settings can ask for funding before VaxLink searches for a lot.
+With automatic funding enabled, VaxLink checks the current Lot list and uses
+a sole match. If both funding categories list the lot, staff choose one.
+VaxLink keeps an existing category and waits for the Lot list to change after
+a category change. After a miss in one category, staff can try the other.
+
+If the Lot cannot be matched, VaxLink only clears a different selection it can
+attribute to the current fill. On a carried detail step this includes the only
+enabled Lot for the assigned Agent. After a final miss on a Single form it
+clears an Agent it selected on a blank form, even if the Lot is already empty.
+It rechecks the current controls after clearing and can clear the same restored
+selection once. Staff selections and persistent mismatches need review. When the
+product matches but another field does not settle, the chart names the fields
+staff need to check.
+
+A confirmed catalogue miss can open an email draft from a saved row or the
+chart. If the catalogue matched and Panorama could not find the lot, the
+chart offers a draft for the Panorama support contact. Staff choose that
+recipient, review the vaccine details, and decide whether to send.
+
 Local Activity is available from the header and shows a table with Today and All
 time columns. All statistics stay visible,
 with JSON export and reset buttons in one row. JSON exports cover
-today in local time or all activity since the last reset. Its counts describe
-extension activity, not confirmation that Panorama saved a clinical record.
+today in local time or all activity since the last reset. The popup reports
+activity and starts downloads. The background worker saves the daily totals and
+prepares the summaries and JSON export. The totals describe extension activity,
+and staff verify and save clinical records in Panorama.
+
+Debug mode keeps a separate session history for troubleshooting. Packaged
+Alpha starts with Debug on. Production and development start with Debug off.
+A saved preference overrides the starting value. Staff can download the
+retained history in Settings.
+Turning Debug off clears the session details without changing Local Activity. The export
+includes the build, autofill settings at download, and the observed route and
+chart checks. The export groups related events by operation. It can include a
+scanned vaccine barcode. Chart field checks record statuses, and repeated
+observations are summarized. Detail readbacks record the funding radio, the native
+and visible Reason selections, time completeness, and which controls or Lot options
+changed between samples. The two scheduled late checks record their outcomes if
+the page is still running. A completed request has a source label when the page
+exposes its JSF callback and the source belongs to the observed form. Otherwise
+the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with
@@ -113,16 +189,44 @@ the Scanner section expanded and focused. The small close button allows manual
 input and saved queues without scanner setup. This choice lasts for the current
 popup and does not change scanner capture or routing.
 
-The Multiple Immunizations and Inventory trays use **+** to open barcode text
+The Immunization and Inventory trays use **+** to open barcode text
 entry in packaged and unpacked installs. They use the existing parser, catalogue
 lookup, and background queue writer. Inventory accepts one barcode per line and
 keeps CSV export. Entry closes after a confirmed save when the input has not
 changed; failed saves and newly typed text keep the entry open. After a partial
-Inventory batch save, only the failed lines remain for correction.
+Inventory batch save, only the failed lines remain for correction. New
+Immunization entries require a lot number. If any recorded expiry date has
+passed locally, VaxLink blocks chart entry. Staff can confirm adding an expired
+lot by hand for reference in the tray. Inventory keeps expired lots for stock
+checks.
+
+A newly saved chart-tray row with no explicit quantity has one use. Older rows
+without a count keep their existing reuse behaviour. Staff can pin an
+uncounted chart row or type the number of remaining doses. The background
+checks the saved dose fields before applying the change, so a quantity edit
+does not overwrite a use that already occurred. Inventory retains its CSV
+columns.
+
+The background can reserve a counted dose for one chart document. It accepts
+another reservation only when the saved quantity still covers it. A chart
+can release its own reservation before it touches any fields. If a field may
+have changed, staff check the original chart before returning the dose or
+recording it as used. A missing response leaves the dose held. The chart tray shows **In progress** for an active reservation.
+**Check original chart** lets staff remove one dose from the tray or keep it
+when a write is uncertain or the original document is confirmed inactive.
+An uninterrupted Multiple detail Lot miss can release a counted dose after
+confirming an empty Lot and no prior target selection. A verified fill updates
+the tray count. Panorama save confirmation is separate.
+Debug records the numbered grid row, whether it carried into Enter Details,
+and the matching detail step or the reason the assignment was released.
 
 A hardware scan travels from the scanner worker through the hidden host to the
-background program. The background routes it to a supported chart or retains
-it in a queue.
+background program. The background saves it to a tray or retains it in the
+held-scan inbox before delivery to a ready single form. The chart reports
+what happened on that form. Inventory uses the local catalogue when available and saves the
+barcode while a download is pending. Saved rows keep the lookup result and the
+catalogue version when known. Scanner acknowledgement follows the saved row
+without waiting for Local Activity counts.
 
 ## Shared helpers
 
@@ -137,28 +241,28 @@ it in a queue.
 - **`queue-record.js`** normalizes popup queue records;
   **`popup-inventory.js`** manages the popup display and CSV columns, requesting
   saved row changes through the background writer.
-- **`scanner/scanner-daemon-shared.js`** supplies common scanner status and port
-  selection helpers. **`scanner/serial-profiles.js`** holds device settings, and
+- **`scanner/scanner-daemon-protocol.js`** defines scanner commands and saved status.
+  **`scanner/scanner-daemon-shared.js`** supplies port selection and status display helpers. **`scanner/serial-profiles.js`** holds device settings, and
   **`scanner/scanner-lock-session.js`** holds lock-session metadata helpers.
 
 ## Key storage keys
 
-| Key                                         | Writers            | Purpose                                       |
-| ------------------------------------------- | ------------------ | --------------------------------------------- |
-| `multiple_inject_queue_v1`                  | background         | Multiple Immunizations queue rows             |
-| `inventory_scan_batch_v1`                   | background         | Inventory tray rows                           |
-| `vaxlink_pending_scan_inbox_v1`             | background         | Single scans held for later chart delivery    |
-| `vaxlink_scanner_capture_error_v1`          | background         | Capture warning awaiting acknowledgement      |
-| `vaxlink_scanner_status_snapshot_v1`        | background         | Last saved scanner status and capture history |
-| `nvc_bundle_override`                       | background         | Cached NVC catalogue                          |
-| `vaxlink_administered_date_autofill_v1`     | popup              | Date Administered autofill preference         |
-| `vaxlink_administered_time_autofill_v1`     | popup              | Time Administered autofill preference         |
-| `vaxlink_administered_datetime_autofill_v1` | legacy popup       | Default for unset date and time switches      |
-| `vaxlink_reason_autofill_v1`                | popup              | Reason for Immunization autofill preference   |
-| `vaxlink_consent_autofill_v1`               | popup              | Consent for Service autofill preference       |
-| `vaxlink_reason_consent_autofill_v1`        | legacy popup       | Default for unset reason and consent switches |
-| `vaxlink_workflow_mode_v1`                  | popup + content    | Current workflow mode                         |
-| `vaxlink_analytics_v1`                      | background + popup | Local event log and summaries                 |
+| Key                                         | Writers         | Purpose                                       |
+| ------------------------------------------- | --------------- | --------------------------------------------- |
+| `multiple_inject_queue_v1`                  | background      | Immunization tray rows                        |
+| `inventory_scan_batch_v1`                   | background      | Inventory tray rows                           |
+| `vaxlink_pending_scan_inbox_v1`             | background      | Scans held for staff review                   |
+| `vaxlink_scanner_capture_error_v1`          | background      | Capture warning awaiting acknowledgement      |
+| `vaxlink_scanner_status_snapshot_v1`        | background      | Last saved scanner status and capture history |
+| `nvc_bundle_override`                       | background      | Cached NVC catalogue                          |
+| `vaxlink_administered_date_autofill_v1`     | popup           | Date Administered autofill preference         |
+| `vaxlink_administered_time_autofill_v1`     | popup           | Time Administered autofill preference         |
+| `vaxlink_administered_datetime_autofill_v1` | legacy popup    | Default for unset date and time switches      |
+| `vaxlink_reason_autofill_v1`                | popup           | Reason for Immunization autofill preference   |
+| `vaxlink_consent_autofill_v1`               | popup           | Consent for Service autofill preference       |
+| `vaxlink_reason_consent_autofill_v1`        | legacy popup    | Default for unset reason and consent switches |
+| `vaxlink_workflow_mode_v1`                  | popup + content | Current workflow mode                         |
+| `vaxlink_analytics_v1`                      | background      | Local Activity daily totals                   |
 
 Queue appends, popup edits, HUD removals, and dose consumption share the
 background writer. Each change reads the latest rows after earlier writes finish,
@@ -205,29 +309,66 @@ are reflected in subsequent scans.
 
 ## Chart boundary
 
-Chart delivery supports only HTTPS immunization paths containing `/recordImms/`
-on `www.panorama.prod.ehealthontario.ca`, `panorama.prod.ehealthontario.ca`,
-and `trpanoramadhir.prod.ehealthontario.ca`. Manifest path matches stay broad
-so navigation within Panorama can initialize the integration; runtime checks
-restrict chart writes. Missing tab metadata requires a read-only response from
-an existing supported integration. It does not permit script injection.
-GS1 parsing, NVC lookup, scanner capture, queues, and inventory remain useful
-without an open chart. Staff review vaccine details before saving in Panorama.
+Chart delivery supports the two HTTPS immunization paths declared in the
+manifest on `www.panorama.prod.ehealthontario.ca`,
+`panorama.prod.ehealthontario.ca`, and
+`trpanoramadhir.prod.ehealthontario.ca`. When tab metadata is unavailable,
+an existing integration can confirm a supported chart. Refresh an
+already-open chart if the integration is missing.
+
+## Workflows
+
+VaxLink reopens the selected workflow. A saved Single or Multiple preference
+opens Immunization. Inventory captures stay in Inventory, and a chart
+notice identifies that mode. Each of the two automatic chart options can
+be switched off independently.
+
+A ready single form can receive the live scan when single-form entry is on.
+A ready Multiple grid can receive the one vaccine just saved to the
+Immunization tray when grid entry is on. If no form can take an automatic
+scan, a safe scan stays in the tray. Opening a chart never uses a previously
+saved row. Staff can add a barcode as text and choose **Use** on an exact
+saved vaccine.
+
+Select saved rows to move them between Immunization and Inventory. Drag a row's
+reorder handle or use its Up and Down arrow keys. Selection stays attached to
+row IDs when a scan arrives. Transfers preserve counts, get new row IDs and
+require confirmation for expired stock moving to Immunization for reference.
+The background writes both tray changes together and blocks transfer of a
+reserved dose. A scan that finishes lookup late can be inserted ahead of later
+captures without changing the order of existing rows.
+
+Recent chart lots appear below both trays. The worker keeps up to 20 named
+product, lot and expiry combinations in browser-session storage. A direct scan
+enters that list only when the original chart's field verification clears its
+pending receipt. A reserved tray dose enters the list when a verified use
+removes the final dose. Each addition requires confirmation. Immunization gets
+one use, and Inventory starts with an unknown count.
 
 ## Pending scanner scans
 
-Single Immunization saves each scan before attempting delivery once to the captured
-active tab and observed form context. Navigation, form replacement, a newer
-fill, or manual takeover invalidates that context. This detects observable
-changes; it cannot identify a patient change that preserves the same URL and
-form without a visible context change.
+VaxLink saves a direct single-form scan before sending it once to its original
+foreground chart. The worker checks the chart build, document context, focus,
+and workstation lock again after waits. The current worker instance and the
+original chart document identify the same delivery.
 
-A successful acknowledgement means the scan was handled or autofill started.
-It does not prove that later field updates completed or that Panorama saved a
-clinical record. Failed or uncertain deliveries remain held and never replay
-automatically, including after unlock. The popup lists held barcodes and capture
-times for deliberate copying into manual input or discard. Staff must check the
-chart first because an uncertain scan may already have populated fields.
+A pending acknowledgement means the chart started handling the scan. VaxLink
+keeps the saved barcode until the same chart verifies its fields. A timeout,
+stale build, lost focus, unavailable lock check, or unverified result leaves a
+held scan for staff review. If VaxLink cannot identify the Agent for a scanned
+lot, it holds the barcode before any field interaction and shows a warning.
+
+Staff can check the original chart and copy or discard a held barcode in the
+popup. Held scans never replay automatically, including after unlock. Field
+verification reflects what the browser observed. Staff still verify and save
+the record in Panorama.
+
+While the workstation is locked, Immunization captures stay held and
+Inventory captures stay in Inventory. Repeated physical scans are kept.
+Lock and unlock changes save in order, and captures retain the session they
+started in even if storage is slow. The popup shows the remaining scans from
+the last lock and warns if capture was interrupted, even when no barcode was
+saved. Unlocking does not start a chart fill.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan
@@ -238,13 +379,38 @@ operations.
 
 ## Panorama autofill sequence
 
-Fill order must be: `agent → lot → (deferred) date/time`. Panorama
-auto-populates dependent fields (trade name, route, dose, manufacturer) after
-lot selection. Lot writes and deferred date/time use the existing bounded retries and
-`!isPrimeFacesAjaxBusy()` guard. This isolated-world check alone does not prove
-that all page activity has finished. Lot matching uses `normalizePanoramaLotToken` to
-handle formats like `LOT123 - Exp. ...`. Panorama uses misspelled IDs (e.g.
-`dateAdministedDate`) — keep those as-is.
+VaxLink fills Agent and then checks the Lot list for the selected funding
+category. It uses an existing choice. Automatic funding can select a sole
+match and asks staff when both categories match. When automatic choice is off,
+staff choose before the search and can try the other category after a miss.
+VaxLink verifies the selected Lot on the current widget. For older saved
+rows without a Lot, it verifies the Trade. Panorama supplies dependent product
+fields after selection. VaxLink fills the enabled Date, Time, Reason and
+Consent details only after the product is confirmed and preserves entered
+values. A bounded watcher handles both visible updates and quiet pages.
+Browser-isolated checks for page activity are one input to this verification.
+
+The fill stays with the original document, form, workflow and step. A staff
+interaction or a changed form stops further writes. A scanner-triggered fill
+also stops when its tab loses focus. On a Multiple detail step, changing the
+Agent permanently stops the fill even if the original Agent returns. A delayed
+first write must meet the
+worker's deadline. An explicit tray choice can continue when the toolbar popup
+takes focus while the chart remains visible.
+
+Using a saved dose on the Multiple grid reserves it before assigning one
+empty row. VaxLink checks the same row after the Agent event. A verified grid
+assignment leaves the dose in the tray for Details. If the row changes
+during the attempt, check the original chart before trying the held dose again.
+
+For a counted tray dose, the chart obtains a reservation before it writes to
+Panorama. Once the watched product and detail fields stay settled, one
+finalization on the current owner asks the background to consume the reservation.
+The queue writer matches the token to the chart document in storage, releases
+the reservation, and decrements the count or removes the last dose in one
+write. If that write fails, the tray reports no verified use. A later repair
+can restore a blank detail on the same chart without another tray write.
+Staff verify and save the immunization in Panorama.
 
 ## CI
 

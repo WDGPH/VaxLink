@@ -1,10 +1,12 @@
 import {
   SCANNER_STATUS_STATES,
+  SCANNER_WORKER_MESSAGES,
   classifyScannerConnectionFailure,
   createScannerStatusSnapshot,
   getScannerReconnectDelayMs,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
+  portInfoMatches,
   selectGrantedPort
 } from './scanner-daemon-shared.js';
 import {
@@ -23,6 +25,9 @@ let activeConnection = null;
 let activePort = null;
 let reconnectTimer = null;
 let openingPromise = null;
+let openingController = null;
+let closingPromise = null;
+let stopping = false;
 let recoverAttemptCount = 0;
 let currentStatus = createScannerStatusSnapshot();
 
@@ -35,7 +40,7 @@ function updateStatus(overrides = {}) {
     ...currentStatus,
     ...overrides
   });
-  postToHost({ type: 'status', status: currentStatus });
+  postToHost({ type: SCANNER_WORKER_MESSAGES.STATUS, status: currentStatus });
 }
 
 function clearReconnectTimer() {
@@ -45,12 +50,33 @@ function clearReconnectTimer() {
   }
 }
 
-async function closeActiveConnection() {
-  const connection = activeConnection;
-  activeConnection = null;
-  activePort = null;
-  if (!connection) return;
-  await connection.close().catch(() => undefined);
+function closeActiveConnection() {
+  closingPromise ??= (async () => {
+    if (activeConnection) {
+      await activeConnection.close();
+    } else if (activePort?.readable || activePort?.writable) {
+      await activePort.close();
+    }
+    activeConnection = null;
+    activePort = null;
+  })().finally(() => {
+    closingPromise = null;
+  });
+  return closingPromise;
+}
+
+async function recoverFromReadFailure(error) {
+  try {
+    await closeActiveConnection();
+    handleConnectionFailure(error);
+  } catch {
+    // Keep the port so Disconnect can retry. A new reader cannot start yet.
+    desiredConnected = false;
+    updateStatus({
+      state: SCANNER_STATUS_STATES.UNAVAILABLE,
+      lastError: 'Could not confirm that the scanner stopped.'
+    });
+  }
 }
 
 function scheduleReconnect() {
@@ -60,7 +86,7 @@ function scheduleReconnect() {
   recoverAttemptCount += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    void connectGrantedPort('retry');
+    void connectGrantedPort();
   }, delayMs);
 }
 
@@ -100,10 +126,8 @@ function handleConnectionFailure(
   }
 }
 
-async function connectGrantedPort(trigger = 'manual') {
-  if (!desiredConnected) {
-    return;
-  }
+function connectGrantedPort() {
+  if (!desiredConnected || closingPromise) return;
   if (activeConnection && activePort) {
     updateStatus({
       state: SCANNER_STATUS_STATES.CONNECTED,
@@ -117,6 +141,8 @@ async function connectGrantedPort(trigger = 'manual') {
     return openingPromise;
   }
 
+  openingController = new AbortController();
+  const { signal } = openingController;
   openingPromise = (async () => {
     clearReconnectTimer();
     if (!(globalThis.navigator && 'serial' in globalThis.navigator)) {
@@ -139,6 +165,7 @@ async function connectGrantedPort(trigger = 'manual') {
 
     const profile = getSerialScannerProfile(desiredProfileId);
     const ports = await getGrantedSerialScannerPorts();
+    if (signal.aborted) return;
     const selection = selectGrantedPort(
       ports,
       profile,
@@ -179,89 +206,174 @@ async function connectGrantedPort(trigger = 'manual') {
     activePort = port;
     preferredPortInfo = normalizeScannerPortInfo(port.getInfo());
 
-    try {
-      activeConnection = await openSerialScanner(port, profile, {
-        onScan: (scan) => {
-          updateStatus({
-            lastCaptureAt: scan.capturedAt || new Date().toISOString(),
-            captureCount: currentStatus.captureCount + 1
-          });
-          postToHost({ type: 'scan', scan });
-        },
-        onStatus: (status) => {
-          if (status.state === 'open') {
-            recoverAttemptCount = 0;
-            updateStatus({
-              state: SCANNER_STATUS_STATES.CONNECTED,
-              profileId: profile.id,
-              portInfo: normalizeScannerPortInfo(
-                status.portInfo || port.getInfo()
-              ),
-              lastConnectedAt: new Date().toISOString(),
-              lastError: '',
-              recoverAttemptCount: 0
-            });
-            return;
-          }
-
-          if (status.state === 'disconnected') {
-            handleConnectionFailure(
-              new DOMException('Serial device disconnected.', 'NetworkError')
-            );
-          }
-        },
-        onError: (error) => {
-          handleConnectionFailure(error);
+    activeConnection = await openSerialScanner(port, profile, {
+      signal,
+      onScan: (scan) => {
+        if (!desiredConnected || signal.aborted || activePort !== port) return;
+        if (currentStatus.testing) {
+          if (!currentStatus.sampleReceived)
+            updateStatus({ sampleReceived: true });
+          return;
         }
-      });
-    } catch (error) {
-      handleConnectionFailure(error);
-    }
-  })().finally(() => {
-    openingPromise = null;
-  });
+        updateStatus({
+          lastCaptureAt: scan.capturedAt || new Date().toISOString(),
+          captureCount: currentStatus.captureCount + 1
+        });
+        postToHost({ type: SCANNER_WORKER_MESSAGES.SCAN, scan });
+      },
+      onStatus: (status) => {
+        if (!desiredConnected || signal.aborted || activePort !== port) return;
+        if (status.state === 'open') {
+          recoverAttemptCount = 0;
+          updateStatus({
+            state: SCANNER_STATUS_STATES.CONNECTED,
+            profileId: profile.id,
+            portInfo: normalizeScannerPortInfo(
+              status.portInfo || port.getInfo()
+            ),
+            lastConnectedAt: new Date().toISOString(),
+            lastError: '',
+            recoverAttemptCount: 0
+          });
+          return;
+        }
+
+        if (status.state === 'disconnected') {
+          void recoverFromReadFailure(
+            new DOMException('Serial device disconnected.', 'NetworkError')
+          );
+        }
+      },
+      onError: (error) => {
+        if (desiredConnected && !signal.aborted && activePort === port) {
+          void recoverFromReadFailure(error);
+        }
+      }
+    });
+  })()
+    .catch((error) => {
+      // Disconnect must see a failed close even if opening was cancelled.
+      if (signal.aborted) {
+        if (activePort) throw error;
+        return;
+      }
+      return recoverFromReadFailure(error);
+    })
+    .finally(() => {
+      openingPromise = null;
+      openingController = null;
+    });
 
   return openingPromise;
 }
 
-async function disconnectScanner() {
+function reply(requestId, fields) {
+  postToHost({ type: SCANNER_WORKER_MESSAGES.REPLY, requestId, ...fields });
+}
+
+async function disconnectScanner({ requestId, forget, portInfo }) {
   desiredConnected = false;
+  stopping = true;
   recoverAttemptCount = 0;
   clearReconnectTimer();
-  await closeActiveConnection();
-  updateStatus({
-    state: SCANNER_STATUS_STATES.DISABLED,
-    portInfo: preferredPortInfo,
-    lastDisconnectedAt: new Date().toISOString(),
-    lastError: '',
-    recoverAttemptCount: 0
-  });
+  openingController?.abort();
+  updateStatus({ state: SCANNER_STATUS_STATES.STOPPING });
+  try {
+    await openingPromise;
+    await closeActiveConnection();
+    let permissionRemoved = false;
+    if (forget) {
+      permissionRemoved = await forgetPortPermission(portInfo);
+      desiredProfileId = '';
+      preferredPortInfo = null;
+    }
+    updateStatus({
+      state: forget
+        ? SCANNER_STATUS_STATES.NEVER_CONFIGURED
+        : SCANNER_STATUS_STATES.DISABLED,
+      profileId: desiredProfileId,
+      selectionRequired: false,
+      testing: false,
+      sampleReceived: false,
+      portInfo: preferredPortInfo,
+      lastDisconnectedAt: new Date().toISOString(),
+      lastError: '',
+      recoverAttemptCount: 0
+    });
+    reply(requestId, { status: currentStatus, permissionRemoved });
+  } catch {
+    updateStatus({
+      state: SCANNER_STATUS_STATES.UNAVAILABLE,
+      lastError: 'Could not confirm that the scanner stopped.'
+    });
+    reply(requestId, { error: currentStatus.lastError });
+  } finally {
+    stopping = false;
+  }
+}
+
+async function forgetPortPermission(info) {
+  if (!info) return false;
+  try {
+    const ports = await getGrantedSerialScannerPorts();
+    const matches = ports.filter((port) =>
+      portInfoMatches(info, port.getInfo())
+    );
+    if (matches.length !== 1 || typeof matches[0].forget !== 'function')
+      return false;
+    await matches[0].forget();
+    return true;
+  } catch {
+    // A disconnected device may no longer expose its browser grant.
+    return false;
+  }
+}
+
+async function refreshPorts() {
+  const port = activePort;
+  if (desiredConnected && activeConnection && port) {
+    const available = await getGrantedSerialScannerPorts();
+    if (desiredConnected && activePort === port && !available.includes(port)) {
+      await recoverFromReadFailure(
+        new DOMException('Serial device disconnected.', 'NetworkError')
+      );
+      return;
+    }
+  }
+  if (desiredConnected && !activeConnection && !openingPromise) {
+    void connectGrantedPort();
+  }
 }
 
 self.addEventListener('message', (event) => {
   const data = event.data || {};
   switch (data.type) {
-    case 'connectGranted':
+    case SCANNER_WORKER_MESSAGES.CONNECT_GRANTED:
+      if (stopping || (!desiredConnected && activePort)) break;
       desiredConnected = true;
-      updateStatus({ selectionRequired: false });
+      updateStatus({
+        selectionRequired: false,
+        testing: data.testing === true,
+        sampleReceived: false
+      });
       desiredProfileId = String(
         data.profileId || desiredProfileId || ''
       ).trim();
-      preferredPortInfo = normalizeScannerPortInfo(
-        data.preferredPortInfo || preferredPortInfo
-      );
-      void connectGrantedPort(data.trigger || 'manual');
+      preferredPortInfo = normalizeScannerPortInfo(data.preferredPortInfo);
+      void connectGrantedPort();
       break;
-    case 'disconnect':
-      void disconnectScanner();
-      break;
-    case 'refreshPorts':
-      if (desiredConnected && !activeConnection && !openingPromise) {
-        void connectGrantedPort(data.trigger || 'refresh');
+    case SCANNER_WORKER_MESSAGES.DISCONNECT:
+      if (stopping) {
+        reply(data.requestId, { error: 'The scanner is already stopping.' });
+      } else {
+        void disconnectScanner(data);
       }
       break;
-    case 'getStatus':
-      postToHost({ type: 'status', status: currentStatus });
+    case SCANNER_WORKER_MESSAGES.REFRESH_PORTS:
+      void refreshPorts().catch(() => undefined);
+      break;
+    case SCANNER_WORKER_MESSAGES.GET_STATUS:
+      reply(data.requestId, { status: currentStatus });
       break;
     default:
       break;

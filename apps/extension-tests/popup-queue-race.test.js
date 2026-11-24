@@ -121,6 +121,58 @@ test('updateById patches the freshest copy of the row', async () => {
   );
 });
 
+test('a quantity edit retains a concurrent append and rejects a changed dose', async () => {
+  const counted = row('vial', { total_doses: 5, remaining_doses: 5 });
+  const incoming = row('scan');
+  store.set(QUEUE_KEY, [counted]);
+  const manager = makeManager();
+  await manager.load();
+  store.set(QUEUE_KEY, [counted, incoming]);
+  const edited = await manager.setDoseCounts('vial', '3');
+  assert.equal(edited.remaining_doses, 3);
+  assert.equal(store.get(QUEUE_KEY)[1].id, incoming.id);
+
+  store.set(QUEUE_KEY, [{ ...edited, remaining_doses: 2 }, incoming]);
+  await assert.rejects(
+    manager.setDoseCounts('vial', '4'),
+    /saved dose changed/
+  );
+  await assert.rejects(manager.setDoseCounts('vial', '1.5'), /whole number/);
+  assert.equal(store.get(QUEUE_KEY)[0].remaining_doses, 2);
+});
+
+test('new single-use rows, pinned rows, and older unknown counts keep their dose rules', async () => {
+  store.set(QUEUE_KEY, [row('legacy')]);
+  const manager = makeManager();
+  await manager.load();
+  await manager.add(row('new'));
+  assert.equal(manager.getById('new').dose_tracking, 'single_use');
+
+  const use = (id) => manager.consumeById(id);
+  assert.equal((await use('legacy')).id, 'legacy');
+
+  const pin = (pinned) => {
+    const current = manager.getById('new');
+    return manager.mutateRows('setDosePinned', {
+      id: current.id,
+      pinned,
+      expected: JSON.stringify([
+        current.dose_tracking,
+        current.total_doses,
+        current.remaining_doses
+      ])
+    });
+  };
+  assert.equal((await pin(true)).dose_tracking, 'retained');
+  assert.equal((await use('new')).dose_tracking, 'retained');
+  assert.equal((await pin(false)).dose_tracking, 'single_use');
+  assert.equal(await use('new'), null);
+  assert.deepEqual(
+    Array.from(store.get(QUEUE_KEY), (item) => item.id),
+    ['legacy']
+  );
+});
+
 test('consumption uses the latest dose count and preserves concurrent appends', async () => {
   store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 })]);
   const manager = makeManager();
@@ -178,11 +230,7 @@ test('background append waits for an in-flight queue removal', async () => {
     popupSender
   );
   await pending;
-  const append = harness.sendMessage({
-    action: 'appendQueueRecord',
-    storageKey: QUEUE_KEY,
-    record: row('new')
-  });
+  const append = harness.appendQueueRecord(QUEUE_KEY, row('new'));
   release();
   assert.equal((await remove).success, true);
   assert.equal((await append).success, true);
@@ -268,4 +316,168 @@ test('queue mutations require an authorized sender and a valid payload', async (
     if (accepted) assert.equal(saved.length, 0);
     else assert.equal(saved, original);
   }
+});
+
+test('the legacy queue append enforces chart sender and record boundaries', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  const url =
+    'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+  const chart = { id: 'vaxlink-test', frameId: 0, url, tab: { id: 44 } };
+  const request = {
+    action: 'appendQueueRecord',
+    storageKey: QUEUE_KEY,
+    record: row('saved')
+  };
+  for (const [message, sender] of [
+    [request, { ...chart, frameId: 1 }],
+    [request, { ...chart, url: new URL('/login', url).href }],
+    [{ ...request, storageKey: 'vaxlink_workflow_mode_v1' }, chart],
+    [{ ...request, record: [] }, chart]
+  ]) {
+    assert.equal((await harness.sendMessage(message, sender)).success, false);
+  }
+  assert.equal(harness.storageData.has(QUEUE_KEY), false);
+  assert.equal((await harness.sendMessage(request, chart)).success, true);
+  assert.equal(harness.storageData.get(QUEUE_KEY).length, 1);
+});
+
+test('an expired manual dose requires confirmation and remains reference only', async () => {
+  store.set(QUEUE_KEY, []);
+  const manager = makeManager();
+  const expired = row('expired', { barcode_expiry: '2000-11-23' });
+  await assert.rejects(manager.add(expired), /Confirm saving/);
+  assert.equal(store.get(QUEUE_KEY).length, 0);
+  await manager.add(expired, { confirmExpired: true });
+  assert.equal(store.get(QUEUE_KEY)[0].reference_only, true);
+  await manager.updateById('expired', {
+    barcode_expiry: '2099-11-23',
+    expiry_flag: 'valid',
+    reference_only: false
+  });
+  assert.equal(store.get(QUEUE_KEY)[0].reference_only, true);
+});
+
+test('selection and reorder use stable IDs when a concurrent scan changes the displayed rows', async () => {
+  store.set(QUEUE_KEY, [row('a'), row('b'), row('c')]);
+  const manager = makeManager();
+  await manager.load();
+  manager.selectedIds.add('b');
+  manager.selectedIds.add('c');
+
+  const newer = [row('a'), row('b'), row('c'), row('scanner')];
+  store.set(QUEUE_KEY, newer);
+  manager.handleStorageChanged({ [QUEUE_KEY]: { newValue: newer } }, 'local');
+  assert.deepEqual(
+    manager.getSelectedRows().map(({ id }) => id),
+    ['b', 'c']
+  );
+
+  await manager.reorder('c', 'a', false);
+  assert.deepEqual(
+    Array.from(store.get(QUEUE_KEY), ({ id }) => id),
+    ['c', 'a', 'b', 'scanner']
+  );
+  assert.deepEqual(
+    manager.getSelectedRows().map(({ id }) => id),
+    ['c', 'b']
+  );
+});
+
+test('moving expired stock requires confirmation and preserves quantities and unrelated rows', async () => {
+  const inventory = 'inventory_scan_batch_v1';
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [inventory]: [
+        row('exp', {
+          barcode_expiry: '2000-11-23',
+          total_doses: 4,
+          remaining_doses: 3
+        }),
+        row('spare')
+      ],
+      [QUEUE_KEY]: [row('existing')]
+    }
+  });
+  const move = (ids, confirmExpired) =>
+    harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey: inventory,
+        operation: 'transfer',
+        payload: { ids, confirmExpired }
+      },
+      popupSender
+    );
+
+  assert.match((await move(['exp', 'gone'], true)).error, /changed/);
+  assert.match((await move(['exp'], false)).error, /Confirm/);
+  assert.equal(harness.storageData.get(inventory).length, 2);
+  assert.equal((await move(['exp'], true)).moved, 1);
+  assert.equal(harness.storageData.get(inventory)[0].id, 'spare');
+  const [existing, added] = harness.storageData.get(QUEUE_KEY);
+  assert.equal(existing.id, 'existing');
+  assert.notEqual(added.id, 'exp');
+  assert.equal(added.total_doses, 4);
+  assert.equal(added.remaining_doses, 3);
+  assert.equal(added.reference_only, true);
+});
+
+test('moving a selected set with a reserved dose preserves every source row', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [QUEUE_KEY]: [
+        row('allowed'),
+        row('reserved', {
+          dose_reservations: [
+            {
+              token: '4ee10f3c-e9df-4100-a10d-364c8dc83f0c',
+              tabId: 44,
+              documentId: 'current-chart'
+            }
+          ]
+        })
+      ]
+    }
+  });
+  const result = await harness.sendMessage(
+    {
+      action: 'mutateQueue',
+      storageKey: QUEUE_KEY,
+      operation: 'transfer',
+      payload: { ids: ['allowed', 'reserved'] }
+    },
+    popupSender
+  );
+  assert.match(result.error, /reserved dose/);
+  assert.equal(harness.storageData.get(QUEUE_KEY).length, 2);
+  assert.equal(harness.storageData.has('inventory_scan_batch_v1'), false);
+});
+
+test('confirmed recent lots are added once per tray with the correct dose policy', async () => {
+  const historyKey = 'vaxlink_recent_chart_lots_v1';
+  const history = row('recent', { barcode_expiry: '2099-01-01' });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    sessionStorage: new Map([[historyKey, [history]]])
+  });
+  const add = (storageKey, confirmed) =>
+    harness.sendMessage(
+      {
+        action: 'mutateQueue',
+        storageKey,
+        operation: 'add_from_history',
+        payload: { id: history.id, confirmed }
+      },
+      popupSender
+    );
+
+  assert.equal((await add(QUEUE_KEY, false)).success, false);
+  const one = (await add(QUEUE_KEY, true)).record;
+  const inventory = (await add('inventory_scan_batch_v1', true)).record;
+  assert.equal(one.dose_tracking, 'single_use');
+  assert.equal(inventory.dose_tracking, 'manual');
+  assert.equal(inventory.total_doses, null);
+  assert.equal(inventory.remaining_doses, null);
+  assert.notEqual(one.id, history.id);
+  assert.notEqual(inventory.id, one.id);
+  assert.equal((await add(QUEUE_KEY, true)).alreadyInTray, true);
 });

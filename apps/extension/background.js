@@ -2,7 +2,27 @@ const VAXLINK_BG_DEBUG = false;
 importScripts('build-info.js');
 importScripts('shared/gs1-parser.js');
 importScripts('shared/expiry-date.js');
+importScripts('shared/workflow.js');
+importScripts('shared/vaccine-label.js');
 importScripts('scanner/scanner-lock-session.js');
+importScripts('scanner/scanner-daemon-protocol.js');
+importScripts('shared/tray-doses.js');
+importScripts('recent-activity.js');
+
+const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
+  getStorage,
+  setStorage,
+  getDebugSettingsAtExport
+);
+
+const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
+
+const {
+  getTrayRemainingDoses,
+  getTrayDoseFields,
+  canPinTrayDose,
+  defaultChartDose
+} = globalThis.VaxLinkTrayDoses;
 
 const {
   SCANNER_LOCK_STATE_KEY,
@@ -67,18 +87,26 @@ const STORAGE_KEYS = {
   health: 'nvc_bundle_health'
 };
 const ANALYTICS_STORAGE_KEY = 'vaxlink_analytics_v1';
-const ANALYTICS_MAX_RECENT_EVENTS = 2000;
 const ANALYTICS_TOP_LIMIT = 12;
 let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
+let scannerChartFocusGeneration = 0;
+const scannerRoutingEpoch = buildAnalyticsId();
+const activeScannerDeliveries = new Map();
+const SCANNER_CHART_RESPONSE_MS = 10000;
 let scannerStatusWriteQueue = Promise.resolve();
-let scannerLockSessionPromise = null;
+let scannerControlQueue = Promise.resolve();
+let scannerLockStateWrites = Promise.resolve();
+let lastScannerIdleState = null;
 let iconInitPromise = null;
-const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
-const LEGACY_POPUP_MODE_KEY = 'vaxlink_popup_mode_v1';
-const LEGACY_HANDS_FREE_KEY = 'hands_free_scan_autofill_enabled';
-const LEGACY_REMOTE_MODE_KEY = 'hands_free_scan_mode_v1';
+const {
+  WORKFLOW_MODE_KEY,
+  LEGACY_POPUP_MODE_KEY,
+  SINGLE_SCAN_AUTOFILL_KEY,
+  GRID_SCAN_AUTOFILL_KEY,
+  normalizeWorkflowMode
+} = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 const PENDING_SCAN_INBOX_KEY = 'vaxlink_pending_scan_inbox_v1';
@@ -86,34 +114,24 @@ const SCANNER_CAPTURE_ERROR_KEY = 'vaxlink_scanner_capture_error_v1';
 const PENDING_SCAN_INBOX_LIMIT = 250;
 const PENDING_SCAN_INBOX_MAX_BYTES = 1024 * 1024;
 const BADGE_COLOR = '#0891b2';
+const SCANNER_PAIRING_TAB_KEY = 'vaxlink_scanner_pairing_tab';
+let scannerPairingRequest;
+const SCANNER_TEST_OWNER_KEY = 'vaxlink_scanner_test_owner_v1';
 const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 const SCANNER_PORT_INFO_STORAGE_KEY = 'vaxlink_serial_scanner_port_info_v1';
-const SCANNER_DAEMON_ENABLED_KEY = 'vaxlink_scanner_daemon_enabled_v1';
-const SCANNER_STATUS_SNAPSHOT_KEY = 'vaxlink_scanner_status_snapshot_v1';
-const SCANNER_DAEMON_OFFSCREEN_PATH = 'scanner-daemon.html';
-const SCANNER_DAEMON_TARGET = 'scannerDaemon';
-const SCANNER_DAEMON_BACKGROUND_TARGET = 'scannerDaemonBackground';
-const SCANNER_DAEMON_ACTIONS = Object.freeze({
-  ENSURE: 'scannerDaemon.ensure',
-  GET_STATUS: 'scannerDaemon.getStatus',
-  CONNECT_GRANTED: 'scannerDaemon.connectGranted',
-  DISCONNECT: 'scannerDaemon.disconnect',
-  ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
-  STATUS_CHANGED: 'scannerDaemon.statusChanged',
-  STATUS_UPDATE: 'scannerDaemon.statusUpdate'
-});
-const SCANNER_STATUS_STATES = Object.freeze({
-  NEVER_CONFIGURED: 'never_configured',
-  STARTING: 'starting',
-  CONNECTED: 'connected',
-  RECOVERING: 'recovering',
-  WAITING_FOR_DEVICE: 'waiting_for_device',
-  PERMISSION_LOST: 'permission_lost',
-  BUSY: 'busy',
-  ERROR: 'error',
-  DISABLED: 'disabled'
-});
-const VALID_SCANNER_STATES = new Set(Object.values(SCANNER_STATUS_STATES));
+const {
+  SCANNER_DAEMON_ENABLED_KEY,
+  SCANNER_STATUS_SNAPSHOT_KEY,
+  SCANNER_DAEMON_OFFSCREEN_PATH,
+  SCANNER_DAEMON_TARGET,
+  SCANNER_DAEMON_BACKGROUND_TARGET,
+  SCANNER_DAEMON_ACTIONS,
+  SCANNER_STATUS_STATES,
+  normalizeScannerPortInfo,
+  createScannerStatusSnapshot,
+  normalizeScannerStatusSnapshot,
+  buildDefaultScannerStatus
+} = globalThis.VaxLinkScannerDaemon;
 let scannerDaemonCreatePromise = null;
 let scannerDaemonStatusCache = createScannerStatusSnapshot();
 
@@ -277,94 +295,6 @@ function setStorage(values) {
   );
 }
 
-function normalizeScannerIsoTimestamp(value) {
-  if (!value) return '';
-  const parsed = new Date(String(value).trim());
-  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString();
-}
-
-function normalizeScannerPortInfo(info) {
-  if (!info || typeof info !== 'object') return null;
-  const normalized = {};
-  if (
-    info.usbVendorId !== undefined &&
-    info.usbVendorId !== null &&
-    info.usbVendorId !== ''
-  ) {
-    const vendorId = Number(info.usbVendorId);
-    if (Number.isFinite(vendorId)) normalized.usbVendorId = vendorId;
-  }
-  if (
-    info.usbProductId !== undefined &&
-    info.usbProductId !== null &&
-    info.usbProductId !== ''
-  ) {
-    const productId = Number(info.usbProductId);
-    if (Number.isFinite(productId)) normalized.usbProductId = productId;
-  }
-  if (info.bluetoothServiceClassId) {
-    normalized.bluetoothServiceClassId = String(info.bluetoothServiceClassId);
-  }
-  return Object.keys(normalized).length ? normalized : null;
-}
-
-function createScannerStatusSnapshot(overrides = {}) {
-  return normalizeScannerStatusSnapshot({
-    state: SCANNER_STATUS_STATES.NEVER_CONFIGURED,
-    profileId: '',
-    portInfo: null,
-    lastConnectedAt: '',
-    lastDisconnectedAt: '',
-    lastCaptureAt: '',
-    lastKnownCaptureAt: '',
-    captureCount: 0,
-    selectionRequired: false,
-    lastError: '',
-    recoverAttemptCount: 0,
-    ...overrides
-  });
-}
-
-function normalizeScannerStatusSnapshot(snapshot) {
-  const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
-  return {
-    state: VALID_SCANNER_STATES.has(source.state)
-      ? source.state
-      : SCANNER_STATUS_STATES.NEVER_CONFIGURED,
-    profileId: String(source.profileId || '').trim(),
-    portInfo: normalizeScannerPortInfo(source.portInfo),
-    lastConnectedAt: normalizeScannerIsoTimestamp(source.lastConnectedAt),
-    lastDisconnectedAt: normalizeScannerIsoTimestamp(source.lastDisconnectedAt),
-    lastCaptureAt: normalizeScannerIsoTimestamp(source.lastCaptureAt),
-    lastKnownCaptureAt: normalizeScannerIsoTimestamp(source.lastKnownCaptureAt),
-    captureCount: Math.max(0, Number.parseInt(source.captureCount, 10) || 0),
-    selectionRequired: source.selectionRequired === true,
-    lastError: String(source.lastError || '').trim(),
-    recoverAttemptCount: Math.max(
-      0,
-      Number.parseInt(source.recoverAttemptCount, 10) || 0
-    )
-  };
-}
-
-function buildDefaultScannerStatus({
-  enabled = false,
-  profileId = '',
-  portInfo = null
-} = {}) {
-  const normalizedProfileId = String(profileId || '').trim();
-  if (!normalizedProfileId) {
-    return createScannerStatusSnapshot();
-  }
-  return createScannerStatusSnapshot({
-    state: enabled
-      ? SCANNER_STATUS_STATES.WAITING_FOR_DEVICE
-      : SCANNER_STATUS_STATES.DISABLED,
-    profileId: normalizedProfileId,
-    portInfo: normalizeScannerPortInfo(portInfo)
-  });
-}
-
 async function getScannerBootstrapState() {
   const stored = await getStorage([
     SCANNER_DAEMON_ENABLED_KEY,
@@ -385,14 +315,39 @@ async function getScannerBootstrapState() {
 }
 
 function persistScannerStatusSnapshot(snapshot) {
+  const normalized = normalizeScannerStatusSnapshot(snapshot);
+  const interruptedSession =
+    normalized.state !== SCANNER_STATUS_STATES.CONNECTED
+      ? withScannerLockSession((session) =>
+          isLockedScannerSession(session) ? session.id : null
+        ).catch(() => null)
+      : null;
+
   const result = scannerStatusWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      const stored = await getStorage([SCANNER_STATUS_SNAPSHOT_KEY]);
+      const stored = await getStorage([
+        SCANNER_STATUS_SNAPSHOT_KEY,
+        SCANNER_DAEMON_ENABLED_KEY,
+        SCANNER_PORT_INFO_STORAGE_KEY
+      ]);
       const previous = normalizeScannerStatusSnapshot(
         stored[SCANNER_STATUS_SNAPSHOT_KEY]
       );
-      const normalized = normalizeScannerStatusSnapshot(snapshot);
+      if (
+        previous.state === SCANNER_STATUS_STATES.CONNECTED &&
+        !previous.testing &&
+        interruptedSession
+      ) {
+        const interruptedId = await interruptedSession;
+        if (interruptedId)
+          await withScannerLockSession((session) => {
+            if (session?.id === interruptedId && !session.interrupted)
+              return setStorage({
+                [SCANNER_LOCK_SESSION_KEY]: { ...session, interrupted: true }
+              });
+          }).catch(() => {});
+      }
       normalized.lastKnownCaptureAt =
         [
           previous.lastKnownCaptureAt,
@@ -406,12 +361,16 @@ function persistScannerStatusSnapshot(snapshot) {
       const values = {
         [SCANNER_STATUS_SNAPSHOT_KEY]: normalized
       };
-      if (normalized.selectionRequired)
+      if (normalized.selectionRequired && !normalized.testing)
         values[SCANNER_DAEMON_ENABLED_KEY] = false;
-      if (normalized.profileId) {
-        values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
-      }
-      if (normalized.portInfo) {
+      // An old install can have a profile without a saved port identity.
+      if (
+        normalized.state === SCANNER_STATUS_STATES.CONNECTED &&
+        !normalized.testing &&
+        normalized.portInfo &&
+        stored[SCANNER_DAEMON_ENABLED_KEY] === true &&
+        !stored[SCANNER_PORT_INFO_STORAGE_KEY]
+      ) {
         values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
       }
       await setStorage(values);
@@ -504,12 +463,25 @@ async function sendScannerDaemonMessage(message) {
   return sendRuntimeMessage({ ...message, target: SCANNER_DAEMON_TARGET });
 }
 
-async function maybeStartScannerDaemon(trigger = 'startup') {
+function queueScannerControl(task) {
+  const pending = scannerControlQueue.then(task);
+  scannerControlQueue = pending.catch(() => undefined);
+  return pending;
+}
+
+function maybeStartScannerDaemon(trigger = 'startup') {
+  return queueScannerControl(async () => {
+    if ((await getScannerTestOwner()) === undefined)
+      return startConfiguredScanner(trigger);
+  });
+}
+
+async function startConfiguredScanner(trigger) {
   const bootstrap = await getScannerBootstrapState();
   if (
     !bootstrap.enabled ||
     !bootstrap.profileId ||
-    bootstrap.status.selectionRequired
+    (bootstrap.status.selectionRequired && !bootstrap.status.testing)
   ) {
     return { started: false, status: bootstrap.status };
   }
@@ -521,7 +493,131 @@ async function maybeStartScannerDaemon(trigger = 'startup') {
     preferredPortInfo: bootstrap.portInfo,
     trigger
   });
-  return { started: true, status: response?.status || bootstrap.status };
+  return {
+    started: response?.success === true,
+    status: response?.status || bootstrap.status
+  };
+}
+
+async function stopConfiguredScanner(
+  action = SCANNER_DAEMON_ACTIONS.DISCONNECT,
+  portInfo
+) {
+  const reply = await sendScannerDaemonMessage({ action, portInfo });
+  if (!reply?.success) {
+    throw new Error(
+      reply?.error || 'Could not confirm that the scanner stopped.'
+    );
+  }
+  return reply;
+}
+
+function isScannerSetupPage(sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.url?.split('?')[0] === chrome.runtime.getURL('scanner-pairing.html')
+  );
+}
+
+async function getScannerTestOwner() {
+  const stored = await chrome.storage.session.get(SCANNER_TEST_OWNER_KEY);
+  return stored[SCANNER_TEST_OWNER_KEY];
+}
+
+async function requireRegularScannerControls() {
+  if ((await getScannerTestOwner()) !== undefined) {
+    throw new Error('Finish or close the scanner test first.');
+  }
+}
+
+async function startScannerTest(tabId) {
+  await requireRegularScannerControls();
+  const { profileId, portInfo } = await getScannerBootstrapState();
+  if (!profileId) throw new Error('Connect a scanner before testing it.');
+  await chrome.tabs.get(tabId);
+  await chrome.storage.session.set({ [SCANNER_TEST_OWNER_KEY]: tabId });
+  try {
+    await stopConfiguredScanner();
+  } catch (error) {
+    await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+    throw error;
+  }
+  try {
+    const reply = await sendScannerDaemonMessage({
+      action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+      profileId,
+      preferredPortInfo: portInfo,
+      testing: true
+    });
+    if (!reply?.success)
+      throw new Error(reply?.error || 'Could not start the scanner test.');
+    return reply;
+  } catch (error) {
+    await endScannerTest(tabId);
+    throw error;
+  }
+}
+
+async function endScannerTest(tabId, tabClosed = false) {
+  if ((await getScannerTestOwner()) !== tabId) return { success: true };
+  try {
+    await stopConfiguredScanner();
+  } catch (error) {
+    // If setup has closed, let Settings retry the stop. Capture stays paused.
+    if (tabClosed) await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+    throw error;
+  }
+  // Both pagehide and tab removal can report the same exit.
+  await chrome.storage.session.remove(SCANNER_TEST_OWNER_KEY);
+  await scannerStatusWriteQueue.catch(() => undefined);
+  await startConfiguredScanner('test_finished');
+  return { success: true };
+}
+
+chrome.tabs.onRemoved?.addListener((tabId) => {
+  void queueScannerControl(() => endScannerTest(tabId, true)).catch(
+    () => undefined
+  );
+});
+
+async function connectConfiguredScanner(request) {
+  await requireRegularScannerControls();
+  const bootstrap = await getScannerBootstrapState();
+  const selected = request.action === SCANNER_DAEMON_ACTIONS.SELECT;
+  const requestedPort = normalizeScannerPortInfo(request.preferredPortInfo);
+  const profileId = String(
+    request.profileId || bootstrap.profileId || ''
+  ).trim();
+  const portInfo = requestedPort || bootstrap.portInfo;
+  if (!profileId) throw new Error('Connect a scanner before reconnecting.');
+  if (selected && !requestedPort)
+    throw new Error('The selected scanner could not be identified.');
+
+  if (selected && (await hasScannerDaemonDocument())) {
+    // Keep the previous selection if its port cannot be closed.
+    await stopConfiguredScanner();
+    await scannerStatusWriteQueue.catch(() => undefined);
+  }
+  const values = {
+    [SCANNER_PROFILE_STORAGE_KEY]: profileId,
+    [SCANNER_PORT_INFO_STORAGE_KEY]: portInfo,
+    [SCANNER_DAEMON_ENABLED_KEY]:
+      selected || request.enableAutostart === true || bootstrap.enabled
+  };
+  if (selected) await setStorage(values);
+  const reply = await sendScannerDaemonMessage({
+    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+    profileId,
+    preferredPortInfo: portInfo
+  });
+  if (!reply?.success)
+    throw new Error(reply?.error || 'Scanner reconnect failed.');
+  if (!selected) {
+    if (!request.profileId) delete values[SCANNER_PROFILE_STORAGE_KEY];
+    if (!requestedPort) delete values[SCANNER_PORT_INFO_STORAGE_KEY];
+    await setStorage(values);
+  }
+  return { success: true, accepted: true };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -569,6 +665,10 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
   const rows =
     stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
 
+  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
+    record = defaultChartDose(record);
+  }
+
   if (
     storageKey === MULTIPLE_INJECT_QUEUE_KEY &&
     options.preserveEveryScan !== true
@@ -588,7 +688,13 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
     }
   }
 
-  rows.push(record);
+  // A slow lookup can finish after later captures. Keep the order of existing rows.
+  const capturedAt = Date.parse(record.scanned_at);
+  const laterIndex = rows.findIndex(
+    (row) => Date.parse(row?.scanned_at) > capturedAt
+  );
+  if (laterIndex < 0) rows.push(record);
+  else rows.splice(laterIndex, 0, record);
   await setStorage({ [storageKey]: rows });
   return {
     ...record,
@@ -603,9 +709,156 @@ function appendQueueRecord(storageKey, record, options = {}) {
   return scannerQueueWriteQueue;
 }
 
+const DOSE_RESERVATION_OPERATIONS = [
+  'reserve_dose',
+  'stop_dose',
+  'review_dose'
+];
+const DOSE_IN_USE = 'This dose is already in use in another chart.';
+const DOSE_REVIEW =
+  'The chart may already contain this scan. Check the original chart before using it again.';
+
+function doseReservations(row) {
+  return Array.isArray(row?.dose_reservations) ? row.dose_reservations : [];
+}
+
+function withDoseReservations(row, reservations) {
+  const updated = { ...row };
+  if (reservations.length) updated.dose_reservations = reservations;
+  else delete updated.dose_reservations;
+  return updated;
+}
+
+async function findInactiveDoseDocument(storageKey, payload) {
+  if (
+    storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+    typeof payload?.id !== 'string' ||
+    typeof payload.token !== 'string'
+  )
+    return null;
+  const stored = await getStorage([storageKey]);
+  const rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  const row = rows.find((row) => row?.id === payload.id);
+  const reservation = doseReservations(row).find(
+    ({ token }) => token === payload.token
+  );
+  if (!reservation || reservation.review) return null;
+
+  // Ask the original document outside the queue writer. An inactive or frozen
+  // tab cannot delay an unrelated capture.
+  const inactive = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 900);
+    chrome.tabs.sendMessage(
+      reservation.tabId,
+      { action: 'isDoseReservationActive', token: reservation.token },
+      { documentId: reservation.documentId },
+      (response) => {
+        clearTimeout(timer);
+        const error = chrome.runtime.lastError;
+        // An absent reply does not tell us whether the original chart is done.
+        resolve(
+          error
+            ? /No (?:tab|document) with id/i.test(error.message)
+            : response?.active === false
+        );
+      }
+    );
+  });
+  return inactive ? reservation : null;
+}
+
+async function getRecentChartLots() {
+  const { [RECENT_CHART_LOTS_KEY]: rows } = await chrome.storage.session.get(
+    RECENT_CHART_LOTS_KEY
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+function recentLotExpiry(vaccine) {
+  const date = [
+    vaccine.inventory_expiry,
+    vaccine.barcode_expiry,
+    vaccine.nvc_lot_expiry,
+    vaccine.expiry
+  ]
+    .map(globalThis.VaxLinkExpiryDate.parseDateToLocal)
+    .find(Boolean);
+  if (!date) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function recentLotKey(vaccine) {
+  const product =
+    vaccine.gtin ||
+    vaccine.din ||
+    vaccine.tradename ||
+    vaccine.generic_name ||
+    vaccine.name;
+  return JSON.stringify(
+    [product, vaccine.lot, recentLotExpiry(vaccine)].map((value) =>
+      String(value || '')
+        .trim()
+        .toUpperCase()
+    )
+  );
+}
+
+async function rememberVerifiedChartLot(data) {
+  if (!data || data.reference_only) return;
+  const vaccine = {};
+  // Store only vaccine identification needed to recognize or add this lot again.
+  for (const field of [
+    'lot',
+    'gtin',
+    'din',
+    'tradename',
+    'generic_name',
+    'name',
+    'disease',
+    'antigen',
+    'manufacturer',
+    'inventory_expiry',
+    'barcode_expiry',
+    'nvc_lot_expiry',
+    'expiry',
+    'nvc_catalogue_version'
+  ]) {
+    const value = data[field];
+    if (typeof value === 'string' && value.trim() && value.length <= 200)
+      vaccine[field] = value.trim();
+  }
+  if (
+    !vaccine.lot ||
+    !globalThis.vaxlinkVaccineLabel({ ...vaccine, drug_code: data.drug_code })
+  )
+    return;
+  if (data.nvc_lot_matched === true) vaccine.nvc_lot_matched = true;
+
+  const expiry = recentLotExpiry(vaccine);
+  if (expiry) vaccine.inventory_expiry = expiry;
+  const key = recentLotKey(vaccine);
+  const rows = await getRecentChartLots();
+  const existing = rows.find((row) => recentLotKey(row) === key);
+  await chrome.storage.session.set({
+    [RECENT_CHART_LOTS_KEY]: [
+      { ...vaccine, id: existing?.id || crypto.randomUUID() },
+      ...rows.filter((row) => row !== existing)
+    ].slice(0, 20)
+  });
+}
+
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
-function mutateQueue(storageKey, operation, payload = {}) {
+function mutateQueue(
+  storageKey,
+  operation,
+  payload = {},
+  popup = false,
+  chart = null,
+  inactiveDose = null
+) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
     .then(async () => {
@@ -626,13 +879,22 @@ function mutateQueue(storageKey, operation, payload = {}) {
               typeof row !== 'object' ||
               Array.isArray(row) ||
               typeof row.id !== 'string' ||
-              !row.id.trim()
+              !row.id.trim() ||
+              'dose_reservations' in row
           ))
       ) {
         throw new Error('Queue add requires an array of records with IDs');
       }
       if (
-        ['remove', 'update', 'consume'].includes(operation) &&
+        [
+          'remove',
+          'update',
+          'consume',
+          'setDoseCount',
+          'setDosePinned',
+          'reorder',
+          ...DOSE_RESERVATION_OPERATIONS
+        ].includes(operation) &&
         (typeof payload.id !== 'string' || !payload.id.trim())
       ) {
         throw new Error('Queue operation requires a record ID');
@@ -642,7 +904,8 @@ function mutateQueue(storageKey, operation, payload = {}) {
         (!payload.patch ||
           typeof payload.patch !== 'object' ||
           Array.isArray(payload.patch) ||
-          ('id' in payload.patch && payload.patch.id !== payload.id))
+          ('id' in payload.patch && payload.patch.id !== payload.id) ||
+          'dose_reservations' in payload.patch)
       ) {
         throw new Error(
           'Queue update requires a patch that preserves the record ID'
@@ -650,34 +913,329 @@ function mutateQueue(storageKey, operation, payload = {}) {
       }
       const stored = await getStorage([storageKey]);
       let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      if (operation === 'add_from_history') {
+        if (
+          typeof payload.id !== 'string' ||
+          !payload.id ||
+          payload.confirmed !== true
+        )
+          throw new Error('Confirm adding the recent lot to the tray.');
+        const vaccine = (await getRecentChartLots()).find(
+          (row) => row.id === payload.id
+        );
+        if (!vaccine)
+          throw new Error('This lot is no longer in Recent chart lots.');
+
+        const toImmunization = storageKey === MULTIPLE_INJECT_QUEUE_KEY;
+        const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(vaccine);
+        if (toImmunization && expired && payload.confirmExpired !== true)
+          throw new Error(
+            'Confirm before adding an expired lot for reference.'
+          );
+        if (
+          rows.some((row) => row && recentLotKey(row) === recentLotKey(vaccine))
+        )
+          return { rows, alreadyInTray: true };
+
+        const record = buildQueueRecordFromParsed(vaccine, '', {
+          dose_tracking: toImmunization ? 'single_use' : 'manual',
+          ...(vaccine.expiry && { expiry: vaccine.expiry }),
+          ...(toImmunization &&
+            expired && { reference_only: true, expiry_flag: 'expired' })
+        });
+        rows = [...rows, record];
+        await setStorage({ [storageKey]: rows });
+        return { rows, record };
+      }
+      if (operation === 'transfer') {
+        if (
+          !Array.isArray(payload.ids) ||
+          !payload.ids.length ||
+          payload.ids.some((id) => typeof id !== 'string' || !id.trim()) ||
+          new Set(payload.ids).size !== payload.ids.length
+        )
+          throw new Error('Choose the scans to move.');
+
+        const ids = new Set(payload.ids);
+        const moving = rows.filter((row) => ids.has(row?.id));
+        if (
+          moving.length !== ids.size ||
+          new Set(moving.map((row) => row.id)).size !== ids.size
+        )
+          throw new Error('The source tray changed. Choose the scans again.');
+        if (moving.some((row) => doseReservations(row).length))
+          throw new Error(
+            'Review the reserved dose on the original chart before moving it.'
+          );
+
+        const toImmunization = storageKey === INVENTORY_BATCH_KEY;
+        const destination = toImmunization
+          ? MULTIPLE_INJECT_QUEUE_KEY
+          : INVENTORY_BATCH_KEY;
+        const transferred = moving.map((row) => {
+          const moved = { ...row, id: crypto.randomUUID() };
+          if (!toImmunization) return moved;
+          if (typeof row.lot !== 'string' || !row.lot.trim())
+            throw new Error(
+              'A scan needs a lot number to move to Immunization.'
+            );
+          if (globalThis.VaxLinkExpiryDate.isExpiredVaccine(row)) {
+            if (payload.confirmExpired !== true)
+              throw new Error(
+                'Confirm before moving expired lots to Immunization.'
+              );
+            moved.reference_only = true;
+            moved.expiry_flag = 'expired';
+          }
+          return defaultChartDose(moved);
+        });
+
+        const destinationStored = await getStorage([destination]);
+        const destinationRows = Array.isArray(destinationStored[destination])
+          ? destinationStored[destination]
+          : [];
+        rows = rows.filter((row) => !ids.has(row?.id));
+        // Write both trays together while the scan writer is still held.
+        await setStorage({
+          [storageKey]: rows,
+          [destination]: [...destinationRows, ...transferred]
+        });
+        return { rows, moved: transferred.length };
+      }
+      const index = rows.findIndex((row) => row?.id === payload.id);
+      const current = rows[index];
+      const reservations = doseReservations(current);
+      const reservation =
+        typeof payload.token === 'string'
+          ? reservations.find(({ token }) => token === payload.token)
+          : null;
+      const ownsReservation =
+        chart &&
+        reservation?.tabId === chart.tab.id &&
+        reservation.documentId === chart.documentId;
+
+      let consumeReviewed = false;
+      if (DOSE_RESERVATION_OPERATIONS.includes(operation)) {
+        if (
+          storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+          typeof chart?.documentId !== 'string' ||
+          !chart.documentId ||
+          typeof payload.token !== 'string' ||
+          !/^[a-f0-9-]{36}$/.test(payload.token)
+        )
+          throw new Error('Open the chart again before using a tray dose.');
+
+        if (operation === 'reserve_dose') {
+          if (
+            ![
+              current?.lot,
+              current?.tradename,
+              current?.name,
+              current?.generic_name
+            ].some((value) => typeof value === 'string' && value.trim()) ||
+            rows.findLastIndex((row) => row?.id === payload.id) !== index
+          )
+            throw new Error(
+              'This vaccine is unavailable. Choose a tray item again.'
+            );
+          if (globalThis.VaxLinkExpiryDate.blocksChartUse(current))
+            throw new Error(
+              'This lot is expired or saved for reference. Choose another tray item.'
+            );
+          if (reservation && (!ownsReservation || reservation.review))
+            throw new Error(DOSE_REVIEW);
+          const remaining = getTrayRemainingDoses(current);
+          if (remaining === null) return { record: current, reserved: false };
+          if (reservation) return { record: current, reserved: true };
+          if (reservations.length >= remaining)
+            throw new Error(
+              reservations.some((dose) => !dose.review)
+                ? DOSE_IN_USE
+                : DOSE_REVIEW
+            );
+
+          rows = rows.slice();
+          rows[index] = withDoseReservations(current, [
+            ...reservations,
+            {
+              token: payload.token,
+              tabId: chart.tab.id,
+              documentId: chart.documentId
+            }
+          ]);
+          await setStorage({ [storageKey]: rows });
+          return { record: current, reserved: true };
+        }
+
+        if (operation === 'stop_dose') {
+          if (
+            typeof payload.written !== 'boolean' ||
+            (reservation && !ownsReservation)
+          )
+            throw new Error(
+              'Only the original chart can stop using this dose.'
+            );
+          if (!reservation || reservation.review) return { rows };
+        } else {
+          const inactiveOriginal =
+            inactiveDose?.token === reservation?.token &&
+            inactiveDose?.tabId === reservation?.tabId &&
+            inactiveDose?.documentId === reservation?.documentId;
+          if (
+            typeof payload.used !== 'boolean' ||
+            !reservation ||
+            (!reservation.review && !inactiveOriginal)
+          )
+            throw new Error(
+              'Check the original chart before resolving this dose.'
+            );
+          consumeReviewed = payload.used;
+        }
+
+        if (!consumeReviewed) {
+          // A possible write holds the dose until staff verify the original chart.
+          const saved =
+            payload.written === true && operation === 'stop_dose'
+              ? reservations.map((dose) =>
+                  dose === reservation ? { ...dose, review: true } : dose
+                )
+              : reservations.filter((dose) => dose !== reservation);
+          rows = rows.slice();
+          rows[index] = withDoseReservations(current, saved);
+          await setStorage({ [storageKey]: rows });
+          return { rows };
+        }
+      }
+
+      if (
+        (['remove', 'update', 'setDoseCount', 'setDosePinned'].includes(
+          operation
+        ) &&
+          rows.some(
+            (row) => row?.id === payload.id && doseReservations(row).length
+          )) ||
+        (operation === 'clear' &&
+          rows.some((row) => doseReservations(row).length))
+      )
+        throw new Error(
+          'Review the reserved dose on the original chart before changing the tray.'
+        );
+
       let record = null;
       let consumed = null;
       if (operation === 'add') {
-        rows = [...rows, ...payload.records];
+        const records =
+          storageKey === MULTIPLE_INJECT_QUEUE_KEY
+            ? payload.records.map((row) => {
+                if (
+                  popup &&
+                  payload.confirmExpired === true &&
+                  payload.records.length === 1
+                )
+                  return {
+                    ...defaultChartDose(row),
+                    reference_only: true,
+                    expiry_flag: 'expired'
+                  };
+                if (globalThis.VaxLinkExpiryDate.isExpiredVaccine(row))
+                  throw new Error(
+                    'Confirm saving the expired lot for reference'
+                  );
+                return defaultChartDose(row);
+              })
+            : payload.records;
+        rows = [...rows, ...records];
       } else if (operation === 'clear') {
         rows = [];
       } else if (operation === 'remove') {
         rows = rows.filter((row) => row?.id !== payload.id);
+      } else if (operation === 'reorder') {
+        if (
+          typeof payload.targetId !== 'string' ||
+          !payload.targetId.trim() ||
+          payload.targetId === payload.id ||
+          typeof payload.after !== 'boolean'
+        )
+          throw new Error('Choose where to move the scan.');
+        const target = rows.findIndex((row) => row?.id === payload.targetId);
+        if (
+          index < 0 ||
+          target < 0 ||
+          rows.findLastIndex((row) => row?.id === payload.id) !== index ||
+          rows.findLastIndex((row) => row?.id === payload.targetId) !== target
+        )
+          throw new Error('The tray changed. Try the move again.');
+        rows = rows.slice();
+        const [moved] = rows.splice(index, 1);
+        rows.splice(
+          target - Number(index < target) + Number(payload.after),
+          0,
+          moved
+        );
       } else if (operation === 'update') {
         rows = rows.map((row) => {
           if (row?.id !== payload.id) return row;
           record = { ...row, ...payload.patch };
+          if (row.reference_only === true) record.reference_only = true;
           return record;
         });
-      } else if (operation === 'consume') {
-        // A legacy duplicate ID must not turn one use into several dose changes.
-        const index = rows.findIndex((row) => row?.id === payload.id);
-        if (index >= 0) {
-          consumed = rows[index];
-          const count = (value) => {
-            const parsed = Number.parseInt(String(value ?? ''), 10);
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      } else if (
+        operation === 'setDoseCount' ||
+        operation === 'setDosePinned'
+      ) {
+        const matches = rows.filter((row) => row?.id === payload.id);
+        const [current] = matches;
+        if (
+          matches.length !== 1 ||
+          payload.expected !== getTrayDoseFields(current)
+        ) {
+          throw new Error(
+            'The saved dose changed. Check the tray and try again.'
+          );
+        }
+        let changes;
+        if (operation === 'setDoseCount') {
+          if (!Number.isSafeInteger(payload.quantity) || payload.quantity < 1)
+            throw new Error('Enter a whole number of doses greater than zero.');
+          changes = {
+            total_doses: payload.quantity,
+            remaining_doses: payload.quantity,
+            dose_tracking: 'manual'
           };
-          const remaining =
-            count(consumed.remaining_doses) ?? count(consumed.total_doses);
-          if (remaining === null) record = consumed;
+        } else {
+          if (
+            storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+            typeof payload.pinned !== 'boolean' ||
+            !canPinTrayDose(current)
+          )
+            throw new Error(
+              'Only a single or uncounted chart dose can be pinned.'
+            );
+          changes = {
+            total_doses: null,
+            remaining_doses: null,
+            dose_tracking: payload.pinned ? 'retained' : 'single_use'
+          };
+        }
+        record = { ...current, ...changes };
+        rows = rows.map((row) => (row === current ? record : row));
+      } else if (operation === 'consume' || consumeReviewed) {
+        if (index >= 0) {
+          if (
+            !consumeReviewed &&
+            (reservations.length || payload.token !== undefined) &&
+            (!ownsReservation || reservation.review)
+          )
+            throw new Error(DOSE_IN_USE);
+          consumed = current;
+          const remaining = getTrayRemainingDoses(current);
+          const saved = reservations.filter((dose) => dose !== reservation);
+          if (remaining === null) record = current;
           else if (remaining > 1) {
-            record = { ...consumed, remaining_doses: remaining - 1 };
+            record = withDoseReservations(
+              { ...current, remaining_doses: remaining - 1 },
+              saved
+            );
           }
           rows = rows.slice();
           if (record) rows[index] = record;
@@ -687,6 +1245,8 @@ function mutateQueue(storageKey, operation, payload = {}) {
         throw new Error('Invalid queue operation');
       }
       await setStorage({ [storageKey]: rows });
+      if (operation === 'consume' && ownsReservation && consumed && !record)
+        await rememberVerifiedChartLot(consumed).catch(() => {});
       return { rows, record, consumed };
     });
   scannerQueueWriteQueue = result;
@@ -705,64 +1265,170 @@ function queryTabs(queryInfo) {
   });
 }
 
-function queryMachineIdleState() {
-  if (!chrome.idle || typeof chrome.idle.queryState !== 'function') {
-    return Promise.resolve('active');
-  }
-  return new Promise((resolve) => {
-    chrome.idle.queryState(15, (state) => {
-      if (chrome.runtime.lastError) {
-        resolve('active');
-        return;
-      }
-      resolve(normalizeMachineIdleState(state));
-    });
+function waitForScannerPairingTab(tabId) {
+  return new Promise((resolve, reject) => {
+    const finish = (error) => {
+      clearTimeout(timeout);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.tabs.onRemoved.removeListener(onRemoved);
+      if (error) reject(error);
+      else resolve();
+    };
+    const onUpdated = (id, change) => {
+      if (id === tabId && change.status === 'complete') finish();
+    };
+    const onRemoved = (id) => {
+      if (id === tabId) finish();
+    };
+    const timeout = setTimeout(
+      () =>
+        finish(
+          new Error('Scanner setup is still loading. Try opening it again.')
+        ),
+      2000
+    );
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.onRemoved.addListener(onRemoved);
+    // The load or closure may have finished before the listeners were added.
+    chrome.tabs.get(tabId).then(
+      (tab) => {
+        if (tab.status !== 'loading') finish();
+      },
+      () => finish()
+    );
   });
 }
 
-async function getLockedScannerSession() {
-  const stored = await getStorage([SCANNER_LOCK_SESSION_KEY]);
-  return stored && stored[SCANNER_LOCK_SESSION_KEY];
+async function getScannerPairingTab(tabId) {
+  if (!Number.isInteger(tabId)) return null;
+  let tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (tab?.status === 'loading') {
+    await waitForScannerPairingTab(tabId);
+    tab = await chrome.tabs.get(tabId).catch(() => null);
+  }
+  if (!tab) return null;
+  // The page answers directly so we can verify it without access to tab URLs.
+  const reply = await chrome.tabs
+    .sendMessage(tabId, { action: 'scannerPairing.isOpen' })
+    .catch(() => null);
+  return reply?.pairing === true ? tab : null;
 }
 
-async function beginLockedScannerSession() {
-  if (!scannerLockSessionPromise) {
-    scannerLockSessionPromise = (async () => {
-      const existing = await getLockedScannerSession();
-      if (isLockedScannerSession(existing)) return existing;
-      const activeTabs = await queryTabs({ active: true, currentWindow: true });
-      const activeChartTab = activeTabs.find(tabMayBeSupportedChart) || null;
-      const session = createLockedScannerSession({ activeTab: activeChartTab });
-      await setStorage({
-        [SCANNER_LOCK_STATE_KEY]: 'locked',
-        [SCANNER_LOCK_SESSION_KEY]: session
+async function showScannerPairingWindow() {
+  const session = chrome.storage.session;
+  const { [SCANNER_PAIRING_TAB_KEY]: tabId } = await session.get(
+    SCANNER_PAIRING_TAB_KEY
+  );
+  const existing = await getScannerPairingTab(tabId);
+  if (existing) {
+    let focusError;
+    try {
+      const tab = existing.active
+        ? existing
+        : await chrome.tabs.update(tabId, { active: true });
+      const window = await chrome.windows.get(tab.windowId);
+      await chrome.windows.update(tab.windowId, {
+        focused: true,
+        ...(window.state === 'minimized' ? { state: 'normal' } : {})
       });
-      return session;
-    })().finally(() => {
-      scannerLockSessionPromise = null;
-    });
+    } catch (error) {
+      focusError = error;
+    }
+    // A window can survive closing the pairing tab if it contains other tabs.
+    if (await getScannerPairingTab(tabId)) {
+      if (focusError) throw focusError;
+      return;
+    }
   }
-  return scannerLockSessionPromise;
+
+  // Chrome displays the device chooser from the standard window's toolbar.
+  const { tabs } = await chrome.windows.create({
+    url: chrome.runtime.getURL('scanner-pairing.html'),
+    type: 'normal',
+    width: 500,
+    height: 440,
+    focused: true
+  });
+  await session.set({ [SCANNER_PAIRING_TAB_KEY]: tabs[0].id });
 }
 
-async function updateScannerLockState(state) {
+function queryMachineIdleState() {
+  return new Promise((resolve) => {
+    if (!chrome.idle?.queryState) return resolve('unavailable');
+    const timer = setTimeout(() => resolve('unavailable'), 1000);
+    try {
+      chrome.idle.queryState(15, (state) => {
+        clearTimeout(timer);
+        if (chrome.runtime.lastError) return resolve('unavailable');
+        resolve(
+          ['active', 'idle', 'locked'].includes(state) ? state : 'unknown'
+        );
+      });
+    } catch (_) {
+      clearTimeout(timer);
+      resolve('unavailable');
+    }
+  });
+}
+
+// Lock, unlock and a capture's session snapshot follow the order they arrive.
+function withScannerLockSession(action) {
+  const result = scannerLockStateWrites.then(async () => {
+    const stored = await getStorage([SCANNER_LOCK_SESSION_KEY]);
+    return action(stored[SCANNER_LOCK_SESSION_KEY]);
+  });
+  scannerLockStateWrites = result.catch(() => {});
+  return result;
+}
+
+async function ensureLockedScannerSession(existing) {
+  if (isLockedScannerSession(existing)) return existing;
+  const activeTabs = await queryTabs({ active: true, currentWindow: true });
+  const activeTab = activeTabs.find(tabMayBeSupportedChart) || null;
+  const session = createLockedScannerSession({ activeTab });
+  await setStorage({
+    [SCANNER_LOCK_STATE_KEY]: 'locked',
+    [SCANNER_LOCK_SESSION_KEY]: session
+  });
+  return session;
+}
+
+function updateScannerLockState(state) {
   const normalized = normalizeMachineIdleState(state);
-  if (normalized === 'locked') {
-    return beginLockedScannerSession();
-  }
-  const existing = await getLockedScannerSession();
-  const wasLocked = isLockedScannerSession(existing);
-  const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
-  if (wasLocked) {
-    values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
-  }
-  await setStorage(values);
-  return values[SCANNER_LOCK_SESSION_KEY] || existing || null;
+  return withScannerLockSession(async (existing) => {
+    if (normalized === 'locked') return ensureLockedScannerSession(existing);
+    const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
+    if (isLockedScannerSession(existing))
+      values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
+    await setStorage(values);
+  });
+}
+
+function observeScannerLockAtCapture() {
+  // The lock event can arrive before its storage write completes.
+  const idle =
+    lastScannerIdleState === 'locked'
+      ? Promise.resolve('locked')
+      : queryMachineIdleState();
+  return withScannerLockSession(async (existing) => {
+    const idleState = await idle;
+    const lockSession = shouldQueueScannerScan(idleState)
+      ? await ensureLockedScannerSession(existing)
+      : null;
+    return { idleState, lockSession };
+  });
 }
 
 function initializeScannerLockMonitoring() {
+  const invalidateChartRoute = () => {
+    scannerChartFocusGeneration += 1;
+  };
+  chrome.tabs.onActivated?.addListener(invalidateChartRoute);
+  chrome.windows?.onFocusChanged?.addListener(invalidateChartRoute);
   if (chrome.idle?.onStateChanged) {
     chrome.idle.onStateChanged.addListener((state) => {
+      lastScannerIdleState = normalizeMachineIdleState(state);
+      if (state === 'locked') invalidateChartRoute();
       void updateScannerLockState(state).catch((error) => {
         console.warn('Could not update scanner lock state:', error);
       });
@@ -772,7 +1438,15 @@ function initializeScannerLockMonitoring() {
 
 function synchronizeScannerLockState() {
   void queryMachineIdleState()
-    .then(updateScannerLockState)
+    .then((state) => {
+      if (
+        lastScannerIdleState !== null ||
+        !['active', 'idle', 'locked'].includes(state)
+      )
+        return;
+      lastScannerIdleState = state;
+      return updateScannerLockState(state);
+    })
     .catch((error) =>
       console.warn('Could not initialize scanner lock state:', error)
     );
@@ -783,12 +1457,11 @@ function isSupportedChartUrl(urlValue) {
     const url = new URL(String(urlValue || ''));
     if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
-    const path = url.pathname.toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
-      path.includes('/recordimms/');
+      /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(url.pathname);
     return isPanorama;
   } catch (_) {
     return false;
@@ -801,6 +1474,59 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
+async function getFocusedScannerTab() {
+  try {
+    const window = await chrome.windows.getLastFocused({ populate: true });
+    if (!window.focused || window.state === 'minimized') return null;
+    return (
+      window.tabs?.find((tab) => tab.active && tabMayBeSupportedChart(tab)) ||
+      null
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
+function scannerRouteMatches(route) {
+  return (
+    route?.epoch === scannerRoutingEpoch &&
+    route.generation === scannerChartFocusGeneration
+  );
+}
+
+async function getActiveScannerChartRoute(tabId, route) {
+  const snapshot = {
+    epoch: scannerRoutingEpoch,
+    generation: scannerChartFocusGeneration
+  };
+  const [idle, tab] = await Promise.all([
+    queryMachineIdleState(),
+    getFocusedScannerTab()
+  ]);
+  if (idle === 'unknown' || idle === 'unavailable')
+    return {
+      success: false,
+      reason: idle === 'unavailable' ? 'lock_unavailable' : 'lock_unknown'
+    };
+  if (
+    idle === 'locked' ||
+    tab?.id !== tabId ||
+    !scannerRouteMatches(snapshot) ||
+    (route && !scannerRouteMatches(route))
+  )
+    return { success: false, reason: 'inactive_chart' };
+  return { success: true, scannerRoute: snapshot };
+}
+
+function matchesScannerChartBuild(build) {
+  return (
+    !!build &&
+    ['version', 'versionName', 'name', 'fingerprint'].every(
+      (key) => (build[key] || '') === (workstationBuildAtLoad[key] || '')
+    )
+  );
+}
+
 function getScannerDestinationContext(tabId) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), 1000);
@@ -808,54 +1534,31 @@ function getScannerDestinationContext(tabId) {
       tabId,
       { action: 'getPanoramaIntegration' },
       { frameId: 0 },
-      (response) => {
+      (reply) => {
         clearTimeout(timer);
-        resolve(
-          !chrome.runtime.lastError &&
-            response?.supported === true &&
-            typeof response.contextToken === 'string'
-            ? response.contextToken
-            : null
-        );
+        if (chrome.runtime.lastError || reply?.supported !== true)
+          return resolve(null);
+        const contextToken =
+          typeof reply.contextToken === 'string' ? reply.contextToken : null;
+        resolve({
+          contextToken,
+          ready: !!contextToken && reply.ready === true,
+          stale: !matchesScannerChartBuild(reply.buildAtLoad),
+          formContext: reply.formContext
+        });
       }
     );
   });
 }
 
-function tabAcceptedScannerScan(response) {
-  return (
-    response?.accepted === true &&
-    (response.success === true ||
-      response.pending === true ||
-      response.duplicate_ignored === true ||
-      response.command_handled === true)
-  );
-}
-
-function sendScanToTab(tabId, scan, contextToken) {
-  return new Promise((resolve, reject) => {
-    // A missing answer is uncertain, not permission to try another chart.
-    const timer = setTimeout(
-      () => reject(new Error('Chart acknowledgement timed out')),
-      10000
-    );
-    chrome.tabs.sendMessage(
-      tabId,
-      { action: 'vaxlinkScanCaptured', scan, contextToken },
-      { frameId: 0 },
-      (response) => {
-        clearTimeout(timer);
-        if (chrome.runtime.lastError || !tabAcceptedScannerScan(response)) {
-          reject(
-            new Error(
-              chrome.runtime.lastError?.message ||
-                response?.error ||
-                'Chart did not accept scan'
-            )
-          );
-        } else resolve(response);
-      }
-    );
+function sendScanToTab(tabId, message) {
+  return new Promise((resolve) => {
+    // Resolve once. A late reply cannot replace an uncertain outcome.
+    const timer = setTimeout(() => resolve(null), SCANNER_CHART_RESPONSE_MS);
+    chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
+      clearTimeout(timer);
+      resolve(chrome.runtime.lastError ? null : response);
+    });
   });
 }
 
@@ -872,24 +1575,6 @@ function normalizeScanEvent(scan) {
     rawBytesHex: String(scan?.rawBytesHex || ''),
     capturedAt: scan?.capturedAt || new Date().toISOString()
   };
-}
-
-function normalizeWorkflowMode(stored) {
-  const direct = stored && stored[WORKFLOW_MODE_KEY];
-  if (direct === 'single' || direct === 'multiple' || direct === 'inventory') {
-    return direct;
-  }
-
-  const legacyPopup = stored && stored[LEGACY_POPUP_MODE_KEY];
-  if (legacyPopup === 'inventory') return 'inventory';
-  if (legacyPopup === 'inject') return 'single';
-
-  const legacyRemote = stored && stored[LEGACY_REMOTE_MODE_KEY];
-  if (legacyRemote === 'tray') return 'multiple';
-  if (legacyRemote === 'autofill') return 'single';
-
-  if (stored && stored[LEGACY_HANDS_FREE_KEY]) return 'single';
-  return 'single';
 }
 
 function getQueueStorageKeyForWorkflow(mode) {
@@ -919,6 +1604,7 @@ function getPositiveInt(value, fallback = null) {
 
 function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   if (!parsed || !vaccineInfo) return;
+  parsed.nvc_lot_matched = true;
   parsed.tradename = vaccineInfo.tradename;
   parsed.generic_name = vaccineInfo.generic_name;
   parsed.disease = vaccineInfo.disease;
@@ -949,7 +1635,8 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
   const inventoryExpiry =
     data.inventory_expiry || data.expiry || data.nvc_lot_expiry || '';
   const expiryStatus = getExpiryStatus(inventoryExpiry);
-  const expirySource = data.expiry
+  const barcodeExpiry = data.barcode_expiry ?? data.expiry ?? '';
+  const expirySource = barcodeExpiry
     ? 'barcode'
     : data.nvc_lot_expiry
       ? 'nvc'
@@ -968,7 +1655,7 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
     gtin: data.gtin || '',
     lot: data.lot || '',
     serial: data.serial || '',
-    barcode_expiry: data.expiry || '',
+    barcode_expiry: barcodeExpiry,
     inventory_expiry: inventoryExpiry,
     nvc_lot_expiry: data.nvc_lot_expiry || '',
     expiry_flag: expiryStatus.flag || '',
@@ -984,6 +1671,9 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
     din: data.din || '',
     drug_code: data.drug_code || data.din || '',
     lookup_error: data.lookup_error || '',
+    lookup_error_category: data.lookup_error_category || '',
+    nvc_catalogue_version: data.nvc_catalogue_version || '',
+    nvc_lot_matched: data.nvc_lot_matched === true,
     ...context
   };
 }
@@ -997,59 +1687,82 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     throw new Error('VaxLink GS1 parser is not loaded');
   }
 
-  const parsed = parser.parseGS1Barcode(scan.rawText);
+  const immunization = mode === 'multiple' && options.inventoryCapture !== true;
+  let parsed;
+  let status;
+  try {
+    parsed =
+      immunization && parser.isRetailBarcode(scan.rawText)
+        ? {}
+        : parser.parseGS1Barcode(scan.rawText);
+    if (immunization && !String(parsed.lot || '').trim())
+      status = 'missing_lot';
+  } catch (error) {
+    if (!immunization) throw error;
+    status = 'parse_error';
+  }
+  if (status) {
+    void logAnalyticsEvent(
+      status === 'missing_lot' ? 'barcode_missing_lot' : status,
+      { workflow: mode, source: scan.source }
+    ).catch(() => {});
+    return { rejection: { status } };
+  }
+
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
-  if (parsed.lot) {
+  parsed.barcode_expiry = parsed.expiry || '';
+  if (
+    parsed.lot &&
+    !(immunization && globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed))
+  ) {
     const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
-      gtin: parsed.gtin
+      gtin: parsed.gtin,
+      waitForDownload: immunization
     });
-    if (!vaccineInfo.error) mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
-    else parsed.lookup_error = vaccineInfo.error;
+    parsed.nvc_catalogue_version = vaccineInfo.catalogueVersion;
+    if (!vaccineInfo.error) {
+      mergeVaccineInfoIntoParsed(parsed, vaccineInfo);
+    } else {
+      parsed.lookup_error = vaccineInfo.error;
+      parsed.lookup_error_category = vaccineInfo.errorCategory;
+      parsed.nvc_lot_expiry = vaccineInfo.lot_expiry;
+    }
   }
 
-  const record = await appendQueueRecord(
-    storageKey,
-    buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
-    { preserveEveryScan: options.preserveEveryScan === true }
+  const draft = buildQueueRecordFromParsed(
+    parsed,
+    scan.rawText,
+    options.context || {}
   );
-  const expiryFlag =
-    record.expiry_flag ||
-    getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  try {
-    await logAnalyticsEvent('scan_captured', {
-      workflow: mode,
-      source: scan.source || 'web-serial',
-      vaccineLabel:
-        record.tradename ||
-        record.generic_name ||
-        record.name ||
-        record.lot ||
-        record.gtin ||
-        '',
-      manufacturer: record.manufacturer || '',
-      expiryFlag
-    });
-    if (!record.duplicate_ignored)
-      await logAnalyticsEvent('queue_saved', {
-        workflow: mode,
-        queue: mode === 'inventory' ? 'inventory' : 'multiple',
-        source: scan.source || 'web-serial',
-        count: 1,
-        queueSizeAfter: record.queueSizeAfter || 0,
-        vaccineLabel:
-          record.tradename ||
-          record.generic_name ||
-          record.name ||
-          record.lot ||
-          '',
-        manufacturer: record.manufacturer || '',
-        expiryFlag
+  const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(draft);
+  const blocked = immunization && !!expiry;
+  if (expiry) draft.expiry_flag = 'expired';
+  const record = blocked
+    ? draft
+    : await appendQueueRecord(storageKey, draft, {
+        preserveEveryScan: options.preserveEveryScan === true
       });
-  } catch (_) {
-    console.warn('Scanner scan retained; usage counters could not be updated.');
+  // Usage counts can finish independently of the scanner acknowledgement.
+  const expiryFlag = record.expiry_flag;
+  const activity = {
+    workflow: mode,
+    source: scan.source || 'web-serial',
+    vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
+    manufacturer: record.manufacturer || '',
+    expiryFlag
+  };
+  void logAnalyticsEvent('scan_captured', activity).catch(() => {});
+  if (!blocked && !record.duplicate_ignored) {
+    void logAnalyticsEvent('queue_saved', {
+      ...activity,
+      queue: mode === 'inventory' ? 'inventory' : 'multiple',
+      queueSizeAfter: record.queueSizeAfter || 0
+    }).catch(() => {});
   }
 
+  if (blocked)
+    return { rejection: { status: 'expired', lot: record.lot, expiry } };
   return {
     queuedToWorkflow: true,
     workflow: mode,
@@ -1093,6 +1806,7 @@ async function getHeldScannerScans() {
 }
 
 function discardHeldScannerScan(scan) {
+  activeScannerDeliveries.delete(scan?.captureId);
   return mutatePendingInbox(async () => {
     const rows = await getHeldScannerScans();
     // New captures have unique IDs. Legacy rows stay held; discard only one
@@ -1109,33 +1823,140 @@ function discardHeldScannerScan(scan) {
   });
 }
 
-async function routeScanToActiveSupportedTab(rawScan) {
+function updateScannerDelivery(delivery, reviewState) {
+  return mutatePendingInbox(async () => {
+    const rows = [...(await getHeldScannerScans())];
+    const index = rows.findIndex(
+      (row) =>
+        row.captureId === delivery.captureId &&
+        row.intendedTabId === delivery.intendedTabId &&
+        row.contextToken === delivery.contextToken &&
+        row.reviewState === 'checking_chart'
+    );
+    if (index < 0) return false;
+    if (
+      reviewState === 'verified' &&
+      delivery.scannerRoute &&
+      !scannerRouteMatches(delivery.scannerRoute)
+    )
+      return false;
+    if (reviewState === 'verified') rows.splice(index, 1);
+    else rows[index] = { ...rows[index], reviewState };
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: rows });
+    return true;
+  });
+}
+
+async function checkScannerDelivery(request, sender) {
+  const delivery = activeScannerDeliveries.get(request.captureId);
+  if (
+    !delivery ||
+    delivery.intendedTabId !== sender.tab.id ||
+    delivery.contextToken !== request.contextToken ||
+    delivery.scannerRoute.epoch !== request.scannerRoute?.epoch ||
+    delivery.scannerRoute.generation !== request.scannerRoute?.generation ||
+    delivery.scannerRoute.startBy !== request.scannerRoute?.startBy ||
+    typeof sender.documentId !== 'string' ||
+    !sender.documentId ||
+    (delivery.documentId && delivery.documentId !== sender.documentId)
+  )
+    return { success: false };
+  const route = await getActiveScannerChartRoute(
+    sender.tab.id,
+    delivery.scannerRoute
+  );
+  if (
+    activeScannerDeliveries.get(request.captureId) !== delivery ||
+    (delivery.documentId && delivery.documentId !== sender.documentId)
+  )
+    return { success: false };
+  if (!route.success) {
+    activeScannerDeliveries.delete(request.captureId);
+    await updateScannerDelivery(delivery, route.reason).catch(() => {});
+    return route;
+  }
+  delivery.documentId = sender.documentId;
+  return { success: true, delivery };
+}
+
+async function verifyScannerChartFields(request, sender) {
+  const delivery = activeScannerDeliveries.get(request.captureId);
+  // Verification can arrive before the original tab response reaches the worker.
+  const reply = await delivery?.reply;
+  if (reply?.accepted !== true || reply.pending !== true) return false;
+  const check = await checkScannerDelivery(request, sender);
+  if (!check.success || check.delivery !== delivery) return false;
+  activeScannerDeliveries.delete(request.captureId);
+  const saved = await updateScannerDelivery(
+    delivery,
+    request.verified ? 'verified' : 'check_chart'
+  );
+  if (saved && request.verified && request.vaccine) {
+    const record = scannerQueueWriteQueue
+      .catch(() => {})
+      .then(() => rememberVerifiedChartLot(request.vaccine));
+    scannerQueueWriteQueue = record.catch(() => {});
+    await scannerQueueWriteQueue;
+  }
+  return saved;
+}
+
+async function routeScanToActiveSupportedTab(rawScan, observeRouting) {
   const scan = {
     ...normalizeScanEvent(rawScan),
     captureId: buildAnalyticsId()
   };
   // Pin the destination before storage waits; focus changes never redirect it.
-  const activeTabs = await queryTabs({ active: true, currentWindow: true });
-  const destination = activeTabs.find(tabMayBeSupportedChart);
-  const contextPromise = destination
-    ? getScannerDestinationContext(destination.id)
-    : Promise.resolve(null);
-  const idleState = await queryMachineIdleState();
-  const storedWorkflow = await getStorage([
-    WORKFLOW_MODE_KEY,
-    LEGACY_POPUP_MODE_KEY,
-    LEGACY_REMOTE_MODE_KEY,
-    LEGACY_HANDS_FREE_KEY
+  const scannerRoute = {
+    epoch: scannerRoutingEpoch,
+    generation: scannerChartFocusGeneration
+  };
+  const [captureLock, routeContext] = await Promise.all([
+    observeScannerLockAtCapture(),
+    getFocusedScannerTab().then(async (destination) => {
+      const context =
+        destination && scannerRouteMatches(scannerRoute)
+          ? getScannerDestinationContext(destination.id)
+          : Promise.resolve(null);
+      const storedWorkflow = await getStorage([
+        WORKFLOW_MODE_KEY,
+        LEGACY_POPUP_MODE_KEY,
+        SINGLE_SCAN_AUTOFILL_KEY,
+        GRID_SCAN_AUTOFILL_KEY
+      ]);
+      return { destination, chart: await context, storedWorkflow };
+    })
   ]);
+  const { idleState, lockSession } = captureLock;
+  const { destination, chart, storedWorkflow } = routeContext;
   const workflowMode = normalizeWorkflowMode(storedWorkflow);
-  const contextToken = await contextPromise;
+  const contextToken = chart?.contextToken || null;
+  observeRouting?.({
+    workflow: workflowMode,
+    form: chart?.formContext?.kind ?? null,
+    formBlockedBy: chart?.formContext?.blockedBy ?? null,
+    chartReady: chart?.ready === true,
+    formReady: chart?.formContext?.ready === true,
+    singleAutofill: storedWorkflow[SINGLE_SCAN_AUTOFILL_KEY] !== false,
+    gridAutofill: storedWorkflow[GRID_SCAN_AUTOFILL_KEY] !== false
+  });
+  const immunization = workflowMode === 'immunization';
+  const readyKind =
+    chart?.ready && chart.formContext?.ready ? chart.formContext.kind : null;
+  const direct =
+    immunization &&
+    storedWorkflow[SINGLE_SCAN_AUTOFILL_KEY] !== false &&
+    ['provider_single', 'non_provider_single'].includes(readyKind);
+  const sendToGrid =
+    immunization &&
+    storedWorkflow[GRID_SCAN_AUTOFILL_KEY] !== false &&
+    readyKind === 'multiple_grid';
 
-  if (shouldQueueScannerScan(idleState)) {
-    const lockSession = await beginLockedScannerSession();
-    if (workflowMode === 'single') {
+  if (lockSession) {
+    if (immunization) {
       const pendingCount = await enqueuePendingScan({
         ...scan,
-        pending_workflow: 'single',
+        pending_workflow: workflowMode,
         ...buildLockedScanQueueContext(lockSession)
       });
       return {
@@ -1145,18 +1966,37 @@ async function routeScanToActiveSupportedTab(rawScan) {
         locked: true,
         lockSessionId: lockSession.id,
         pinnedTabId: lockSession.tabId,
-        workflow: 'single',
+        workflow: workflowMode,
         pendingCount
       };
     }
     const lockedQueueResult = await saveScannerScanToWorkflowQueue(
       scan,
-      'multiple',
+      workflowMode,
       {
         context: buildLockedScanQueueContext(lockSession),
         preserveEveryScan: true
       }
     );
+    if (lockedQueueResult.rejection) {
+      // Staff cannot see chart feedback while locked. Keep the rejected barcode for review.
+      const pendingCount = await enqueuePendingScan({
+        ...scan,
+        pending_workflow: workflowMode,
+        ...buildLockedScanQueueContext(lockSession)
+      });
+      return {
+        routed: false,
+        queued: true,
+        queuedToWorkflow: false,
+        locked: true,
+        lockSessionId: lockSession.id,
+        pinnedTabId: lockSession.tabId,
+        workflow: workflowMode,
+        pendingCount,
+        response: lockedQueueResult.rejection
+      };
+    }
     return {
       routed: false,
       queued: true,
@@ -1164,53 +2004,163 @@ async function routeScanToActiveSupportedTab(rawScan) {
       locked: true,
       lockSessionId: lockSession.id,
       pinnedTabId: lockSession.tabId,
-      workflow: 'multiple',
+      workflow: workflowMode,
       storageKey: lockedQueueResult.storageKey,
       queueSizeAfter: lockedQueueResult.record?.queueSizeAfter || 0
     };
   }
-  // Queue workflows are owned by the background daemon. Do not route these
-  // scans through a chart first: the chart content script may still have a
-  // stale mode during popup/storage synchronization, which previously made a
-  // Multiple scan behave like Single or disappear into a failed chart fill.
-  if (workflowMode === 'multiple' || workflowMode === 'inventory') {
+  let reviewState;
+  if (idleState === 'unavailable') reviewState = 'lock_unavailable';
+  else if (idleState === 'unknown') reviewState = 'lock_unknown';
+  else if (chart?.stale) reviewState = 'stale_chart';
+  else if (destination && !scannerRouteMatches(scannerRoute))
+    reviewState = 'inactive_chart';
+
+  // No selected chart receives a replay. A grid gets only the row just saved.
+  if (!immunization || (!direct && !reviewState)) {
     const workflowQueueResult = await saveScannerScanToWorkflowQueue(
       scan,
-      workflowMode
+      immunization ? 'multiple' : 'inventory'
     );
+    if (workflowQueueResult.rejection) {
+      if (
+        destination &&
+        contextToken &&
+        chart.ready &&
+        !chart.stale &&
+        (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
+      ) {
+        chrome.tabs.sendMessage(
+          destination.id,
+          {
+            action: 'showScannerBarcodeFeedback',
+            contextToken,
+            feedback: workflowQueueResult.rejection
+          },
+          { frameId: 0 },
+          () => void chrome.runtime.lastError
+        );
+      }
+      return {
+        routed: false,
+        queued: false,
+        queuedToWorkflow: false,
+        workflow: workflowMode,
+        response: workflowQueueResult.rejection
+      };
+    }
+    const saved = workflowQueueResult.record;
+    const queued = !saved?.duplicate_ignored;
+    let response;
+    if (
+      sendToGrid &&
+      queued &&
+      saved?.id &&
+      (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
+    ) {
+      response = await sendScanToTab(destination.id, {
+        action: 'vaxlinkGridScanCaptured',
+        recordId: saved.id,
+        contextToken,
+        scannerRoute: {
+          ...scannerRoute,
+          startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+        }
+      }).catch(() => null);
+    }
     return {
-      routed: false,
-      queued: !workflowQueueResult.record?.duplicate_ignored,
-      queuedToWorkflow: !workflowQueueResult.record?.duplicate_ignored,
-      duplicate_ignored: workflowQueueResult.record?.duplicate_ignored === true,
-      workflow: workflowQueueResult.workflow,
+      routed: response?.status === 'grid_added',
+      queued,
+      queuedToWorkflow: queued,
+      duplicate_ignored: saved?.duplicate_ignored === true,
+      workflow: workflowMode,
       storageKey: workflowQueueResult.storageKey,
-      queueSizeAfter: workflowQueueResult.record?.queueSizeAfter || 0
+      queueSizeAfter: saved?.queueSizeAfter || 0,
+      response
     };
   }
 
+  reviewState ??= 'checking_chart';
   const held = {
     ...scan,
     intendedTabId: destination?.id ?? null,
-    contextToken
+    contextToken,
+    reviewState
   };
   const pendingCount = await enqueuePendingScan(held);
-  // Messaging must not occupy the inbox writer: other captures and deliberate
-  // discards can proceed while this one waits for its answer.
-  if (destination && contextToken) {
-    try {
-      const response = await sendScanToTab(destination.id, scan, contextToken);
-      await discardHeldScannerScan(held);
-      return { routed: true, queued: false, tabId: destination.id, response };
-    } catch (_) {
-      // The chart may already contain values. Retain the scan without replay.
+  if (reviewState === 'checking_chart') {
+    const active = await getActiveScannerChartRoute(
+      destination.id,
+      scannerRoute
+    );
+    if (!active.success) {
+      await updateScannerDelivery(held, active.reason);
+    } else {
+      const route = {
+        ...scannerRoute,
+        startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+      };
+      const delivery = {
+        captureId: held.captureId,
+        intendedTabId: destination.id,
+        contextToken,
+        scannerRoute: route
+      };
+      activeScannerDeliveries.set(held.captureId, delivery);
+      // Messaging must not occupy the inbox writer while a chart responds.
+      try {
+        delivery.reply = sendScanToTab(destination.id, {
+          action: 'vaxlinkScanCaptured',
+          scan,
+          contextToken,
+          scannerRoute: route
+        });
+        const response = await delivery.reply;
+        if (
+          response?.accepted === true &&
+          response.pending === true &&
+          delivery.documentId
+        ) {
+          return {
+            routed: true,
+            queued: true,
+            tabId: destination.id,
+            response
+          };
+        }
+        activeScannerDeliveries.delete(held.captureId);
+        const noWrite =
+          response?.accepted === true &&
+          (response.command_handled === true ||
+            response.duplicate_ignored === true ||
+            ['parse_error', 'missing_lot', 'expired'].includes(
+              response.status
+            ));
+        if (noWrite && (await updateScannerDelivery(delivery, 'verified')))
+          return {
+            routed: true,
+            queued: false,
+            tabId: destination.id,
+            response
+          };
+        const reason =
+          response?.status === 'unknown_agent'
+            ? 'unknown_agent'
+            : response?.accepted === false && !response.chartNeedsReview
+              ? 'inactive_chart'
+              : 'check_chart';
+        await updateScannerDelivery(held, reason);
+      } catch (_) {
+        activeScannerDeliveries.delete(held.captureId);
+        await updateScannerDelivery(held, 'check_chart').catch(() => {});
+      }
     }
   }
   return {
     routed: false,
     queued: true,
     queuedToWorkflow: false,
-    workflow: 'single',
+    workflow: workflowMode,
     pendingCount
   };
 }
@@ -1262,9 +2212,10 @@ function createAnalyticsDay(dayKey) {
       multiple: createAnalyticsWorkflowStats(),
       inventory: createAnalyticsWorkflowStats()
     },
-    parsing: { success: 0, error: 0 },
+    parsing: { success: 0, error: 0, missingLot: 0 },
     lookup: { success: 0, error: 0 },
     autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
+    funding: { prompts: 0, choices: 0, single: 0, both: 0, unmatched: 0 },
     queues: {
       multipleSaved: 0,
       multipleUsed: 0,
@@ -1276,7 +2227,13 @@ function createAnalyticsDay(dayKey) {
     },
     exports: { inventoryCount: 0, inventoryRows: 0 },
     nvc: { manualSuccess: 0, manualFailure: 0, autoSuccess: 0, autoFailure: 0 },
-    expiry: { expired: 0, expiringSoon: 0, valid: 0, unknown: 0 },
+    expiry: {
+      expired: 0,
+      expiringSoon: 0,
+      valid: 0,
+      unknown: 0,
+      noticesShown: 0
+    },
     sources: {},
     vaccines: {},
     manufacturers: {}
@@ -1292,35 +2249,23 @@ function createAnalyticsStore() {
     firstSeenAt: now,
     lastEventAt: null,
     lastExportAt: null,
-    days: {},
-    recentEvents: []
+    days: {}
   };
 }
 
-async function getAnalyticsStore() {
-  const stored = await getStorage([ANALYTICS_STORAGE_KEY]);
-  const existing = stored[ANALYTICS_STORAGE_KEY];
+function normalizeAnalyticsStore(existing) {
   if (!existing || typeof existing !== 'object') {
-    const created = createAnalyticsStore();
-    await setStorage({ [ANALYTICS_STORAGE_KEY]: created });
-    return created;
+    return createAnalyticsStore();
   }
-  if (!existing.deviceId) {
-    existing.deviceId = buildAnalyticsId();
-  }
-  if (!existing.firstSeenAt) {
-    existing.firstSeenAt = new Date().toISOString();
-  }
-  if (!existing.days || typeof existing.days !== 'object') {
-    existing.days = {};
-  }
-  if (!Array.isArray(existing.recentEvents)) {
-    existing.recentEvents = [];
-  }
-  if (typeof existing.deviceLabel !== 'string') {
-    existing.deviceLabel = '';
-  }
-  return existing;
+  return {
+    ...existing,
+    deviceId: existing.deviceId || buildAnalyticsId(),
+    firstSeenAt: existing.firstSeenAt || new Date().toISOString(),
+    days:
+      existing.days && typeof existing.days === 'object' ? existing.days : {},
+    deviceLabel:
+      typeof existing.deviceLabel === 'string' ? existing.deviceLabel : ''
+  };
 }
 
 function ensureAnalyticsDay(store, dayKey) {
@@ -1372,13 +2317,6 @@ function applyTopCounter(map, rawKey, amount = 1) {
   });
 }
 
-function appendRecentAnalyticsEvent(store, event) {
-  store.recentEvents.push(event);
-  if (store.recentEvents.length > ANALYTICS_MAX_RECENT_EVENTS) {
-    store.recentEvents = store.recentEvents.slice(-ANALYTICS_MAX_RECENT_EVENTS);
-  }
-}
-
 function applyAnalyticsEvent(day, event) {
   const workflow = normalizeWorkflowKey(event.workflow);
   const count = safeAnalyticsCount(event.count, 1);
@@ -1394,10 +2332,16 @@ function applyAnalyticsEvent(day, event) {
     applyTopCounter(day.manufacturers, event.manufacturer, count);
   }
   if (event.expiryFlag) {
-    day.expiry[normalizeExpiryKey(event.expiryFlag)] += count;
+    const key = normalizeExpiryKey(event.expiryFlag);
+    day.expiry ??= {};
+    day.expiry[key] = (day.expiry[key] || 0) + count;
   }
 
   switch (event.eventType) {
+    case 'expiry_notice_shown':
+      day.expiry ??= {};
+      day.expiry.noticesShown = (day.expiry.noticesShown ?? 0) + 1;
+      break;
     case 'popup_open':
       day.popupOpens += 1;
       break;
@@ -1409,6 +2353,9 @@ function applyAnalyticsEvent(day, event) {
       if (event.source && String(event.source).startsWith('popup')) {
         day.workflows[workflow].popupParses += count;
       }
+      break;
+    case 'barcode_missing_lot':
+      day.parsing.missingLot = (day.parsing.missingLot || 0) + count;
       break;
     case 'parse_error':
       day.parsing.error += count;
@@ -1456,7 +2403,23 @@ function applyAnalyticsEvent(day, event) {
     case 'autofill_attempt':
       day.autofill.attempts += count;
       break;
+    case 'funding_prompt_shown':
+    case 'funding_choice_made':
+    case 'funding_comparison': {
+      const metric =
+        event.eventType === 'funding_prompt_shown'
+          ? 'prompts'
+          : event.eventType === 'funding_choice_made'
+            ? 'choices'
+            : event.outcome;
+      if (metric) {
+        day.funding ??= {};
+        day.funding[metric] = (day.funding[metric] || 0) + 1;
+      }
+      break;
+    }
     case 'autofill_result':
+      if (event.pending) break;
       if (event.success) {
         day.autofill.success += count;
         day.workflows[workflow].autofillSuccess += count;
@@ -1486,7 +2449,6 @@ function applyAnalyticsEvent(day, event) {
 function makeAnalyticsEvent(eventType, payload = {}) {
   const ts = payload.ts || new Date().toISOString();
   return {
-    id: buildAnalyticsId(),
     ts,
     day: analyticsDayKey(ts),
     eventType,
@@ -1494,35 +2456,42 @@ function makeAnalyticsEvent(eventType, payload = {}) {
     queue: payload.queue ? normalizeQueueKey(payload.queue) : '',
     source: trimAnalyticsLabel(payload.source, 40),
     success: !!payload.success,
+    pending: payload.pending === true,
+    outcome: ['single', 'both', 'unmatched'].includes(payload.outcome)
+      ? payload.outcome
+      : '',
     count: safeAnalyticsCount(payload.count, 1),
     rows: safeAnalyticsCount(payload.rows, 0),
     queueSizeAfter: safeAnalyticsCount(payload.queueSizeAfter, 0),
     expiryFlag: payload.expiryFlag || '',
     vaccineLabel: trimAnalyticsLabel(payload.vaccineLabel, 60),
     manufacturer: trimAnalyticsLabel(payload.manufacturer, 60),
-    trigger: payload.trigger || '',
-    note: trimAnalyticsLabel(payload.note, 120)
+    trigger: payload.trigger || ''
   };
 }
 
-function mutateAnalyticsStore(mutator) {
+function accessAnalyticsStore(mutator) {
   analyticsWriteQueue = analyticsWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      const store = await getAnalyticsStore();
-      await mutator(store);
-      await setStorage({ [ANALYTICS_STORAGE_KEY]: store });
+      const stored = await getStorage([ANALYTICS_STORAGE_KEY]);
+      const existing = stored[ANALYTICS_STORAGE_KEY];
+      const normalized = normalizeAnalyticsStore(existing);
+      const store = mutator?.(normalized) ?? normalized;
+      // First use needs a lasting identity even when Activity opens before a scan.
+      if (mutator || !existing?.deviceId || !existing.firstSeenAt) {
+        await setStorage({ [ANALYTICS_STORAGE_KEY]: store });
+      }
       return store;
     });
   return analyticsWriteQueue;
 }
 
 async function logAnalyticsEvent(eventType, payload = {}) {
-  return mutateAnalyticsStore((store) => {
-    const event = makeAnalyticsEvent(eventType, payload);
+  const event = makeAnalyticsEvent(eventType, payload);
+  return accessAnalyticsStore((store) => {
     const day = ensureAnalyticsDay(store, event.day);
     applyAnalyticsEvent(day, event);
-    appendRecentAnalyticsEvent(store, event);
     store.lastEventAt = event.ts;
   });
 }
@@ -1535,6 +2504,7 @@ function sumObjectCounters(target, source) {
 
 function aggregateAnalyticsDays(days) {
   const rollup = createAnalyticsDay('rollup');
+  rollup.expiry.noticesShown = null;
   for (const day of days) {
     rollup.eventCount += day.eventCount || 0;
     rollup.popupOpens += day.popupOpens || 0;
@@ -1549,10 +2519,9 @@ function aggregateAnalyticsDays(days) {
       target.autofillSuccess += source.autofillSuccess || 0;
       target.autofillFailure += source.autofillFailure || 0;
     });
-    ['success', 'error'].forEach((key) => {
-      rollup.parsing[key] += day.parsing?.[key] || 0;
-      rollup.lookup[key] += day.lookup?.[key] || 0;
-    });
+    sumObjectCounters(rollup.parsing, day.parsing);
+    sumObjectCounters(rollup.lookup, day.lookup);
+    sumObjectCounters(rollup.funding, day.funding);
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });
@@ -1584,6 +2553,10 @@ function aggregateAnalyticsDays(days) {
     ['expired', 'expiringSoon', 'valid', 'unknown'].forEach((key) => {
       rollup.expiry[key] += day.expiry?.[key] || 0;
     });
+    if (typeof day.expiry?.noticesShown === 'number') {
+      rollup.expiry.noticesShown =
+        (rollup.expiry.noticesShown ?? 0) + day.expiry.noticesShown;
+    }
     sumObjectCounters(rollup.sources, day.sources);
     sumObjectCounters(rollup.vaccines, day.vaccines);
     sumObjectCounters(rollup.manufacturers, day.manufacturers);
@@ -1592,10 +2565,13 @@ function aggregateAnalyticsDays(days) {
 }
 
 async function getAnalyticsSummary() {
-  const store = await getAnalyticsStore();
+  return buildAnalyticsSummary(await accessAnalyticsStore());
+}
+
+function buildAnalyticsSummary(store) {
   const dayKeys = Object.keys(store.days).sort();
   const todayKey = analyticsDayKey();
-  const today = store.days[todayKey] || createAnalyticsDay(todayKey);
+  const today = store.days[todayKey] || {};
   const rollup = aggregateAnalyticsDays(dayKeys.map((key) => store.days[key]));
   return {
     deviceId: store.deviceId,
@@ -1611,16 +2587,18 @@ async function getAnalyticsSummary() {
 }
 
 async function getAnalyticsExport(scope = 'pilot') {
-  const store = await getAnalyticsStore();
+  const store = await accessAnalyticsStore((store) => {
+    store.lastExportAt = new Date().toISOString();
+  });
   const dayKeys = Object.keys(store.days).sort();
-  const todayKey = analyticsDayKey();
+  const todayKey = analyticsDayKey(store.lastExportAt);
   const selectedKeys =
     scope === 'today' ? dayKeys.filter((key) => key === todayKey) : dayKeys;
   const selectedDays = Object.fromEntries(
     selectedKeys.map((key) => [key, store.days[key]])
   );
   return {
-    exportedAt: new Date().toISOString(),
+    exportedAt: store.lastExportAt,
     scope,
     deviceId: store.deviceId,
     deviceLabel: store.deviceLabel || '',
@@ -1633,21 +2611,13 @@ async function getAnalyticsExport(scope = 'pilot') {
 }
 
 async function setAnalyticsDeviceLabel(label) {
-  return mutateAnalyticsStore((store) => {
+  return accessAnalyticsStore((store) => {
     store.deviceLabel = trimAnalyticsLabel(label, 80);
   });
 }
 
-async function markAnalyticsExported() {
-  return mutateAnalyticsStore((store) => {
-    store.lastExportAt = new Date().toISOString();
-  });
-}
-
 async function resetAnalyticsStore() {
-  const fresh = createAnalyticsStore();
-  await setStorage({ [ANALYTICS_STORAGE_KEY]: fresh });
-  return fresh;
+  return accessAnalyticsStore(() => createAnalyticsStore());
 }
 
 async function sha256Hex(text) {
@@ -1700,7 +2670,7 @@ function nvcFailure(category) {
 
 async function lookupVaccineInfo(lot, options = {}) {
   await loadNVCBundle();
-  if (!hasUsableNVCCatalogue()) {
+  if (!hasUsableNVCCatalogue() && options.waitForDownload !== false) {
     let timer;
     try {
       await Promise.race([
@@ -1723,10 +2693,14 @@ async function lookupVaccineInfo(lot, options = {}) {
     );
   }
   const info = lookupVaccineLot(lot, options);
-  if (!info) return nvcFailure('not_found');
-  return hasNVCVaccineIdentity(info)
-    ? info
-    : { ...info, ...nvcFailure('incomplete') };
+  const catalogueVersion = nvcIndexes.catalogueInfo?.releaseVersion ?? null;
+  if (!info) return { ...nvcFailure('not_found'), catalogueVersion };
+  if (info.error) return { ...info, catalogueVersion };
+  return {
+    ...info,
+    ...(hasNVCVaccineIdentity(info) ? {} : nvcFailure('incomplete')),
+    catalogueVersion
+  };
 }
 
 function validateBundleShape(data) {
@@ -2047,8 +3021,7 @@ async function performNVCRefresh(options) {
     }).catch(() => undefined);
     await logAnalyticsEvent('nvc_refresh_result', {
       trigger,
-      success: false,
-      note: nvcHealth.lastError
+      success: false
     }).catch(() => undefined);
     return nvcFailure(nvcHealth.lastError);
   }
@@ -2952,7 +3925,7 @@ function lookupVaccineLot(lotNumber, options = {}) {
     return vaccineInfo;
   } catch (e) {
     console.error('Error looking up vaccine lot:', e);
-    return null;
+    return nvcFailure('unavailable');
   }
 }
 
@@ -3014,7 +3987,11 @@ async function readScannerStatus() {
     scannerDaemonStatusCache.lastKnownCaptureAt ||
     scannerDaemonStatusCache.lastCaptureAt;
   const bootstrap = await getScannerBootstrapState();
-  let status = bootstrap.status;
+  let status = {
+    ...bootstrap.status,
+    profileId: bootstrap.profileId || bootstrap.status.profileId,
+    portInfo: bootstrap.portInfo || bootstrap.status.portInfo
+  };
   status.lastKnownCaptureAt =
     [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
       .sort()
@@ -3053,6 +4030,8 @@ async function readScannerStatus() {
         ]
           .sort()
           .at(-1) || '';
+      liveStatus.profileId ||= bootstrap.profileId;
+      liveStatus.portInfo ||= bootstrap.portInfo;
       if (liveStatus.lastCaptureAt) captureSource = 'live';
       status = liveStatus;
       source = 'live';
@@ -3177,8 +4156,129 @@ async function getWorkstationHealth(tabId) {
   return result;
 }
 
-// Listen for requests from popup
+function isChartMessageSender(sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.frameId === 0 &&
+    Number.isInteger(sender.tab?.id) &&
+    isSupportedChartUrl(sender.url) &&
+    (!sender.tab.url || isSupportedChartUrl(sender.tab.url))
+  );
+}
+
+function canChangeQueue(sender) {
+  return (
+    isChartMessageSender(sender) ||
+    (sender.id === chrome.runtime.id &&
+      sender.url === chrome.runtime.getURL('popup.html'))
+  );
+}
+
+async function getDebugSettingsAtExport() {
+  const legacyDateTime = 'vaxlink_administered_datetime_autofill_v1';
+  const legacyReasonConsent = 'vaxlink_reason_consent_autofill_v1';
+  const preferences = {
+    singleImmunization: [SINGLE_SCAN_AUTOFILL_KEY],
+    multipleImmunizationsGrid: [GRID_SCAN_AUTOFILL_KEY],
+    multipleImmunizationsDetails: ['vaxlink_grid_detail_autofill_v1'],
+    administrationDate: [
+      'vaxlink_administered_date_autofill_v1',
+      legacyDateTime
+    ],
+    administrationTime: [
+      'vaxlink_administered_time_autofill_v1',
+      legacyDateTime
+    ],
+    routineReason: ['vaxlink_reason_autofill_v1', legacyReasonConsent],
+    consentObtained: ['vaxlink_consent_autofill_v1', legacyReasonConsent]
+  };
+  const stored = await getStorage([
+    WORKFLOW_MODE_KEY,
+    LEGACY_POPUP_MODE_KEY,
+    'vaxlink_auto_resolve_funding_v1',
+    ...new Set(Object.values(preferences).flat())
+  ]);
+  return {
+    workflow: normalizeWorkflowMode(stored),
+    autofill: {
+      ...Object.fromEntries(
+        Object.entries(preferences).map(([name, [key, legacyKey]]) => [
+          name,
+          (stored[key] ?? stored[legacyKey]) !== false
+        ])
+      ),
+      autoResolveFunding: stored.vaxlink_auto_resolve_funding_v1 !== false
+    }
+  };
+}
+
+const traceMessageFields = {
+  openRecentActivity: [],
+  appendRecentActivity: ['token', 'source', 'rows'],
+  getRecentActivity: [],
+  setRecentActivity: ['enabled'],
+  exportRecentActivity: []
+};
+
+function handleRecentActivityMessage(request, sender, sendResponse) {
+  const { action } = request;
+  const fields = traceMessageFields[action];
+  const chartAction =
+    action === 'openRecentActivity' || action === 'appendRecentActivity';
+  if (
+    sender.id !== chrome.runtime.id ||
+    (chartAction
+      ? !isChartMessageSender(sender)
+      : sender.url !== chrome.runtime.getURL('popup.html')) ||
+    Object.keys(request).length !== fields.length + 1 ||
+    !fields.every((key) => Object.hasOwn(request, key)) ||
+    (action === 'setRecentActivity' && typeof request.enabled !== 'boolean')
+  ) {
+    sendResponse({ success: false });
+    return false;
+  }
+
+  let result;
+  if (action === 'openRecentActivity') result = recentActivity.open();
+  else if (action === 'appendRecentActivity') {
+    result = recentActivity.append(request.token, request.source, request.rows);
+  } else result = recentActivity.manage(action, request.enabled);
+
+  result.then(
+    (response) => sendResponse({ success: true, ...response }),
+    () => sendResponse({ success: false })
+  );
+  return true;
+}
+
+// Listen for requests from extension contexts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (
+    typeof request?.action === 'string' &&
+    Object.hasOwn(traceMessageFields, request.action)
+  )
+    return handleRecentActivityMessage(request, sender, sendResponse);
+  if (request?.action === 'scannerPairing.open') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('popup.html')
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Open Scanner setup from Settings.'
+      });
+      return false;
+    }
+    // Share a pending open across popups so two requests cannot open two windows.
+    scannerPairingRequest ??= showScannerPairingWindow().finally(() => {
+      scannerPairingRequest = null;
+    });
+    scannerPairingRequest.then(
+      () => sendResponse({ success: true }),
+      (error) => sendResponse({ success: false, error: error.message })
+    );
+    return true;
+  }
   bgLog('Background received message:', request);
   if (request?.target === SCANNER_DAEMON_TARGET) {
     return false;
@@ -3241,8 +4341,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.ENABLE_AUTOSTART) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true })
-      .then(() => getScannerBootstrapState())
+    queueScannerControl(async () => {
+      await requireRegularScannerControls();
+      await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: true });
+      return getScannerBootstrapState();
+    })
       .then((bootstrap) =>
         sendResponse({ success: true, status: bootstrap.status })
       )
@@ -3255,62 +4358,71 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
-    (async () => {
-      const values = {};
-      const requestedProfileId = String(request.profileId || '').trim();
-      const requestedPortInfo = normalizeScannerPortInfo(
-        request.preferredPortInfo
-      );
-      if (requestedProfileId) {
-        values[SCANNER_PROFILE_STORAGE_KEY] = requestedProfileId;
-      }
-      if (requestedPortInfo) {
-        values[SCANNER_PORT_INFO_STORAGE_KEY] = requestedPortInfo;
-      }
-      if (request.enableAutostart === true) {
-        values[SCANNER_DAEMON_ENABLED_KEY] = true;
-      }
-      if (Object.keys(values).length) {
-        await setStorage(values);
-      }
-      const bootstrap = await getScannerBootstrapState();
-      if (!bootstrap.profileId) {
-        throw new Error('No scanner profile is configured yet.');
-      }
-      await sendScannerDaemonMessage({
-        action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-        profileId: bootstrap.profileId,
-        preferredPortInfo: bootstrap.portInfo,
-        trigger: request.trigger || 'manual'
-      });
-      sendResponse({ success: true, accepted: true, status: bootstrap.status });
-    })().catch((error) => {
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED ||
+    request.action === SCANNER_DAEMON_ACTIONS.SELECT
+  ) {
+    if (
+      request.action === SCANNER_DAEMON_ACTIONS.SELECT &&
+      !isScannerSetupPage(sender)
+    ) {
       sendResponse({
         success: false,
-        error: error?.message || 'Scanner reconnect failed'
+        error: 'Open Scanner setup from Settings.'
       });
-    });
+      return false;
+    }
+    queueScannerControl(() => connectConfiguredScanner(request)).then(
+      sendResponse,
+      (error) => sendResponse({ success: false, error: error.message })
+    );
     return true;
   }
 
-  if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
-      .then(() =>
-        sendScannerDaemonMessage({
-          action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
-          trigger: request.trigger || 'manual'
-        })
-      )
-      .then((response) =>
-        sendResponse({ success: true, accepted: true, response })
-      )
-      .catch((error) =>
-        sendResponse({
-          success: false,
-          error: error?.message || 'Scanner disconnect failed'
-        })
-      );
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.START_TEST ||
+    request.action === SCANNER_DAEMON_ACTIONS.END_TEST
+  ) {
+    const tabId = sender.tab?.id;
+    if (!isScannerSetupPage(sender) || !Number.isInteger(tabId)) {
+      sendResponse({
+        success: false,
+        error: 'Open Scanner setup from Settings.'
+      });
+      return false;
+    }
+    queueScannerControl(() =>
+      request.action === SCANNER_DAEMON_ACTIONS.START_TEST
+        ? startScannerTest(tabId)
+        : endScannerTest(tabId)
+    ).then(sendResponse, (error) =>
+      sendResponse({ success: false, error: error.message })
+    );
+    return true;
+  }
+
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT ||
+    request.action === SCANNER_DAEMON_ACTIONS.FORGET
+  ) {
+    queueScannerControl(async () => {
+      await requireRegularScannerControls();
+      const forgetting = request.action === SCANNER_DAEMON_ACTIONS.FORGET;
+      const { portInfo } = await getScannerBootstrapState();
+      // An interrupted or failed close must not restart capture on startup.
+      await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false });
+      const reply = await stopConfiguredScanner(request.action, portInfo);
+      if (forgetting) {
+        await scannerStatusWriteQueue.catch(() => undefined);
+        await setStorage({
+          [SCANNER_PROFILE_STORAGE_KEY]: '',
+          [SCANNER_PORT_INFO_STORAGE_KEY]: null
+        });
+      }
+      return reply;
+    }).then(sendResponse, (error) =>
+      sendResponse({ success: false, error: error.message })
+    );
     return true;
   }
 
@@ -3332,7 +4444,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'lookupVaccineInfo') {
-    lookupVaccineInfo(request.lot, { gtin: request.gtin })
+    lookupVaccineInfo(request.lot, {
+      gtin: request.gtin,
+      waitForDownload: request.waitForDownload !== false
+    })
       .catch(() => nvcFailure('unavailable'))
       .then(sendResponse);
 
@@ -3351,28 +4466,90 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (
+    ['mutateQueue', 'appendQueueRecord'].includes(request.action) &&
+    !canChangeQueue(sender)
+  ) {
+    sendResponse({
+      success: false,
+      error: 'Queue changes require the popup or a supported chart'
+    });
+    return false;
+  }
+
+  if (request.action === 'checkDoseReview') {
+    if (!isChartMessageSender(sender)) {
+      sendResponse({ reviewable: false });
+      return false;
+    }
+    findInactiveDoseDocument(MULTIPLE_INJECT_QUEUE_KEY, request.payload).then(
+      (dose) => sendResponse({ reviewable: !!dose }),
+      () => sendResponse({ reviewable: false })
+    );
+    return true;
+  }
+
   if (request.action === 'mutateQueue') {
     const popup = sender.url === chrome.runtime.getURL('popup.html');
-    const chart =
-      sender.frameId === 0 &&
-      Number.isInteger(sender.tab?.id) &&
-      isSupportedChartUrl(sender.url) &&
-      (!sender.tab.url || isSupportedChartUrl(sender.tab.url));
-    if (sender.id !== chrome.runtime.id || (!popup && !chart)) {
+    if (
+      [
+        'setDoseCount',
+        'setDosePinned',
+        'reorder',
+        'transfer',
+        'add_from_history'
+      ].includes(request.operation) &&
+      !popup
+    ) {
       sendResponse({
         success: false,
-        error: 'Queue changes require the popup or a supported chart'
+        error: 'These tray changes require the popup.'
       });
       return false;
     }
-    mutateQueue(request.storageKey, request.operation, request.payload)
+    if (DOSE_RESERVATION_OPERATIONS.includes(request.operation) && popup) {
+      sendResponse({
+        success: false,
+        error: 'Dose reservations require a supported chart.'
+      });
+      return false;
+    }
+    const change = (inactiveDose) =>
+      mutateQueue(
+        request.storageKey,
+        request.operation,
+        request.payload,
+        popup,
+        popup ? null : sender,
+        inactiveDose
+      );
+    const changed =
+      request.operation === 'review_dose'
+        ? findInactiveDoseDocument(request.storageKey, request.payload).then(
+            change
+          )
+        : change();
+    changed
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;
   }
 
   if (request.action === 'appendQueueRecord') {
-    appendQueueRecord(request.storageKey || '', request.record || null)
+    const { storageKey, record } = request;
+    if (
+      ![MULTIPLE_INJECT_QUEUE_KEY, INVENTORY_BATCH_KEY].includes(storageKey) ||
+      !record ||
+      typeof record !== 'object' ||
+      Array.isArray(record) ||
+      'dose_reservations' in record ||
+      typeof record.id !== 'string' ||
+      !record.id.trim()
+    ) {
+      sendResponse({ success: false, error: 'Invalid queue append' });
+      return false;
+    }
+    appendQueueRecord(storageKey, record)
       .then((record) => sendResponse({ success: true, record }))
       .catch((error) =>
         sendResponse({
@@ -3383,9 +4560,112 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (
+    request.action === 'checkScannerChart' ||
+    request.action === 'verifyScannerChartFields'
+  ) {
+    if (!isChartMessageSender(sender)) {
+      sendResponse({ success: false });
+      return false;
+    }
+    if (request.action === 'verifyScannerChartFields') {
+      if (typeof request.verified !== 'boolean') {
+        sendResponse({ success: false });
+        return false;
+      }
+      verifyScannerChartFields(request, sender).then(
+        (success) => sendResponse({ success }),
+        () => sendResponse({ success: false })
+      );
+    } else {
+      const check = request.captureId
+        ? checkScannerDelivery(request, sender).then(({ success, reason }) => ({
+            success,
+            reason
+          }))
+        : getActiveScannerChartRoute(sender.tab.id, request.scannerRoute);
+      check.then(sendResponse, () => sendResponse({ success: false }));
+    }
+    return true;
+  }
+
   if (request.action === 'scannerScanCaptured') {
-    routeScanToActiveSupportedTab(request.scan || null)
-      .then((result) => sendResponse({ success: true, ...result }))
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL(SCANNER_DAEMON_OFFSCREEN_PATH)
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Capture requires the scanner host.'
+      });
+      return false;
+    }
+    const started = performance.now();
+    const traceTicket = recentActivity.open().catch(() => null);
+    let routing;
+    routeScanToActiveSupportedTab(
+      request.scan || null,
+      (observed) => (routing = observed)
+    )
+      .then((result) => {
+        sendResponse({ success: true, ...result });
+        if (result.response?.activityRecording === true) return;
+        const ms = Math.round(performance.now() - started);
+        // Capture acknowledgement depends on the saved scan, not Debug.
+        void traceTicket
+          .then((ticket) => {
+            if (!ticket?.token) return;
+            const status = result.response?.status;
+            const accepted =
+              !result.locked &&
+              (result.routed ||
+                result.queuedToWorkflow ||
+                result.duplicate_ignored ||
+                ['expired', 'missing_lot', 'parse_error'].includes(status));
+            const stage =
+              status === 'grid_added'
+                ? 'grid'
+                : result.response?.activityStage === 'detail'
+                  ? 'detail'
+                  : 'none';
+            const operation = {
+              operation: 1,
+              ms,
+              mode:
+                result.workflow === 'inventory'
+                  ? 'inventory'
+                  : result.queuedToWorkflow || stage === 'grid'
+                    ? 'multiple'
+                    : 'single',
+              stage
+            };
+            const rows = [
+              {
+                ...operation,
+                event: 'scan',
+                ...(routing ? { routing } : {}),
+                decision: accepted ? 'accepted' : 'held'
+              }
+            ];
+            if (status === 'expired')
+              rows.push({ ...operation, event: 'stop', reason: 'expired' });
+            if (status === 'missing_lot' || status === 'parse_error') {
+              const missingLot = status === 'missing_lot';
+              rows.push({
+                ...operation,
+                event: 'barcode',
+                result: missingLot ? 'missing_lot' : 'malformed',
+                barcode: missingLot
+                  ? globalThis.VaxLinkRecentActivity.scannedBarcode(
+                      request.scan?.rawText
+                    )
+                  : ''
+              });
+            }
+            return recentActivity.append(ticket.token, ticket.source, rows);
+          })
+          .catch(() => {});
+      })
       .catch((error) => {
         void recordCaptureWarning().catch(() => undefined);
         sendResponse({
@@ -3447,11 +4727,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'getAnalyticsExport') {
     getAnalyticsExport(request.scope === 'today' ? 'today' : 'pilot')
-      .then((data) =>
-        markAnalyticsExported().then(() =>
-          sendResponse({ success: true, data })
-        )
-      )
+      .then((data) => sendResponse({ success: true, data }))
       .catch((error) =>
         sendResponse({
           success: false,
@@ -3463,8 +4739,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'setAnalyticsDeviceLabel') {
     setAnalyticsDeviceLabel(request.label || '')
-      .then(() => getAnalyticsSummary())
-      .then((summary) => sendResponse({ success: true, summary }))
+      .then((store) =>
+        sendResponse({ success: true, summary: buildAnalyticsSummary(store) })
+      )
       .catch((error) =>
         sendResponse({
           success: false,
@@ -3476,8 +4753,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'resetAnalyticsStore') {
     resetAnalyticsStore()
-      .then(() => getAnalyticsSummary())
-      .then((summary) => sendResponse({ success: true, summary }))
+      .then((store) =>
+        sendResponse({ success: true, summary: buildAnalyticsSummary(store) })
+      )
       .catch((error) =>
         sendResponse({
           success: false,

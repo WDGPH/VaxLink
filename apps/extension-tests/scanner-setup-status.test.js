@@ -33,7 +33,17 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     'navigator'
   );
   let listener, releaseCommand, commandStarted;
-  const pairingWindows = [];
+  const pairingRequests = [];
+  let holdNextStatus = false;
+  let releaseStatus;
+  let reader = {
+    status: {
+      state: 'connected',
+      profileId,
+      lastKnownCaptureAt: '2026-11-11T15:20:00Z'
+    },
+    source: 'cached'
+  };
   globalThis.document = {
     getElementById: (id) => nodes[id]
   };
@@ -48,12 +58,6 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
     }
   });
   globalThis.chrome = {
-    windows: {
-      create(options, done) {
-        pairingWindows.push(options);
-        done();
-      }
-    },
     storage: {
       local: {
         get(_keys, done) {
@@ -69,13 +73,15 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
         }
       },
       sendMessage(message, done) {
-        if (message.action === 'scannerDaemon.getStatus') {
-          done({
-            success: true,
-            status: { state: 'connected', profileId },
-            source: 'cached',
-            captureError: true
-          });
+        if (message.action === 'scannerPairing.open') {
+          pairingRequests.push(message);
+          done({ success: true });
+        } else if (message.action === 'scannerDaemon.getStatus') {
+          const response = { success: true, ...reader };
+          if (holdNextStatus) {
+            holdNextStatus = false;
+            releaseStatus = () => done(response);
+          } else done(response);
         } else {
           releaseCommand = done;
           commandStarted();
@@ -83,62 +89,80 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       }
     }
   };
-  const live = (state) =>
-    listener({
-      action: 'scannerDaemon.statusChanged',
+  const live = async (state, portInfo) => {
+    reader = {
+      source: 'live',
       status: {
         state,
         profileId,
-        captureCount: 2,
-        lastCaptureAt: '2026-11-11T15:20:00Z',
+        portInfo,
         lastError: state === 'error' ? 'Cable unavailable' : ''
       }
-    });
+    };
+    listener({ action: 'scannerDaemon.statusChanged', status: reader.status });
+    await Promise.resolve();
+  };
   try {
     const { initializeScannerSettings } =
       await import('../extension/scanner-settings.js?status-regression');
     initializeScannerSettings();
     await Promise.resolve();
-    assert.equal(nodes.connectionStatus.textContent, 'Connection unknown');
+    assert.match(
+      nodes.connectionStatus.textContent,
+      /^Connection unknown: Last known capture/
+    );
     assert.equal(nodes.connectGrantedBtn.hidden, false);
-    live('error');
+    await live('error');
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
     nodes.requestPortBtn.listeners.click();
-    assert.deepEqual(pairingWindows, [
-      {
-        url: `chrome-extension://vaxlink-test/scanner-pairing.html?profile=${profileId}`,
-        type: 'normal',
-        width: 500,
-        height: 440,
-        focused: true
-      }
-    ]);
+    assert.deepEqual(pairingRequests, [{ action: 'scannerPairing.open' }]);
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
-    for (const updateBeforeAcknowledgement of [false, true]) {
-      live('waiting_for_device');
-      const started = new Promise((resolve) => {
-        commandStarted = resolve;
-      });
-      nodes.connectGrantedBtn.listeners.click();
-      await started;
-      if (updateBeforeAcknowledgement) live('connected');
-      releaseCommand({
-        success: true,
-        status: { state: 'connected', profileId }
-      });
-      // The command's controlled promise has resolved. Let its UI continuation run.
-      await Promise.resolve();
-      assert.equal(
-        nodes.connectionStatus.className,
-        updateBeforeAcknowledgement ? 'status success' : 'status info'
-      );
-      assert.match(
-        nodes.connectionStatus.textContent,
-        updateBeforeAcknowledgement
-          ? /^Connected$/
-          : /Connecting|Checking connection/
-      );
+    await live('waiting_for_device');
+    const started = new Promise((resolve) => {
+      commandStarted = resolve;
+    });
+    const reconnect = nodes.connectGrantedBtn.listeners.click();
+    await started;
+    assert.equal(nodes.connectionStatus.textContent, 'Connecting…');
+    releaseCommand({
+      success: true,
+      status: { state: 'connected', profileId }
+    });
+    await reconnect;
+    await new Promise(setImmediate);
+    assert.equal(nodes.connectionStatus.className, 'status info');
+    assert.equal(nodes.connectionStatus.textContent, 'Disconnected');
+    await live('connected');
+    assert.equal(nodes.connectionStatus.className, 'status success');
+    assert.equal(nodes.connectionStatus.textContent, 'Connected');
+    for (const [info, label] of [
+      [null, ''],
+      [{ usbVendorId: 0x05e0 }, 'Scanner Zebra'],
+      [
+        { usbVendorId: 0x05e0, usbProductId: 0x0001 },
+        'Scanner Zebra [USB 05E0:0001]'
+      ],
+      [
+        { usbVendorId: 0x12ab, usbProductId: 0x00bc },
+        'Scanner [USB 12AB:00BC]'
+      ],
+      [{ usbVendorId: 0x10000, usbProductId: -1 }, '']
+    ]) {
+      await live('connected', info);
+      assert.equal(nodes.scannerIdentity.textContent, label);
+      assert.equal(nodes.scannerIdentity.hidden, !label);
     }
+
+    holdNextStatus = true;
+    await live('waiting_for_device');
+    await live('connected', { usbVendorId: 0x05e0, usbProductId: 1 });
+    releaseStatus();
+    await Promise.resolve();
+    assert.equal(nodes.connectionStatus.textContent, 'Connected');
+    assert.equal(
+      nodes.scannerIdentity.textContent,
+      'Scanner Zebra [USB 05E0:0001]'
+    );
   } finally {
     delete globalThis.document;
     delete globalThis.chrome;

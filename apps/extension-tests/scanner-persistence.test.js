@@ -12,7 +12,7 @@ const scan = (rawText) => ({
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
 const captured = (harness, rawText) =>
-  harness.sendMessage({ action: 'scannerScanCaptured', scan: scan(rawText) });
+  harness.captureScannerScan(scan(rawText));
 
 test('concurrent pending writes are serialized, including delayed saves', async () => {
   let release;
@@ -127,10 +127,8 @@ test('warning badge survives queue updates and failed acknowledgement', async ()
     false
   );
   assert.equal(harness.getBadgeText(), '!');
-  await harness.sendMessage({
-    action: 'appendQueueRecord',
-    storageKey: 'multiple_inject_queue_v1',
-    record: { id: 'queue-1' }
+  await harness.appendQueueRecord('multiple_inject_queue_v1', {
+    id: 'queue-1'
   });
   assert.equal(harness.getBadgeText(), '!');
   const sender = {
@@ -196,4 +194,74 @@ test('a new capture failure during acknowledgement keeps the warning', async () 
     action: 'scannerDaemon.getStatus'
   });
   assert.equal(status.captureError, true);
+});
+
+test('unreadable and lotless captures never enter the Immunization tray', async () => {
+  for (const idleState of ['active', 'locked']) {
+    const harness = createBackgroundHarness(null, {
+      idleState,
+      storage: { vaxlink_workflow_mode_v1: 'multiple' }
+    });
+    const scans = ['036000291452', '(01)00036000291452', 'not a barcode'];
+    for (const barcode of scans) {
+      const response = await captured(harness, barcode);
+      if (idleState === 'active')
+        assert.equal(
+          response.response?.status,
+          barcode === 'not a barcode' ? 'parse_error' : 'missing_lot'
+        );
+      assert.equal(response.queuedToWorkflow, false);
+    }
+    assert.equal(harness.storageData.has('multiple_inject_queue_v1'), false);
+    assert.deepEqual(
+      Array.from(
+        harness.storageData.get(pending) || [],
+        ({ rawText }) => rawText
+      ),
+      idleState === 'locked' ? scans : []
+    );
+  }
+});
+
+test('an expired scanner capture stays out of Immunization but Inventory can retain the stock', async () => {
+  const expired = '01001234567890121700010110TRAINING';
+  for (const idleState of ['active', 'locked']) {
+    const harness = createBackgroundHarness(null, {
+      idleState,
+      storage: { vaxlink_workflow_mode_v1: 'multiple' }
+    });
+    const rejected = await captured(harness, expired);
+    if (idleState === 'active')
+      assert.equal(rejected.response?.status, 'expired');
+    assert.equal(rejected.queuedToWorkflow, false);
+    assert.equal(harness.storageData.has('multiple_inject_queue_v1'), false);
+    assert.equal(
+      harness.storageData.get(pending)?.[0].rawText,
+      idleState === 'locked' ? expired : undefined
+    );
+    if (idleState === 'locked') continue;
+    harness.storageData.set('vaxlink_workflow_mode_v1', 'inventory');
+    assert.equal((await captured(harness, expired)).queued, true);
+    const [stock] = harness.storageData.get('inventory_scan_batch_v1');
+    assert.equal(stock.expiry_flag, 'expired');
+    assert.equal(stock.raw_barcode, expired);
+  }
+});
+test('the tray keeps capture order when a scan finishes processing later', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  await harness.captureScannerScan({
+    rawText: '10SECOND',
+    capturedAt: '2026-07-28T12:00:01Z'
+  });
+  await harness.captureScannerScan({
+    rawText: '10FIRST',
+    capturedAt: '2026-07-28T12:00:00Z'
+  });
+  assert.deepEqual(
+    Array.from(
+      harness.storageData.get('multiple_inject_queue_v1'),
+      (item) => item.lot
+    ),
+    ['FIRST', 'SECOND']
+  );
 });

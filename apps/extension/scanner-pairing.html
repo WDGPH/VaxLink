@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Pair scanner · VaxLink</title>
+    <title>Scanner setup · VaxLink</title>
     <style>
       * {
         box-sizing: border-box;
@@ -20,7 +20,7 @@
       }
       h1 {
         margin: 0 0 12px;
-        color: #0b3d4f;
+        color: #102d41;
         font-size: 22px;
       }
       p {
@@ -44,8 +44,8 @@
         cursor: pointer;
       }
       #chooseScannerBtn {
-        background: #0b7892;
-        border-color: #0b7892;
+        background: #0e6575;
+        border-color: #0e6575;
         color: #ffffff;
       }
       button:disabled {
@@ -60,11 +60,14 @@
   </head>
   <body>
     <main>
-      <h1>Pair scanner</h1>
-      <p>Choose your scanner from the device list.</p>
+      <h1>Scanner setup</h1>
+      <p id="setupHint">Connect your scanner to capture barcodes in VaxLink.</p>
       <p id="pairingStatus" role="status" hidden></p>
       <div class="actions">
-        <button id="chooseScannerBtn" type="button">Choose scanner</button>
+        <button id="chooseScannerBtn" type="button">Connect scanner</button>
+        <button id="testScannerBtn" type="button" hidden>
+          Test saved scanner
+        </button>
         <button id="closePairingBtn" type="button">Close</button>
       </div>
     </main>

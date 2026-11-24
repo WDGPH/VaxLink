@@ -1,38 +1,19 @@
 ---
 name: vaxlink-extension-debugging
-description: Debug VaxLink extension behavior across popup, content script, background service worker, parsing, storage, and analytics. Use when scans do not autofill, messages fail between popup and content script, workflow settings are ignored, inventory parsing is wrong, or extension logs need tracing in `apps/extension/*.js`.
+description: Trace VaxLink scanner capture, tray storage, Panorama autofill, Local Activity and Debug. Use when scans do not arrive, the wrong form receives a scan, an Autofill setting is ignored, or a dose stays held.
 ---
 
 # VaxLink Extension Debugging
 
-## Focus
+1. Confirm the installed build and browser profile. Use synthetic barcodes and
+   a training chart to reproduce the problem.
+2. Check scanner connection and last known capture time. Follow the barcode
+   through the worker route, tray save or held scan, and the chart's reply.
+3. For a chart fill, look at the observed form, eligibility, funding choice,
+   Agent and Lot or Trade readback, and the enabled detail fields. Check that
+   the same document and owner still hold the fill after each wait.
+4. If a dose is in review, inspect the original chart before resolving it.
+   Check the tray balance after the verification reply.
 
-Use this skill when the bug is in the extension plumbing rather than Panorama itself.
-Trace the path from scan input to parsed payload to background queue to content-script autofill.
-
-## Debug Order
-
-- Confirm the input parsed correctly.
-- Confirm the popup built the expected payload.
-- Confirm the background worker stored or forwarded the message.
-- Confirm the content script received the message and chose the right workflow.
-- Confirm the page selectors are actually visible and enabled.
-
-## High Value Files
-
-- `apps/extension/popup.js`
-- `apps/extension/popup-inventory.js`
-- `apps/extension/queue-record.js`
-- `apps/extension/popup-parser.js`
-- `apps/extension/background.js`
-- `apps/extension/content.js`
-
-## What To Check First
-
-- Does the parsed barcode contain `lot`, `expiry`, `gtin`, and `serial` as expected?
-- Did the popup include `administered_at` only when the setting is enabled?
-- Is `workflow_mode` correct for single, multiple, or inventory flows?
-- Did the popup/content flow update the legacy queue key as expected?
-- Did background storage keep the last-known-good bundle and analytics state?
-- Is the content script on the right host and page type before autofill starts?
-- Are there runtime errors from `chrome.runtime.lastError` or missing permissions?
+Open [Extension Debug Flow](references/extension-debug-flow.md) for file
+locations and how to interpret the Debug export.

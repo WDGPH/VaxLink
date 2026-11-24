@@ -272,3 +272,63 @@ test('simultaneous refreshes share results, retain ready lookups, and recover af
   assert.doesNotMatch(JSON.stringify(degraded), /private detail/);
   assert.equal((await lookup(harness, 'LOT2')).lot_number, 'LOT2');
 });
+
+test('Inventory acknowledges a saved barcode while catalogue and Activity are waiting', async () => {
+  const downloading = deferred();
+  const download = deferred();
+  const counting = deferred();
+  let resumeCount;
+  const h = createBackgroundHarness(null, {
+    storage: { vaxlink_workflow_mode_v1: 'inventory' },
+    fetch: fetchCatalogue(() => {
+      downloading.resolve();
+      return download.promise;
+    }),
+    delayStorageSet(values, resume) {
+      if (!values.vaxlink_analytics_v1 || resumeCount) return false;
+      resumeCount = resume;
+      counting.resolve();
+      return true;
+    }
+  });
+  const refreshing = refresh(h);
+  await downloading.promise;
+  const catalogue = bundle('TRAIN-01');
+  const lotResource = catalogue.entry[1].resource;
+  lotResource.version = '1.138';
+  lotResource.concept.push({
+    code: 'TRAIN-INCOMPLETE',
+    property: [{ code: 'lotNumber', valueString: 'TRAIN-INCOMPLETE' }]
+  });
+  try {
+    const capturing = h.captureScannerScan({ rawText: '(10)TRAIN-01' });
+    const concurrentLookup = h.sendMessage({
+      action: 'lookupVaccineInfo',
+      lot: 'TRAIN-01',
+      waitForDownload: false
+    });
+    await counting.promise;
+    const [row] = h.storageData.get('inventory_scan_batch_v1');
+    assert.equal(row.lot, 'TRAIN-01');
+    assert.equal(row.lookup_error_category, 'initializing');
+    assert.equal((await concurrentLookup).errorCategory, 'initializing');
+    const result = await Promise.race([
+      capturing,
+      new Promise((resolve) => setImmediate(resolve))
+    ]);
+    assert.equal(result?.queued, true);
+  } finally {
+    resumeCount?.();
+    download.resolve(response(catalogue));
+    await refreshing;
+  }
+  const found = await lookup(h, 'TRAIN-01');
+  assert.equal(found.tradename, 'Test vaccine');
+  assert.equal(found.catalogueVersion, '1.138');
+  const incomplete = await lookup(h, 'TRAIN-INCOMPLETE');
+  assert.equal(incomplete.errorCategory, 'incomplete');
+  assert.equal(incomplete.catalogueVersion, '1.138');
+  const miss = await lookup(h, 'TRAIN-MISSING');
+  assert.equal(miss.errorCategory, 'not_found');
+  assert.equal(miss.catalogueVersion, '1.138');
+});

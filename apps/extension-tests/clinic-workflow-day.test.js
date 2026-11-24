@@ -200,11 +200,10 @@ if (!bundle) {
         barcode
       );
 
-      const response = await harness.sendMessage({
-        action: 'appendQueueRecord',
-        storageKey: 'multiple_inject_queue_v1',
+      const response = await harness.appendQueueRecord(
+        'multiple_inject_queue_v1',
         record
-      });
+      );
       assert.equal(response.success, true);
     }
 

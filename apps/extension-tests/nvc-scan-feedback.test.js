@@ -1,78 +1,153 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import '../extension/shared/gs1-parser.js';
-
-const source = readFileSync(
-  new URL('../extension/content.js', import.meta.url),
-  'utf8'
-);
-const productionFunction = (name) => {
-  const match = source.match(
-    new RegExp(`^(?:async )?function ${name}\\([^]*?^}`, 'm')
-  );
-  assert.ok(match, `Missing production function: ${name}`);
-  return match[0];
-};
+import {
+  createContentHarness,
+  deliverScannerScanToChart
+} from './helpers/clinic-sim.js';
 
 test('failed chart fill still shows the NVC failure and retains barcode fields', async () => {
   for (const error of [
     'NVC catalogue is unavailable',
     'Lot not found in the NVC catalogue'
   ]) {
-    const slot = { innerHTML: '' };
+    const chart = createContentHarness();
+    const { context, storageReads } = chart;
+    storageReads
+      .find(({ keys }) => keys.includes('vaxlink_workflow_mode_v1'))
+      .callback({});
+    const form = { isConnected: true };
+    const notices = [];
     let fillPayload;
-    const context = vm.createContext({
-      console,
-      chrome: {
-        runtime: {
-          lastError: null,
-          sendMessage: (_request, done) => done({ error })
-        }
-      },
-      isHandsFreeSupportedPage: () => true,
-      handleVaxlinkCommand: () => false,
-      lastHandledScanValue: '',
-      lastHandledScanAt: 0,
-      activeWorkflowMode: 'single',
-      beginPanoramaAutofill: (data) => data,
-      isPanoramaAutofillCurrent: () => true,
-      vlog() {},
-      logAnalyticsEvent() {},
+    Object.assign(context, {
+      getPanoramaAutofillForm: () => form,
+      getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
+      getPanoramaAgentCandidates: () => ['Training vaccine'],
+      getPanoramaMultiStepIndicatorKey: () => '',
       playAudioCue() {},
-      ensureToastHost() {},
-      parseGS1BarcodeFromScanner: globalThis.VaxLinkGS1Parser.parseGS1Barcode,
-      getExpiryStatus: () => ({ flag: 'valid' }),
-      getQueueStorageKeyForWorkflow: () => null,
+      showVaxlinkToast: (data) => notices.push(data),
       autoFillPanorama: (data) => {
         fillPayload = data;
         return { status: 'failed' };
-      },
-      isAutofillSuccess: () => false,
-      isAutofillPending: () => false,
-      toastRoutineSlot: slot,
-      toastDismissTimer: null,
-      setTimeout: () => 0,
-      clearTimeout() {},
-      escapeToastHtml: (text) => text
+      }
     });
-    vm.runInContext(
-      [
-        productionFunction('lookupVaccineInfoByLot'),
-        productionFunction('showVaxlinkToast'),
-        productionFunction('handleHandsFreeScan')
-      ].join('\n'),
-      context
-    );
-    const result = await context.handleHandsFreeScan(
-      '01001234567890121727123110TRAININGLOT'
+    context.chrome.runtime.sendMessage = (request, done) => {
+      const response =
+        request.action === 'lookupVaccineInfo' ? { error } : { success: true };
+      if (done) done(response);
+      return Promise.resolve(response);
+    };
+    const result = await deliverScannerScanToChart(
+      chart,
+      '01001234567890121799123110TRAININGLOT'
     );
     assert.equal(result.success, false);
     assert.equal(fillPayload.lot, 'TRAININGLOT');
     assert.equal(fillPayload.gtin, '00123456789012');
     assert.ok(fillPayload.expiry);
-    assert.ok(slot.innerHTML.includes(error));
-    assert.match(slot.innerHTML, /Vaccine details are incomplete/);
+    assert.equal(notices[0].lookup_error, error);
   }
+});
+
+test('terminal feedback names the fields or catalogue to review and counts rendered expiry notices', () => {
+  const { context } = createContentHarness();
+  const routine = { innerHTML: '' };
+  const warning = { innerHTML: '', querySelector: () => null };
+  const events = [];
+  Object.assign(context, {
+    routine,
+    warning,
+    ensureToastHost() {},
+    escapeToastHtml: (text) => text,
+    setTimeout: () => 0,
+    clearTimeout() {},
+    playAudioCue() {},
+    logAnalyticsEvent: (event) => events.push(event)
+  });
+  vm.runInContext(
+    'toastRoutineSlot = routine; toastWarningSlot = warning;',
+    context
+  );
+  context.showVaxlinkToast({
+    _fillFeedback: 'deadline_details',
+    _reviewFields: ['time', 'consent']
+  });
+  assert.match(
+    routine.innerHTML,
+    /Check the administration time and Consent for Service/
+  );
+  context.location.hostname = 'trpanoramadhir.prod.ehealthontario.ca';
+  context.showVaxlinkToast({
+    _fillFeedback: 'lot_not_matched',
+    _lotNeedsReview: true,
+    lot: 'TRAIN&LOT',
+    lookup_error_category: 'not_found'
+  });
+  assert.match(routine.innerHTML, /Lot not found in Panorama training/);
+  assert.match(routine.innerHTML, /Check the Agent and Lot on the chart/);
+  assert.match(
+    routine.innerHTML,
+    /missing from the National Vaccine Catalogue/
+  );
+  assert.doesNotMatch(routine.innerHTML, /Resolution Coordinator/);
+  const draft = () =>
+    new URL(
+      routine.innerHTML
+        .match(/href="(mailto:[^"]+)"/)[1]
+        .replaceAll('&amp;', '&')
+    );
+  assert.equal(draft().pathname, 'NVC-CNV@phac-aspc.gc.ca');
+  const catalogueMatch = {
+    lot: 'TRAIN&LOT',
+    tradename: 'Training vaccine',
+    nvc_lot_matched: true,
+    nvc_catalogue_version: '1.138'
+  };
+  for (const training of [true, false]) {
+    context.location.hostname = training
+      ? 'trpanoramadhir.prod.ehealthontario.ca'
+      : 'panorama.prod.ehealthontario.ca';
+    for (const multiple of [true, false]) {
+      context.showVaxlinkToast({
+        ...catalogueMatch,
+        _vaxlinkOwner: {
+          kind: multiple ? 'multiple_detail' : 'provider_single'
+        },
+        _fillFeedback: training ? 'lot_not_matched' : 'funding_exhausted',
+        _doseKept: multiple
+      });
+      assert.match(
+        routine.innerHTML,
+        /vl-toast-title">Lot found in NVC\. No match in Panorama lookup\./
+      );
+      assert.equal(routine.innerHTML.includes('Panorama training'), training);
+      assert.equal(routine.innerHTML.includes('Draft email to PRC'), !training);
+      assert.equal(routine.innerHTML.includes('mailto:'), !training);
+      assert.equal(routine.innerHTML.includes('delete this entry'), multiple);
+      assert.equal(routine.innerHTML.includes('Dose kept in tray'), multiple);
+      if (!training) {
+        assert.equal(draft().pathname, '');
+        assert.equal(
+          draft().searchParams.get('cc'),
+          'innovation@wdgpublichealth.ca'
+        );
+      }
+    }
+  }
+  context.showVaxlinkToast({
+    ...catalogueMatch,
+    _fillFeedback: 'deadline_details'
+  });
+  assert.doesNotMatch(routine.innerHTML, /mailto:/);
+  context.showVaxlinkToast({
+    lot: 'TRAIN',
+    _fillFeedback: 'lot_not_matched',
+    lookup_error_category: 'unavailable'
+  });
+  assert.doesNotMatch(routine.innerHTML, /mailto:/);
+  context.showVaxlinkToast({ expiry_flag: 'valid' });
+  context.showVaxlinkToast({ expiry_flag: 'expired' });
+  context.showVaxlinkToast({ expiry_flag: 'expiring_soon' });
+  assert.match(warning.innerHTML, /Expired vaccine/);
+  assert.deepEqual(events, ['expiry_notice_shown', 'expiry_notice_shown']);
 });

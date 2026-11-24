@@ -5,7 +5,7 @@
   "include-v-in-tag": true,
   "prerelease": true,
   "versioning": "prerelease",
-  "prerelease-type": "alpha",
+  "prerelease-type": "rc1",
   "bootstrap-sha": "8b45b6ebec6c74933cbd680491b6ecef2265ef26",
   "changelog-sections": [
     {

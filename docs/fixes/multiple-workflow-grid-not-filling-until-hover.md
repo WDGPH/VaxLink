@@ -1,5 +1,8 @@
 # Bug: Multi-Immunization Grid Not Auto-Filling Until Nurse Hovers
 
+This report describes the former Multiple Immunizations mode. See the
+[architecture guide](../architecture.md) for the current vaccine tray workflow.
+
 **Branch:** `fix/agent-selection-first-page`  
 **Affected workflow:** Multiple immunization mode — historicalfactoryTable grid page
 

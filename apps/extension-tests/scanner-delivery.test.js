@@ -20,8 +20,7 @@ const row = (rawText) => ({
   source: 'web-serial',
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
-const capture = (h, rawText) =>
-  h.sendMessage({ action: 'scannerScanCaptured', scan: row(rawText) });
+const capture = (h, rawText) => h.captureScannerScan(row(rawText));
 const options = (extra = {}) => ({
   tabs: [tab],
   storage: { vaxlink_workflow_mode_v1: 'single' },
@@ -29,7 +28,8 @@ const options = (extra = {}) => ({
     supported: true,
     contextToken: 'document-1',
     accepted: true,
-    success: true
+    success: true,
+    command_handled: true
   },
   ...extra
 });
@@ -82,34 +82,73 @@ test('single capture is saved before delivery and binds delivery to the captured
   );
   assert.equal(h.tabMessages[1].tabId, tab.id);
   assert.equal(h.tabMessages[1].message.contextToken, 'document-1');
+  assert.ok(h.tabMessages[1].message.scannerRoute.startBy > Date.now());
   assert.equal(h.storageData.get(inbox).length, 0);
 });
 
-test('unavailable, unsupported, or unacknowledged destinations retain scans', async () => {
-  for (const extra of [
+test('unacknowledged chart attempts retain their scan', async () => {
+  for (const tabResponse of [
+    { supported: true, contextToken: 'document-1', success: true },
+    { supported: true, contextToken: 'document-1', accepted: true }
+  ]) {
+    const h = harness({ tabResponse });
+    await capture(h, 'held');
+    assert.equal(h.storageData.get(inbox)[0].rawText, 'held');
+  }
+});
+
+test('disabled, unidentified and unready forms save to the Immunization tray', async () => {
+  for (const overrides of [
     { tabs: [] },
+    { storage: { vaxlink_single_scan_autofill_v1: false } },
     { tabResponse: { supported: false } },
     {
       tabResponse: {
         supported: true,
         contextToken: 'document-1',
-        success: true
-      }
-    },
-    {
-      tabResponse: {
-        supported: true,
-        contextToken: 'document-1',
-        accepted: true
+        formContext: { kind: 'provider_single', ready: false }
       }
     }
   ]) {
-    const h = harness(extra);
-    await capture(h, 'held');
-    assert.equal(h.storageData.get(inbox).length, 1);
-    assert.equal(h.storageData.get(inbox)[0].rawText, 'held');
-    if (extra.tabResponse?.supported === false)
-      assert.equal(h.tabMessages.length, 1);
+    const h = harness(overrides);
+    const result = await capture(h, '(10)TESTLOT');
+    assert.equal(result.workflow, 'immunization');
+    assert.equal(result.queuedToWorkflow, true);
+    assert.equal(h.storageData.get('multiple_inject_queue_v1').length, 1);
+    assert.equal(h.storageData.has(inbox), false);
+    assert.ok(
+      h.tabMessages.every(
+        ({ message }) => message.action !== 'vaxlinkScanCaptured'
+      )
+    );
+  }
+});
+
+test('a grid receives only the new saved row when automatic grid entry is enabled', async () => {
+  for (const enabled of [false, true]) {
+    const key = 'multiple_inject_queue_v1';
+    const h = harness({
+      storage: {
+        [key]: [{ id: 'older', lot: 'OLDLOT' }],
+        vaxlink_grid_scan_autofill_v1: enabled
+      },
+      tabResponse: {
+        supported: true,
+        contextToken: 'grid-document',
+        formContext: { kind: 'multiple_grid', ready: true },
+        status: 'grid_added'
+      }
+    });
+    const result = await capture(h, '(10)TESTLOT');
+    const rows = h.storageData.get(key);
+    const writes = h.tabMessages.filter(
+      ({ message }) => message.action === 'vaxlinkGridScanCaptured'
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(result.queuedToWorkflow, true);
+    assert.equal(result.routed, enabled);
+    assert.equal(writes.length, Number(enabled));
+    if (enabled) assert.equal(writes[0].message.recordId, rows[1].id);
   }
 });
 
@@ -165,7 +204,7 @@ test('failed removal after acknowledgement retains the captured scan', async () 
 });
 
 test('only the popup can inspect or discard a held scan', async () => {
-  const h = harness({ tabs: [] });
+  const h = harness({ tabs: [], idleState: 'unknown' });
   await capture(h, 'held');
   const listed = await h.sendMessage({ action: 'getHeldScannerScans' }, popup);
   assert.equal(listed.success, true);
@@ -221,33 +260,30 @@ test('failed initial persistence never sends the scan', async () => {
   );
 });
 
-test('delivery stays pinned to the tab active at capture', async () => {
-  const save = gate();
-  let held = false;
-  const tabs = [{ ...tab }, { ...tab, id: 45, active: false }];
-  const h = harness({
-    tabs,
-    delayStorageSet(values, resume) {
-      if (inbox in values && !held) {
+test('delivery stays held when the original tab loses focus, even if staff return', async () => {
+  for (const returnToOriginal of [false, true]) {
+    const save = gate();
+    let held = false;
+    const tabs = [{ ...tab }, { ...tab, id: 45, active: false }];
+    const h = harness({
+      tabs,
+      delayStorageSet(values, resume) {
+        if (!(inbox in values) || held) return false;
         held = true;
         save.hold(resume);
         return true;
       }
-      return false;
-    }
-  });
-  const result = capture(h, 'pinned');
-  await save.started;
-  tabs[0].active = false;
-  tabs[1].active = true;
-  save.release();
-  await result;
-  assert.equal(
-    h.tabMessages.find(
-      ({ message }) => message.action === 'vaxlinkScanCaptured'
-    ).tabId,
-    44
-  );
+    });
+    const result = capture(h, 'pinned');
+    await save.started;
+    h.activateTab(45);
+    if (returnToOriginal) h.activateTab(44);
+    save.release();
+    await result;
+    assert.equal(h.tabMessages.length, 1);
+    assert.equal(h.storageData.get(inbox)[0].intendedTabId, 44);
+    assert.equal(h.storageData.get(inbox)[0].reviewState, 'inactive_chart');
+  }
 });
 
 test('late acknowledgement cannot remove a newer identical capture', async () => {
@@ -266,6 +302,7 @@ test('late acknowledgement cannot remove a newer identical capture', async () =>
   const old = h.storageData.get(inbox)[0];
   await h.sendMessage({ action: 'discardHeldScannerScan', scan: old }, popup);
   tabs[0].active = false;
+  h.setIdleState('locked');
   await capture(h, 'same');
   const newer = h.storageData.get(inbox)[0];
   assert.notEqual(newer.captureId, old.captureId);
@@ -329,4 +366,122 @@ test('a same-tab chart change during workflow reads cannot select a new context'
     'chart-A'
   );
   assert.equal(h.storageData.get(inbox)[0].rawText, 'chart-A scan');
+});
+
+test('only the hidden scanner host can submit a physical capture', async () => {
+  const h = harness();
+  const host = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
+  };
+  for (const sender of [
+    popup,
+    { id: host.id, frameId: 0, tab, url: tab.url },
+    { ...host, id: 'another-extension' }
+  ]) {
+    const response = await h.sendMessage(
+      { action: 'scannerScanCaptured', scan: row('10TESTLOT') },
+      sender
+    );
+    assert.equal(response.success, false);
+  }
+  assert.deepEqual(h.tabMessages, []);
+  assert.equal(h.storageData.has(inbox), false);
+});
+
+test('a pending response clears and adds recent history only when the matching chart verifies', async () => {
+  const delivery = gate();
+  const sessionStorage = new Map();
+  const recent = 'vaxlink_recent_chart_lots_v1';
+  const h = harness({
+    sessionStorage,
+    tabResponse: {
+      supported: true,
+      contextToken: 'document-1',
+      accepted: true,
+      pending: true
+    },
+    delayTabMessage(_id, message, resume) {
+      if (message.action !== 'vaxlinkScanCaptured') return false;
+      delivery.hold(resume);
+      return true;
+    }
+  });
+  const sender = {
+    id: 'vaxlink-test',
+    tab,
+    frameId: 0,
+    url: tab.url,
+    documentId: 'original-document'
+  };
+  const captured = capture(h, 'pending');
+  await delivery.started;
+  const { scan, contextToken, scannerRoute } = h.tabMessages[1].message;
+  const claim = { captureId: scan.captureId, contextToken, scannerRoute };
+  assert.equal(
+    (await h.sendMessage({ action: 'checkScannerChart', ...claim }, sender))
+      .success,
+    true
+  );
+  const verification = {
+    action: 'verifyScannerChartFields',
+    ...claim,
+    verified: true,
+    vaccine: {
+      tradename: 'Sample vaccine',
+      lot: 'LOT1',
+      barcode_expiry: '2099-01-01',
+      raw_barcode: 'private fixture'
+    }
+  };
+  delivery.release();
+  assert.equal((await captured).queued, true);
+  assert.equal(h.storageData.get(inbox)[0].reviewState, 'checking_chart');
+  for (const [request, from] of [
+    [verification, { ...sender, documentId: 'replacement' }],
+    [{ ...verification, contextToken: 'old' }, sender],
+    [
+      {
+        ...verification,
+        scannerRoute: { ...scannerRoute, epoch: 'old-worker' }
+      },
+      sender
+    ],
+    [verification, { ...sender, frameId: 1 }]
+  ]) {
+    assert.equal((await h.sendMessage(request, from)).success, false);
+    assert.equal(h.storageData.get(inbox).length, 1);
+    assert.equal(sessionStorage.has(recent), false);
+  }
+  const copies = await Promise.all([
+    h.sendMessage(verification, sender),
+    h.sendMessage(verification, sender)
+  ]);
+  assert.equal(copies.filter((result) => result.success).length, 1);
+  assert.equal(h.storageData.get(inbox).length, 0);
+  assert.equal(sessionStorage.get(recent).length, 1);
+  assert.equal(sessionStorage.get(recent)[0].lot, 'LOT1');
+  assert.equal('raw_barcode' in sessionStorage.get(recent)[0], false);
+});
+
+test('an unavailable or unknown lock check and a stale chart keep the original scan held', async () => {
+  for (const [overrides, reason] of [
+    [{ idleError: 'Idle service unavailable' }, 'lock_unavailable'],
+    [{ idleState: 'unknown' }, 'lock_unknown'],
+    [
+      {
+        tabResponse: {
+          supported: true,
+          contextToken: 'document-1',
+          buildAtLoad: { version: 'old' }
+        }
+      },
+      'stale_chart'
+    ]
+  ]) {
+    const h = harness(overrides);
+    await capture(h, 'held');
+    assert.equal(h.storageData.get(inbox)[0].reviewState, reason);
+    assert.equal(h.tabMessages.length, 1);
+  }
 });

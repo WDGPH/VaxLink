@@ -31,5 +31,40 @@
     return (calendarDay(expiry) - calendarDay(today)) / 86400000;
   }
 
-  root.VaxLinkExpiryDate = Object.freeze({ parseDateToLocal, daysUntil });
+  function expiredVaccineDate(vaccine, today = new Date()) {
+    let earliestDate = '';
+    let earliestDays = 0;
+    for (const value of [
+      vaccine?.barcode_expiry,
+      vaccine?.expiry,
+      vaccine?.inventory_expiry,
+      vaccine?.nvc_lot_expiry
+    ]) {
+      const date = parseDateToLocal(value);
+      if (!date) continue;
+      const days = daysUntil(date, today);
+      if (days < earliestDays) {
+        earliestDate = value;
+        earliestDays = days;
+      }
+    }
+    return earliestDate;
+  }
+
+  function isExpiredVaccine(vaccine) {
+    // Recheck calendar dates even if a saved row was still valid when scanned.
+    return vaccine?.expiry_flag === 'expired' || !!expiredVaccineDate(vaccine);
+  }
+
+  function blocksChartUse(vaccine) {
+    return vaccine?.reference_only === true || isExpiredVaccine(vaccine);
+  }
+
+  root.VaxLinkExpiryDate = Object.freeze({
+    parseDateToLocal,
+    daysUntil,
+    expiredVaccineDate,
+    isExpiredVaccine,
+    blocksChartUse
+  });
 })(globalThis);

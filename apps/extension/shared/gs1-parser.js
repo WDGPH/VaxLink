@@ -133,6 +133,8 @@
         throw new Error('AI(01) GTIN incomplete');
       }
       data.gtin = scan.substring(2, 16);
+      if (!/^\d{14}$/.test(data.gtin))
+        throw new Error('AI(01) GTIN is invalid');
       idx = 16;
     } else if (!isLikelyAIStart(scan, 0)) {
       throw new Error('Expected a GS1 AI sequence (01/17/10/21)');
@@ -211,6 +213,18 @@
     }
   }
 
+  function isRetailBarcode(value) {
+    const digits = String(value || '')
+      .trim()
+      .replace(/^\]E\d/i, '');
+    if (!/^(?:\d{8}|\d{12,14})$/.test(digits)) return false;
+    let sum = 0;
+    for (let i = digits.length - 1; i >= 0; i--) {
+      sum += Number(digits[i]) * ((digits.length - 1 - i) % 2 ? 3 : 1);
+    }
+    return sum % 10 === 0;
+  }
+
   root.VaxLinkGS1Parser = Object.freeze({
     GS,
     formatDate,
@@ -221,6 +235,7 @@
     findNextAI,
     parseGS1Barcode,
     isCandidateGS1Text,
-    hasNumericGtin
+    hasNumericGtin,
+    isRetailBarcode
   });
 })(globalThis);

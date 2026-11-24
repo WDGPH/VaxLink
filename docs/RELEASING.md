@@ -11,8 +11,7 @@ same v1.1.5 commit; the former `dev` branch is not used.
    and generated changelog.
 3. Merge the release PR. Release-please creates the version tag and GitHub Release.
 4. GitHub Actions packages the production extension and uploads
-   `vaxlink-prod-<v>.zip` and, for releases produced after this improvement,
-   `SHA256SUMS` calculated from that final ZIP.
+   `vaxlink-prod-<v>.zip` and `SHA256SUMS` calculated from that final ZIP.
 5. An authorized publisher verifies the ZIP, uploads it to the existing VaxLink
    Chrome Web Store listing, and submits it for review. GitHub release creation
    does not publish to the store automatically.
@@ -32,7 +31,10 @@ higher than the one already uploaded to that listing.
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
-branch differences; runtime channel behaviour derives from the manifest name.
+branch differences; runtime channel behaviour uses that packaged identity. Debug starts on in
+packaged Alpha and off in production and unpacked development unless a saved
+preference overrides it. Use the exact package being evaluated for the
+[workstation acceptance checks](fixes/browser-only-locked-scanner-poc.md).
 
 ### Alpha releases
 
@@ -43,21 +45,21 @@ branch differences; runtime channel behaviour derives from the manifest name.
 3. An authorized publisher verifies the ZIP and uploads it to the separate
    VaxLink Alpha listing for review. Store publication remains manual.
 
-Alpha versioning starts after v1.1.5, without the old 1.1.3 override. For patch
-changes the sequence is `1.1.6-alpha`, `1.1.6-alpha.1`, and so on; features or
-breaking changes can advance the minor or major version instead. Release-please
-owns these version changes; do not edit the version files or tag releases by hand.
+The first 2.0 candidate uses the commit footer `Release-As: 2.0.0-rc1`.
+If you squash the feature PR, keep that footer in the squash commit body.
+Check that the release PR proposes `2.0.0-rc1` before merging it.
+GitHub marks `v2.0.0-rc1` as a prerelease. Further changes to the 2.0.0
+candidate go into the next release PR for `2.0.0-rc2`, then `2.0.0-rc3`.
+Several feature PRs can go into one candidate.
 
-Chrome requires numeric versions. Packaging maps `1.1.6-alpha` to `1.1.6.0`,
-`1.1.6-alpha.1` to `1.1.6.1`, and so on, while `version_name` and the ZIP filename
-retain the full prerelease version. This lets successive Alpha uploads update
-the same listing. Production packaging requires a stable package version and
-keeps its three-part numeric version. Check the version against the target store
-listing before every upload.
+For `v2.0.0-rc1`, upload `vaxlink-alpha-2.0.0-rc1.zip` to VaxLink Alpha.
+Its manifest displays `2.0.0-rc1` and uses `2.0.0.1` for Chrome updates.
+RC2 uses `2.0.0.2`. Each numeric version must exceed the previous upload
+to that listing. Production uses a separate listing and a three-part version.
 
 Promote reviewed changes through a separate promotion PR based on current `main`.
 Preserve the feature and fix commits so release-please can classify them; do not
-replace the changes with one `chore:` commit. Keep stable version and release
+replace the changes with one `chore:` commit. Omit the candidate’s `Release-As` footer when carrying commits to production. Keep stable version and release
 bookkeeping from `main`, and let its stable release PR update them. Inspect the
 production package for channel-specific exclusions before promotion. The stable
 release PR and Store submission remain separate steps. Direct production fixes
@@ -70,8 +72,8 @@ the existing stable documentation-hub integration is unchanged.
 - **Chrome Web Store:** Chrome validates the extension package through its normal distribution process and updates the installed listing automatically. Use the approved VaxLink listing for production.
 - **Manual GitHub deployment:** Partner IT downloads an approved `vaxlink-prod-<v>.zip` from the GitHub Release, verifies it, extracts it, and uses Chrome's **Load unpacked** option to deploy the folder. This is an IT-managed fallback, subject to organizational Chrome policies. It does not automatically receive Chrome Web Store updates. Partner IT must deliberately install each subsequent approved version. Reload supported Panorama tabs after an extension update.
 
-Releases produced after this improvement attach `SHA256SUMS` for their final
-ZIP assets. Historical releases, including v1.1.5, may not have a separate checksum
+New releases attach `SHA256SUMS` for their final ZIP assets. Historical
+releases, including v1.1.5, may not have a separate checksum
 file. Do not assume it is available or replace historical assets to add one.
 GitHub also provides native SHA-256 release-asset digests, which partner IT can
 use to verify older downloads when available.

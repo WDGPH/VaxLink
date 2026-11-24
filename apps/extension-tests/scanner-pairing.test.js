@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  createBackgroundHarness,
+  makeTestNvcBundle
+} from './helpers/clinic-sim.js';
 
 test('pairing needs a click, preserves cancellation, and waits for connection handoff', async () => {
   const saved = Object.getOwnPropertyDescriptors(globalThis);
   const nodes = Object.fromEntries(
-    ['chooseScannerBtn', 'closePairingBtn', 'pairingStatus'].map((id) => [
+    [
+      'chooseScannerBtn',
+      'testScannerBtn',
+      'closePairingBtn',
+      'pairingStatus',
+      'setupHint'
+    ].map((id) => [
       id,
       {
         dataset: {},
@@ -14,7 +24,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       }
     ])
   );
-  let portError, releaseCommand, commandStarted;
+  let portError, releaseCommand, commandStarted, pagehide;
   let requestCount = 0,
     closeCount = 0;
   const commands = [];
@@ -22,6 +32,9 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
   globalThis.document = { getElementById: (id) => nodes[id] };
   globalThis.window = {
     location: { search: '?profile=zebra-ds8178-usb-cdc' },
+    addEventListener(type, listener) {
+      if (type === 'pagehide') pagehide = listener;
+    },
     close() {
       closeCount++;
     }
@@ -32,17 +45,34 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       serial: {
         async requestPort(options) {
           requestCount++;
-          assert.deepEqual(options, { filters: [{ usbVendorId: 1504 }] });
+          assert.deepEqual(options, {});
           if (portError) throw portError;
           return { getInfo: () => info };
-        }
+        },
+        getPorts: async () => [{ getInfo: () => info }]
       }
     }
   });
   globalThis.chrome = {
+    storage: {
+      local: {
+        get(_key, done) {
+          done({ vaxlink_serial_scanner_profile_v1: 'zebra-ds8178-usb-cdc' });
+        }
+      }
+    },
     runtime: {
+      onMessage: { addListener() {} },
       sendMessage(message, done) {
         commands.push(message);
+        if (message.action === 'scannerDaemon.getStatus') {
+          done({
+            success: true,
+            source: 'live',
+            status: { testing: true, state: 'connected' }
+          });
+          return;
+        }
         releaseCommand = done;
         commandStarted();
       }
@@ -90,11 +120,9 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
         'keep the window until the background accepts'
       );
       assert.deepEqual(commands.at(-1), {
-        action: 'scannerDaemon.connectGranted',
+        action: 'scannerDaemon.select',
         profileId: 'zebra-ds8178-usb-cdc',
-        preferredPortInfo: info,
-        enableAutostart: true,
-        trigger: 'pairing_permission_granted'
+        preferredPortInfo: info
       });
       if (failure === 'transport')
         chrome.runtime.lastError = { message: 'Background unavailable' };
@@ -115,10 +143,172 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
         );
       } else assert.equal(closeCount, 1);
     }
+    assert.equal(nodes.testScannerBtn.hidden, false);
+    const begin = nodes.testScannerBtn.click();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.startTest');
+    releaseCommand({ success: true });
+    await begin;
+    assert.equal(nodes.closePairingBtn.textContent, 'Finish test');
+    assert.match(nodes.pairingStatus.textContent, /Test scans stay out/);
+    pagehide();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.endTest');
+    releaseCommand({ success: true });
+
+    const finish = nodes.closePairingBtn.click();
+    assert.equal(commands.at(-1).action, 'scannerDaemon.endTest');
+    assert.equal(closeCount, 1);
+    releaseCommand({ success: true });
+    await finish;
+    assert.equal(closeCount, 2);
   } finally {
     for (const key of ['document', 'window', 'navigator', 'chrome']) {
       if (saved[key]) Object.defineProperty(globalThis, key, saved[key]);
       else delete globalThis[key];
     }
   }
+});
+
+test('Scanner setup shares an in-flight window and restores the same open page after worker restart', async () => {
+  const sessionStorage = new Map();
+  const tabs = new Map();
+  const updates = [];
+  const updatedListeners = new Set();
+  const removedListeners = new Set();
+  let observeLoad;
+  let closeOnFocus = false;
+  let created = 0;
+  let releaseCreate;
+  let observeCreate;
+  const creating = new Promise((resolve) => {
+    observeCreate = resolve;
+  });
+  const options = {
+    sessionStorage,
+    tabsApi: {
+      onUpdated: {
+        addListener(listener) {
+          updatedListeners.add(listener);
+          observeLoad?.();
+        },
+        removeListener(listener) {
+          updatedListeners.delete(listener);
+        }
+      },
+      onRemoved: {
+        addListener(listener) {
+          removedListeners.add(listener);
+        },
+        removeListener(listener) {
+          removedListeners.delete(listener);
+        }
+      },
+      async get(id) {
+        const tab = tabs.get(id);
+        if (!tab) throw new Error('No tab');
+        return tab;
+      },
+      async sendMessage(id, message) {
+        assert.equal(message.action, 'scannerPairing.isOpen');
+        if (!tabs.get(id)?.pairing) throw new Error('No receiver');
+        return { pairing: true };
+      },
+      async update(id, details) {
+        assert.equal(details.active, true);
+        return this.get(id);
+      }
+    },
+    windows: {
+      async create(details) {
+        const id = ++created;
+        assert.equal(details.type, 'normal');
+        assert.equal(
+          details.url,
+          'chrome-extension://vaxlink-test/scanner-pairing.html'
+        );
+        if (id === 1)
+          await new Promise((resolve) => {
+            releaseCreate = resolve;
+            observeCreate();
+          });
+        const tab = {
+          id,
+          windowId: id + 100,
+          pairing: true,
+          status: 'loading'
+        };
+        tabs.set(id, tab);
+        return { tabs: [tab] };
+      },
+      async get(id) {
+        return { id, state: 'minimized' };
+      },
+      async update(id, details) {
+        updates.push({ id, focused: details.focused, state: details.state });
+        if (closeOnFocus) tabs.delete(id - 100);
+      }
+    }
+  };
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  const request = {
+    action: 'scannerPairing.open',
+    profileId: 'zebra-ds8178-usb-cdc'
+  };
+  const harness = createBackgroundHarness(makeTestNvcBundle(), options);
+  assert.equal((await harness.sendMessage(request)).success, false);
+  assert.equal(created, 0);
+  const first = harness.sendMessage(request, sender);
+  await creating;
+  const repeated = harness.sendMessage(request, sender);
+  releaseCreate();
+  assert.ok(
+    (await Promise.all([first, repeated])).every((response) => response.success)
+  );
+  assert.equal(created, 1);
+
+  tabs.get(1).status = 'complete';
+  const restarted = createBackgroundHarness(makeTestNvcBundle(), options);
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(created, 1);
+  assert.deepEqual(updates.at(-1), { id: 101, focused: true, state: 'normal' });
+  tabs.get(1).pairing = false;
+  tabs.get(1).status = 'loading';
+  const waiting = new Promise((resolve) => {
+    observeLoad = resolve;
+  });
+  const navigated = restarted.sendMessage(request, sender);
+  await waiting;
+  assert.equal(
+    updates.length,
+    1,
+    'do not focus a tab while its page is unknown'
+  );
+  assert.equal(created, 1);
+  tabs.get(1).status = 'complete';
+  for (const listener of updatedListeners) listener(1, { status: 'complete' });
+  assert.equal((await navigated).success, true);
+  assert.equal(
+    created,
+    2,
+    'leave another page alone if the tab navigated away'
+  );
+  assert.equal(updatedListeners.size, 0);
+  assert.equal(
+    removedListeners.size,
+    2,
+    'only the permanent test-close listeners remain'
+  );
+  tabs.get(2).status = 'complete';
+  closeOnFocus = true;
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(
+    created,
+    3,
+    'open a replacement if the pairing tab closes during focus'
+  );
+  tabs.delete(3);
+  assert.equal((await restarted.sendMessage(request, sender)).success, true);
+  assert.equal(created, 4, 'open a fresh pairing page after closure');
 });
