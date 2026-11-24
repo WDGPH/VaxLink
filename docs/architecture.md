@@ -78,19 +78,17 @@ Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
 Settings has three sections, in order: Scanner, Autofill, and National Vaccine Catalogue.
 `scanner-settings.js` provides connection controls directly within the Scanner
-section. It shows connection status and the saved scanner name, with pairing,
-reconnect, and disconnect controls. Cached status cannot confirm a live
-connection. Actual connection errors remain visible. The popup sends connection
-requests to the background; it does not run the ongoing scanner reader.
+section. It shows the saved device and gets current connection status from the
+reader. When the reader does not reply, Settings shows the last known capture
+time if available. The popup sends connection requests to the background.
 
-Pair opens a small temporary standard browser window (`scanner-pairing.html` and
-`scanner-pairing.js`). Chromium needs its extensions toolbar to display the device
-chooser; a popup window does not provide it. Staff click Choose scanner in the
-standard window to grant Web Serial access. The window sends the
-selected port identity to the background reader and closes when the connection
-request is accepted. This acknowledgement does not confirm a live connection.
-Cancellation leaves the window open for another choice. Scanner settings and
-live connection status remain in the popup.
+**Scanner setup** opens a temporary standard browser window
+(`scanner-pairing.html` and `scanner-pairing.js`). Chromium needs its extensions
+toolbar to display the device chooser. Staff click **Connect scanner** and choose a
+device. Cancelling the chooser leaves the current scanner connected. When
+replacing a scanner, the background waits for the existing port to close before
+saving the new device and starting capture. The setup window closes after the
+hidden reader accepts the request. Settings confirms when it is connected.
 
 National Vaccine Catalogue shows its version, publication date, and last checked
 date, with a Refresh button. Loading and refresh errors stay visible.

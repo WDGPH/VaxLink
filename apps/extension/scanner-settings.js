@@ -1,25 +1,16 @@
 import {
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
-  normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
-  selectGrantedPort,
   getScannerConnectionLabel
 } from './scanner/scanner-daemon-shared.js';
 import {
-  SCANNER_PORT_INFO_STORAGE_KEY,
-  SCANNER_PROFILE_STORAGE_KEY,
-  getSerialScannerProfile,
-  portMatchesProfile
+  formatUsbId,
+  getSerialScannerProfile
 } from './scanner/serial-profiles.js';
-import {
-  getGrantedSerialScannerPorts,
-  isWebSerialSupported
-} from './scanner/serial-provider.js';
+import { isWebSerialSupported } from './scanner/serial-provider.js';
 
-let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let statusChangeVersion = 0;
-let configuredProfileId;
 
 const els = {};
 export function initializeScannerSettings() {
@@ -35,17 +26,25 @@ export function initializeScannerSettings() {
     els[id] = document.getElementById(id);
   });
   bindEvents();
+  if (!isWebSerialSupported()) {
+    setStatus(
+      els.connectionStatus,
+      'Web Serial is not available in this browser.',
+      'error'
+    );
+    setButtons({ canConnect: false, canDisconnect: false });
+    return;
+  }
   chrome.runtime.onMessage.addListener((request) => {
     if (
       request?.action === SCANNER_DAEMON_ACTIONS.STATUS_CHANGED &&
       request.status
     ) {
-      statusChangeVersion++;
-      applyDaemonStatus(request.status);
+      void refreshStatus();
     }
     return false;
   });
-  loadScannerConnection();
+  void refreshStatus();
 }
 
 function bindEvents() {
@@ -81,10 +80,8 @@ function sendScannerDaemonCommand(action, payload = {}) {
 }
 
 function applyDaemonStatus(status, source = 'live') {
-  scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
-  const profile = getSerialScannerProfile(
-    scannerStatusSnapshot.profileId || getSelectedProfile()?.id
-  );
+  const scannerStatusSnapshot = normalizeScannerStatusSnapshot(status);
+  const profile = getSerialScannerProfile(scannerStatusSnapshot.profileId);
   const state = scannerStatusSnapshot.state;
   const connected =
     state === SCANNER_STATUS_STATES.CONNECTED && source === 'live';
@@ -92,89 +89,76 @@ function applyDaemonStatus(status, source = 'live') {
     ? 'success'
     : source === 'live' &&
         (state === SCANNER_STATUS_STATES.ERROR ||
-          state === SCANNER_STATUS_STATES.BUSY)
+          state === SCANNER_STATUS_STATES.BUSY ||
+          state === SCANNER_STATUS_STATES.UNAVAILABLE)
       ? 'error'
       : 'info';
   setStatus(
     els.connectionStatus,
     [
       getScannerConnectionLabel(status, source),
-      source === 'live' ? scannerStatusSnapshot.lastError : ''
+      source === 'live' ? scannerStatusSnapshot.lastError : '',
+      source !== 'live' && scannerStatusSnapshot.lastKnownCaptureAt
+        ? `Last known capture ${new Date(scannerStatusSnapshot.lastKnownCaptureAt).toLocaleString()}.`
+        : ''
     ]
       .filter(Boolean)
       .join(': '),
     tone
   );
   const identityKnown = !!scannerStatusSnapshot.profileId;
+  const { usbVendorId, usbProductId } = scannerStatusSnapshot.portInfo || {};
+  const usb =
+    usbVendorId != null && usbProductId != null
+      ? ` [USB ${formatUsbId(usbVendorId)}:${formatUsbId(usbProductId)}]`
+      : '';
   els.scannerIdentity.hidden = !identityKnown;
   els.scannerIdentity.textContent = identityKnown
-    ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label} (Web Serial)`
+    ? `${connected ? 'Scanner' : 'Saved scanner'}: ${profile.label}${usb}`
     : '';
   const stopping = state === SCANNER_STATUS_STATES.STOPPING;
+  const starting = state === SCANNER_STATUS_STATES.STARTING;
   const retryStop = state === SCANNER_STATUS_STATES.UNAVAILABLE;
+  const needsSetup =
+    state === SCANNER_STATUS_STATES.PERMISSION_LOST ||
+    scannerStatusSnapshot.selectionRequired;
+  const canStop =
+    retryStop ||
+    (identityKnown && !needsSetup && state !== SCANNER_STATUS_STATES.DISABLED);
   setButtons({
-    canConnect: !connected && !stopping && !retryStop,
-    canDisconnect: connected || retryStop
+    canConnect: !stopping && !starting && !retryStop,
+    canDisconnect: canStop && !stopping
   });
-  els.requestPortBtn.hidden = connected;
   els.connectGrantedBtn.hidden =
     connected ||
-    (state === SCANNER_STATUS_STATES.NEVER_CONFIGURED && !identityKnown);
-  els.disconnectBtn.hidden = !(connected || stopping || retryStop);
+    !identityKnown ||
+    needsSetup ||
+    starting ||
+    stopping ||
+    retryStop;
+  els.disconnectBtn.hidden = !(canStop || stopping);
 }
 
-function loadScannerConnection() {
-  if (!isWebSerialSupported()) {
-    setStatus(
-      els.connectionStatus,
-      'Web Serial is not available in this browser context.',
-      'error'
+async function refreshStatus() {
+  const version = ++statusChangeVersion;
+  try {
+    const result = await sendScannerDaemonCommand(
+      SCANNER_DAEMON_ACTIONS.GET_STATUS
     );
-    setButtons({ canConnect: false, canDisconnect: false });
-    return;
+    if (version === statusChangeVersion)
+      applyDaemonStatus(result.status, result.source);
+  } catch (error) {
+    if (version === statusChangeVersion)
+      setStatus(els.connectionStatus, error.message, 'error');
   }
-
-  chrome.storage.local.get(
-    [SCANNER_PROFILE_STORAGE_KEY, SCANNER_PORT_INFO_STORAGE_KEY],
-    (stored) => {
-      const profile = getSerialScannerProfile(
-        stored && stored[SCANNER_PROFILE_STORAGE_KEY]
-      );
-      const portInfo = normalizeScannerPortInfo(
-        stored && stored[SCANNER_PORT_INFO_STORAGE_KEY]
-      );
-      configuredProfileId = profile.id;
-      if (portInfo) {
-        els.scannerIdentity.hidden = false;
-        els.scannerIdentity.textContent = `Saved scanner: ${profile.label} (Web Serial)`;
-      }
-      void sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.GET_STATUS)
-        .then((response) => {
-          applyDaemonStatus(response.status, response.source);
-        })
-        .catch((error) =>
-          setStatus(els.connectionStatus, error.message, 'error')
-        );
-    }
-  );
-
-  setStatus(els.connectionStatus, 'Checking scanner connection…', 'info');
-  setButtons({ canConnect: true, canDisconnect: false });
-}
-
-function getSelectedProfile() {
-  return getSerialScannerProfile(
-    scannerStatusSnapshot.profileId || configuredProfileId
-  );
 }
 
 function openPairingWindow() {
-  const profile = getSelectedProfile();
   // Chrome anchors extension device choosers to its extensions toolbar.
   // A popup window lacks that toolbar, so use a standard browser window.
   chrome.windows.create(
     {
-      url: chrome.runtime.getURL(`scanner-pairing.html?profile=${profile.id}`),
+      url: chrome.runtime.getURL('scanner-pairing.html'),
       type: 'normal',
       width: 500,
       height: 440,
@@ -192,59 +176,22 @@ function openPairingWindow() {
 }
 
 async function reconnectGrantedPort() {
-  const profile = getSelectedProfile();
+  setButtons({ canConnect: false, canDisconnect: true });
+  setStatus(els.connectionStatus, 'Connecting…', 'info');
   try {
-    setButtons({ canConnect: false, canDisconnect: false });
-    const ports = await getGrantedSerialScannerPorts();
-    const selection = selectGrantedPort(
-      ports,
-      profile,
-      scannerStatusSnapshot.portInfo,
-      portMatchesProfile
-    );
-    const port = selection.port;
-    if (!port) {
-      throw new Error(
-        selection.reason === 'ambiguous'
-          ? 'Multiple granted scanners have the same identity. Disconnect or revoke access to the others, then select the scanner again.'
-          : 'The selected scanner could not be identified. Reconnect it or use Pair.'
-      );
-    }
-    const versionAtRequest = statusChangeVersion;
     await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED, {
-      profileId: profile.id,
-      preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
-      enableAutostart: true,
-      trigger: 'setup_reconnect'
+      enableAutostart: true
     });
-    if (statusChangeVersion === versionAtRequest)
-      setStatus(
-        els.connectionStatus,
-        'Reconnect requested. Checking connection…',
-        'info'
-      );
+    await refreshStatus();
   } catch (error) {
-    const message = error.message || 'Reconnect failed.';
-    setStatus(els.connectionStatus, message, 'error');
+    setStatus(els.connectionStatus, error.message, 'error');
     setButtons({ canConnect: true, canDisconnect: false });
   }
 }
 
-async function disconnectActivePort(options = {}) {
-  const reply = await sendScannerDaemonCommand(
-    SCANNER_DAEMON_ACTIONS.DISCONNECT,
-    {
-      trigger: 'setup_disconnect'
-    }
-  );
-  applyDaemonStatus(reply.status);
-  setButtons({ canConnect: true, canDisconnect: false });
-  if (!options.quiet)
-    setStatus(
-      els.connectionStatus,
-      'Background scanner disconnected.',
-      'warning'
-    );
+async function disconnectActivePort() {
+  await sendScannerDaemonCommand(SCANNER_DAEMON_ACTIONS.DISCONNECT);
+  await refreshStatus();
 }
 
 function setButtons({ canConnect, canDisconnect }) {

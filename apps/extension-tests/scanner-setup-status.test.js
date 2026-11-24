@@ -34,6 +34,14 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
   );
   let listener, releaseCommand, commandStarted;
   const pairingWindows = [];
+  let reader = {
+    status: {
+      state: 'connected',
+      profileId,
+      lastKnownCaptureAt: '2026-11-11T15:20:00Z'
+    },
+    source: 'cached'
+  };
   globalThis.document = {
     getElementById: (id) => nodes[id]
   };
@@ -72,9 +80,7 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
         if (message.action === 'scannerDaemon.getStatus') {
           done({
             success: true,
-            status: { state: 'connected', profileId },
-            source: 'cached',
-            captureError: true
+            ...reader
           });
         } else {
           releaseCommand = done;
@@ -83,30 +89,34 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       }
     }
   };
-  const live = (state) =>
-    listener({
-      action: 'scannerDaemon.statusChanged',
+  const live = async (state) => {
+    reader = {
+      source: 'live',
       status: {
         state,
         profileId,
-        captureCount: 2,
-        lastCaptureAt: '2026-11-11T15:20:00Z',
         lastError: state === 'error' ? 'Cable unavailable' : ''
       }
-    });
+    };
+    listener({ action: 'scannerDaemon.statusChanged', status: reader.status });
+    await Promise.resolve();
+  };
   try {
     const { initializeScannerSettings } =
       await import('../extension/scanner-settings.js?status-regression');
     initializeScannerSettings();
     await Promise.resolve();
-    assert.equal(nodes.connectionStatus.textContent, 'Connection unknown');
+    assert.match(
+      nodes.connectionStatus.textContent,
+      /^Connection unknown: Last known capture/
+    );
     assert.equal(nodes.connectGrantedBtn.hidden, false);
-    live('error');
+    await live('error');
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
     nodes.requestPortBtn.listeners.click();
     assert.deepEqual(pairingWindows, [
       {
-        url: `chrome-extension://vaxlink-test/scanner-pairing.html?profile=${profileId}`,
+        url: `chrome-extension://vaxlink-test/scanner-pairing.html`,
         type: 'normal',
         width: 500,
         height: 440,
@@ -114,31 +124,24 @@ test('scanner errors stay visible and command acknowledgements cannot claim live
       }
     ]);
     assert.match(nodes.connectionStatus.textContent, /Cable unavailable/);
-    for (const updateBeforeAcknowledgement of [false, true]) {
-      live('waiting_for_device');
-      const started = new Promise((resolve) => {
-        commandStarted = resolve;
-      });
-      nodes.connectGrantedBtn.listeners.click();
-      await started;
-      if (updateBeforeAcknowledgement) live('connected');
-      releaseCommand({
-        success: true,
-        status: { state: 'connected', profileId }
-      });
-      // The command's controlled promise has resolved. Let its UI continuation run.
-      await Promise.resolve();
-      assert.equal(
-        nodes.connectionStatus.className,
-        updateBeforeAcknowledgement ? 'status success' : 'status info'
-      );
-      assert.match(
-        nodes.connectionStatus.textContent,
-        updateBeforeAcknowledgement
-          ? /^Connected$/
-          : /Connecting|Checking connection/
-      );
-    }
+    await live('waiting_for_device');
+    const started = new Promise((resolve) => {
+      commandStarted = resolve;
+    });
+    const reconnect = nodes.connectGrantedBtn.listeners.click();
+    await started;
+    assert.equal(nodes.connectionStatus.textContent, 'Connecting…');
+    releaseCommand({
+      success: true,
+      status: { state: 'connected', profileId }
+    });
+    await reconnect;
+    await new Promise(setImmediate);
+    assert.equal(nodes.connectionStatus.className, 'status info');
+    assert.equal(nodes.connectionStatus.textContent, 'Disconnected');
+    await live('connected');
+    assert.equal(nodes.connectionStatus.className, 'status success');
+    assert.equal(nodes.connectionStatus.textContent, 'Connected');
   } finally {
     delete globalThis.document;
     delete globalThis.chrome;

@@ -1,16 +1,19 @@
 import {
   SCANNER_DAEMON_ACTIONS,
-  normalizeScannerPortInfo
+  normalizeScannerPortInfo,
+  selectGrantedPort
 } from './scanner/scanner-daemon-shared.js';
-import { getSerialScannerProfile } from './scanner/serial-profiles.js';
 import {
+  ZEBRA_USB_VENDOR_ID,
+  getSerialScannerProfile,
+  portMatchesProfile
+} from './scanner/serial-profiles.js';
+import {
+  getGrantedSerialScannerPorts,
   isWebSerialSupported,
   requestSerialScannerPort
 } from './scanner/serial-provider.js';
 
-const profile = getSerialScannerProfile(
-  new URLSearchParams(window.location.search).get('profile')
-);
 const chooseButton = document.getElementById('chooseScannerBtn');
 const status = document.getElementById('pairingStatus');
 document.getElementById('closePairingBtn').addEventListener('click', () => {
@@ -28,16 +31,34 @@ chooseButton.addEventListener('click', async () => {
     showStatus('Waiting for scanner selection…');
     // The browser needs a click in this window. Opening it from Pair does not
     // transfer the toolbar popup's permission to show a device chooser.
-    const port = await requestSerialScannerPort(profile);
-    showStatus('Scanner selected. Requesting connection…');
+    const port = await requestSerialScannerPort();
+    const info = normalizeScannerPortInfo(port.getInfo());
+    const profile = getSerialScannerProfile(
+      info?.usbVendorId === ZEBRA_USB_VENDOR_ID
+        ? 'zebra-ds8178-usb-cdc'
+        : 'generic-usb-cdc'
+    );
+    if (!info) throw new Error('The selected scanner could not be identified.');
+    const selection = selectGrantedPort(
+      await getGrantedSerialScannerPorts(),
+      profile,
+      info,
+      portMatchesProfile
+    );
+    if (!selection.port) {
+      throw new Error(
+        selection.reason === 'ambiguous'
+          ? 'More than one scanner matches. Unplug the extra scanner, then choose again.'
+          : 'The selected scanner is no longer available.'
+      );
+    }
+    showStatus('Connecting scanner…');
     await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
-          action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+          action: SCANNER_DAEMON_ACTIONS.SELECT,
           profileId: profile.id,
-          preferredPortInfo: normalizeScannerPortInfo(port.getInfo()),
-          enableAutostart: true,
-          trigger: 'pairing_permission_granted'
+          preferredPortInfo: info
         },
         (response) => {
           if (chrome.runtime.lastError)
@@ -56,7 +77,7 @@ chooseButton.addEventListener('click', async () => {
   } catch (error) {
     showStatus(
       error.name === 'NotFoundError'
-        ? 'No scanner selected. Choose scanner to try again.'
+        ? 'No scanner selected. Choose Connect scanner to try again.'
         : error.message || 'Scanner pairing failed.',
       error.name !== 'NotFoundError'
     );

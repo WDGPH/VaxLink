@@ -11,6 +11,7 @@
     ENSURE: 'scannerDaemon.ensure',
     GET_STATUS: 'scannerDaemon.getStatus',
     CONNECT_GRANTED: 'scannerDaemon.connectGranted',
+    SELECT: 'scannerDaemon.select',
     DISCONNECT: 'scannerDaemon.disconnect',
     ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
     STATUS_CHANGED: 'scannerDaemon.statusChanged',

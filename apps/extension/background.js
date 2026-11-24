@@ -73,6 +73,7 @@ let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
 let scannerStatusWriteQueue = Promise.resolve();
+let scannerControlQueue = Promise.resolve();
 let scannerLockSessionPromise = null;
 let iconInitPromise = null;
 const WORKFLOW_MODE_KEY = 'vaxlink_workflow_mode_v1';
@@ -287,7 +288,11 @@ function persistScannerStatusSnapshot(snapshot) {
   const result = scannerStatusWriteQueue
     .catch(() => undefined)
     .then(async () => {
-      const stored = await getStorage([SCANNER_STATUS_SNAPSHOT_KEY]);
+      const stored = await getStorage([
+        SCANNER_STATUS_SNAPSHOT_KEY,
+        SCANNER_DAEMON_ENABLED_KEY,
+        SCANNER_PORT_INFO_STORAGE_KEY
+      ]);
       const previous = normalizeScannerStatusSnapshot(
         stored[SCANNER_STATUS_SNAPSHOT_KEY]
       );
@@ -307,10 +312,13 @@ function persistScannerStatusSnapshot(snapshot) {
       };
       if (normalized.selectionRequired)
         values[SCANNER_DAEMON_ENABLED_KEY] = false;
-      if (normalized.profileId) {
-        values[SCANNER_PROFILE_STORAGE_KEY] = normalized.profileId;
-      }
-      if (normalized.portInfo) {
+      // An old install can have a profile without a saved port identity.
+      if (
+        normalized.state === SCANNER_STATUS_STATES.CONNECTED &&
+        normalized.portInfo &&
+        stored[SCANNER_DAEMON_ENABLED_KEY] === true &&
+        !stored[SCANNER_PORT_INFO_STORAGE_KEY]
+      ) {
         values[SCANNER_PORT_INFO_STORAGE_KEY] = normalized.portInfo;
       }
       await setStorage(values);
@@ -403,7 +411,17 @@ async function sendScannerDaemonMessage(message) {
   return sendRuntimeMessage({ ...message, target: SCANNER_DAEMON_TARGET });
 }
 
-async function maybeStartScannerDaemon(trigger = 'startup') {
+function queueScannerControl(task) {
+  const pending = scannerControlQueue.then(task);
+  scannerControlQueue = pending.catch(() => undefined);
+  return pending;
+}
+
+function maybeStartScannerDaemon(trigger = 'startup') {
+  return queueScannerControl(() => startConfiguredScanner(trigger));
+}
+
+async function startConfiguredScanner(trigger) {
   const bootstrap = await getScannerBootstrapState();
   if (
     !bootstrap.enabled ||
@@ -421,6 +439,64 @@ async function maybeStartScannerDaemon(trigger = 'startup') {
     trigger
   });
   return { started: true, status: response?.status || bootstrap.status };
+}
+
+async function stopConfiguredScanner() {
+  const reply = await sendScannerDaemonMessage({
+    action: SCANNER_DAEMON_ACTIONS.DISCONNECT
+  });
+  if (!reply?.success) {
+    throw new Error(
+      reply?.error || 'Could not confirm that the scanner stopped.'
+    );
+  }
+  return reply;
+}
+
+function isScannerSetupPage(sender) {
+  return (
+    sender.id === chrome.runtime.id &&
+    sender.url?.split('?')[0] === chrome.runtime.getURL('scanner-pairing.html')
+  );
+}
+
+async function connectConfiguredScanner(request) {
+  const bootstrap = await getScannerBootstrapState();
+  const selected = request.action === SCANNER_DAEMON_ACTIONS.SELECT;
+  const requestedPort = normalizeScannerPortInfo(request.preferredPortInfo);
+  const profileId = String(
+    request.profileId || bootstrap.profileId || ''
+  ).trim();
+  const portInfo = requestedPort || bootstrap.portInfo;
+  if (!profileId) throw new Error('Connect a scanner before reconnecting.');
+  if (selected && !requestedPort)
+    throw new Error('The selected scanner could not be identified.');
+
+  if (selected && (await hasScannerDaemonDocument())) {
+    // Keep the previous selection if its port cannot be closed.
+    await stopConfiguredScanner();
+    await scannerStatusWriteQueue.catch(() => undefined);
+  }
+  const values = {
+    [SCANNER_PROFILE_STORAGE_KEY]: profileId,
+    [SCANNER_PORT_INFO_STORAGE_KEY]: portInfo,
+    [SCANNER_DAEMON_ENABLED_KEY]:
+      selected || request.enableAutostart === true || bootstrap.enabled
+  };
+  if (selected) await setStorage(values);
+  const reply = await sendScannerDaemonMessage({
+    action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
+    profileId,
+    preferredPortInfo: portInfo
+  });
+  if (!reply?.success)
+    throw new Error(reply?.error || 'Scanner reconnect failed.');
+  if (!selected) {
+    if (!request.profileId) delete values[SCANNER_PROFILE_STORAGE_KEY];
+    if (!requestedPort) delete values[SCANNER_PORT_INFO_STORAGE_KEY];
+    await setStorage(values);
+  }
+  return { success: true, accepted: true };
 }
 
 // A hardware scanner can fire twice on one vial (issue #25). Inventory mode is
@@ -2892,7 +2968,11 @@ async function readScannerStatus() {
     scannerDaemonStatusCache.lastKnownCaptureAt ||
     scannerDaemonStatusCache.lastCaptureAt;
   const bootstrap = await getScannerBootstrapState();
-  let status = bootstrap.status;
+  let status = {
+    ...bootstrap.status,
+    profileId: bootstrap.profileId || bootstrap.status.profileId,
+    portInfo: bootstrap.portInfo || bootstrap.status.portInfo
+  };
   status.lastKnownCaptureAt =
     [cachedCaptureAt, status.lastKnownCaptureAt, status.lastCaptureAt]
       .sort()
@@ -2931,6 +3011,8 @@ async function readScannerStatus() {
         ]
           .sort()
           .at(-1) || '';
+      liveStatus.profileId ||= bootstrap.profileId;
+      liveStatus.portInfo ||= bootstrap.portInfo;
       if (liveStatus.lastCaptureAt) captureSource = 'live';
       status = liveStatus;
       source = 'live';
@@ -3133,69 +3215,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED) {
-    (async () => {
-      const values = {};
-      const requestedProfileId = String(request.profileId || '').trim();
-      const requestedPortInfo = normalizeScannerPortInfo(
-        request.preferredPortInfo
-      );
-      if (requestedProfileId) {
-        values[SCANNER_PROFILE_STORAGE_KEY] = requestedProfileId;
-      }
-      if (requestedPortInfo) {
-        values[SCANNER_PORT_INFO_STORAGE_KEY] = requestedPortInfo;
-      }
-      if (request.enableAutostart === true) {
-        values[SCANNER_DAEMON_ENABLED_KEY] = true;
-      }
-      if (Object.keys(values).length) {
-        await setStorage(values);
-      }
-      const bootstrap = await getScannerBootstrapState();
-      if (!bootstrap.profileId) {
-        throw new Error('No scanner profile is configured yet.');
-      }
-      const reply = await sendScannerDaemonMessage({
-        action: SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED,
-        profileId: bootstrap.profileId,
-        preferredPortInfo: bootstrap.portInfo,
-        trigger: request.trigger || 'manual'
-      });
-      if (!reply?.success)
-        throw new Error(reply?.error || 'Scanner reconnect failed');
-      sendResponse({ success: true, accepted: true, status: bootstrap.status });
-    })().catch((error) => {
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.CONNECT_GRANTED ||
+    request.action === SCANNER_DAEMON_ACTIONS.SELECT
+  ) {
+    if (
+      request.action === SCANNER_DAEMON_ACTIONS.SELECT &&
+      !isScannerSetupPage(sender)
+    ) {
       sendResponse({
         success: false,
-        error: error?.message || 'Scanner reconnect failed'
+        error: 'Open Scanner setup from Settings.'
       });
-    });
+      return false;
+    }
+    queueScannerControl(() => connectConfiguredScanner(request)).then(
+      sendResponse,
+      (error) => sendResponse({ success: false, error: error.message })
+    );
     return true;
   }
 
   if (request.action === SCANNER_DAEMON_ACTIONS.DISCONNECT) {
-    setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false })
-      .then(() =>
-        sendScannerDaemonMessage({
-          action: SCANNER_DAEMON_ACTIONS.DISCONNECT,
-          trigger: request.trigger || 'manual'
-        })
-      )
-      .then((response) =>
-        sendResponse(
-          response || {
-            success: false,
-            error: 'Scanner stop could not be confirmed.'
-          }
-        )
-      )
-      .catch((error) =>
-        sendResponse({
-          success: false,
-          error: error?.message || 'Scanner disconnect failed'
-        })
-      );
+    queueScannerControl(async () => {
+      await setStorage({ [SCANNER_DAEMON_ENABLED_KEY]: false });
+      return stopConfiguredScanner();
+    }).then(sendResponse, (error) =>
+      sendResponse({ success: false, error: error.message })
+    );
     return true;
   }
 

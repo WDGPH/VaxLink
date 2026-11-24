@@ -320,9 +320,7 @@ self.addEventListener('message', (event) => {
       desiredProfileId = String(
         data.profileId || desiredProfileId || ''
       ).trim();
-      preferredPortInfo = normalizeScannerPortInfo(
-        data.preferredPortInfo || preferredPortInfo
-      );
+      preferredPortInfo = normalizeScannerPortInfo(data.preferredPortInfo);
       void connectGrantedPort();
       break;
     case SCANNER_WORKER_MESSAGES.DISCONNECT:

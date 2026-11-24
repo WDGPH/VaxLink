@@ -32,10 +32,11 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       serial: {
         async requestPort(options) {
           requestCount++;
-          assert.deepEqual(options, { filters: [{ usbVendorId: 1504 }] });
+          assert.deepEqual(options, {});
           if (portError) throw portError;
           return { getInfo: () => info };
-        }
+        },
+        getPorts: async () => [{ getInfo: () => info }]
       }
     }
   });
@@ -90,11 +91,9 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
         'keep the window until the background accepts'
       );
       assert.deepEqual(commands.at(-1), {
-        action: 'scannerDaemon.connectGranted',
+        action: 'scannerDaemon.select',
         profileId: 'zebra-ds8178-usb-cdc',
-        preferredPortInfo: info,
-        enableAutostart: true,
-        trigger: 'pairing_permission_granted'
+        preferredPortInfo: info
       });
       if (failure === 'transport')
         chrome.runtime.lastError = { message: 'Background unavailable' };

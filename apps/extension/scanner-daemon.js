@@ -142,12 +142,8 @@ async function routeScannerScan(scan) {
 function requestConnect(message = {}) {
   const worker = ensureWorker();
   desiredConnection = {
-    profileId: String(
-      message.profileId || currentStatus.profileId || ''
-    ).trim(),
-    preferredPortInfo: normalizeScannerPortInfo(
-      message.preferredPortInfo || currentStatus.portInfo
-    ),
+    profileId: String(message.profileId || '').trim(),
+    preferredPortInfo: normalizeScannerPortInfo(message.preferredPortInfo),
     trigger: message.trigger || 'manual'
   };
   worker.postMessage({

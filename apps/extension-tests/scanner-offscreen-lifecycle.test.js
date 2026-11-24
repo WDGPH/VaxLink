@@ -141,3 +141,83 @@ for (const event of ['startup', 'install']) {
     );
   });
 }
+
+test('selecting a replacement waits for the old reader before saving and starting normal capture', async () => {
+  const profileKey = 'vaxlink_serial_scanner_profile_v1';
+  const portKey = 'vaxlink_serial_scanner_port_info_v1';
+  const enabledKey = 'vaxlink_scanner_daemon_enabled_v1';
+  const oldPort = { usbVendorId: 1504, usbProductId: 1 };
+  const nextPort = { usbVendorId: 1504, usbProductId: 2 };
+  let stop;
+  let reportStop;
+  let stopping = new Promise((resolve) => {
+    reportStop = resolve;
+  });
+  const readerCalls = [];
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [profileKey]: 'zebra-ds8178-usb-cdc',
+      [portKey]: oldPort,
+      [enabledKey]: true,
+      vaxlink_workflow_mode_v1: 'inventory'
+    },
+    runtimeSendMessage(message, reply) {
+      if (message.target === 'scannerDaemon') readerCalls.push(message);
+      if (message.action === 'scannerDaemon.disconnect') {
+        stop = reply;
+        reportStop();
+      } else {
+        if (message.action === 'scannerDaemon.connectGranted') {
+          assert.equal(harness.storageData.get(portKey).usbProductId, 2);
+        }
+        reply({ success: true });
+      }
+    }
+  });
+  await harness.sendMessage({ action: 'scannerDaemon.ensure' });
+  const select = () =>
+    harness.sendMessage(
+      {
+        action: 'scannerDaemon.select',
+        profileId: 'zebra-ds8178-usb-cdc',
+        preferredPortInfo: nextPort
+      },
+      {
+        id: 'vaxlink-test',
+        url: 'chrome-extension://vaxlink-test/scanner-pairing.html'
+      }
+    );
+  const failed = select();
+  await stopping;
+  assert.deepEqual(harness.storageData.get(portKey), oldPort);
+  stop({ success: false, error: 'Close failed' });
+  assert.equal((await failed).success, false);
+  assert.equal(readerCalls.length, 1);
+
+  stopping = new Promise((resolve) => {
+    reportStop = resolve;
+  });
+  const replacement = select();
+  await stopping;
+  assert.deepEqual(harness.storageData.get(portKey), oldPort);
+  stop({ success: true });
+  assert.equal((await replacement).success, true);
+  assert.equal(readerCalls.length, 3);
+  assert.equal(readerCalls.at(-1).action, 'scannerDaemon.connectGranted');
+  assert.equal(harness.storageData.get(enabledKey), true);
+  assert.equal(harness.storageData.has('inventory_scan_batch_v1'), false);
+
+  const firstScan = '01001234567890121727123110FIRSTLOT';
+  const result = await harness.sendMessage({
+    action: 'scannerScanCaptured',
+    scan: { rawText: firstScan, source: 'web-serial' }
+  });
+  assert.equal(result.success, true);
+  assert.deepEqual(
+    Array.from(
+      harness.storageData.get('inventory_scan_batch_v1'),
+      (row) => row.raw_barcode
+    ),
+    [firstScan]
+  );
+});
