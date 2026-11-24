@@ -161,8 +161,8 @@ export class ScanQueueManager {
     return result.record;
   }
 
-  async add(record) {
-    await this.mutateRows('add', { records: [record] });
+  async add(record, { confirmExpired } = {}) {
+    await this.mutateRows('add', { records: [record], confirmExpired });
   }
 
   async addMany(records) {
@@ -456,9 +456,10 @@ function buildQueueItemMarkup(row, index, options) {
   const scannedAt = escapeHtml(formatInventoryTimestamp(row.scanned_at));
   const id = escapeHtml(row.id || '');
   const doseText = formatDoseSummary(row);
-  const useActionMarkup = options.showUseAction
-    ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
-    : '';
+  const useActionMarkup =
+    options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
+      ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
+      : '';
   const setDoseActionMarkup = `<button class="inventory-dose-set" type="button" data-set-doses-id="${id}">Set doses</button>`;
 
   return `
@@ -466,7 +467,7 @@ function buildQueueItemMarkup(row, index, options) {
       <div class="inventory-item-top">
         <div>
           <div class="inventory-item-title">${title}</div>
-          <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}</div>
+          <div class="inventory-item-meta">Lot ${lot} | ${scannedAt}${row.reference_only ? ' | Reference only' : ''}</div>
         </div>
         <div class="inventory-item-actions">
           ${useActionMarkup}

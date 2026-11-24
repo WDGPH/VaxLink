@@ -66,3 +66,47 @@ test('one deferred use consumes once, distinct uses consume again, and unknown c
   await context.finalizeDeferredPanoramaAutofill(makeUse('unknown'));
   assert.equal(harness.storageData.get(key)[1].id, 'unknown');
 });
+
+test('Local Activity preserves product names and skips lot aliases from saved rows', async () => {
+  const worker = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: {
+      [key]: [
+        {
+          id: 'legacy-alias',
+          name: 'TRAININGLOT',
+          lot: 'TRAININGLOT',
+          remaining_doses: 1
+        },
+        {
+          id: 'legacy-name',
+          name: 'Legacy vaccine',
+          lot: 'LEGACY-LOT',
+          remaining_doses: 1
+        }
+      ]
+    }
+  });
+  const { context } = createContentHarness();
+  const sender = {
+    id: 'vaxlink-test',
+    frameId: 0,
+    url: chartUrl,
+    tab: { id: 44, url: chartUrl }
+  };
+  context.chrome.runtime.sendMessage = (message, done) => {
+    void worker.sendMessage(message, sender).then(done);
+  };
+  for (const recordId of ['legacy-alias', 'legacy-name']) {
+    assert.ok(
+      await context.consumeQueueRecordAfterDeferredAutofill({
+        storageKey: key,
+        recordId
+      })
+    );
+  }
+  assert.equal(worker.storageData.get(key).length, 0);
+  const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });
+  assert.equal(data.rollup.queues.multipleUsed, 2);
+  assert.equal(data.rollup.vaccines['Legacy vaccine'], 2);
+  assert.doesNotMatch(JSON.stringify(data), /TRAININGLOT|LEGACY-LOT/);
+});

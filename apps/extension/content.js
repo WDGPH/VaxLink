@@ -272,7 +272,9 @@ function setupMessageListener() {
     }
     if (request.action === 'showScannerBarcodeFeedback') {
       if (!isScannerDeliveryContextCurrent(request.contextToken)) return false;
-      const status = request.feedback?.status;
+      const { status, lot, expiry } = request.feedback || {};
+      if (status === 'expired')
+        blockIneligibleChartUse({ lot, expiry, expiry_flag: 'expired' });
       if (status === 'missing_lot' || status === 'parse_error')
         showVaxlinkToast({ _barcodeFeedback: status });
       return false;
@@ -498,7 +500,7 @@ function buildInventoryRecordFromParsed(data, rawBarcode) {
     barcode_expiry: barcodeExpiry,
     inventory_expiry: inventoryExpiry,
     nvc_lot_expiry: data.nvc_lot_expiry || '',
-    expiry_flag: expiryStatus.flag || '',
+    expiry_flag: data.expiry_flag || expiryStatus.flag || '',
     expiry_days_remaining: expiryStatus.daysRemaining ?? '',
     expiry_source: expirySource,
     route: data.route || '',
@@ -681,7 +683,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
   try {
     let vaccineInfo = null;
     let lookupAttempted = false;
-    if (parsed.lot) {
+    if (
+      parsed.lot &&
+      !(immunization && globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed))
+    ) {
       lookupAttempted = true;
       const lookup = await lookupVaccineInfoByLot(
         parsed.lot,
@@ -747,9 +752,10 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     );
   }
 
-  const finalExpiryFlag = getExpiryStatus(
-    parsed.expiry || parsed.nvc_lot_expiry
-  ).flag;
+  const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed);
+  const finalExpiryFlag = expired
+    ? 'expired'
+    : getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
   logAnalyticsEvent('scan_captured', {
     workflow: activeWorkflowMode,
     source,
@@ -758,10 +764,18 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     expiryFlag: finalExpiryFlag
   });
 
+  if (immunization) {
+    const blocked = blockIneligibleChartUse(parsed);
+    if (blocked) return { accepted: true, ...blocked };
+  }
   const queueStorageKey = getQueueStorageKeyForWorkflow(activeWorkflowMode);
   if (queueStorageKey) {
     try {
-      const record = await saveScanToQueue(parsed, trimmed, queueStorageKey);
+      const record = await saveScanToQueue(
+        { ...parsed, expiry_flag: finalExpiryFlag },
+        trimmed,
+        queueStorageKey
+      );
       const queueKey =
         activeWorkflowMode === 'inventory' ? 'inventory' : 'multiple';
       if (record.duplicate_ignored) {
@@ -2192,36 +2206,26 @@ function resetPanoramaFundedRadioToShowAll() {
   return setPanoramaFundedRadioValue('SHOW_ALL');
 }
 
-function isExpiredPanoramaScan(data) {
-  const flag =
-    data?.expiry_flag ||
-    getExpiryStatus(
-      data?.inventory_expiry || data?.expiry || data?.nvc_lot_expiry
-    ).flag;
-  return flag === 'expired';
-}
-
-// Panorama hides expired/recalled lots from the lot dropdown unless the
-// "Display Expired and Recalled Lots" checkbox is on. Every funding-radio
-// change (e.g. answering the PF/NPF chooser) re-renders the LotInfo section
-// and resets that checkbox, so an expired scan must re-assert it before each
-// lot fill attempt or the lot silently disappears from the options.
-function ensurePanoramaExpiredRecalledLotsVisible() {
-  const input = document.querySelector(
-    'input[id*="displayExpiredRecalledCheckbox:selectBooleanCheckboxId_input"]'
-  );
-  if (!input) return 'not_found';
-  if (input.checked) return 'already';
-  const box = input.closest('.ui-chkbox')?.querySelector('.ui-chkbox-box');
-  assertPanoramaAutofillWrite();
-  if (box) box.click();
-  if (!input.checked) {
-    assertPanoramaAutofillWrite();
-    input.checked = true;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  vlog('VaxLink: enabled Display Expired and Recalled Lots');
-  return 'clicked';
+function blockIneligibleChartUse(data) {
+  if (!globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return null;
+  const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(data);
+  showVaxlinkToast({
+    lot: data.lot,
+    tradename: data.tradename,
+    generic_name: data.generic_name,
+    name: data.name,
+    expiry,
+    expiry_flag: 'expired',
+    _chartUseBlocked: true,
+    reference_only: data.reference_only === true
+  });
+  return {
+    success: false,
+    status: 'expired',
+    error: data.reference_only
+      ? 'This lot is saved for reference only.'
+      : 'Expired vaccine. Autofill stopped.'
+  };
 }
 
 // After the nurse answers the PF/NPF prompt we thread their pick through the
@@ -2599,11 +2603,9 @@ function schedulePanoramaLotOrTradeSelection(
   // re-assert -> lot options refresh) takes a few seconds; three counted
   // misses must outlast it or the chooser re-appears mid-refresh.
   const SHARED_FUNDING_MISS_GAP_MS = 1200;
-  const EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS = 2500;
   // Panorama re-renders can momentarily drop the funded radio's checked state.
-  // Re-clicking it on every such pass stacks radio AJAX requests, each of
-  // which resets the expired-lots checkbox again — visible flicker and a
-  // longer road to the lot. Re-apply at most once per cooldown.
+  // Re-clicking it on each pass stacks radio AJAX requests.
+  // Re-apply at most once per cooldown.
   const FUNDING_REAPPLY_COOLDOWN_MS = 2500;
   let lastFundingReapplyClickAt = 0;
   // While a fillable lot select exists, lot filling is silent and lands in one
@@ -2619,7 +2621,6 @@ function schedulePanoramaLotOrTradeSelection(
   // Spacing the counted passes keeps the scheduler alive across that window.
   const STABLE_PASS_GAP_MS = 700;
   let lastSharedFundingMissAt = 0;
-  let lastExpiredVisibilityClickAt = 0;
   let lastStablePassAt = 0;
   const restartSharedFundingMissWindow = () => {
     sharedFundingMisses = 0;
@@ -2646,6 +2647,10 @@ function schedulePanoramaLotOrTradeSelection(
 
   const attempt = () => {
     if (stopped) return;
+    if (blockIneligibleChartUse(data)) {
+      stop();
+      return;
+    }
     const now = Date.now();
     if (now - lastAttemptAt < minAttemptGapMs) return;
     lastAttemptAt = now;
@@ -2670,13 +2675,6 @@ function schedulePanoramaLotOrTradeSelection(
           }
           const reapplied = reapplyAnsweredPanoramaFundingChoice(data);
           if (!reapplied) {
-            // For an expired lot, assert "Display Expired and Recalled Lots"
-            // BEFORE prompting for PF/NPF: its AJAX settles while the nurse
-            // reads the prompt, so their answer only has the radio refresh
-            // left and the lot resolves without visible churn.
-            if (isExpiredPanoramaScan(data)) {
-              ensurePanoramaExpiredRecalledLotsVisible();
-            }
             showVaxlinkToast(
               {
                 ...data,
@@ -2695,23 +2693,6 @@ function schedulePanoramaLotOrTradeSelection(
             restartSharedFundingMissWindow();
             return; // wait for the radio AJAX to settle
           }
-        }
-      }
-
-      // An expired lot only appears in the dropdown while "Display Expired and
-      // Recalled Lots" is checked, and every funding-radio AJAX resets it.
-      // Click it at most once per cooldown and keep going — returning here
-      // would starve the deferred date/reason/consent fills and the 3-miss
-      // prompt whenever Panorama keeps resetting the checkbox.
-      if (
-        hasLot &&
-        isExpiredPanoramaScan(data) &&
-        now - lastExpiredVisibilityClickAt >=
-          EXPIRED_VISIBILITY_CLICK_COOLDOWN_MS
-      ) {
-        if (ensurePanoramaExpiredRecalledLotsVisible() === 'clicked') {
-          lastExpiredVisibilityClickAt = now;
-          restartSharedFundingMissWindow();
         }
       }
 
@@ -2903,6 +2884,8 @@ function isPanoramaImmunizationPage() {
 }
 
 function fillPanoramaImmunizationFields(data) {
+  const blocked = blockIneligibleChartUse(data);
+  if (blocked) return blocked;
   const sharedFundingProductLabel =
     getPanoramaSharedFundingLotProductLabel(data);
   const preserveFundingFilter = !!(
@@ -2917,13 +2900,6 @@ function fillPanoramaImmunizationFields(data) {
     // If the nurse already answered the chooser, re-apply their pick rather than
     // re-prompting; only summon the chooser when there is no recorded answer yet.
     if (!reapplyAnsweredPanoramaFundingChoice(data)) {
-      // For an expired lot, assert "Display Expired and Recalled Lots" BEFORE
-      // prompting for PF/NPF: its AJAX settles while the nurse reads the
-      // prompt, so their answer only has the radio refresh left and the lot
-      // resolves without visible churn.
-      if (isExpiredPanoramaScan(data)) {
-        ensurePanoramaExpiredRecalledLotsVisible();
-      }
       showVaxlinkToast(
         {
           ...data,
@@ -3177,7 +3153,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     gtin: record.gtin || '',
     lot: record.lot || '',
     serial: record.serial || '',
-    expiry: record.barcode_expiry || record.inventory_expiry || '',
+    expiry:
+      record.expiry || record.barcode_expiry || record.inventory_expiry || '',
     inventory_expiry: record.inventory_expiry || record.barcode_expiry || '',
     nvc_lot_expiry: record.nvc_lot_expiry || '',
     expiry_flag: record.expiry_flag || '',
@@ -3198,6 +3175,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     lookup_error: record.lookup_error || '',
     lookup_error_category: record.lookup_error_category || '',
     nvc_catalogue_version: record.nvc_catalogue_version || '',
+    reference_only: record.reference_only === true,
+    barcode_expiry: record.barcode_expiry || '',
     name:
       record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -3586,7 +3565,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
             toastDismissTimer = null;
           }
           toastRoutineSlot.innerHTML = '';
-          if (!isPanoramaAutofillCurrent(data)) return;
+          if (!isPanoramaAutofillCurrent(data) || blockIneligibleChartUse(data))
+            return;
           const radioResult = runPanoramaAutofill(data, () =>
             setPanoramaFundedRadioValue(fundedChoice)
           );
@@ -3680,7 +3660,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
     : '';
 
   const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
-    <div class="vl-toast-title">${isExpired ? '\u26a0 Expired vaccine scanned' : escapeToastHtml(label)}</div>
+    <div class="vl-toast-title">${isExpired ? 'Expired vaccine' : escapeToastHtml(label)}</div>
+    ${data._chartUseBlocked ? `<div class="vl-toast-detail">${data.reference_only ? 'Saved for reference only.' : 'Autofill stopped. Use an in-date vaccine.'}</div>` : ''}
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
     ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
     ${queuedNote}
@@ -4417,6 +4398,7 @@ async function applyNextQueueItem(options = {}) {
     const record = rows[recordIndex];
     const data = buildAutofillPayloadFromQueueRecord(record);
     if (!data) return 'no_data';
+    if (blockIneligibleChartUse(data)) return 'expired';
     data._vaxlinkOwner = ownerData._vaxlinkOwner;
     data._vaxlinkQueueContext = {
       storageKey: MULTIPLE_INJECT_QUEUE_KEY,
@@ -4673,7 +4655,7 @@ function fillPanoramaMultipleGridDate1(rowIndex, data) {
 }
 
 function fillPanoramaMultipleGridRow(rowIndex, data) {
-  if (!data) return false;
+  if (!data || globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return false;
   const rowState = getPanoramaMultipleGridRowState(rowIndex);
   const agentNeeded = !rowState.agentText;
   const dateNeeded = !rowState.dateText;

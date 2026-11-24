@@ -221,3 +221,27 @@ test('unreadable and lotless captures never enter the Immunization tray', async 
     );
   }
 });
+
+test('an expired scanner capture stays out of Immunization but Inventory can retain the stock', async () => {
+  const expired = '01001234567890121700010110TRAINING';
+  for (const idleState of ['active', 'locked']) {
+    const harness = createBackgroundHarness(null, {
+      idleState,
+      storage: { vaxlink_workflow_mode_v1: 'multiple' }
+    });
+    const rejected = await captured(harness, expired);
+    assert.equal(rejected.response?.status, 'expired');
+    assert.equal(rejected.queuedToWorkflow, false);
+    assert.equal(harness.storageData.has('multiple_inject_queue_v1'), false);
+    assert.equal(
+      harness.storageData.get(pending)?.[0].rawText,
+      idleState === 'locked' ? expired : undefined
+    );
+    if (idleState === 'locked') continue;
+    harness.storageData.set('vaxlink_workflow_mode_v1', 'inventory');
+    assert.equal((await captured(harness, expired)).queued, true);
+    const [stock] = harness.storageData.get('inventory_scan_batch_v1');
+    assert.equal(stock.expiry_flag, 'expired');
+    assert.equal(stock.raw_barcode, expired);
+  }
+});

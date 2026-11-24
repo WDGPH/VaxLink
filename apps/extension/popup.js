@@ -15,6 +15,7 @@ import {
 } from './popup-parser.js';
 import {
   buildParsedOutputMarkup,
+  escapeHtml,
   renderNVCStatus,
   formatNVCRefreshMessage,
   setButtonBusy,
@@ -307,6 +308,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (!parsedData) {
         writeOutput(
           'Scan a barcode first. Parsing runs automatically.',
+          'error'
+        );
+        return;
+      }
+
+      if (globalThis.VaxLinkExpiryDate.blocksChartUse(parsedData)) {
+        writeOutput(
+          'This vaccine is expired. Use an in-date vaccine.',
           'error'
         );
         return;
@@ -942,7 +951,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     gtin: record.gtin || '',
     lot: record.lot || '',
     serial: record.serial || '',
-    expiry: record.barcode_expiry || record.inventory_expiry || '',
+    expiry:
+      record.expiry || record.barcode_expiry || record.inventory_expiry || '',
     inventory_expiry: record.inventory_expiry || record.barcode_expiry || '',
     nvc_lot_expiry: record.nvc_lot_expiry || '',
     expiry_flag: record.expiry_flag || '',
@@ -966,6 +976,8 @@ function buildAutofillPayloadFromQueueRecord(record) {
     lookup_error: record.lookup_error || '',
     lookup_error_category: record.lookup_error_category || '',
     nvc_catalogue_version: record.nvc_catalogue_version || '',
+    reference_only: record.reference_only === true,
+    barcode_expiry: record.barcode_expiry || '',
     name:
       record.name || record.generic_name || record.tradename || record.din || ''
   };
@@ -1236,6 +1248,21 @@ function setQueueEntryOpen(open) {
   else queueEntryToggleBtn.focus();
 }
 
+function confirmExpiredTrayAdd(lot) {
+  const dialog = document.getElementById('expiredTrayDialog');
+  document.getElementById('expiredTrayMessage').textContent =
+    `Lot ${lot} has expired. You can save it for reference. VaxLink will block chart entry.`;
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.addEventListener(
+      'close',
+      () => resolve(dialog.returnValue === 'add'),
+      { once: true }
+    );
+    dialog.showModal();
+  });
+}
+
 async function addManualScanToMultipleQueue() {
   if (multipleAddInFlight) return;
   const modeSnapshot = activeMode;
@@ -1263,9 +1290,11 @@ async function addManualScanToMultipleQueue() {
     if (!baseData.scanned_at) {
       baseData.scanned_at = new Date().toISOString();
     }
-    const enriched = await enrichParsedData(baseData);
+    const enriched = await enrichParsedData(baseData, 'multiple');
     const record = buildQueueRecord(enriched, rawBarcode);
-    await multipleInjectManager.add(record);
+    const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(record);
+    if (expired && !(await confirmExpiredTrayAdd(record.lot))) return;
+    await multipleInjectManager.add(record, { confirmExpired: expired });
     clearQueueSaveFailure(noticeVersion);
     logAnalyticsEvent('queue_saved', {
       workflow: 'multiple',
@@ -1289,8 +1318,10 @@ async function addManualScanToMultipleQueue() {
     if (activeMode === modeSnapshot && currentInput) {
       closeEntry = true;
       writeOutput(
-        `✓ Added to Multiple Immunizations tray: ${label}`,
-        'success'
+        expired
+          ? `Saved for reference only: ${escapeHtml(label)}`
+          : `✓ Added to Multiple Immunizations tray: ${escapeHtml(label)}`,
+        expired ? 'warning' : 'success'
       );
     }
   } catch (error) {
@@ -1404,6 +1435,10 @@ async function addPendingScansToInventory() {
 }
 
 async function handleUseMultipleInjectRecord(record) {
+  if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) {
+    writeOutput('This vaccine is expired. Use an in-date vaccine.', 'error');
+    return;
+  }
   const data = buildAutofillPayloadFromQueueRecord(record);
   if (!data) {
     writeOutput('Saved vaccine could not be loaded.', 'error');
@@ -1578,7 +1613,11 @@ async function enrichParsedData(baseData, mode = activeMode) {
   }
 
   const chosenExpiry = baseData.expiry || vaccineInfo?.lot_expiry || null;
-  const expiryStatus = getExpiryStatus(chosenExpiry);
+  const expiredDate = globalThis.VaxLinkExpiryDate.expiredVaccineDate({
+    ...baseData,
+    nvc_lot_expiry: vaccineInfo?.lot_expiry
+  });
+  const expiryStatus = getExpiryStatus(expiredDate || chosenExpiry);
   const expirySource = baseData.expiry
     ? 'barcode'
     : vaccineInfo?.lot_expiry

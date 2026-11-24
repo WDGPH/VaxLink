@@ -654,7 +654,7 @@ function appendQueueRecord(storageKey, record, options = {}) {
 
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
-function mutateQueue(storageKey, operation, payload = {}) {
+function mutateQueue(storageKey, operation, payload = {}, popup = false) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
     .then(async () => {
@@ -702,7 +702,27 @@ function mutateQueue(storageKey, operation, payload = {}) {
       let record = null;
       let consumed = null;
       if (operation === 'add') {
-        rows = [...rows, ...payload.records];
+        const records =
+          storageKey === MULTIPLE_INJECT_QUEUE_KEY
+            ? payload.records.map((row) => {
+                if (
+                  popup &&
+                  payload.confirmExpired === true &&
+                  payload.records.length === 1
+                )
+                  return {
+                    ...row,
+                    reference_only: true,
+                    expiry_flag: 'expired'
+                  };
+                if (globalThis.VaxLinkExpiryDate.isExpiredVaccine(row))
+                  throw new Error(
+                    'Confirm saving the expired lot for reference'
+                  );
+                return row;
+              })
+            : payload.records;
+        rows = [...rows, ...records];
       } else if (operation === 'clear') {
         rows = [];
       } else if (operation === 'remove') {
@@ -711,6 +731,7 @@ function mutateQueue(storageKey, operation, payload = {}) {
         rows = rows.map((row) => {
           if (row?.id !== payload.id) return row;
           record = { ...row, ...payload.patch };
+          if (row.reference_only === true) record.reference_only = true;
           return record;
         });
       } else if (operation === 'consume') {
@@ -1160,7 +1181,10 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   parsed.barcode_expiry = parsed.expiry || '';
-  if (parsed.lot) {
+  if (
+    parsed.lot &&
+    !(immunization && globalThis.VaxLinkExpiryDate.isExpiredVaccine(parsed))
+  ) {
     const vaccineInfo = await lookupVaccineInfo(parsed.lot, {
       gtin: parsed.gtin,
       waitForDownload: immunization
@@ -1175,15 +1199,21 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     }
   }
 
-  const record = await appendQueueRecord(
-    storageKey,
-    buildQueueRecordFromParsed(parsed, scan.rawText, options.context || {}),
-    { preserveEveryScan: options.preserveEveryScan === true }
+  const draft = buildQueueRecordFromParsed(
+    parsed,
+    scan.rawText,
+    options.context || {}
   );
-  const expiryFlag =
-    record.expiry_flag ||
-    getExpiryStatus(parsed.expiry || parsed.nvc_lot_expiry).flag;
-  // Capture has already been saved. Usage counts can finish independently.
+  const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(draft);
+  const blocked = immunization && !!expiry;
+  if (expiry) draft.expiry_flag = 'expired';
+  const record = blocked
+    ? draft
+    : await appendQueueRecord(storageKey, draft, {
+        preserveEveryScan: options.preserveEveryScan === true
+      });
+  // Usage counts can finish independently of the scanner acknowledgement.
+  const expiryFlag = record.expiry_flag;
   const activity = {
     workflow: mode,
     source: scan.source || 'web-serial',
@@ -1192,7 +1222,7 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     expiryFlag
   };
   void logAnalyticsEvent('scan_captured', activity).catch(() => {});
-  if (!record.duplicate_ignored) {
+  if (!blocked && !record.duplicate_ignored) {
     void logAnalyticsEvent('queue_saved', {
       ...activity,
       queue: mode === 'inventory' ? 'inventory' : 'multiple',
@@ -1200,6 +1230,8 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     }).catch(() => {});
   }
 
+  if (blocked)
+    return { rejection: { status: 'expired', lot: record.lot, expiry } };
   return {
     queuedToWorkflow: true,
     workflow: mode,
@@ -3602,7 +3634,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'mutateQueue') {
-    mutateQueue(request.storageKey, request.operation, request.payload)
+    const popup = sender.url === chrome.runtime.getURL('popup.html');
+    mutateQueue(request.storageKey, request.operation, request.payload, popup)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
     return true;

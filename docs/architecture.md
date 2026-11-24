@@ -141,7 +141,11 @@ entry in packaged and unpacked installs. They use the existing parser, catalogue
 lookup, and background queue writer. Inventory accepts one barcode per line and
 keeps CSV export. Entry closes after a confirmed save when the input has not
 changed; failed saves and newly typed text keep the entry open. After a partial
-Inventory batch save, only the failed lines remain for correction.
+Inventory batch save, only the failed lines remain for correction. New
+Immunization entries require a lot number. If any recorded expiry date has
+passed locally, VaxLink blocks chart entry. Staff can confirm adding an expired
+lot by hand for reference in the tray. Inventory keeps expired lots for stock
+checks.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains

@@ -288,3 +288,19 @@ test('the legacy queue append enforces chart sender and record boundaries', asyn
   assert.equal((await harness.sendMessage(request, chart)).success, true);
   assert.equal(harness.storageData.get(QUEUE_KEY).length, 1);
 });
+
+test('an expired manual dose requires confirmation and remains reference only', async () => {
+  store.set(QUEUE_KEY, []);
+  const manager = makeManager();
+  const expired = row('expired', { barcode_expiry: '2000-11-23' });
+  await assert.rejects(manager.add(expired), /Confirm saving/);
+  assert.equal(store.get(QUEUE_KEY).length, 0);
+  await manager.add(expired, { confirmExpired: true });
+  assert.equal(store.get(QUEUE_KEY)[0].reference_only, true);
+  await manager.updateById('expired', {
+    barcode_expiry: '2099-11-23',
+    expiry_flag: 'valid',
+    reference_only: false
+  });
+  assert.equal(store.get(QUEUE_KEY)[0].reference_only, true);
+});

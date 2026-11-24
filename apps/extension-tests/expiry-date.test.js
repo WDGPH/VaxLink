@@ -8,6 +8,7 @@ import {
 } from '../extension/popup-parser.js';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createContentHarness } from './helpers/clinic-sim.js';
 
 test('rejects impossible expiry dates and preserves GS1 month-end dates', () => {
   for (const value of ['261340', '260000', '260230', '270229']) {
@@ -72,4 +73,52 @@ test('counts calendar days across daylight saving time', () => {
       ['unknown', null]
     ])
   );
+});
+
+test('the written expiry day remains valid until the local calendar moves past it', () => {
+  const { expiredVaccineDate } = globalThis.VaxLinkExpiryDate;
+  const vaccine = { nvc_lot_expiry: '2026-11-23T01:00:00Z' };
+  assert.equal(expiredVaccineDate(vaccine, new Date(2026, 10, 23, 23, 59)), '');
+  assert.equal(
+    expiredVaccineDate(vaccine, new Date(2026, 10, 24)),
+    vaccine.nvc_lot_expiry
+  );
+});
+
+test('a saved dose with an elapsed catalogue date or a reference-only flag cannot write chart controls', () => {
+  const notices = [];
+  const { context } = createContentHarness({
+    document: {
+      querySelector() {
+        assert.fail('Chart controls must not be read to fill this dose');
+      }
+    }
+  });
+  context.showVaxlinkToast = (notice) => notices.push(notice);
+  for (const record of [
+    {
+      lot: 'TRAIN-EXPIRED',
+      barcode_expiry: '2099-11-23',
+      inventory_expiry: '2099-11-23',
+      nvc_lot_expiry: '2000-11-23',
+      expiry_flag: 'valid'
+    },
+    {
+      lot: 'TRAIN-REFERENCE',
+      reference_only: true,
+      inventory_expiry: '2099-11-23'
+    }
+  ]) {
+    const payload = context.buildAutofillPayloadFromQueueRecord(record);
+    assert.equal(
+      context.fillPanoramaImmunizationFields(payload).status,
+      'expired'
+    );
+    assert.equal(context.fillPanoramaMultipleGridRow(0, payload), false);
+  }
+  assert.deepEqual(
+    notices.map((notice) => notice.lot),
+    ['TRAIN-EXPIRED', 'TRAIN-REFERENCE']
+  );
+  assert.equal(notices[0].expiry, '2000-11-23');
 });
