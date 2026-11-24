@@ -33,6 +33,7 @@ function fixture() {
     getFields: () => [{ closest: () => state.form }],
     getPanoramaAgentSelectors: () => [],
     getPanoramaMultiStepIndicatorKey: () => state.step,
+    getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
     Event: class {
       constructor(type) {
         this.type = type;

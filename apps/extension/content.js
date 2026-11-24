@@ -212,34 +212,37 @@ function logAnalyticsEvent(eventType, payload = {}) {
   }
 }
 
-function getScannerDeliveryContext() {
+function getScannerDeliveryContext(kind) {
   // Inspecting the same form must not invalidate a scan already in transit.
-  if (isScannerDeliveryContextCurrent(scannerDeliveryContext?.token)) {
+  if (isScannerDeliveryContextCurrent(scannerDeliveryContext?.token, kind)) {
     return scannerDeliveryContext.token;
   }
   scannerDeliveryContext = {
     token: crypto.randomUUID(),
     form: getPanoramaAutofillForm(),
     url: location.href,
-    step: getPanoramaMultiStepIndicatorKey(),
+    step: getPanoramaMultiStepIndicatorKey({ visibleOnly: true }),
+    kind: kind ?? getPanoramaFormContext({ checkReadiness: false }).kind,
     mode: activeWorkflowMode,
     generation: panoramaContextGeneration
   };
   return scannerDeliveryContext.form ? scannerDeliveryContext.token : null;
 }
 
-function isScannerDeliveryContextCurrent(token) {
+function isScannerDeliveryContextCurrent(token, kind) {
   const context = scannerDeliveryContext;
-  return (
-    !!token &&
-    context?.token === token &&
+  if (!token || context?.token !== token) return false;
+  const current =
     context.form?.isConnected &&
     context.form === getPanoramaAutofillForm() &&
     context.url === location.href &&
-    context.step === getPanoramaMultiStepIndicatorKey() &&
+    context.step === getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) &&
     context.mode === activeWorkflowMode &&
-    context.generation === panoramaContextGeneration
-  );
+    context.generation === panoramaContextGeneration &&
+    context.kind ===
+      (kind ?? getPanoramaFormContext({ checkReadiness: false }).kind);
+  if (!current) scannerDeliveryContext = null;
+  return !!current;
 }
 
 function setupMessageListener() {
@@ -252,7 +255,10 @@ function setupMessageListener() {
     vlog('autoFill message', request?.action, request?.data);
     if (request.action === 'getPanoramaIntegration') {
       const supported = isHandsFreeSupportedPage();
-      const contextToken = getScannerDeliveryContext();
+      const formContext = supported ? getPanoramaFormContext() : null;
+      const contextToken = supported
+        ? getScannerDeliveryContext(formContext.kind)
+        : null;
       const initialized = {
         listener: window.__vaxlinkMessageListenerInitialized === true,
         settings: panoramaSettingsInitialized
@@ -260,6 +266,7 @@ function setupMessageListener() {
       sendResponse({
         supported,
         contextToken,
+        formContext,
         ready:
           supported &&
           !!contextToken &&
@@ -1065,11 +1072,11 @@ function toIsoDate(value) {
   return null;
 }
 
-function getFields(selectors) {
+function getFields(selectors, scope = document) {
   const seen = new Set();
   const fields = [];
   for (const selector of selectors) {
-    const matches = document.querySelectorAll(selector);
+    const matches = scope.querySelectorAll(selector);
     for (const el of matches) {
       if (!seen.has(el)) {
         seen.add(el);
@@ -1756,8 +1763,8 @@ function getPanoramaAgentSelectors() {
   ];
 }
 
-function getPanoramaCurrentAgentSelectionText() {
-  const fields = getFields(getPanoramaAgentSelectors()).filter(
+function getPanoramaCurrentAgentSelectionText(scope) {
+  const fields = getFields(getPanoramaAgentSelectors(), scope).filter(
     canFillPanoramaControl
   );
   for (const field of fields) {
@@ -1831,16 +1838,32 @@ function hasPanoramaDeferredDetailData(data) {
   return false;
 }
 
-function getPanoramaAdministeredDateTimeFields() {
+function getPanoramaAdministeredDateTimeFields(
+  data,
+  { includeDisabled = false } = {}
+) {
+  const scope = data?._vaxlinkOwner?.form;
   return {
-    dateField: getFields([
-      'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
-      'input[id*="dateAdministedDate:dateInput_input"]'
-    ]).find((field) => canFillPanoramaControl(field) && isVisible(field)),
-    timeField: getFields([
-      'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
-      'input[id*="dateAdministedDate:timeInput:timeInput"]'
-    ]).find((field) => canFillPanoramaControl(field) && isVisible(field))
+    dateField: getFields(
+      [
+        'input[id*="immsDetailssection_dateAdministedDate:dateInput_input"]',
+        'input[id*="dateAdministedDate:dateInput_input"]'
+      ],
+      scope
+    ).find(
+      (field) =>
+        (includeDisabled || canFillPanoramaControl(field)) && isVisible(field)
+    ),
+    timeField: getFields(
+      [
+        'input[id*="immsDetailssection_dateAdministedDate:timeInput:timeInput"]',
+        'input[id*="dateAdministedDate:timeInput:timeInput"]'
+      ],
+      scope
+    ).find(
+      (field) =>
+        (includeDisabled || canFillPanoramaControl(field)) && isVisible(field)
+    )
   };
 }
 
@@ -2854,6 +2877,120 @@ function isPanoramaRecordImmsPage() {
   } catch {
     return false;
   }
+}
+
+function getPanoramaAddImmunizationTypes(section, shown) {
+  if (!/immunization\s+type\s*:/i.test(section.textContent)) return null;
+  const types = new Set();
+  let hasAddHeading = false;
+  for (const node of section.querySelectorAll(
+    'h1, h2, h3, legend, [role="heading"], div, span, p, label, strong, b, dl, tr, td, th'
+  )) {
+    const text = node.textContent.trim();
+    if (
+      text.length > 100 ||
+      !/^(add\s+immunization|immunization\s+type\s*:)/i.test(text) ||
+      !shown(node)
+    )
+      continue;
+
+    // Panorama can place the type label and value in separate elements.
+    // Use the rendered text so hidden fields cannot identify a form.
+    const visibleText = normalizeLabelText(
+      (node.innerText || '').replace(/[-–—]/g, ' ')
+    );
+    if (visibleText === 'add immunization') hasAddHeading = true;
+    if (visibleText === 'immunization type provider recorded')
+      types.add('provider_single');
+    if (visibleText === 'immunization type non provider recorded')
+      types.add('non_provider_single');
+  }
+  return hasAddHeading ? types : null;
+}
+
+function getPanoramaFormContext({ checkReadiness = true } = {}) {
+  const blocked = (kind, blockedBy) => ({ kind, ready: false, blockedBy });
+  const form = getPanoramaAutofillForm();
+  if (!form?.isConnected)
+    return blocked('unknown', 'form_missing_or_ambiguous');
+
+  const shown = (node) =>
+    isVisible(node) && getComputedStyle(node).visibility === 'visible';
+  const agent = getFields(getPanoramaAgentSelectors(), form).find((field) =>
+    shown(field.closest('.ui-selectonemenu') || field)
+  );
+  const date = getPanoramaAdministeredDateTimeFields(
+    { _vaxlinkOwner: { form } },
+    { includeDisabled: true }
+  ).dateField;
+  const detailVisible = !!agent && shown(date);
+  const gridVisible = isPanoramaMultipleImmunizationGridPage({
+    visibleOnly: true
+  });
+  if (gridVisible) {
+    if (detailVisible) return blocked('unknown', 'conflicting_controls');
+    if (!checkReadiness) return { kind: 'multiple_grid', ready: false };
+    if (isPrimeFacesAjaxBusy())
+      return blocked('multiple_grid', 'panorama_busy');
+    if (!getPanoramaMultipleGridRows().some(shown))
+      return blocked('multiple_grid', 'no_grid_rows');
+    if (!canFillPanoramaControl(getPanoramaMultipleGridAgentField(0)))
+      return blocked('multiple_grid', 'agent_control_unavailable');
+    if (!canFillPanoramaControl(getPanoramaMultipleGridDate1Field(0)))
+      return blocked('multiple_grid', 'date_control_unavailable');
+    return { kind: 'multiple_grid', ready: true };
+  }
+
+  const section = form.closest('.ui-dialog') || form;
+  const titles = [
+    ...section.querySelectorAll('h1, h2, h3, legend, .ui-dialog-title')
+  ]
+    .filter(shown)
+    .map((title) =>
+      normalizeLabelText(title.textContent.replace(/[-–—]/g, ' '))
+    );
+  const hasProviderTitle = titles.includes('add provider recorded');
+  const hasNonProviderTitle = titles.includes('add non provider recorded');
+  const step = getPanoramaMultiStepIndicatorKey({ visibleOnly: true });
+  if (step && (hasProviderTitle || hasNonProviderTitle))
+    return blocked('unknown', 'conflicting_titles');
+  const addTypes = step
+    ? null
+    : getPanoramaAddImmunizationTypes(section, shown);
+  const provider = hasProviderTitle || addTypes?.has('provider_single');
+  const nonProvider =
+    hasNonProviderTitle || addTypes?.has('non_provider_single');
+  // The type line can also appear on a multiple detail step. A step hidden
+  // inside this form is still a reason to avoid treating it as a single form.
+  if (
+    (provider && nonProvider) ||
+    (addTypes?.size &&
+      getPanoramaMultiStepIndicatorKey({ scope: section, exact: true }))
+  )
+    return blocked('unknown', 'conflicting_titles');
+  const kind = step
+    ? 'multiple_detail'
+    : provider
+      ? 'provider_single'
+      : nonProvider
+        ? 'non_provider_single'
+        : null;
+  if (!kind) return blocked('unknown', 'unrecognized_title');
+  if (!checkReadiness) return { kind, ready: false };
+  if (!agent || !canFillPanoramaControl(agent))
+    return blocked(kind, 'agent_control_unavailable');
+  if (!shown(date) || !canFillPanoramaControl(date))
+    return blocked(kind, 'date_control_unavailable');
+  if (isPrimeFacesAjaxBusy()) return blocked(kind, 'panorama_busy');
+  if (step) return { kind, ready: true };
+
+  if (
+    getPanoramaCurrentAgentSelectionText(form) ||
+    getPanoramaCurrentLotSelectionText(form) ||
+    getPanoramaCurrentTradeSelectionText(form)
+  )
+    return blocked(kind, 'already_has_vaccine');
+  return { kind, ready: true };
 }
 
 function isPanoramaImmunizationPage() {
@@ -4524,16 +4661,28 @@ let lastAutoFilledPanoramaStepKey = '';
 let lastSkippedPanoramaAgentKey = '';
 let multiStepAutoFillPending = false;
 
-function isPanoramaMultipleImmunizationGridPage() {
+function isPanoramaMultipleImmunizationGridPage({ visibleOnly = false } = {}) {
   if (!isHandsFreeSupportedPage()) return false;
   const tableBody = document.querySelector(
     'tbody[id*="historicalfactoryTable:dataTable_data"]'
   );
-  if (!tableBody) return false;
-  const hasAddRowsButton = !!document.querySelector(
+  if (
+    !tableBody ||
+    (visibleOnly &&
+      (!isVisible(tableBody) ||
+        getComputedStyle(tableBody).visibility !== 'visible'))
+  ) {
+    return false;
+  }
+  const addRowsButton = document.querySelector(
     'button[id*="historicalfactoryTable:addButtonId:commandButtonId"]'
   );
-  if (!hasAddRowsButton) return false;
+  if (!addRowsButton) return false;
+  if (visibleOnly)
+    return (
+      isVisible(addRowsButton) &&
+      getComputedStyle(addRowsButton).visibility === 'visible'
+    );
   const hasAgentField = !!document.querySelector(
     'select[id*="historicalfactoryTable:dataTable:0:immsAgentMenu:selectOneMenu_input"]'
   );
@@ -4708,8 +4857,8 @@ async function maybeAutoFillPanoramaMultipleGrid() {
   }
 }
 
-function getPanoramaCurrentTradeSelectionText() {
-  const fields = getFields(getPanoramaTradeSelectors()).filter(
+function getPanoramaCurrentTradeSelectionText(scope) {
+  const fields = getFields(getPanoramaTradeSelectors(), scope).filter(
     canFillPanoramaControl
   );
   for (const field of fields) {
@@ -4721,12 +4870,15 @@ function getPanoramaCurrentTradeSelectionText() {
   return '';
 }
 
-function getPanoramaCurrentLotSelectionText() {
-  const selectFields = getFields([
-    'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
-    'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
-  ]).filter(canFillPanoramaControl);
+function getPanoramaCurrentLotSelectionText(scope) {
+  const selectFields = getFields(
+    [
+      'select[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+      'select[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_input"]',
+      'select[id*="LotInfo:lotNumberSelect:selectOneMenu_input"]'
+    ],
+    scope
+  ).filter(canFillPanoramaControl);
   for (const field of selectFields) {
     const text = normalizeForMatch(getFieldFilledText(field));
     if (text && text !== 'select') {
@@ -4734,11 +4886,14 @@ function getPanoramaCurrentLotSelectionText() {
     }
   }
 
-  const selectedLotLabels = getFields([
-    'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-    'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
-    'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
-  ]);
+  const selectedLotLabels = getFields(
+    [
+      'label[id*="immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+      'label[id*="addimmsdetails_vaccDetailssection1_LotInfo:lotNumberSelect:selectOneMenu_label"]',
+      'label[id*="LotInfo:lotNumberSelect:selectOneMenu_label"]'
+    ],
+    scope
+  );
   for (const label of selectedLotLabels) {
     const text = normalizeForMatch(label?.textContent || '');
     if (text && text !== 'select') {
@@ -4748,16 +4903,25 @@ function getPanoramaCurrentLotSelectionText() {
   return '';
 }
 
-function getPanoramaMultiStepIndicatorKey() {
-  const nodes = Array.from(
-    document.querySelectorAll('div, span, td, th, strong, label')
-  );
+function getPanoramaMultiStepIndicatorKey({
+  scope = document,
+  visibleOnly = false,
+  exact = visibleOnly
+} = {}) {
+  const nodes = scope.querySelectorAll('div, span, td, th, strong, label');
+  const pattern = exact
+    ? /^(\d+)\s+of\s+(\d+)\s+immunizations?$/i
+    : /\b(\d+)\s+of\s+(\d+)\s+immunizations?\b/i;
   for (const node of nodes) {
     const text = String(node.textContent || '')
       .replace(/\s+/g, ' ')
       .trim();
-    const match = text.match(/\b(\d+)\s+of\s+(\d+)\s+immunizations?\b/i);
-    if (match) {
+    const match = text.match(pattern);
+    if (
+      match &&
+      (!visibleOnly ||
+        (isVisible(node) && getComputedStyle(node).visibility === 'visible'))
+    ) {
       return `${match[1]}-of-${match[2]}`;
     }
   }

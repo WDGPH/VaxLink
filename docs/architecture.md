@@ -63,6 +63,12 @@ the chart after checking unsaved work. Development and Alpha can fill training
 charts. The packaged production build can also fill production charts. Scanner
 capture and local trays remain available while chart entry is blocked.
 
+The chart integration reports the visible form and its readiness to callers.
+It distinguishes provider and non-provider single forms, the Multiple grid and
+the Multiple detail step. Conflicting headings or controls and unavailable
+fields explain why a form is unready. Reading the same form repeatedly keeps
+its delivery token. A new form, workflow or step retires the old token.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

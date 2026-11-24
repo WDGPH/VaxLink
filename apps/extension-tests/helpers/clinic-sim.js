@@ -166,6 +166,8 @@ export function createContentHarness(globals = {}) {
     window,
     document: {
       readyState: 'loading',
+      querySelector: () => null,
+      querySelectorAll: () => [],
       documentElement: {
         getAttribute: (key) => chartAttributes.get(key) || null,
         setAttribute: (key, value) => chartAttributes.set(key, value)
