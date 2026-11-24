@@ -12,6 +12,9 @@ const contentBuildAtLoad = Object.freeze({
   fingerprint: globalThis.VAXLINK_BUILD_ID || null
 });
 let panoramaSettingsInitialized = false;
+const chartActivity = isHandsFreeSupportedPage()
+  ? globalThis.VaxLinkRecentActivity.createChartRecorder()
+  : null;
 
 const HANDS_FREE_BUILD = '2026-03-11-hf-recovery-1';
 vlog(
@@ -415,6 +418,8 @@ function setupMessageListener() {
         });
         return true;
       }
+      const stage = 'detail';
+      const activity = chartActivity?.begin('single', stage);
       Promise.resolve(
         handleHandsFreeScan(
           request.scan?.rawText || '',
@@ -424,13 +429,19 @@ function setupMessageListener() {
             captureId: request.scan.captureId,
             contextToken: request.contextToken,
             scannerRoute: request.scannerRoute
-          }
+          },
+          activity
         )
       )
         .then((result) => {
           const accepted = result?.accepted !== false;
+          const activityRecording = chartActivity?.isCurrent(activity) === true;
+          if (accepted && activityRecording)
+            chartActivity.record(activity, 'scan', { decision: 'accepted' });
           sendResponse({
             accepted,
+            activityRecording: accepted && activityRecording,
+            activityStage: stage,
             success: !!result?.success,
             pending: !!result?.pending,
             status: result?.status || (result?.success ? 'success' : 'failed'),
@@ -669,7 +680,8 @@ async function handleHandsFreeScan(
   scanValue,
   source = 'unknown',
   startBy = null,
-  scannerDelivery = null
+  scannerDelivery = null,
+  activity = null
 ) {
   if (!isHandsFreeSupportedPage()) {
     return {
@@ -750,6 +762,7 @@ async function handleHandsFreeScan(
     activeWorkflowMode === 'immunization' && !scannerDelivery
       ? beginPanoramaAutofill({}, true, { automatic: true, startBy })
       : null;
+  if (activity && fillData) fillData._vaxlinkOwner.activity = activity;
 
   const immunization = activeWorkflowMode !== 'inventory';
   let parsed;
@@ -759,6 +772,10 @@ async function handleHandsFreeScan(
         ? {}
         : parseGS1BarcodeFromScanner(trimmed);
   } catch (error) {
+    chartActivity?.record(activity, 'barcode', {
+      result: 'malformed',
+      barcode: ''
+    });
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
     playAudioCue('error');
     if (immunization) showVaxlinkToast({ _barcodeFeedback: 'parse_error' });
@@ -774,6 +791,16 @@ async function handleHandsFreeScan(
     };
   }
   if (immunization && !String(parsed.lot || '').trim()) {
+    if (chartActivity?.isCurrent(activity)) {
+      chartActivity.record(activity, 'barcode', {
+        result: 'missing_lot',
+        barcode: globalThis.VaxLinkRecentActivity.scannedBarcode(trimmed)
+      });
+      chartActivity.record(activity, 'nvc_lookup', {
+        result: 'no_lot',
+        catalogueVersion: null
+      });
+    }
     logAnalyticsEvent('barcode_missing_lot', {
       workflow: activeWorkflowMode,
       source
@@ -786,6 +813,11 @@ async function handleHandsFreeScan(
       error: 'The barcode has no lot number'
     };
   }
+  if (chartActivity?.isCurrent(activity))
+    chartActivity.record(activity, 'barcode', {
+      result: 'parsed',
+      barcode: globalThis.VaxLinkRecentActivity.scannedBarcode(trimmed)
+    });
   logAnalyticsEvent('parse_success', {
     workflow: activeWorkflowMode,
     source,
@@ -807,6 +839,17 @@ async function handleHandsFreeScan(
         parsed.gtin,
         activeWorkflowMode !== 'inventory'
       );
+      if (chartActivity?.isCurrent(activity)) {
+        const diagnostics = globalThis.VaxLinkRecentActivity;
+        chartActivity.record(activity, 'nvc_lookup', {
+          result: diagnostics.lookupResult(lookup),
+          catalogueVersion: diagnostics.catalogueVersion(
+            lookup?.catalogueVersion
+          )
+            ? lookup.catalogueVersion
+            : null
+        });
+      }
       parsed.nvc_catalogue_version = lookup?.catalogueVersion;
       if (lookup?.error) {
         parsed.lookup_error = lookup.error;
@@ -842,6 +885,10 @@ async function handleHandsFreeScan(
       });
     }
   } catch (error) {
+    chartActivity?.record(activity, 'nvc_lookup', {
+      result: 'unavailable',
+      catalogueVersion: null
+    });
     console.warn('Hands-free lookup error:', error);
     logAnalyticsEvent('lookup_error', {
       workflow: activeWorkflowMode,
@@ -1136,6 +1183,7 @@ function initHandsFreeScanner() {
     window.addEventListener(type, () => {
       clearGridCarry();
       cancelPanoramaAutofill();
+      if (type === 'pagehide') chartActivity?.flush();
     });
   }
   window.addEventListener('blur', invalidateAutomaticPanoramaContext);
@@ -1835,35 +1883,58 @@ function panoramaDateTimeHasValue(value) {
   return /[a-z0-9]/i.test(String(value || ''));
 }
 
-function getPanoramaDeferredDetailFieldsNeedingReview(data) {
+const PANORAMA_DETAIL_FIELD_LABELS = {
+  date: 'administration date',
+  time: 'administration time',
+  reason: 'Reason for Immunization',
+  consent: 'Consent for Service'
+};
+
+function getPanoramaDeferredDetailFieldsNeedingReview(data, observed) {
   const scope = data?._vaxlinkOwner?.form;
   const administered = getPanoramaAdministeredDateTimeValues(data);
   const { dateField, timeField } = getPanoramaAdministeredDateTimeFields(data, {
     includeDisabled: true
   });
-  const fields = [];
-  if (administered.date && !panoramaDateTimeHasValue(dateField?.value))
-    fields.push('administration date');
-  if (administered.time && !panoramaDateTimeHasValue(timeField?.value))
-    fields.push('administration time');
-  if (
-    reasonAutofillEnabled &&
-    !panoramaSelectAutofillSatisfied(
-      getPanoramaReasonForImmunizationSelectors(),
-      scope
-    )
-  )
-    fields.push('Reason for Immunization');
-  if (
-    consentAutofillEnabled &&
-    !panoramaSelectAutofillSatisfied(getPanoramaConsentReasonSelectors(), scope)
-  )
-    fields.push('Consent for Service');
-  return fields;
+  const dateTimeStatus = (requested, field) =>
+    !requested
+      ? 'not_requested'
+      : !field
+        ? 'missing'
+        : panoramaDateTimeHasValue(field.value)
+          ? 'match'
+          : canFillPanoramaControl(field)
+            ? 'mismatch'
+            : 'disabled';
+  const statuses = {
+    date: dateTimeStatus(administered.date, dateField),
+    time: dateTimeStatus(administered.time, timeField),
+    reason: reasonAutofillEnabled
+      ? panoramaSelectAutofillStatus(
+          getPanoramaReasonForImmunizationSelectors(),
+          scope
+        )
+      : 'not_requested',
+    consent: consentAutofillEnabled
+      ? panoramaSelectAutofillStatus(getPanoramaConsentReasonSelectors(), scope)
+      : 'not_requested'
+  };
+  if (observed) Object.assign(observed, statuses);
+  return Object.keys(statuses).filter((key) => {
+    const status = statuses[key];
+    // Missing or disabled Reason and Consent controls need no write.
+    return (
+      status === 'mismatch' ||
+      ((key === 'date' || key === 'time') &&
+        (status === 'missing' || status === 'disabled'))
+    );
+  });
 }
 
-function hasPanoramaDeferredDetailFieldsFilled(data) {
-  return getPanoramaDeferredDetailFieldsNeedingReview(data).length === 0;
+function hasPanoramaDeferredDetailFieldsFilled(data, observed) {
+  return (
+    getPanoramaDeferredDetailFieldsNeedingReview(data, observed).length === 0
+  );
 }
 
 function fillPanoramaMaskedTextInput(
@@ -1951,10 +2022,12 @@ function getPanoramaConsentReasonValue(data) {
   return explicit || 'Consent obtained';
 }
 
-function panoramaSelectAutofillSatisfied(selectors, scope) {
-  return getFields(selectors, scope).every(
-    (field) => !canFillPanoramaControl(field) || !!field.value
-  );
+function panoramaSelectAutofillStatus(selectors, scope) {
+  const fields = getFields(selectors, scope);
+  if (!fields.length) return 'missing';
+  const editable = fields.filter(canFillPanoramaControl);
+  if (!editable.length) return 'disabled';
+  return editable.every((field) => field.value) ? 'match' : 'mismatch';
 }
 
 function getPanoramaDefaultOption(field, desiredText) {
@@ -2571,6 +2644,9 @@ function setPanoramaFundedRadioValue(value) {
 function blockIneligibleChartUse(data) {
   if (!globalThis.VaxLinkExpiryDate.blocksChartUse(data)) return null;
   const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(data);
+  chartActivity?.record(data._vaxlinkOwner?.activity, 'stop', {
+    reason: 'expired'
+  });
   showVaxlinkToast({
     lot: data.lot,
     tradename: data.tradename,
@@ -2938,6 +3014,7 @@ function recordFundingComparison(data, outcome) {
   )
     return;
   owner.fundingComparisonRecorded = true;
+  chartActivity?.record(owner.activity, 'funding_comparison', { outcome });
   logAnalyticsEvent('funding_comparison', {
     workflow: data._vaxlinkQueueContext?.workflow || owner.mode,
     outcome
@@ -2960,6 +3037,7 @@ function schedulePanoramaLotOrTradeSelection(
   const hasAgent = getPanoramaAgentCandidates(data).length > 0;
   const shouldTryLotOrTrade = hasLot || hasTrade;
   const shouldFillDeferredFields = hasPanoramaDeferredDetailData(data);
+  const trace = data._vaxlinkOwner.activity;
   if (!shouldTryLotOrTrade && !shouldFillDeferredFields && !hasAgent) {
     return;
   }
@@ -2986,9 +3064,10 @@ function schedulePanoramaLotOrTradeSelection(
 
   const finalizeOnResolved = options.finalizeOnResolved === true;
 
-  const stop = () => {
+  const stop = (reason = 'context', fields = {}) => {
     if (stopped) return;
     stopped = true;
+    if (reason) chartActivity?.record(trace, 'stop', { reason, ...fields });
     observer?.disconnect();
     clearTimeout(timer);
     if (stopPanoramaLotTradeWatcher === stop) {
@@ -2997,23 +3076,28 @@ function schedulePanoramaLotOrTradeSelection(
   };
   stopPanoramaLotTradeWatcher = stop;
 
-  const stopUnverified = () => {
+  const stopUnverified = (reason, fields) => {
+    stop(reason, fields);
     const owner = data._vaxlinkOwner;
     if (owner?.trayDose || owner?.scannerDelivery) stopPanoramaFillOwner(owner);
-    stop();
   };
 
   function finishLotMiss() {
     const owner = data._vaxlinkOwner;
     const choice = data._fundedRadioChoice;
-    if (choice) owner.fundingBucketsChecked.add(choice);
+    if (choice) {
+      owner.fundingBucketsChecked.add(choice);
+      chartActivity?.record(trace, 'lot_miss', { funding: choice });
+    }
     if (
       choice &&
       owner.fundingBucketsChecked.size < PANORAMA_FUNDING_CHOICES.length
     ) {
       showVaxlinkToast({ ...data, _fundingChoiceRequired: 'other' });
+      stop('funding');
     } else {
       const cleanup = clearPanoramaNonMatchingLot(data);
+      chartActivity?.record(trace, 'lot_cleanup', { result: cleanup });
       if (isPanoramaAutofillCurrent(data)) {
         recordDeferredAutofillResult(data, false);
         showVaxlinkToast({
@@ -3022,16 +3106,16 @@ function schedulePanoramaLotOrTradeSelection(
           _lotNeedsReview: cleanup === 'review'
         });
       }
-      stopUnverified();
+      stopUnverified(choice ? 'funding_exhausted' : 'lot_not_matched');
       return;
     }
-    stop();
   }
 
-  const attempt = (now) => {
+  const attempt = (now, wake) => {
     if (blockIneligibleChartUse(data)) {
       if (finalizeOnResolved) recordDeferredAutofillResult(data, false);
-      stopUnverified();
+      // The expiry guard already recorded this stop on the same owner.
+      stopUnverified(null);
       return;
     }
     if (isPrimeFacesAjaxBusy() || isPanoramaLotListAwaitingRefresh(data)) {
@@ -3090,10 +3174,40 @@ function schedulePanoramaLotOrTradeSelection(
       const funding = hasLot
         ? getPanoramaLotFundingChoices(widget, data.lot)
         : [];
+      if (hasLot && chartActivity?.isCurrent(trace)) {
+        const options = readPanoramaLotList();
+        chartActivity.record(trace, 'options', {
+          count: options?.rows.length ?? 0,
+          target:
+            options?.rows.some(({ text }) =>
+              panoramaLotLabelMatches(
+                text,
+                data.lot,
+                isExplicitPanoramaFundingValue(currentFunding)
+                  ? currentFunding
+                  : undefined
+              )
+            ) === true,
+          funding:
+            isExplicitPanoramaFundingValue(currentFunding) ||
+            currentFunding === 'SHOW_ALL'
+              ? currentFunding
+              : '',
+          control: options
+            ? options.control === widget?.select
+              ? 'select'
+              : 'panel'
+            : 'missing',
+          site:
+            location.hostname === PANORAMA_TRAINING_HOST
+              ? 'training'
+              : 'production'
+        });
+      }
       if (funding.length === 2 && !isPrimeFacesAjaxBusy()) {
         recordFundingComparison(data, 'both');
         showVaxlinkToast({ ...data, _fundingChoiceRequired: 'both' });
-        stop();
+        stop('funding');
         return;
       }
 
@@ -3139,12 +3253,45 @@ function schedulePanoramaLotOrTradeSelection(
       }
     }
 
+    const before =
+      shouldFillDeferredFields &&
+      resolved &&
+      hasResolvedAgent &&
+      chartActivity?.isCurrent(trace)
+        ? {}
+        : null;
+    let after = before;
     let deferredResolved =
-      !shouldFillDeferredFields || hasPanoramaDeferredDetailFieldsFilled(data);
+      !shouldFillDeferredFields ||
+      hasPanoramaDeferredDetailFieldsFilled(data, before);
     if (!deferredResolved) {
       stableSince = null;
       fillPanoramaDeferredDetailFields(data);
-      deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data);
+      if (before) after = {};
+      deferredResolved = hasPanoramaDeferredDetailFieldsFilled(data, after);
+    }
+
+    if (chartActivity?.isCurrent(trace)) {
+      const status = (requested, checked, matched) =>
+        !requested
+          ? 'not_requested'
+          : !checked
+            ? 'not_checked'
+            : matched
+              ? 'match'
+              : 'mismatch';
+      chartActivity.record(trace, 'check', {
+        wake,
+        agent: status(hasAgent, true, hasResolvedAgent),
+        lot: status(hasLot, hasResolvedAgent, resolved),
+        trade: status(!hasLot && hasTrade, hasResolvedAgent, resolved),
+        deferred: status(
+          shouldFillDeferredFields,
+          hasResolvedAgent && resolved,
+          deferredResolved
+        ),
+        ...(before ? { deferredCheck: { before, after } } : {})
+      });
     }
 
     if (
@@ -3167,7 +3314,8 @@ function schedulePanoramaLotOrTradeSelection(
       // in them is a no-op while the fields still hold the desired values.
       setTimeout(() => runDeferredPass(), 1500);
       setTimeout(() => runDeferredPass(), 3500);
-      stop();
+      // The finalizer records its verified outcome after any queue write.
+      stop(finalizeOnResolved ? null : 'settled');
     }
   };
 
@@ -3231,6 +3379,7 @@ function schedulePanoramaLotOrTradeSelection(
     }
     const now = performance.now();
     if (now >= deadline) {
+      let lastDeferredFields;
       if (finalizeOnResolved) {
         const feedback = runPanoramaAutofill(data, () => {
           const productVerified =
@@ -3246,17 +3395,29 @@ function schedulePanoramaLotOrTradeSelection(
             : { _fillFeedback: 'deadline' };
         });
         if (feedback && isPanoramaAutofillCurrent(data)) {
+          lastDeferredFields = feedback._reviewFields;
           recordDeferredAutofillResult(data, false);
           showVaxlinkToast({ ...data, ...feedback });
         }
       }
-      stopUnverified();
+      stopUnverified(
+        'deadline',
+        lastDeferredFields?.length ? { lastDeferredFields } : {}
+      );
       return;
     }
     if (now < scheduledAt) {
       armNextCheck();
       return;
     }
+    const wake =
+      lastCheckAt === -Infinity
+        ? 'initial'
+        : domHint
+          ? 'dom'
+          : now >= nextFallbackAt
+            ? 'fallback'
+            : 'stability';
     domHint = false;
     lastCheckAt = now;
     if (now >= nextFallbackAt) {
@@ -3266,11 +3427,11 @@ function schedulePanoramaLotOrTradeSelection(
         (Math.floor((now - firstCheckAt) / fallbackGapMs) + 1) * fallbackGapMs;
     }
     try {
-      runPanoramaAutofill(data, () => attempt(now));
+      runPanoramaAutofill(data, () => attempt(now, wake));
     } catch (error) {
       if (finalizeOnResolved && isPanoramaAutofillCurrent(data))
         recordDeferredAutofillResult(data, false);
-      stopUnverified();
+      stopUnverified('error');
       vlog(error.message);
     }
     if (!stopped) armNextCheck();
@@ -3462,6 +3623,10 @@ function fillPanoramaImmunizationFields(data) {
   const blocked = blockIneligibleChartUse(data);
   if (blocked) return blocked;
   const owner = data._vaxlinkOwner;
+  owner.activity ??= chartActivity?.begin(
+    owner.kind === 'multiple_detail' ? 'multiple' : 'single',
+    'detail'
+  );
   if (data.lot) {
     if (!Object.hasOwn(owner, 'initialLot')) {
       const widget = getPanoramaLotWidget();
@@ -4017,6 +4182,9 @@ async function finalizeDeferredPanoramaAutofill(data) {
     }
   }
   owner.detailOutcome = verified ? 'verified' : 'failed';
+  chartActivity?.record(owner.activity, 'stop', {
+    reason: verified ? 'settled' : 'error'
+  });
   logDeferredAutofillResult(data, verified, consumed?.record);
   if (owner.detailOutcome === 'failed') {
     await stopTrayDose(owner);
@@ -4303,7 +4471,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         title = 'Lot not found in either funding category';
     } else if (data._fillFeedback === 'deadline_details') {
       detail = data._reviewFields?.length
-        ? `Check the ${new Intl.ListFormat('en').format(data._reviewFields)} in Panorama.`
+        ? `Check the ${new Intl.ListFormat('en').format(data._reviewFields.map((field) => PANORAMA_DETAIL_FIELD_LABELS[field]))} in Panorama.`
         : 'Review the autofilled fields in Panorama.';
     }
     const catalogueStatus = catalogueMiss
@@ -4358,6 +4526,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
       durationMs,
       { persistent: true }
     );
+    chartActivity?.record(owner.activity, 'funding_prompt', { reason });
     logAnalyticsEvent('funding_prompt_shown', { workflow });
     let answered = false;
     toastRoutineSlot
@@ -4378,6 +4547,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
             stopPanoramaFillOwner(data._vaxlinkOwner);
             return;
           }
+          chartActivity?.record(owner.activity, 'funding_choice', { funding });
           logAnalyticsEvent('funding_choice_made', { workflow });
           const { _fundingChoiceRequired, ...rest } = data;
           const next = { ...rest, _fundedRadioChoice: funding };

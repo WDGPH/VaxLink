@@ -191,7 +191,10 @@ export function createContentHarness(globals = {}) {
       },
       storage: {
         local: {
-          get: (keys, callback) => storageReads.push({ keys, callback })
+          get(keys, callback) {
+            if (!callback) return Promise.resolve({});
+            storageReads.push({ keys, callback });
+          }
         },
         onChanged: {
           addListener: (listener) => storageListeners.push(listener)

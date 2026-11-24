@@ -13,25 +13,167 @@
       values.includes(value);
   const integer = (min, max) => (value) =>
     Number.isSafeInteger(value) && value >= min && value <= max;
+  const outcome = choices('match', 'mismatch', 'not_requested', 'not_checked');
+  const deferredFieldNames = ['date', 'time', 'reason', 'consent'];
+  const deferredOutcome = choices(
+    'match',
+    'mismatch',
+    'not_requested',
+    'missing',
+    'disabled'
+  );
+  const deferredFields = (fields) =>
+    fields &&
+    Object.keys(fields).length === deferredFieldNames.length &&
+    deferredFieldNames.every(
+      (key) => Object.hasOwn(fields, key) && deferredOutcome(fields[key])
+    );
+  const funding = choices(
+    '',
+    'SHOW_ALL',
+    'PUBLICLY_FUNDED',
+    'NON_PUBLICLY_FUNDED'
+  );
+  const validBarcode = (value) =>
+    typeof value === 'string' &&
+    value.length <= 128 &&
+    (/^(?:01\d{14}|17\d{6}|10[!-~]|21[!-~])[!-~\x1d]*$/.test(value) ||
+      globalThis.VaxLinkGS1Parser.isRetailBarcode(value));
+  const catalogueVersion = (value) =>
+    value === null ||
+    (typeof value === 'string' &&
+      /^\d+(?:\.\d+)*$/.test(value) &&
+      value.length <= 32);
+  const wake = choices(
+    'initial',
+    'timer',
+    'fallback',
+    'dom',
+    'stability',
+    'late'
+  );
+  const details = {
+    scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
+    barcode: {
+      result: choices('parsed', 'malformed', 'missing_lot'),
+      barcode: (value) => value === '' || validBarcode(value)
+    },
+    nvc_lookup: {
+      result: choices(
+        'found',
+        'not_found',
+        'incomplete',
+        'initializing',
+        'unavailable',
+        'no_lot'
+      ),
+      catalogueVersion
+    },
+    options: {
+      target: choices(true, false),
+      count: integer(0, 100000),
+      funding,
+      control: choices('select', 'panel', 'missing'),
+      site: choices('training', 'production')
+    },
+    lot_miss: { funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED') },
+    lot_cleanup: { result: choices('empty', 'cleared', 'review') },
+    funding_comparison: { outcome: choices('single', 'both', 'unmatched') },
+    funding_prompt: { reason: choices('manual', 'both', 'other') },
+    funding_choice: {
+      funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED')
+    },
+    check: {
+      wake,
+      agent: outcome,
+      lot: outcome,
+      trade: outcome,
+      deferred: outcome
+    },
+    stop: {
+      reason: choices(
+        'settled',
+        'deadline',
+        'takeover',
+        'context',
+        'replaced',
+        'funding',
+        'funding_exhausted',
+        'lot_not_matched',
+        'different_lot_selected',
+        'expired',
+        'error'
+      )
+    }
+  };
   const common = {
     operation: integer(1, operationRange - 1),
     ms: integer(0, 24 * 60 * 60 * 1000),
     mode: choices('single', 'multiple', 'inventory'),
     stage: choices('grid', 'detail', 'none')
   };
-  const details = {
-    scan: { decision: choices('accepted', 'held', 'workflow_mismatch') }
-  };
-
   function validEvent(row) {
-    if (!row || !Object.hasOwn(details, row.event)) return false;
+    if (
+      !row ||
+      typeof row.event !== 'string' ||
+      !Object.hasOwn(details, row.event)
+    )
+      return false;
+    if (
+      row.event === 'barcode' &&
+      row.result === 'malformed' &&
+      row.barcode !== ''
+    )
+      return false;
     const fields = { ...common, ...details[row.event] };
+    if (
+      row.event === 'check' &&
+      row.stage === 'detail' &&
+      Object.hasOwn(row, 'deferredCheck')
+    )
+      fields.deferredCheck = (check) =>
+        check &&
+        Object.keys(check).length === 2 &&
+        Object.hasOwn(check, 'before') &&
+        deferredFields(check.before) &&
+        Object.hasOwn(check, 'after') &&
+        deferredFields(check.after);
+    if (row.event === 'stop' && Object.hasOwn(row, 'repeatedChecks'))
+      fields.repeatedChecks = integer(1, 100000);
+    if (
+      row.event === 'stop' &&
+      row.reason === 'deadline' &&
+      Object.hasOwn(row, 'lastDeferredFields')
+    ) {
+      fields.lastDeferredFields = (names) =>
+        Array.isArray(names) &&
+        names.length > 0 &&
+        names.length <= deferredFieldNames.length &&
+        new Set(names).size === names.length &&
+        names.every((name) => deferredFieldNames.includes(name));
+    }
     return (
       Object.keys(row).length === Object.keys(fields).length + 1 &&
       Object.entries(fields).every(
         ([key, valid]) => Object.hasOwn(row, key) && valid(row[key])
       )
     );
+  }
+
+  function scannedBarcode(value) {
+    const barcode = globalThis.VaxLinkGS1Parser.normalizeGS1BarcodeText(value);
+    return validBarcode(barcode) ? barcode : '';
+  }
+
+  function lookupResult(lookup) {
+    if (lookup && !lookup.error) return 'found';
+    if (
+      ['not_found', 'incomplete', 'initializing'].includes(
+        lookup?.errorCategory
+      )
+    )
+      return lookup.errorCategory;
+    return 'unavailable';
   }
 
   function buildDetails() {
@@ -156,9 +298,136 @@
     return { open, append, manage };
   }
 
+  function createChartRecorder() {
+    let recording = null;
+    let preferenceObserved = false;
+    let pending = [];
+    let timer = null;
+
+    async function send(message) {
+      return chrome.runtime.sendMessage(message);
+    }
+
+    function open() {
+      const current = recording;
+      if (!current || current.ticket || current.opening) return;
+      current.opening = true;
+      void send({ action: 'openRecentActivity' })
+        .then((reply) => {
+          if (current === recording && reply?.token) {
+            current.ticket = { token: reply.token, source: reply.source };
+            flush();
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          current.opening = false;
+        });
+    }
+
+    function reset(enabled = !!recording) {
+      recording = enabled
+        ? { operation: 0, ticket: null, opening: false }
+        : null;
+      pending = [];
+      clearTimeout(timer);
+      timer = null;
+      open();
+    }
+
+    function flush() {
+      clearTimeout(timer);
+      timer = null;
+      const current = recording;
+      if (!current?.ticket || !pending.length) return;
+      const rows = pending;
+      pending = [];
+      void send({ action: 'appendRecentActivity', ...current.ticket, rows })
+        .then((reply) => {
+          if (reply?.stale && recording === current) reset();
+        })
+        .catch(() => {});
+    }
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === 'local' && Object.hasOwn(changes, preferenceKey)) {
+        preferenceObserved = true;
+        reset(debugEnabled(changes[preferenceKey].newValue) === true);
+      }
+    });
+    void Promise.resolve()
+      .then(() => chrome.storage.local.get(preferenceKey))
+      .then((stored) => {
+        if (!preferenceObserved)
+          reset(debugEnabled(stored[preferenceKey]) === true);
+      })
+      .catch(() => {});
+
+    return {
+      flush,
+      begin(mode, stage) {
+        if (!recording || recording.operation >= operationRange - 1)
+          return null;
+        open();
+        return {
+          recording,
+          operation: ++recording.operation,
+          started: performance.now(),
+          mode,
+          stage
+        };
+      },
+      isCurrent(trace) {
+        return !!trace && trace.recording === recording;
+      },
+      record(trace, event, fields) {
+        if (!trace || trace.recording !== recording) return;
+        if (event === 'check') {
+          const { wake, ...fieldResults } = fields;
+          const signature = JSON.stringify(fieldResults);
+          if (signature === trace.lastCheck) {
+            trace.repeatedChecks = Math.min(
+              (trace.repeatedChecks || 0) + 1,
+              100000
+            );
+            return;
+          }
+          trace.lastCheck = signature;
+        }
+        if (event === 'options') {
+          const signature = JSON.stringify(fields);
+          if (signature === trace.lastOptions) return;
+          trace.lastOptions = signature;
+        }
+        if (event === 'stop' && trace.repeatedChecks) {
+          fields = { ...fields, repeatedChecks: trace.repeatedChecks };
+          trace.repeatedChecks = 0;
+          trace.lastCheck = undefined;
+          trace.lastOptions = undefined;
+        }
+        if (pending.length === maxBatch) pending.shift();
+        pending.push({
+          event,
+          operation: trace.operation,
+          ms: Math.max(0, Math.round(performance.now() - trace.started)),
+          mode: trace.mode,
+          stage: trace.stage,
+          ...fields
+        });
+        if (!recording.ticket) open();
+        else if (pending.length >= maxBatch) flush();
+        else if (timer === null) timer = setTimeout(flush, 50);
+      }
+    };
+  }
+
   globalThis.VaxLinkRecentActivity = {
     preferenceKey,
     sessionKey,
-    createRecorder
+    scannedBarcode,
+    lookupResult,
+    catalogueVersion,
+    createRecorder,
+    createChartRecorder
   };
 })();

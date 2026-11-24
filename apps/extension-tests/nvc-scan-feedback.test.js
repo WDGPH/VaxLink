@@ -58,7 +58,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   );
   context.showVaxlinkToast({
     _fillFeedback: 'deadline_details',
-    _reviewFields: ['administration time', 'Consent for Service']
+    _reviewFields: ['time', 'consent']
   });
   assert.match(
     routine.innerHTML,

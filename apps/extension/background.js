@@ -4546,6 +4546,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => {
         sendResponse({ success: true, ...result });
+        if (result.response?.activityRecording === true) return;
         const ms = Math.round(performance.now() - started);
         // Capture acknowledgement depends on the saved scan, not Debug.
         void traceTicket

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   createBackgroundHarness,
+  createContentHarness,
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
@@ -169,4 +171,142 @@ test('Debug storage can fail without delaying capture, and disabling preserves L
   const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });
   assert.equal(data.rollup.workflows.inventory.liveScans, 2);
   assert.equal(worker.storageData.get('inventory_scan_batch_v1').length, 2);
+});
+
+test('a missing-lot lookup and funding prompt can be retained without adding identifiers to Local Activity', async () => {
+  const worker = fixture({ storage: { [preference]: false } });
+  const requests = [];
+  const integration = createContentHarness({
+    location: new URL(chartUrl),
+    setTimeout: () => 1,
+    clearTimeout() {}
+  });
+  const { context, storageListeners, windowListeners } = integration;
+  const toast = {
+    innerHTML: '',
+    querySelector: () => null,
+    querySelectorAll: () => []
+  };
+  const form = { isConnected: true, querySelectorAll: () => [] };
+  Object.assign(context, {
+    toast,
+    getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
+    getPanoramaMultiStepIndicatorKey: () => '',
+    ensureToastHost() {},
+    escapeToastHtml: (text) => text,
+    playAudioCue() {},
+    isPanoramaImmunizationPage: () => true
+  });
+  vm.runInContext('toastRoutineSlot = toast;', context);
+  context.chrome.runtime.sendMessage = (message, done) => {
+    const response = worker.sendMessage(message, chart);
+    requests.push(done ? response.then(done) : response);
+    return response;
+  };
+  const recorder = vm.runInContext('chartActivity', context);
+  context.applyAutofillSettings({ vaxlink_auto_resolve_funding_v1: false });
+  const setDebug = async (enabled) => {
+    await worker.manage('setRecentActivity', { enabled });
+    for (const listener of storageListeners)
+      listener({ [preference]: { newValue: enabled } }, 'local');
+    await Promise.all(requests);
+  };
+
+  for (const [enabled, lot] of [
+    [false, 'TRAIN-OFF'],
+    [true, 'TRAIN-ON']
+  ]) {
+    await setDebug(enabled);
+    const activity = recorder.begin('single', 'detail');
+    const result = await context.handleHandsFreeScan(
+      `01001234567890121799123110${lot}`,
+      'web-serial',
+      null,
+      null,
+      activity
+    );
+    assert.equal(result.pending, true);
+    assert.match(toast.innerHTML, /Choose vaccine funding/);
+    if (!enabled)
+      assert.equal((await worker.manage('getRecentActivity')).retained, 0);
+  }
+  for (const listener of windowListeners.get('pagehide')) listener();
+  await Promise.all(requests);
+  const exported = await worker.manage('exportRecentActivity');
+  assert.deepEqual(
+    Array.from(exported.rows, (row) => row.event),
+    ['barcode', 'nvc_lookup', 'funding_prompt']
+  );
+  assert.equal(
+    new Set(Array.from(exported.rows, (row) => row.operation)).size,
+    1
+  );
+  assert.equal(exported.rows[1].result, 'not_found');
+  assert.match(exported.rows[0].barcode, /00123456789012.*TRAIN-ON/);
+  await setDebug(false);
+  const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });
+  assert.equal(data.rollup.funding.prompts, 2);
+  assert.equal(data.rollup.autofill.attempts, 2);
+  assert.equal(data.rollup.autofill.failure, 0);
+  assert.doesNotMatch(
+    JSON.stringify(data),
+    /TRAIN-ON|TRAIN-OFF|00123456789012/
+  );
+});
+
+test('detailed Debug checks retain statuses under the byte cap and reject field values', async () => {
+  const sessionStorage = new Map();
+  const worker = fixture({ sessionStorage });
+  const ticket = await worker.open();
+  const statuses = {
+    date: 'not_requested',
+    time: 'not_requested',
+    reason: 'not_requested',
+    consent: 'not_requested'
+  };
+  const check = {
+    event: 'check',
+    operation: 999999,
+    ms: 86000000,
+    mode: 'inventory',
+    stage: 'detail',
+    wake: 'fallback',
+    agent: 'not_requested',
+    lot: 'not_requested',
+    trade: 'not_requested',
+    deferred: 'not_requested',
+    deferredCheck: { before: statuses, after: statuses }
+  };
+  assert.equal(
+    (
+      await worker.append(ticket, [
+        {
+          ...check,
+          deferredCheck: {
+            before: statuses,
+            after: { ...statuses, time: '09:30' }
+          }
+        }
+      ])
+    ).success,
+    false
+  );
+  for (let start = 0; start < 3000; start += 32) {
+    const count = Math.min(32, 3000 - start);
+    assert.equal(
+      (await worker.append(ticket, Array(count).fill(check))).success,
+      true
+    );
+  }
+  const exported = await worker.manage('exportRecentActivity');
+  const bytes = Buffer.byteLength(
+    JSON.stringify([...sessionStorage.values()][0])
+  );
+  assert.ok(
+    exported.retained < 3000,
+    'the byte cap evicts rows before the count cap'
+  );
+  assert.equal(exported.retained + exported.overwritten, 3000);
+  assert.ok(bytes <= 1024 * 1024);
 });
