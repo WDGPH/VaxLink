@@ -178,11 +178,7 @@ test('background append waits for an in-flight queue removal', async () => {
     popupSender
   );
   await pending;
-  const append = harness.sendMessage({
-    action: 'appendQueueRecord',
-    storageKey: QUEUE_KEY,
-    record: row('new')
-  });
+  const append = harness.appendQueueRecord(QUEUE_KEY, row('new'));
   release();
   assert.equal((await remove).success, true);
   assert.equal((await append).success, true);
@@ -268,4 +264,27 @@ test('queue mutations require an authorized sender and a valid payload', async (
     if (accepted) assert.equal(saved.length, 0);
     else assert.equal(saved, original);
   }
+});
+
+test('the legacy queue append enforces chart sender and record boundaries', async () => {
+  const harness = createBackgroundHarness(makeTestNvcBundle());
+  const url =
+    'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+  const chart = { id: 'vaxlink-test', frameId: 0, url, tab: { id: 44 } };
+  const request = {
+    action: 'appendQueueRecord',
+    storageKey: QUEUE_KEY,
+    record: row('saved')
+  };
+  for (const [message, sender] of [
+    [request, { ...chart, frameId: 1 }],
+    [request, { ...chart, url: new URL('/login', url).href }],
+    [{ ...request, storageKey: 'vaxlink_workflow_mode_v1' }, chart],
+    [{ ...request, record: [] }, chart]
+  ]) {
+    assert.equal((await harness.sendMessage(message, sender)).success, false);
+  }
+  assert.equal(harness.storageData.has(QUEUE_KEY), false);
+  assert.equal((await harness.sendMessage(request, chart)).success, true);
+  assert.equal(harness.storageData.get(QUEUE_KEY).length, 1);
 });

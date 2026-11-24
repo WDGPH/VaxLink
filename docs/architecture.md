@@ -50,10 +50,12 @@ This stage reads scanner messages; parsing their vaccine fields happens later.
 
 ### Panorama integration: `content.js`
 
-Chrome loads this content script into supported Panorama tabs. It can read and
-change the page's HTML fields, but its JavaScript variables are separate from
-Panorama's own variables. This separation is why a page-library variable may be
-unavailable even when the page is still updating.
+Chrome loads this content script on the immunization entry paths declared for
+the three Panorama hosts in `manifest.json`. If a chart opened before VaxLink
+was installed or updated, refresh the chart to load the integration.
+The script can read and change the page's HTML fields. Its JavaScript variables
+are separate from Panorama's own variables. This separation is why a
+page-library variable may be unavailable even when the page is still updating.
 
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
@@ -70,8 +72,9 @@ It reads workflow settings from local storage.
 
 `popup.js`, `popup.html`, `popup-inventory.js`, and `popup-ui.js` provide manual
 scan input and preview, workflow selection, queue and inventory controls, CSV
-export, and scanner status. The popup sends fill requests to
-the selected Panorama integration.
+export, and scanner status. The popup sends fill requests to the Panorama
+integration already loaded in the selected tab. Opening the popup grants no
+access to the page in the current tab.
 
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title

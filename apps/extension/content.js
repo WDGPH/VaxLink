@@ -267,6 +267,7 @@ function setupMessageListener() {
       return true;
     }
     if (request.action === 'vaxlinkScanCaptured') {
+      if (sender.id !== chrome.runtime.id) return false;
       if (window.top !== window.self) {
         return false;
       }
@@ -311,13 +312,7 @@ function setupMessageListener() {
       return true;
     }
     if (request.action === 'autoFill') {
-      // Only the top frame should respond to autoFill messages from the popup.
-      // With all_frames:true, iframes also receive the message; if an iframe
-      // responds first with { success: false } (no matching fields), the popup
-      // sees a failure even though the main frame would succeed. Returning
-      // false lets the top frame's response through. (Edge delivers iframe
-      // responses before the main frame more often than Chrome, causing
-      // multi-inject to fail.)
+      if (sender.id !== chrome.runtime.id) return false;
       if (window.top !== window.self) {
         return false;
       }
@@ -832,12 +827,13 @@ function isHandsFreeSupportedPage() {
       return false;
     }
 
-    const path = String(window.location.pathname || '').toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
-      path.includes('/recordimms/');
+      /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(
+        window.location.pathname
+      );
     return isPanorama;
   } catch (error) {
     return false;
@@ -2815,7 +2811,9 @@ function isPanoramaRecordImmsPage() {
       host === 'panorama.prod.ehealthontario.ca' ||
       host === 'trpanoramadhir.prod.ehealthontario.ca';
     if (!isPanorama) return false;
-    return window.location.pathname.toLowerCase().includes('/recordimms/');
+    return /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(
+      window.location.pathname
+    );
   } catch {
     return false;
   }

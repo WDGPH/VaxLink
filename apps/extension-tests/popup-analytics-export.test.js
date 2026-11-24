@@ -133,9 +133,8 @@ test('a CSV export during a delayed Inventory save counts each action once', asy
       /Scans<\/th><td>3<\/td><td>10<\/td>/
     );
 
-    const capture = background.sendMessage({
-      action: 'scannerScanCaptured',
-      scan: { rawText: '01001234567890121727123110UNLISTEDLOT' }
+    const capture = background.captureScannerScan({
+      rawText: '01001234567890121727123110UNLISTEDLOT'
     });
     await savingScan.promise;
     try {

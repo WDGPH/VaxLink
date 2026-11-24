@@ -34,14 +34,12 @@ test('scans captured while Windows is locked are preserved in Multiple Inject', 
     ]
   });
 
-  const first = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: makeScan('2026-07-28T12:00:00.000Z')
-  });
-  const second = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: makeScan('2026-07-28T12:00:01.000Z')
-  });
+  const first = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:00:00.000Z')
+  );
+  const second = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:00:01.000Z')
+  );
 
   assert.equal(first.success, true);
   assert.equal(first.locked, true);
@@ -75,10 +73,9 @@ test('scans captured while Windows is locked in Single mode remain held', async 
     ]
   });
 
-  const response = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: makeScan('2026-07-28T12:05:00.000Z')
-  });
+  const response = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:05:00.000Z')
+  );
 
   assert.equal(response.success, true);
   assert.equal(response.locked, true);
@@ -96,10 +93,9 @@ test('an unlocked scan is not mislabeled as a locked queue record', async () => 
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'active'
   });
-  const response = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: makeScan('2026-07-28T12:10:00.000Z')
-  });
+  const response = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:10:00.000Z')
+  );
 
   assert.equal(response.success, true);
   assert.equal(response.locked, undefined);
@@ -121,10 +117,9 @@ test('unlocked Multiple mode queues in background without delivering to a chart'
     tabResponse: { accepted: true, success: true }
   });
 
-  const response = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: makeScan('2026-07-28T12:15:00.000Z')
-  });
+  const response = await harness.captureScannerScan(
+    makeScan('2026-07-28T12:15:00.000Z')
+  );
 
   assert.equal(response.success, true);
   assert.equal(response.queuedToWorkflow, true);
@@ -144,12 +139,9 @@ test('a rapid locked scanner burst cannot lose queue rows to storage races', asy
     storage: { vaxlink_workflow_mode_v1: 'multiple' }
   });
   const scans = Array.from({ length: 20 }, (_, index) =>
-    harness.sendMessage({
-      action: 'scannerScanCaptured',
-      scan: {
-        ...makeScan(`2026-07-28T12:20:${String(index).padStart(2, '0')}.000Z`),
-        rawText: `01001234567890121727123110BURST${String(index).padStart(2, '0')}`
-      }
+    harness.captureScannerScan({
+      ...makeScan(`2026-07-28T12:20:${String(index).padStart(2, '0')}.000Z`),
+      rawText: `01001234567890121727123110BURST${String(index).padStart(2, '0')}`
     })
   );
 

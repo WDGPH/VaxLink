@@ -20,8 +20,7 @@ const row = (rawText) => ({
   source: 'web-serial',
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
-const capture = (h, rawText) =>
-  h.sendMessage({ action: 'scannerScanCaptured', scan: row(rawText) });
+const capture = (h, rawText) => h.captureScannerScan(row(rawText));
 const options = (extra = {}) => ({
   tabs: [tab],
   storage: { vaxlink_workflow_mode_v1: 'single' },
@@ -329,4 +328,25 @@ test('a same-tab chart change during workflow reads cannot select a new context'
     'chart-A'
   );
   assert.equal(h.storageData.get(inbox)[0].rawText, 'chart-A scan');
+});
+
+test('only the hidden scanner host can submit a physical capture', async () => {
+  const h = harness();
+  const host = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
+  };
+  for (const sender of [
+    popup,
+    { id: host.id, frameId: 0, tab, url: tab.url },
+    { ...host, id: 'another-extension' }
+  ]) {
+    const response = await h.sendMessage(
+      { action: 'scannerScanCaptured', scan: row('10TESTLOT') },
+      sender
+    );
+    assert.equal(response.success, false);
+  }
+  assert.deepEqual(h.tabMessages, []);
+  assert.equal(h.storageData.has(inbox), false);
 });

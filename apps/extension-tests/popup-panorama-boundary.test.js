@@ -14,32 +14,21 @@ const code = source.slice(
 const supported =
   'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
 
-function harness(urls, handshake = false, probe = null) {
+function harness({ url, handshake = false, fillResponse = null }) {
   const messages = [];
-  let injections = 0;
-  const targets = [];
   const chrome = {
     runtime: { lastError: null },
     tabs: {
       query(_query, callback) {
-        const url = urls.shift();
         queueMicrotask(() => callback([{ id: 1, url }]));
       },
-      sendMessage(_id, message, _options, callback) {
+      sendMessage(_id, message, options, callback) {
+        assert.equal(options.frameId, 0);
         messages.push(message.action);
         if (message.action === 'getPanoramaIntegration')
           return callback({ supported: handshake });
+        if (fillResponse) return callback(fillResponse);
         chrome.runtime.lastError = { message: 'Receiving end does not exist' };
-        callback();
-        chrome.runtime.lastError = null;
-      }
-    },
-    scripting: {
-      executeScript(details, callback) {
-        targets.push(details.target);
-        if (details.func) return callback(probe ? [probe] : []);
-        injections++;
-        chrome.runtime.lastError = { message: 'No document with id' };
         callback();
         chrome.runtime.lastError = null;
       }
@@ -49,10 +38,6 @@ function harness(urls, handshake = false, probe = null) {
   vm.runInContext(code, context);
   return {
     messages,
-    targets,
-    get injections() {
-      return injections;
-    },
     send: () =>
       new Promise((resolve) =>
         context.sendAutoFillMessage(1, { lot: 'test' }, resolve)
@@ -61,44 +46,31 @@ function harness(urls, handshake = false, probe = null) {
 }
 
 test('missing tab URL requires a successful read-only handshake before delivery', async () => {
-  const h = harness([undefined]);
+  const h = harness({});
   const result = await h.send();
   assert.equal(result.success, false);
+  assert.match(result.error, /refresh it and try again/);
   assert.deepEqual(h.messages, ['getPanoramaIntegration']);
-  assert.equal(h.injections, 0);
 });
 
-test('navigation to an unsupported page prevents recovery injection', async () => {
-  const h = harness([supported, 'https://example.org/chart']);
+test('unsupported Panorama path is rejected before a fill message', async () => {
+  const h = harness({ url: new URL('/login', supported).href });
   const result = await h.send();
   assert.equal(result.success, false);
-  assert.deepEqual(h.messages, ['autoFill']);
-  assert.equal(h.injections, 0);
+  assert.deepEqual(h.messages, []);
 });
 
-test('a handshake does not authorize injection when URL metadata is unavailable', async () => {
-  const h = harness([undefined, undefined], true);
-  const result = await h.send();
-  assert.equal(result.success, false);
+test('existing chart integration can fill when the tab URL is unavailable', async () => {
+  const fillResponse = { success: true };
+  const h = harness({ handshake: true, fillResponse });
+  assert.equal(await h.send(), fillResponse);
   assert.deepEqual(h.messages, ['getPanoramaIntegration', 'autoFill']);
-  assert.equal(h.injections, 0);
 });
 
-test('recovery fails closed if the probe has no document identity', async () => {
-  const h = harness([supported, supported], false, { result: true });
+test('a chart without the integration prompts for refresh without retrying the fill', async () => {
+  const h = harness({ url: supported });
   const result = await h.send();
   assert.equal(result.success, false);
-  assert.equal(h.injections, 0);
-});
-
-test('navigation after probe cannot inject into the replacement document', async () => {
-  const h = harness([supported, supported], false, {
-    result: true,
-    documentId: 'original-document'
-  });
-  const result = await h.send();
-  assert.equal(result.success, false);
-  assert.equal(h.injections, 1);
-  assert.deepEqual(Array.from(h.targets[1].documentIds), ['original-document']);
+  assert.match(result.error, /refresh it and try again/);
   assert.deepEqual(h.messages, ['autoFill']);
 });

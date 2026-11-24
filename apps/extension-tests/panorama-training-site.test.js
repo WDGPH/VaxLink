@@ -44,48 +44,39 @@ function pagePredicates(url, { iframe = false } = {}) {
   };
 }
 
-test('manifest keeps the exact HTTPS training match without broader eHealth access', () => {
+test('manifest limits page integration to Panorama immunization entry paths', () => {
   const manifest = JSON.parse(
     readFileSync(new URL('manifest.json', extension), 'utf8')
   );
   const matches = manifest.content_scripts.flatMap((script) => script.matches);
   assert.deepEqual(
-    matches.filter((pattern) => pattern.includes('trpanorama')),
-    [`https://${TRAINING_HOST}/*`]
+    matches,
+    PANORAMA_HOSTS.flatMap((host) =>
+      ['phsdsm/ImmsWeb/pages/recordImms/*', 'ImmsWeb/pages/recordImms/*'].map(
+        (path) => `https://${host}/${path}`
+      )
+    )
   );
-  assert.equal(
-    matches.some((pattern) => pattern.includes('inputhealth')),
-    false
-  );
+  assert.deepEqual(manifest.host_permissions, ['https://nvc-cnv.canada.ca/*']);
+  assert.deepEqual(manifest.optional_host_permissions || [], []);
   const permissions = [
-    ...matches,
-    ...(manifest.host_permissions || []),
-    ...(manifest.optional_host_permissions || [])
+    ...manifest.permissions,
+    ...(manifest.optional_permissions || [])
   ];
-  assert.deepEqual(
-    permissions.filter((pattern) => pattern.includes('trpanorama')),
-    [`https://${TRAINING_HOST}/*`]
-  );
-  assert.equal(
-    permissions.some((pattern) => {
-      const host = pattern.split('/')[2] || '';
-      return host.includes('ehealthontario.ca') && host.includes('*');
-    }),
-    false
-  );
+  for (const permission of ['activeTab', 'scripting', 'tabs']) {
+    assert.equal(permissions.includes(permission), false, permission);
+  }
 });
 
 test('runtime gates recognize supported URLs and preserve the hands-free frame boundary', () => {
   // Expected columns: scanner routing, hands-free, Panorama HUD.
   const cases = [
-    ...PANORAMA_HOSTS.map((host) => [
-      `https://${host}${RECORD_PATH}`,
-      [true, true, true]
-    ]),
-    [
-      `https://${TRAINING_HOST}/training/recordImms/details?tab=1#details`,
-      [true, true, true]
-    ],
+    ...PANORAMA_HOSTS.flatMap((host) =>
+      [RECORD_PATH, RECORD_PATH.replace('/phsdsm', '')].map((path) => [
+        `https://${host}${path}?tab=1#details`,
+        [true, true, true]
+      ])
+    ),
     ...['inputhealth.com', 'clinic.inputhealth.com'].map((host) => [
       `https://${host}/chart`,
       [false, false, false]
@@ -95,6 +86,7 @@ test('runtime gates recognize supported URLs and preserve the hands-free frame b
     ...[
       `https://${TRAINING_HOST}/`,
       `https://${TRAINING_HOST}/login?next=${RECORD_PATH}#${RECORD_PATH}`,
+      `https://${TRAINING_HOST}/training/recordImms/details`,
       `https://${TRAINING_HOST}/ImmsWeb/pages/recordImms`,
       `https://www.${TRAINING_HOST}${RECORD_PATH}`,
       `https://${TRAINING_HOST}.example.org${RECORD_PATH}`,
@@ -135,13 +127,10 @@ test('background routes a Single scan to the active training chart', async () =>
       success: true
     }
   });
-  const response = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: {
-      type: 'vaxlink.scan',
-      rawText: '10TRAININGLOT1',
-      source: 'web-serial'
-    }
+  const response = await harness.captureScannerScan({
+    type: 'vaxlink.scan',
+    rawText: '10TRAININGLOT1',
+    source: 'web-serial'
   });
   assert.equal(response.success, true);
   assert.equal(harness.tabMessages.length, 2);
@@ -157,10 +146,7 @@ test('background requires an existing integration before sending to a tab withou
     tabs: [{ id: 44, active: true, currentWindow: true }],
     tabResponse: { supported: false }
   });
-  await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: { rawText: '10LOT', source: 'web-serial' }
-  });
+  await harness.captureScannerScan({ rawText: '10LOT', source: 'web-serial' });
   assert.deepEqual(
     harness.tabMessages.map(({ message }) => message.action),
     ['getPanoramaIntegration']
@@ -179,10 +165,7 @@ test('background delivers to a tab without a URL only after the integration hand
       success: true
     }
   });
-  await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: { rawText: '10LOT', source: 'web-serial' }
-  });
+  await harness.captureScannerScan({ rawText: '10LOT', source: 'web-serial' });
   assert.deepEqual(
     harness.tabMessages.map(({ message }) => message.action),
     ['getPanoramaIntegration', 'vaxlinkScanCaptured']

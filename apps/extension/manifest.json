@@ -4,14 +4,7 @@
   "version": "1.1.5",
   "version_name": "1.2.0-alpha",
   "description": "Parse GS1 vaccine barcodes and auto-fill Panorama",
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "storage",
-    "alarms",
-    "offscreen",
-    "idle"
-  ],
+  "permissions": ["storage", "alarms", "offscreen", "idle"],
   "minimum_chrome_version": "114",
   "host_permissions": ["https://nvc-cnv.canada.ca/*"],
   "icons": {
@@ -32,9 +25,12 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.panorama.prod.ehealthontario.ca/*",
-        "https://panorama.prod.ehealthontario.ca/*",
-        "https://trpanoramadhir.prod.ehealthontario.ca/*"
+        "https://www.panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/*",
+        "https://www.panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/*",
+        "https://panorama.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/*",
+        "https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/*",
+        "https://trpanoramadhir.prod.ehealthontario.ca/phsdsm/ImmsWeb/pages/recordImms/*",
+        "https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/*"
       ],
       "js": [
         "build-info.js",

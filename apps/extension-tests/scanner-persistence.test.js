@@ -12,7 +12,7 @@ const scan = (rawText) => ({
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
 const captured = (harness, rawText) =>
-  harness.sendMessage({ action: 'scannerScanCaptured', scan: scan(rawText) });
+  harness.captureScannerScan(scan(rawText));
 
 test('concurrent pending writes are serialized, including delayed saves', async () => {
   let release;
@@ -127,10 +127,8 @@ test('warning badge survives queue updates and failed acknowledgement', async ()
     false
   );
   assert.equal(harness.getBadgeText(), '!');
-  await harness.sendMessage({
-    action: 'appendQueueRecord',
-    storageKey: 'multiple_inject_queue_v1',
-    record: { id: 'queue-1' }
+  await harness.appendQueueRecord('multiple_inject_queue_v1', {
+    id: 'queue-1'
   });
   assert.equal(harness.getBadgeText(), '!');
   const sender = {

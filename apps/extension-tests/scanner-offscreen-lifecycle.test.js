@@ -208,9 +208,9 @@ test('selecting a replacement waits for the old reader before saving and startin
   assert.equal(harness.storageData.has('inventory_scan_batch_v1'), false);
 
   const firstScan = '01001234567890121727123110FIRSTLOT';
-  const result = await harness.sendMessage({
-    action: 'scannerScanCaptured',
-    scan: { rawText: firstScan, source: 'web-serial' }
+  const result = await harness.captureScannerScan({
+    rawText: firstScan,
+    source: 'web-serial'
   });
   assert.equal(result.success, true);
   assert.deepEqual(

@@ -484,6 +484,24 @@ export function createBackgroundHarness(bundle, options = {}) {
 
   return {
     sendMessage,
+    captureScannerScan(scan) {
+      return sendMessage(
+        { action: 'scannerScanCaptured', scan },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
+        }
+      );
+    },
+    appendQueueRecord(storageKey, record) {
+      return sendMessage(
+        { action: 'appendQueueRecord', storageKey, record },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/popup.html'
+        }
+      );
+    },
     startup: () => startupListeners.forEach((fn) => fn()),
     install: () => installListeners.forEach((fn) => fn()),
     removeTab: (id) => tabRemovedListeners.forEach((fn) => fn(id)),

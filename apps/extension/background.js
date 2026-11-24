@@ -918,12 +918,11 @@ function isSupportedChartUrl(urlValue) {
     const url = new URL(String(urlValue || ''));
     if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
-    const path = url.pathname.toLowerCase();
     const isPanorama =
       (host === 'www.panorama.prod.ehealthontario.ca' ||
         host === 'panorama.prod.ehealthontario.ca' ||
         host === 'trpanoramadhir.prod.ehealthontario.ca') &&
-      path.includes('/recordimms/');
+      /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(url.pathname);
     return isPanorama;
   } catch (_) {
     return false;
@@ -3297,7 +3296,18 @@ async function getWorkstationHealth(tabId) {
   return result;
 }
 
-// Listen for requests from popup
+function canChangeQueue(sender) {
+  if (sender.id !== chrome.runtime.id) return false;
+  if (sender.url === chrome.runtime.getURL('popup.html')) return true;
+  return (
+    sender.frameId === 0 &&
+    Number.isInteger(sender.tab?.id) &&
+    isSupportedChartUrl(sender.url) &&
+    (!sender.tab.url || isSupportedChartUrl(sender.tab.url))
+  );
+}
+
+// Listen for requests from extension contexts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.action === 'scannerPairing.open') {
     if (
@@ -3504,20 +3514,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (
+    ['mutateQueue', 'appendQueueRecord'].includes(request.action) &&
+    !canChangeQueue(sender)
+  ) {
+    sendResponse({
+      success: false,
+      error: 'Queue changes require the popup or a supported chart'
+    });
+    return false;
+  }
+
   if (request.action === 'mutateQueue') {
-    const popup = sender.url === chrome.runtime.getURL('popup.html');
-    const chart =
-      sender.frameId === 0 &&
-      Number.isInteger(sender.tab?.id) &&
-      isSupportedChartUrl(sender.url) &&
-      (!sender.tab.url || isSupportedChartUrl(sender.tab.url));
-    if (sender.id !== chrome.runtime.id || (!popup && !chart)) {
-      sendResponse({
-        success: false,
-        error: 'Queue changes require the popup or a supported chart'
-      });
-      return false;
-    }
     mutateQueue(request.storageKey, request.operation, request.payload)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
@@ -3525,7 +3533,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'appendQueueRecord') {
-    appendQueueRecord(request.storageKey || '', request.record || null)
+    const { storageKey, record } = request;
+    if (
+      ![MULTIPLE_INJECT_QUEUE_KEY, INVENTORY_BATCH_KEY].includes(storageKey) ||
+      !record ||
+      typeof record !== 'object' ||
+      Array.isArray(record) ||
+      typeof record.id !== 'string' ||
+      !record.id.trim()
+    ) {
+      sendResponse({ success: false, error: 'Invalid queue append' });
+      return false;
+    }
+    appendQueueRecord(storageKey, record)
       .then((record) => sendResponse({ success: true, record }))
       .catch((error) =>
         sendResponse({
@@ -3537,6 +3557,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'scannerScanCaptured') {
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL(SCANNER_DAEMON_OFFSCREEN_PATH)
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Capture requires the scanner host.'
+      });
+      return false;
+    }
     routeScanToActiveSupportedTab(request.scan || null)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => {

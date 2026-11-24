@@ -1612,7 +1612,7 @@ function isSupportedPanoramaUrl(value) {
         'panorama.prod.ehealthontario.ca',
         'trpanoramadhir.prod.ehealthontario.ca'
       ].includes(url.hostname) &&
-      url.pathname.toLowerCase().includes('/recordimms/')
+      /^\/(?:phsdsm\/)?ImmsWeb\/pages\/recordImms\//.test(url.pathname)
     );
   } catch (_) {
     return false;
@@ -1659,94 +1659,29 @@ async function sendAutoFillMessage(
   data,
   callback = handleAutoFillResponse
 ) {
-  const unsupported = () =>
-    callback({
-      success: false,
-      error: 'Open a supported Panorama immunization page.'
-    });
-  if (!(await canFillPanoramaTab(tabId))) return unsupported();
+  const chartRequired = {
+    success: false,
+    error:
+      'Open a supported Panorama immunization page. If it’s already open, refresh it and try again.'
+  };
+  if (!(await canFillPanoramaTab(tabId))) return callback(chartRequired);
   chrome.tabs.sendMessage(
     tabId,
     { action: 'autoFill', data },
     { frameId: 0 },
-    async (response) => {
+    (response) => {
       if (!chrome.runtime.lastError) return callback(response);
       const message = chrome.runtime.lastError.message || '';
-      if (!message.includes('Receiving end does not exist')) {
-        callback({ success: false, error: `Message send failed: ${message}` });
-        return;
-      }
-      // Injection requires a current URL; a handshake cannot authorize injection.
-      const tab = await getTabForFill(tabId);
-      if (!tab?.url || !isSupportedPanoramaUrl(tab.url)) return unsupported();
-      chrome.scripting.executeScript(
-        {
-          target: { tabId, frameIds: [0] },
-          func: (expectedUrl) => {
-            const url = new URL(location.href);
-            return (
-              location.href === expectedUrl &&
-              url.protocol === 'https:' &&
-              [
-                'www.panorama.prod.ehealthontario.ca',
-                'panorama.prod.ehealthontario.ca',
-                'trpanoramadhir.prod.ehealthontario.ca'
-              ].includes(url.hostname) &&
-              url.pathname.toLowerCase().includes('/recordimms/')
-            );
-          },
-          args: [tab.url]
-        },
-        (results) => {
-          const documentId = results?.[0]?.documentId;
-          if (
-            chrome.runtime.lastError ||
-            results?.[0]?.result !== true ||
-            !documentId
-          )
-            return unsupported();
-          chrome.scripting.executeScript(
-            {
-              target: { tabId, documentIds: [documentId] },
-              files: [
-                'build-info.js',
-                'panorama-agent-rules.js',
-                'shared/gs1-parser.js',
-                'shared/expiry-date.js',
-                'content.js'
-              ]
-            },
-            () => {
-              if (chrome.runtime.lastError) {
-                callback({
-                  success: false,
-                  error: `Script injection failed: ${chrome.runtime.lastError.message}`
-                });
-                return;
-              }
-              chrome.tabs.sendMessage(
-                tabId,
-                { action: 'autoFill', data },
-                { documentId },
-                callback
-              );
-            }
-          );
-        }
+      callback(
+        message.includes('Receiving end does not exist')
+          ? chartRequired
+          : { success: false, error: `Message send failed: ${message}` }
       );
     }
   );
 }
 
 function handleAutoFillResponse(response) {
-  if (chrome.runtime.lastError) {
-    writeOutput(
-      `Auto-fill failed: ${chrome.runtime.lastError.message}`,
-      'error'
-    );
-    return;
-  }
-
   if (response && response.success) {
     writeOutput('Chart auto-filled', 'success');
   } else if (response && response.pending) {
