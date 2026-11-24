@@ -29,10 +29,11 @@ export function formatNVCRefreshMessage(status) {
 
 export function renderNVCStatus(status, container, message) {
   if (!container || !status) return;
-  const summary = container.ownerDocument?.getElementById('nvcSettingsState');
-  if (summary) {
+  const details = container.ownerDocument?.getElementById(
+    'nvcCatalogueDetails'
+  );
+  if (details) {
     const published = new Date(status.releaseDate || '');
-    const lastCheck = new Date(status.lastCheckAt || '');
     const publication = Number.isFinite(published.getTime())
       ? published.toLocaleDateString('en-US', {
           month: 'short',
@@ -41,43 +42,17 @@ export function renderNVCStatus(status, container, message) {
           timeZone: 'UTC'
         })
       : '';
-    const checked = Number.isFinite(lastCheck.getTime());
-    const checkTime = checked
-      ? lastCheck.toLocaleString(undefined, {
-          month: 'short',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit'
-        })
-      : '';
-    summary.textContent = [
-      getNVCStatusLabel(status),
+    details.textContent = [
       status.releaseVersion ? `Version ${status.releaseVersion}` : '',
-      publication,
-      checked ? `Checked ${checkTime}` : 'No successful check'
+      publication
     ]
       .filter(Boolean)
       .join(' · ');
-    summary.title = checked
-      ? `Last successful check ${lastCheck.toLocaleString()}`
-      : '';
+    details.hidden = !details.textContent;
   }
   const health = message || describeNVCHealth(status);
   container.textContent = health;
   container.hidden = !health;
-}
-
-export function getNVCStatusLabel(status, now = Date.now()) {
-  if (!status?.usable)
-    return status?.state === 'refreshing' ? 'Checking' : 'Unavailable';
-  if (status.state === 'refreshing') return 'Ready · checking';
-  if (status.freshnessDegraded || status.lastError)
-    return 'Ready · check failed';
-  const age = now - Date.parse(status.lastCheckAt || '');
-  const interval = (status.autoSyncIntervalMinutes || 1440) * 60000;
-  return Number.isFinite(age) && age >= 0 && age < interval
-    ? 'Up to date'
-    : 'Ready · check due';
 }
 
 export function setButtonBusy(button, busy, busyText) {

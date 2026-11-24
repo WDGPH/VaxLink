@@ -22,10 +22,10 @@ higher than the one already uploaded to that listing.
 
 ## Channels
 
-| Channel    | Status                       | Web Store listing | Packaged manifest name | Popup badge |
-| ---------- | ---------------------------- | ----------------- | ---------------------- | ----------- |
-| Production | Active, releases from `main` | VaxLink           | `VaxLink`              | hidden      |
-| Alpha      | Prereleases from `alpha`     | VaxLink Alpha     | `VaxLink Alpha`        | shown       |
+| Channel    | Status                       | Web Store listing | Packaged manifest name |
+| ---------- | ---------------------------- | ----------------- | ---------------------- |
+| Production | Active, releases from `main` | VaxLink           | `VaxLink`              |
+| Alpha      | Prereleases from `alpha`     | VaxLink Alpha     | `VaxLink Alpha`        |
 
 `scripts/package-extension.sh prod` and `alpha` stamp the channel name and
 `version_name` into the packaged manifest. Keep channel identity out of source
@@ -135,7 +135,7 @@ Examples:
 ### Sanity checks before any store upload
 
 - Open the zip and confirm `manifest.json` has the right `name`/`version_name` for the listing.
-- Load the extracted zip unpacked and open the popup: badge present on alpha, absent on prod.
+- Load the extracted ZIP unpacked and confirm the extension name in Chrome and the version in the popup.
 - No downloaded `nvc_bundle.json`, tests, fixtures, `node_modules`, or development-only files inside the ZIP (the package script excludes them). Verify the checksum against the final ZIP before uploading.
 
 ## Repository security settings

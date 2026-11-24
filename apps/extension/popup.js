@@ -99,13 +99,6 @@ const AUTO_RESOLVE_FUNDING_KEY = 'vaxlink_auto_resolve_funding_v1';
 document.addEventListener('DOMContentLoaded', async () => {
   const version = document.getElementById('extensionVersion');
   const manifest = chrome.runtime.getManifest();
-  const name = document.getElementById('extensionName');
-  if (name && manifest.name) {
-    const channel = document.getElementById('extensionChannel');
-    if (channel && /^VaxLink(?: |$)/.test(manifest.name))
-      channel.textContent = manifest.name.slice('VaxLink'.length);
-    else name.textContent = manifest.name;
-  }
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
 

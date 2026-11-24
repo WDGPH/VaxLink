@@ -8,8 +8,7 @@ import {
 } from './helpers/clinic-sim.js';
 import {
   formatNVCRefreshMessage,
-  renderNVCStatus,
-  getNVCStatusLabel
+  renderNVCStatus
 } from '../extension/popup-ui.js';
 
 const officialUrl = 'https://nvc-cnv.canada.ca/fhir/v2/Bundle/NVC';
@@ -96,25 +95,18 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   assert.equal(restored.releaseDate, '2026-11-05');
   assert.equal(restored.lotCount, 2);
   assert.notEqual(restored.updatedAt, restored.releaseDate);
-  const summary = {};
+  const details = {};
   const container = {
     ownerDocument: {
-      getElementById: (id) => (id === 'nvcSettingsState' ? summary : null)
+      getElementById: (id) => (id === 'nvcCatalogueDetails' ? details : null)
     }
   };
   renderNVCStatus(restored, container);
-  assert.ok(
-    summary.textContent.includes(
-      'Version <img src=x onerror=alert(1)> · Nov 5, 2026 · Checked '
-    )
-  );
   assert.equal(
-    summary.title,
-    `Last successful check ${new Date(restored.lastCheckAt).toLocaleString()}`
+    details.textContent,
+    'Version <img src=x onerror=alert(1)> · Nov 5, 2026'
   );
-  renderNVCStatus({ ...restored, lastCheckAt: null }, container);
-  assert.match(summary.textContent, / · No successful check$/);
-  assert.equal(summary.title, '');
+  assert.equal(details.hidden, false);
   assert.equal(container.textContent, '');
   assert.equal(container.hidden, true);
   const missing = await status(
@@ -122,32 +114,9 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   );
   assert.equal(missing.releaseDate, null);
   assert.equal(missing.releaseVersion, null);
-  renderNVCStatus({ ...missing, lastCheckAt: null }, container);
-  assert.equal(summary.textContent, 'Ready · check due · No successful check');
-});
-
-test('compact catalogue status distinguishes a usable cache from a recent successful check', () => {
-  const now = Date.parse('2026-11-10T12:00:00Z');
-  for (const [status, label] of [
-    [{ usable: false }, 'Unavailable'],
-    [{ usable: false, state: 'refreshing' }, 'Checking'],
-    [{ usable: true }, 'Ready · check due'],
-    [{ usable: true, state: 'refreshing' }, 'Ready · checking'],
-    [
-      { usable: true, lastCheckAt: '2026-11-09T11:00:00Z' },
-      'Ready · check due'
-    ],
-    [{ usable: true, lastCheckAt: '2026-11-10T11:00:00Z' }, 'Up to date'],
-    [
-      {
-        usable: true,
-        lastCheckAt: '2026-11-10T11:00:00Z',
-        freshnessDegraded: true
-      },
-      'Ready · check failed'
-    ]
-  ])
-    assert.equal(getNVCStatusLabel(status, now), label);
+  renderNVCStatus(missing, container);
+  assert.equal(details.hidden, true);
+  assert.equal(container.hidden, true);
 });
 
 test('popup lookups follow accepted updates and failed refreshes keep accepted metadata', async () => {
