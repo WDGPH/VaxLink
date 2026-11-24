@@ -1611,6 +1611,7 @@ function matchesExactPanoramaAgent(agentText, candidates, mappedAgents) {
 }
 
 function tryFillPanoramaAgent(data) {
+  if (data?._vaxlinkOwner?.kind === 'multiple_detail') return false;
   const candidates = getPanoramaAgentCandidates(data);
   if (!candidates.length) return false;
   const scope = data?._vaxlinkOwner?.form;
@@ -2664,6 +2665,10 @@ function beginPanoramaAutofill(
       url,
       step,
       kind,
+      detailAgent:
+        kind === 'multiple_detail'
+          ? panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form))
+          : '',
       mode: activeWorkflowMode,
       automatic,
       startBy,
@@ -2689,6 +2694,11 @@ function isPanoramaAutofillCurrent(data) {
     owner.mode === activeWorkflowMode &&
     owner.step === getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) &&
     owner.kind === getPanoramaFormContext({ checkReadiness: false }).kind &&
+    (owner.kind !== 'multiple_detail' ||
+      (owner.detailAgent &&
+        panoramaAgentIdentity(
+          getPanoramaCurrentAgentSelectionText(owner.form)
+        ) === owner.detailAgent)) &&
     (!owner.automatic || isPanoramaChartActive()) &&
     (!owner.trayDose || document.visibilityState === 'visible') &&
     (!owner.gridAssignment ||
@@ -2724,7 +2734,18 @@ function stopPanoramaFillOwner(owner) {
 }
 
 function handlePanoramaAutofillUserInteraction(event) {
-  if (!event.isTrusted) return;
+  if (!event.isTrusted) {
+    const owner = panoramaAutofillOwner;
+    // Panorama can change the native Agent without replacing the form.
+    if (
+      owner?.detailAgent &&
+      !owner.cancelled &&
+      ['input', 'change'].includes(event.type) &&
+      getPanoramaDetailAgentFields(owner.form).includes(event.target)
+    )
+      isPanoramaAutofillCurrent({ _vaxlinkOwner: owner });
+    return;
+  }
   if (
     event.type === 'keydown' &&
     (event.ctrlKey ||
@@ -3286,6 +3307,8 @@ function schedulePanoramaLotOrTradeSelection(
 
   if (typeof MutationObserver === 'function' && document.body) {
     observer = new MutationObserver(() => {
+      if (data._vaxlinkOwner.detailAgent && !isPanoramaAutofillCurrent(data))
+        return;
       domHint = true;
       armNextCheck();
     });
@@ -3756,18 +3779,21 @@ async function useTrayVaccine(recordId, contextToken, scannerRoute = null) {
   )
     throw new Error('The grid changed. The vaccine remains in the tray.');
 
+  const data = beginPanoramaAutofill({}, true, {
+    automatic: !!scannerRoute,
+    startBy: scannerRoute?.startBy ?? null
+  });
   if (!scannerRoute && context.kind === 'multiple_detail') {
     await releaseGridDetailStep();
-    if (!current() || document.visibilityState !== 'visible')
+    if (
+      !isPanoramaAutofillCurrent(data) ||
+      document.visibilityState !== 'visible'
+    )
       throw new Error(
         'Panorama changed. Check the chart and choose the vaccine again.'
       );
   }
 
-  const data = beginPanoramaAutofill({}, true, {
-    automatic: !!scannerRoute,
-    startBy: scannerRoute?.startBy ?? null
-  });
   data._vaxlinkOwner.scannerRoute = scannerRoute;
   return fillReservedTrayRecord(
     recordId,
@@ -3842,7 +3868,7 @@ async function fillReservedTrayRecord(
       requiredKind === 'multiple_detail' &&
       !queueRecordMatchesPanoramaAgentText(
         record,
-        getPanoramaCurrentAgentSelectionText()
+        getPanoramaCurrentAgentSelectionText(owner.form)
       )
     ) {
       throw new Error(

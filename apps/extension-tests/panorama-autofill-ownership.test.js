@@ -882,3 +882,32 @@ test('a repeatedly repaired Time shows detail progress after the Lot matches', (
   assert.equal(notices[2][0], 'deadline_details');
   assert.deepEqual(notices[2][1], ['time']);
 });
+
+test('a changed Multiple detail Agent permanently cancels deliberate and carried Lot fills', () => {
+  for (const automatic of [false, true]) {
+    const f = fixture();
+    let selected = 'Hepatitis B [HB]';
+    const agent = { form: f.form };
+    f.context.getPanoramaFormContext = () => ({
+      kind: 'multiple_detail',
+      ready: true
+    });
+    f.context.isPanoramaChartActive = () => true;
+    f.context.getPanoramaDetailAgentFields = () => [agent];
+    f.context.getPanoramaSelectedAgentTexts = () => [selected];
+    const fill = f.beginPanoramaAutofill({ lot: 'LOT1' }, true, { automatic });
+    assert.equal(f.isPanoramaAutofillCurrent(fill), true);
+    selected = '[HB] Hepatitis B';
+    assert.equal(f.isPanoramaAutofillCurrent(fill), true);
+    selected = 'Hepatitis B Pediatric [HB-pediatric]';
+    for (const listener of f.documentListeners.get('change'))
+      listener({ isTrusted: false, type: 'change', target: agent });
+    selected = 'Hepatitis B [HB]';
+    assert.equal(
+      f.context.runPanoramaAutofill(fill, () =>
+        assert.fail('old Lot fill wrote after the original Agent returned')
+      ),
+      false
+    );
+  }
+});
