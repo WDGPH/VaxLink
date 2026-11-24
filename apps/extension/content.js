@@ -2871,7 +2871,24 @@ function schedulePanoramaLotOrTradeSelection(
     if (owner?.trayDose || owner?.scannerDelivery) stopPanoramaFillOwner(owner);
   };
 
+  function readUsableLotList() {
+    const list = readPanoramaLotList();
+    if (!list) return null;
+    const labels = list.rows
+      .filter(
+        ({ disabled, text }) => !disabled && getPanoramaNonemptyLotLabel(text)
+      )
+      .map(({ text, value }) => [text, value]);
+    const widget = getPanoramaLotWidget();
+    return labels.length &&
+      (list.control !== widget?.panel || isVisible(list.control))
+      ? { control: list.control, signature: JSON.stringify(labels) }
+      : null;
+  }
+
   function finishLotMiss() {
+    if (!getPanoramaLotFundingChoices(getPanoramaLotWidget(), data.lot).length)
+      recordFundingComparison(data, 'unmatched');
     const owner = data._vaxlinkOwner;
     const choice = data._fundedRadioChoice;
     if (choice) {
@@ -3012,32 +3029,17 @@ function schedulePanoramaLotOrTradeSelection(
         usableMiss = undefined;
         if (funding.length === 1) recordFundingComparison(data, 'single');
       } else if (hasLot && panelRescue && !isPrimeFacesAjaxBusy()) {
-        const list = readPanoramaLotList();
-        const labels = list?.rows
-          .filter(
-            ({ disabled, text }) =>
-              !disabled && getPanoramaNonemptyLotLabel(text)
-          )
-          .map(({ text, value }) => [text, value]);
-        const currentWidget = getPanoramaLotWidget();
-        if (
-          labels?.length &&
-          (list.control !== currentWidget?.panel || isVisible(list.control))
-        ) {
-          const signature = JSON.stringify(labels);
-          if (
-            usableMiss?.control !== list.control ||
-            usableMiss.signature !== signature
-          ) {
-            usableMiss = { control: list.control, signature, since: now };
-          } else if (now - usableMiss.since >= 3000) {
-            if (!getPanoramaLotFundingChoices(currentWidget, data.lot).length)
-              recordFundingComparison(data, 'unmatched');
-            finishLotMiss();
-            return;
-          }
-        } else {
+        const list = readUsableLotList();
+        if (!list) {
           usableMiss = undefined;
+        } else if (
+          usableMiss?.control !== list.control ||
+          usableMiss.signature !== list.signature
+        ) {
+          usableMiss = { ...list, since: now };
+        } else if (now - usableMiss.since >= 3000) {
+          finishLotMiss();
+          return;
         }
       }
     }
@@ -3167,34 +3169,6 @@ function schedulePanoramaLotOrTradeSelection(
       }
     }
     const now = performance.now();
-    if (now >= deadline) {
-      let lastDeferredFields;
-      if (finalizeOnResolved) {
-        const feedback = runPanoramaAutofill(data, () => {
-          const productVerified =
-            !isPrimeFacesAjaxBusy() &&
-            panoramaDetailAgentMatches(data) &&
-            panoramaDetailProductMatches(data);
-          return productVerified
-            ? {
-                _fillFeedback: 'deadline_details',
-                _reviewFields:
-                  getPanoramaDeferredDetailFieldsNeedingReview(data)
-              }
-            : { _fillFeedback: 'deadline' };
-        });
-        if (feedback && isPanoramaAutofillCurrent(data)) {
-          lastDeferredFields = feedback._reviewFields;
-          recordDeferredAutofillResult(data, false);
-          showVaxlinkToast({ ...data, ...feedback });
-        }
-      }
-      stopUnverified(
-        'deadline',
-        lastDeferredFields?.length ? { lastDeferredFields } : {}
-      );
-      return;
-    }
     if (now < scheduledAt) {
       armNextCheck();
       return;
@@ -3216,6 +3190,51 @@ function schedulePanoramaLotOrTradeSelection(
         (Math.floor((now - firstCheckAt) / fallbackGapMs) + 1) * fallbackGapMs;
     }
     try {
+      if (now >= deadline) {
+        let lastDeferredFields;
+        if (finalizeOnResolved) {
+          const feedback = runPanoramaAutofill(data, () => {
+            const ready =
+              !isPrimeFacesAjaxBusy() && panoramaDetailAgentMatches(data);
+            const productVerified = ready && panoramaDetailProductMatches(data);
+            // A list read late can support Lot feedback even without a full
+            // three-second miss interval. Confirm it is still the same list.
+            if (
+              ready &&
+              !productVerified &&
+              usableMiss &&
+              !isPanoramaLotListAwaitingRefresh(data)
+            ) {
+              const list = readUsableLotList();
+              if (
+                list?.control === usableMiss.control &&
+                list.signature === usableMiss.signature
+              ) {
+                finishLotMiss();
+                return null;
+              }
+            }
+            return productVerified
+              ? {
+                  _fillFeedback: 'deadline_details',
+                  _reviewFields:
+                    getPanoramaDeferredDetailFieldsNeedingReview(data)
+                }
+              : { _fillFeedback: 'deadline' };
+          });
+          if (stopped) return;
+          if (feedback && isPanoramaAutofillCurrent(data)) {
+            lastDeferredFields = feedback._reviewFields;
+            recordDeferredAutofillResult(data, false);
+            showVaxlinkToast({ ...data, ...feedback });
+          }
+        }
+        stopUnverified(
+          'deadline',
+          lastDeferredFields?.length ? { lastDeferredFields } : {}
+        );
+        return;
+      }
       runPanoramaAutofill(data, () => attempt(now, wake));
     } catch (error) {
       if (finalizeOnResolved && isPanoramaAutofillCurrent(data))

@@ -770,3 +770,48 @@ test('an unreadable Lot list does not establish a miss before the ten-second dea
   assert.deepEqual(reports, [['autofill_result', false]]);
   assert.equal(f.state.timers.length, 0);
 });
+
+test('a Lot miss first observed late uses the current list at the deadline', () => {
+  for (const replaceAtDeadline of [false, true]) {
+    const f = fixture();
+    const notices = [];
+    const reports = [];
+    const select = { options: [] };
+    let cleanups = 0;
+    Object.assign(f.context, {
+      getPanoramaLotWidget: () => ({ select }),
+      hasPanoramaLotSelection: () => false,
+      tryFillPanoramaLotOrTrade: () => false,
+      clearPanoramaNonMatchingLot: () => {
+        cleanups++;
+        return 'review';
+      },
+      showVaxlinkToast: (data) =>
+        notices.push([data._fillFeedback, data._lotNeedsReview]),
+      logAnalyticsEvent: (event, payload) => {
+        if (event === 'autofill_result') reports.push(payload.success);
+      }
+    });
+    const data = f.beginPanoramaAutofill({ lot: 'TRAIN' });
+    const started = f.state.now;
+    f.schedulePanoramaLotOrTradeSelection(data, 0, {
+      finalizeOnResolved: true
+    });
+    while (f.state.now - started < 7500) f.runTimer();
+    select.options = [{ text: 'OTHER', value: 'other' }];
+    while (f.state.now - started < 9500) f.runTimer();
+    assert.deepEqual(notices, []);
+    if (replaceAtDeadline) select.options = [];
+    f.runTimer();
+    assert.equal(f.state.now - started, 10000);
+    assert.deepEqual(
+      notices,
+      replaceAtDeadline
+        ? [['deadline', undefined]]
+        : [['lot_not_matched', true]]
+    );
+    assert.equal(cleanups, replaceAtDeadline ? 0 : 1);
+    assert.deepEqual(reports, [false]);
+    assert.equal(f.state.timers.length, 0);
+  }
+});
