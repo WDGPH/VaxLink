@@ -19,4 +19,14 @@ Designate one browser and one profile for scanning on each clinic workstation. C
 4. Close the popup and run the lock procedure below on an awake workstation. Record the results against the actual model, cradle, browser and profile. Test sleep and wake separately.
 5. If the clinic copies browser profiles, test a copied profile on its destination workstation, including the contents present immediately after the copy. If it uses remote desktops, verify where the USB device is attached, where the browser runs and where the scan is saved. Record each combination separately.
 
+## Find the scanner controls
+
+Open **Settings** using the gear in the popup. **Scanner setup** is at the top.
+
+![VaxLink Settings with Scanner setup above the autofill preferences](images/settings.png)
+
+Choose **Connect scanner** to open the browser’s device chooser.
+
+![Scanner setup before pairing, with Connect scanner and Close](images/scanner-setup.png)
+
 [Workstation acceptance procedure](fixes/browser-only-locked-scanner-poc.md)

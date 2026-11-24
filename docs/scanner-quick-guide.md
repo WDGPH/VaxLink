@@ -15,6 +15,10 @@ On a single form, a scan can be pending while VaxLink waits for Panorama to
 settle. VaxLink keeps the barcode until it can verify the fields in that form.
 You still need to check and save the record in Panorama.
 
+The Inventory tray shows captured lots and recent scans.
+
+![Inventory tray with two sample vaccines and an Add again button under Recent Scans](images/inventory-tray.png)
+
 ## The scanner beeped but nothing appeared
 
 1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Held scanner scans** in Immunization. The unlock summary shows scans available from the last lock.
@@ -32,13 +36,19 @@ yourself. With **Carry a grid dose into Enter Details** on, VaxLink can bring
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
+The chart tray also has a **Use** button beside each available vaccine.
+
+![VaxLink tray on a sample chart with Use beside the available lot](images/chart-tray.png)
+
 Select rows to move them between trays. Drag a reorder handle or use its Up
 and Down arrow keys to change the order. To add another dose from a recently
 verified chart lot, choose it below the tray and confirm **Add to tray**.
 
 ## A tray dose is already in use
 
-**In progress** means VaxLink has reserved the dose. If **Check original chart** appears, open it and check the vaccine and lot on the original chart. Choose **Remove one from tray** if the chart accounts for that dose, or **Keep in tray** if the dose is still available. Choose **Not now** if you still need to check.
+A reserved dose shows **Reserved on chart** in the popup and **In progress** on the chart. If **Check original chart** appears, open it and check the vaccine and lot on the original chart. Choose **Remove one from tray** if the chart accounts for that dose, or **Keep in tray** if the dose is still available. Choose **Not now** if you still need to check.
+
+![Immunization tray showing Reserved on chart for one sample lot and Check original chart for another](images/immunization-tray.png)
 
 ## Download troubleshooting details
 
@@ -46,6 +56,8 @@ In **Settings → Debug mode**, choose **Download** before closing the browser
 or turning collection off. The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
+
+![Local Activity showing today’s and all-time counts for scanning, charting, funding and tray use](images/local-activity.png)
 
 ## Move, test or replace the scanner
 
