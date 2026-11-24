@@ -28,7 +28,7 @@ function fixture() {
     },
     document: { getElementById: () => null },
     location: new URL(
-      'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+      'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
     ),
     getFields: () => [{ closest: () => state.form }],
     getPanoramaAgentSelectors: () => [],

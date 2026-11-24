@@ -39,6 +39,10 @@ const CONSENT_AUTOFILL_KEY = 'vaxlink_consent_autofill_v1';
 const AUDIO_FEEDBACK_KEY = 'vaxlink_audio_feedback_enabled_v1';
 const HUD_POSITION_KEY = 'vaxlink_hud_position_v1';
 const HUD_HIDDEN_KEY = 'vaxlink_hud_hidden_v1';
+const CHART_INSTALLATIONS_ATTRIBUTE = 'data-vaxlink-installations';
+const MULTIPLE_INSTALLATIONS_WARNING =
+  'Two copies of VaxLink are open on this chart. Disable the extra copy in browser extensions, then refresh the chart after checking unsaved work.';
+let registeredChart = null;
 let activeWorkflowMode = 'single';
 let adminDateAutofillEnabled = true;
 let adminTimeAutofillEnabled = true;
@@ -320,6 +324,12 @@ function setupMessageListener() {
         sendResponse({ success: false, error: 'Unsupported chart page' });
         return true;
       }
+      const entryBlocked = panoramaEntryBlockReason();
+      if (entryBlocked) {
+        warnPanoramaEntryBlocked(entryBlocked);
+        sendResponse({ success: false, error: entryBlocked });
+        return true;
+      }
       try {
         const result = autoFillPanorama(beginPanoramaAutofill(request.data));
         vlog('autoFillPanorama', result?.status, result);
@@ -572,6 +582,19 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
       status: 'command_handled',
       command_handled: true
     };
+  }
+
+  if (activeWorkflowMode === 'single') {
+    const entryBlocked = panoramaEntryBlockReason();
+    if (entryBlocked) {
+      warnPanoramaEntryBlocked(entryBlocked);
+      return {
+        accepted: false,
+        success: false,
+        status: 'entry_blocked',
+        error: entryBlocked
+      };
+    }
   }
 
   const scanCapturedAt = new Date().toISOString();
@@ -975,11 +998,6 @@ function initHandsFreeScanner() {
 // Register listener immediately
 setupMessageListener();
 initHandsFreeScanner();
-
-// Also re-register when DOM is ready in case of timing issues
-document.addEventListener('DOMContentLoaded', () => {
-  vlog('DOMContentLoaded');
-});
 
 function toIsoDate(value) {
   if (!value) return null;
@@ -2417,6 +2435,7 @@ function isPanoramaAutofillCurrent(data) {
     !!owner &&
     owner === panoramaAutofillOwner &&
     !owner.cancelled &&
+    !panoramaEntryBlockReason() &&
     owner.document === document &&
     owner.form?.isConnected &&
     owner.form === getPanoramaAutofillForm() &&
@@ -3401,6 +3420,17 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (!isHandsFreeSupportedPage()) return;
   ensureToastHost();
 
+  if (data._entryWarning) {
+    toastWarningSlot.innerHTML = `<div class="vl-toast expired persistent show" role="alert">
+      <div class="vl-toast-detail">${escapeToastHtml(data._entryWarning)}</div>
+      <button class="vl-toast-dismiss" type="button">Dismiss</button>
+    </div>`;
+    toastWarningSlot
+      .querySelector('button')
+      .addEventListener('click', () => dismissToast(toastWarningSlot));
+    return;
+  }
+
   // Routine toasts share one slot and one auto-dismiss timer; the persistent
   // expired warning lives in its own slot above and is never replaced by them.
   const showRoutineToast = (html, ms, options = {}) => {
@@ -4282,6 +4312,11 @@ let applyQueueInFlight = false;
 
 async function applyNextQueueItem(options = {}) {
   if (applyQueueInFlight) return;
+  const entryBlocked = panoramaEntryBlockReason();
+  if (entryBlocked) {
+    if (options.automatic !== true) warnPanoramaEntryBlocked(entryBlocked);
+    return;
+  }
   const ownerData =
     options.ownerData || beginPanoramaAutofill({}, options.automatic !== true);
   if (!isPanoramaAutofillCurrent(ownerData)) return;
@@ -4874,6 +4909,75 @@ function initPanoramaMultiStepWatcher() {
 }
 
 // ---------------------------------------------------------------------------
+// Register each isolated copy on the shared chart once. The marker contains
+// only public extension IDs. Read-only checks never claim the chart.
+function registerPanoramaInstallation() {
+  if (registeredChart || !isHandsFreeSupportedPage()) return;
+  const chart = document.documentElement;
+  if (!chart) return;
+  registeredChart = chart;
+  const ids = readPanoramaInstallations(chart);
+  const id = chrome.runtime.id;
+  if (!ids.includes(id)) {
+    chart.setAttribute(CHART_INSTALLATIONS_ATTRIBUTE, [...ids, id].join(' '));
+  }
+}
+
+function readPanoramaInstallations(chart) {
+  return (chart.getAttribute(CHART_INSTALLATIONS_ATTRIBUTE) || '')
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function panoramaEntryBlockReason() {
+  const chart = document.documentElement;
+  if (!chart || registeredChart !== chart) {
+    return 'Refresh the chart to load VaxLink before filling.';
+  }
+  const ids = readPanoramaInstallations(chart);
+  if (ids.some((id) => id !== chrome.runtime.id)) {
+    return MULTIPLE_INSTALLATIONS_WARNING;
+  }
+  if (!ids.includes(chrome.runtime.id)) {
+    return 'Refresh the chart to load VaxLink before filling.';
+  }
+  if (
+    (contentBuildAtLoad.name !== 'VaxLink' ||
+      !contentBuildAtLoad.fingerprint) &&
+    location.hostname !== 'trpanoramadhir.prod.ehealthontario.ca'
+  ) {
+    return 'VaxLink Alpha and development copies fill training charts only.';
+  }
+  return '';
+}
+
+function warnPanoramaEntryBlocked(warning) {
+  if (document.body) showVaxlinkToast({ _entryWarning: warning });
+}
+
+function watchPanoramaInstallations() {
+  registerPanoramaInstallation();
+  if (!registeredChart) return;
+  const check = () => {
+    const reason = panoramaEntryBlockReason();
+    if (reason !== MULTIPLE_INSTALLATIONS_WARNING) return;
+    cancelPanoramaAutofill();
+    warnPanoramaEntryBlocked(reason);
+  };
+  check();
+  new MutationObserver(check).observe(registeredChart, {
+    attributes: true,
+    attributeFilter: [CHART_INSTALLATIONS_ATTRIBUTE]
+  });
+}
+
+registerPanoramaInstallation();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', watchPanoramaInstallations);
+} else {
+  watchPanoramaInstallations();
+}
+
 // Initialize new features after DOM is ready
 // ---------------------------------------------------------------------------
 

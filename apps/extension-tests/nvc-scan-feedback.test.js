@@ -32,6 +32,7 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
         }
       },
       isHandsFreeSupportedPage: () => true,
+      panoramaEntryBlockReason: () => '',
       handleVaxlinkCommand: () => false,
       lastHandledScanValue: '',
       lastHandledScanAt: 0,

@@ -57,6 +57,12 @@ The script can read and change the page's HTML fields. Its JavaScript variables
 are separate from Panorama's own variables. This separation is why a
 page-library variable may be unavailable even when the page is still updating.
 
+The integration records the extension's public ID on the chart document. When
+two copies are present, both stop filling. Disable the extra copy and refresh
+the chart after checking unsaved work. Development and Alpha can fill training
+charts. The packaged production build can also fill production charts. Scanner
+capture and local trays remain available while chart entry is blocked.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

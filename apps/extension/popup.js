@@ -110,6 +110,8 @@ const MODE_CONFIG = {
 document.addEventListener('DOMContentLoaded', async () => {
   const version = document.getElementById('extensionVersion');
   const manifest = chrome.runtime.getManifest();
+  const name = document.getElementById('extensionName');
+  if (name) name.textContent = manifest.name;
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
 

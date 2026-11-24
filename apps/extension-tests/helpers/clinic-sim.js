@@ -144,10 +144,11 @@ export function createContentHarness(globals = {}) {
   const storageReads = [];
   const storageListeners = [];
   const windowListeners = new Map();
+  const chartAttributes = new Map();
   const location =
     globals.location ||
     new URL(
-      'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+      'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
     );
   const window = {
     location,
@@ -165,6 +166,10 @@ export function createContentHarness(globals = {}) {
     window,
     document: {
       readyState: 'loading',
+      documentElement: {
+        getAttribute: (key) => chartAttributes.get(key) || null,
+        setAttribute: (key, value) => chartAttributes.set(key, value)
+      },
       ...globals.document,
       addEventListener(type, callback) {
         if (!documentListeners.has(type)) documentListeners.set(type, []);
@@ -173,6 +178,7 @@ export function createContentHarness(globals = {}) {
     },
     chrome: {
       runtime: {
+        id: 'vaxlink-test',
         getManifest: () => manifest,
         onMessage: {
           addListener: (listener) => messageListeners.push(listener)
