@@ -8,6 +8,15 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [2.0.0-rc2](https://github.com/WDGPH/VaxLink/compare/v2.0.0-rc1...v2.0.0-rc2) (2026-11-24)
+
+
+### Fixed
+
+* clarify tray counts and catalogue messages ([c3d2452](https://github.com/WDGPH/VaxLink/commit/c3d245240f5cf5c149cc442e7cbe3ce2b287b215))
+* keep scanner permission instructions visible ([ca4175f](https://github.com/WDGPH/VaxLink/commit/ca4175fe7edcab5c63c3903c034635d57786cbb0))
+* simplify the popup and keep scanner permission guidance visible ([3697761](https://github.com/WDGPH/VaxLink/commit/3697761d97844d8088b5003740595ad008bc1c4e))
+
 ## [2.0.0-rc1](https://github.com/WDGPH/VaxLink/compare/v1.2.0-alpha...v2.0.0-rc1) (2026-11-24)
 
 
