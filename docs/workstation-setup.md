@@ -1,6 +1,6 @@
 # Set up a scanning workstation
 
-Designate one browser and one profile for scanning on each clinic workstation. Chrome and Edge, separate browser profiles, and Alpha or development installations have independent readers and trays. Record the workstation configuration before staff start scanning.
+Designate one browser and one profile for scanning on each clinic workstation. Each browser profile and VaxLink installation has its own scanner connection and trays. Record the workstation configuration before staff start scanning.
 
 | Record for this station                                | Local value |
 | ------------------------------------------------------ | ----------- |
@@ -35,4 +35,4 @@ Confirm the station’s workflow and autofill settings with the clinical and pri
 
 Start in Inventory with representative products, formulations and package sizes. VaxLink recognizes nirsevimab as the Panorama agent RSVAb. Check each presentation against its label and the catalogue. In training, use synthetic records to try a single entry, several immunizations, an interrupted scan and a missing lot. Verify scan recovery after locking and unlocking the station. Ask an authorized Panorama administrator to confirm production lots and funding choices before clinical rollout.
 
-[Workstation acceptance procedure](fixes/browser-only-locked-scanner-poc.md)
+[Workstation acceptance procedure](scanner-acceptance.md)

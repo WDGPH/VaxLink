@@ -278,7 +278,7 @@ Alpha-only iterations between the 1.0.1 prod release and the June pilot rounds.
 ## [1.0.2] – 2026-06-03
 
 ### Fixed
-- **Paste interception false positive** — `onHandsFreePaste` was calling `event.preventDefault()` for any clipboard content containing the substring `"01"`, silently swallowing patient notes, dates, health card numbers, and other clinical text pasted into Panorama fields. The fix gates paste interception on `parseGS1BarcodeFromScanner` succeeding and the extracted GTIN being 14 numeric digits (#14). See `docs/paste-interception-false-positive.md`.
+- **Paste interception false positive** — `onHandsFreePaste` was calling `event.preventDefault()` for any clipboard content containing the substring `"01"`, silently swallowing patient notes, dates, health card numbers, and other clinical text pasted into Panorama fields. The fix gates paste interception on `parseGS1BarcodeFromScanner` succeeding and the extracted GTIN being 14 numeric digits (#14).
 
 ---
 
@@ -294,7 +294,6 @@ Alpha-only iterations between the 1.0.1 prod release and the June pilot rounds.
 ### Added
 - HUD can now be **moved and hidden** by the user — drag to reposition, or dismiss entirely (#6).
 - Added popup UI improvements (`popup.html` / `popup.js`) supporting multi-inject workflow.
-- New debug docs: `docs/multiple-workflow-grid-not-filling-until-hover.md` and `docs/multiple-workflow-wrong-agent-first-page.md`.
 
 **Contributors:** Eswar Attuluri
 

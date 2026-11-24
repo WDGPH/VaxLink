@@ -34,7 +34,7 @@ higher than the one already uploaded to that listing.
 branch differences; runtime channel behaviour uses that packaged identity. Debug starts on in
 packaged Alpha and off in production and unpacked development unless a saved
 preference overrides it. Use the exact package being evaluated for the
-[workstation acceptance checks](fixes/browser-only-locked-scanner-poc.md).
+[workstation acceptance checks](scanner-acceptance.md).
 
 ### Alpha releases
 
