@@ -173,7 +173,7 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   const failed = await refresh(bg);
   assert.equal(
     formatNVCRefreshMessage(failed),
-    'Unable to refresh NVC. Previously downloaded catalogue remains available.'
+    'Could not check for updates. You can still use the previous catalogue.'
   );
   const after = await status(bg);
   for (const key of [
@@ -189,12 +189,12 @@ test('popup lookups follow accepted updates and failed refreshes keep accepted m
   renderNVCStatus(after, container);
   assert.match(
     container.textContent,
-    /Previously downloaded catalogue remains available/
+    /You can still use the previous catalogue/
   );
   assert.equal(container.hidden, false);
   assert.equal(
     formatNVCRefreshMessage({ success: false, usable: false }),
-    'Unable to refresh NVC. No usable catalogue is available.'
+    'Could not check for updates. The catalogue is unavailable.'
   );
   const statusArea = { textContent: 'NVC is loading.' };
   const loadStatus = vm.runInNewContext(

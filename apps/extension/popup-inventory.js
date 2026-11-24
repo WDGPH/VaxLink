@@ -492,12 +492,12 @@ export function buildMultipleInjectSummary(rows) {
     const remaining = getTrayRemainingDoses(row) ?? 0;
     return total + (Number.isFinite(remaining) ? remaining : 0);
   }, 0);
-  let summary = `${count} vaccine(s) saved for later chart fill.`;
+  let summary = `${count} ${count === 1 ? 'item' : 'items'} in the tray for chart entry.`;
   if (lockedCount > 0) {
     summary += ` ${lockedCount} captured while the workstation was locked.`;
   }
   if (doseTotal > 0) {
-    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
+    summary += ` ${doseTotal} ${doseTotal === 1 ? 'dose' : 'doses'} remaining.`;
   }
   if (expiredCount || expiringCount) {
     summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;
@@ -517,9 +517,9 @@ export function buildInventorySummary(rows) {
     const remaining = getTrayRemainingDoses(row) ?? 0;
     return total + (Number.isFinite(remaining) ? remaining : 0);
   }, 0);
-  let summary = `${count} scan(s) ready for inventory export.`;
+  let summary = `${count} ${count === 1 ? 'scan' : 'scans'} ready to export.`;
   if (doseTotal > 0) {
-    summary += ` ${doseTotal} dose(s) remaining across all vials.`;
+    summary += ` ${doseTotal} ${doseTotal === 1 ? 'dose' : 'doses'} remaining.`;
   }
   if (expiredCount || expiringCount) {
     summary += ` ${expiredCount} expired, ${expiringCount} expiring soon.`;

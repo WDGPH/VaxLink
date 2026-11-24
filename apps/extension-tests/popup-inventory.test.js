@@ -46,11 +46,11 @@ test('build summary helpers report counts, doses, and expiry flags', () => {
 
   assert.equal(
     buildMultipleInjectSummary(rows),
-    '2 vaccine(s) saved for later chart fill. 3 dose(s) remaining across all vials. 1 expired, 1 expiring soon.'
+    '2 items in the tray for chart entry. 3 doses remaining. 1 expired, 1 expiring soon.'
   );
   assert.equal(
     buildInventorySummary(rows),
-    '2 scan(s) ready for inventory export. 3 dose(s) remaining across all vials. 1 expired, 1 expiring soon.'
+    '2 scans ready to export. 3 doses remaining. 1 expired, 1 expiring soon.'
   );
 });
 
@@ -60,7 +60,7 @@ test('multiple summary identifies scans captured while the workstation was locke
     { captured_while_locked: true },
     {}
   ]);
-  assert.match(summary, /3 vaccine\(s\) saved/);
+  assert.match(summary, /3 items in the tray for chart entry/);
   assert.match(summary, /2 captured while the workstation was locked/);
 });
 

@@ -1,21 +1,21 @@
 export function describeNVCHealth(status) {
   if (status.state === 'refreshing') {
     return status.usable
-      ? 'NVC is refreshing. Cached catalogue remains available.'
-      : 'NVC is loading.';
+      ? 'Checking for updates. You can still use the previous catalogue.'
+      : 'Loading the catalogue.';
   }
   if (!status.usable)
-    return 'NVC catalogue is unavailable. Barcode details can still be captured.';
+    return 'The catalogue is unavailable. You can still capture barcodes.';
   if (status.freshnessDegraded)
-    return 'NVC refresh failed. Previously downloaded catalogue remains available.';
+    return 'The update check failed. You can still use the previous catalogue.';
   return '';
 }
 
 export function formatNVCRefreshMessage(status) {
   if (!status?.success)
     return status?.usable
-      ? 'Unable to refresh NVC. Previously downloaded catalogue remains available.'
-      : 'Unable to refresh NVC. No usable catalogue is available.';
+      ? 'Could not check for updates. You can still use the previous catalogue.'
+      : 'Could not check for updates. The catalogue is unavailable.';
   const count = Number(status.lotCount || 0).toLocaleString();
   const codes = status.lotCount === 1 ? 'lot code' : 'lot codes';
   if (status.firstRefresh)
