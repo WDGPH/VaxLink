@@ -69,6 +69,11 @@ the Multiple detail step. Conflicting headings or controls and unavailable
 fields explain why a form is unready. Reading the same form repeatedly keeps
 its delivery token. A new form, workflow or step retires the old token.
 
+A fill keeps its original chart through retries. A manual field interaction
+or changed form stops the fill. Automatic entry also stops when its tab loses
+focus. The worker and chart use the same deadline for the first field
+interaction, so a late lookup cannot start filling after the worker times out.
+
 Vaccine rules match the Panorama Agent for the formulation. For example, MMR
 and MMR with varicella use different Agents, as do adult and pediatric
 hepatitis B products. Where Panorama provides a native select, VaxLink reads

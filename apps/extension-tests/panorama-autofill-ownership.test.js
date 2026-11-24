@@ -414,3 +414,47 @@ test('formulation-specific vaccines do not match the broader Agent on a detail s
     );
   }
 });
+
+test('a scanner lookup cannot start writing after losing focus or its first-write deadline', async () => {
+  for (const interrupt of [
+    (f) => {
+      const token = f.getScannerDeliveryContext();
+      f.windowListeners.get('blur').forEach((listener) => listener());
+      // The chart reports focus again before the catalogue reply arrives.
+      assert.equal(f.isScannerDeliveryContextCurrent(token), false);
+    },
+    (f) => {
+      f.state.now += 100;
+    }
+  ]) {
+    const f = fixture();
+    let resolve;
+    f.state.lookup = new Promise((done) => {
+      resolve = done;
+    });
+    const pending = f.handleHandsFreeScan('scan', 'web-serial', 1100);
+    interrupt(f);
+    resolve({});
+    const result = await pending;
+    assert.equal(result.accepted, false);
+    assert.equal(result.status, 'cancelled');
+    assert.equal(f.state.fills, 0);
+  }
+});
+
+test('an owned field interaction before the deadline can continue on the same chart', () => {
+  const f = fixture();
+  const data = f.beginPanoramaAutofill({}, true, {
+    automatic: true,
+    startBy: 1100
+  });
+  const field = { value: '', focus() {}, dispatchEvent() {}, blur() {} };
+  f.runPanoramaAutofill(data, () =>
+    f.fillPanoramaMaskedTextInput(field, '2026/11/24')
+  );
+  f.state.now = 1100;
+  assert.equal(field.value, '2026/11/24');
+  assert.equal(f.isPanoramaAutofillCurrent(data), true);
+  f.windowListeners.get('blur').forEach((listener) => listener());
+  assert.equal(f.isPanoramaAutofillCurrent(data), false);
+});

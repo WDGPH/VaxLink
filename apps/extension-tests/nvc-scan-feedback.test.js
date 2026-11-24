@@ -13,6 +13,7 @@ test('failed chart fill still shows the NVC failure and retains barcode fields',
     let fillPayload;
     Object.assign(context, {
       getPanoramaAutofillForm: () => form,
+      getPanoramaFormContext: () => ({ kind: 'provider_single', ready: true }),
       getPanoramaMultiStepIndicatorKey: () => '',
       playAudioCue() {},
       showVaxlinkToast: (data) => notices.push(data),

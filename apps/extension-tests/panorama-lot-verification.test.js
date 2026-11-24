@@ -34,6 +34,7 @@ function fixture() {
   });
   Object.assign(context, {
     getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
     getPanoramaMultiStepIndicatorKey: () => state.step
   });
   context.document.getElementById = (id) => state.nodes.get(id);

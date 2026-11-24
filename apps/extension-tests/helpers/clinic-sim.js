@@ -166,6 +166,8 @@ export function createContentHarness(globals = {}) {
     window,
     document: {
       readyState: 'loading',
+      visibilityState: 'visible',
+      hasFocus: () => true,
       querySelector: () => null,
       querySelectorAll: () => [],
       documentElement: {

@@ -295,7 +295,10 @@ function setupMessageListener() {
         sendResponse({ success: false, error: 'Unsupported chart page' });
         return true;
       }
-      if (!isScannerDeliveryContextCurrent(request.contextToken)) {
+      if (
+        !Number.isFinite(request.startBy) ||
+        !isScannerDeliveryContextCurrent(request.contextToken)
+      ) {
         sendResponse({
           accepted: false,
           success: false,
@@ -306,7 +309,8 @@ function setupMessageListener() {
       Promise.resolve(
         handleHandsFreeScan(
           request.scan?.rawText || '',
-          request.scan?.source || 'scanner-channel'
+          request.scan?.source || 'scanner-channel',
+          request.startBy
         )
       )
         .then((result) => {
@@ -574,7 +578,11 @@ function mergeVaccineInfoIntoParsed(parsed, vaccineInfo) {
   }
 }
 
-async function handleHandsFreeScan(scanValue, source = 'unknown') {
+async function handleHandsFreeScan(
+  scanValue,
+  source = 'unknown',
+  startBy = null
+) {
   if (!isHandsFreeSupportedPage()) {
     return {
       accepted: false,
@@ -616,6 +624,15 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     }
   }
 
+  if (startBy !== null && (!isPanoramaChartActive() || Date.now() >= startBy)) {
+    return {
+      accepted: false,
+      success: false,
+      status: 'cancelled',
+      error: 'Autofill stopped: chart lost focus or entry timed out'
+    };
+  }
+
   const scanCapturedAt = new Date().toISOString();
   vlog('hands-free candidate', {
     source,
@@ -642,7 +659,9 @@ async function handleHandsFreeScan(scanValue, source = 'unknown') {
     lastHandledScanAt = now;
   }
   const fillData =
-    activeWorkflowMode === 'single' ? beginPanoramaAutofill({}) : null;
+    activeWorkflowMode === 'single'
+      ? beginPanoramaAutofill({}, true, { automatic: true, startBy })
+      : null;
 
   const immunization = activeWorkflowMode !== 'inventory';
   let parsed;
@@ -1051,6 +1070,11 @@ function initHandsFreeScanner() {
   for (const type of ['pagehide', 'popstate', 'hashchange']) {
     window.addEventListener(type, cancelPanoramaAutofill);
   }
+  window.addEventListener('blur', invalidateAutomaticPanoramaContext);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible')
+      invalidateAutomaticPanoramaContext();
+  });
 }
 
 // Register listener immediately
@@ -2525,18 +2549,34 @@ function getPanoramaAutofillForm() {
   return forms.size === 1 ? [...forms][0] : null;
 }
 
-function beginPanoramaAutofill(data = {}, explicit = true) {
+function isPanoramaChartActive() {
+  return document.visibilityState === 'visible' && document.hasFocus();
+}
+
+function invalidateAutomaticPanoramaContext() {
+  // A return to this tab cannot revive a scan pinned before focus was lost.
+  if (panoramaAutofillOwner?.automatic) cancelPanoramaAutofill();
+  else panoramaContextGeneration += 1;
+}
+
+function beginPanoramaAutofill(
+  data = {},
+  explicit = true,
+  { automatic = !explicit, startBy = null } = {}
+) {
   const form = getPanoramaAutofillForm();
   const url = location.href;
-  const step = getPanoramaMultiStepIndicatorKey();
-  // Automatic retries keep the cancelled owner. Only a new form/context or an
-  // explicit scan/Fill action can start again after the nurse takes over.
+  const step = getPanoramaMultiStepIndicatorKey({ visibleOnly: true });
+  const { kind } = getPanoramaFormContext({ checkReadiness: false });
+  // Automatic retries keep a cancelled owner. A new form/context or a
+  // deliberate scan/Fill action can start again after staff take over.
   if (
     explicit ||
     !panoramaAutofillOwner ||
     panoramaAutofillOwner.form !== form ||
     panoramaAutofillOwner.url !== url ||
-    panoramaAutofillOwner.step !== step
+    panoramaAutofillOwner.step !== step ||
+    panoramaAutofillOwner.kind !== kind
   ) {
     cancelPanoramaAutofill();
     panoramaAutofillOwner = {
@@ -2544,7 +2584,10 @@ function beginPanoramaAutofill(data = {}, explicit = true) {
       form,
       url,
       step,
+      kind,
       mode: activeWorkflowMode,
+      automatic,
+      startBy,
       cancelled: false
     };
   }
@@ -2554,18 +2597,23 @@ function beginPanoramaAutofill(data = {}, explicit = true) {
 
 function isPanoramaAutofillCurrent(data) {
   const owner = data?._vaxlinkOwner;
-  return (
-    !!owner &&
-    owner === panoramaAutofillOwner &&
-    !owner.cancelled &&
+  if (!owner || owner !== panoramaAutofillOwner || owner.cancelled)
+    return false;
+  const current =
     !panoramaEntryBlockReason() &&
     owner.document === document &&
     owner.form?.isConnected &&
     owner.form === getPanoramaAutofillForm() &&
     owner.url === location.href &&
     owner.mode === activeWorkflowMode &&
-    owner.step === getPanoramaMultiStepIndicatorKey()
-  );
+    owner.step === getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) &&
+    owner.kind === getPanoramaFormContext({ checkReadiness: false }).kind &&
+    (!owner.automatic || isPanoramaChartActive()) &&
+    (owner.writeAttempted ||
+      owner.startBy === null ||
+      Date.now() < owner.startBy);
+  if (!current) cancelPanoramaAutofill();
+  return !!current;
 }
 
 function updatePanoramaWorkflowMode(mode) {
@@ -2635,9 +2683,12 @@ function runPanoramaAutofill(data, callback) {
 }
 
 function assertPanoramaAutofillWrite() {
-  if (panoramaWritingData && !isPanoramaAutofillCurrent(panoramaWritingData)) {
+  if (!panoramaWritingData) return;
+  if (!isPanoramaAutofillCurrent(panoramaWritingData)) {
     throw new Error('Autofill stopped: form changed or manual takeover');
   }
+  // Even focusing a control can run Panorama handlers.
+  panoramaWritingData._vaxlinkOwner.writeAttempted = true;
 }
 
 function schedulePanoramaLotOrTradeSelection(

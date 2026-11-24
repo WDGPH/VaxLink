@@ -34,6 +34,7 @@ test('one deferred use consumes once, distinct uses consume again, and unknown c
   const form = { isConnected: true };
   Object.assign(context, {
     getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
     getPanoramaMultiStepIndicatorKey: () => '',
     getExpiryStatus: () => ({ flag: 'valid' }),
     logAnalyticsEvent() {},

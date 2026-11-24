@@ -31,6 +31,7 @@ function fixture(settings = {}) {
   // writers. Replace only Panorama's widgets and asynchronous lot scheduler.
   Object.assign(context, {
     getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
     getPanoramaMultiStepIndicatorKey: () => '',
     isPanoramaImmunizationPage: () => true,
     getPanoramaSharedFundingLotProductLabel: () => '',

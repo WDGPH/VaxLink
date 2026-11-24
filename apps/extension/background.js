@@ -990,14 +990,17 @@ function tabAcceptedScannerScan(response) {
 
 function sendScanToTab(tabId, scan, contextToken) {
   return new Promise((resolve, reject) => {
-    // A missing answer is uncertain, not permission to try another chart.
+    // The chart and worker share the deadline so a late lookup cannot start
+    // writing after the worker has already held the scan for review.
+    const waitMs = 10000;
+    const startBy = Date.now() + waitMs;
     const timer = setTimeout(
       () => reject(new Error('Chart acknowledgement timed out')),
-      10000
+      waitMs
     );
     chrome.tabs.sendMessage(
       tabId,
-      { action: 'vaxlinkScanCaptured', scan, contextToken },
+      { action: 'vaxlinkScanCaptured', scan, contextToken, startBy },
       { frameId: 0 },
       (response) => {
         clearTimeout(timer);

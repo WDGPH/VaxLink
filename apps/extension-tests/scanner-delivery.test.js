@@ -81,6 +81,7 @@ test('single capture is saved before delivery and binds delivery to the captured
   );
   assert.equal(h.tabMessages[1].tabId, tab.id);
   assert.equal(h.tabMessages[1].message.contextToken, 'document-1');
+  assert.ok(h.tabMessages[1].message.startBy > Date.now());
   assert.equal(h.storageData.get(inbox).length, 0);
 });
 
