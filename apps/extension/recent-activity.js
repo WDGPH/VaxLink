@@ -102,6 +102,11 @@
         'manual_use',
         'skipped',
         'detail_identity_unmatched',
+        'detail_fields_loading',
+        'detail_agent_unmatched',
+        'detail_unassigned',
+        'detail_date_unmatched',
+        'detail_lot_unconfirmed',
         'detail_not_ready',
         'detail_matched'
       )

@@ -793,8 +793,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }));
     let kind = 'multiple_grid';
     let visibleRows = gridRows;
-    let detailAgent = agents[0];
-    let detailDate = date;
+    const reordered = scenario === 'reordered_rows';
+    let detailAgent = agents[reordered ? 2 : 0];
+    let detailDate = reordered ? '2026-11-24' : date;
+    let selectedLot = '';
+    let retry;
     let detailReady = true;
     const fills = [];
     Object.assign(context, {
@@ -813,13 +816,18 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       getPanoramaAdministeredDateTimeFields: () => ({
         dateField: { value: detailDate }
       }),
-      getPanoramaDisplayedLot: () => '',
+      getPanoramaDisplayedLot: () => selectedLot,
+      panoramaLotSelectionMatches: (_widget, lot) =>
+        !!lot && selectedLot === lot,
       autoFillPanorama(data) {
         fills.push(data);
         return { status: 'pending' };
       },
       showVaxlinkToast() {},
-      setTimeout: () => 1,
+      setTimeout(callback, delay) {
+        if (delay === 500) retry = callback;
+        return 1;
+      },
       clearTimeout() {},
       MutationObserver: class {
         observe() {}
@@ -844,16 +852,28 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }
     kind = 'multiple_detail';
     state.step = '1-of-3';
-    await context.advanceGridHandoff();
+    if (reordered) {
+      selectedLot = 'SAMPLE-0';
+      await context.advanceGridHandoff();
+      assert.equal(
+        fills.length,
+        0,
+        'a different Lot cannot authorize a reordered detail'
+      );
+      selectedLot = 'SAMPLE-2';
+      retry();
+      await new Promise(setImmediate);
+    } else await context.advanceGridHandoff();
     assert.deepEqual(
       fills.map(({ lot }) => lot),
-      ['SAMPLE-0'],
+      [reordered ? 'SAMPLE-2' : 'SAMPLE-0'],
       scenario
     );
     await context.finalizeDeferredPanoramaAutofill(fills[0]);
 
     state.step = scenario === 'skipped_step' ? '3-of-3' : '2-of-2';
-    detailAgent = agents[2];
+    detailAgent = agents[reordered ? 0 : 2];
+    selectedLot = reordered ? 'SAMPLE-0' : '';
     detailDate = '';
     detailReady = false;
     await context.advanceGridHandoff();
@@ -874,7 +894,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     } else {
       assert.deepEqual(
         fills.map(({ lot }) => lot),
-        ['SAMPLE-0', 'SAMPLE-2'],
+        reordered ? ['SAMPLE-2', 'SAMPLE-0'] : ['SAMPLE-0', 'SAMPLE-2'],
         scenario
       );
       await context.finalizeDeferredPanoramaAutofill(fills[1]);

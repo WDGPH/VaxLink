@@ -5788,6 +5788,7 @@ function clearGridCarry(reason = 'context_changed') {
   gridDetailHandoff = null;
   handoff.observer.disconnect();
   clearTimeout(handoff.opening);
+  clearTimeout(handoff.retry);
   for (const row of handoff.rows)
     if (row.entry) void releaseGridAssignment(row.entry, reason);
 }
@@ -5863,6 +5864,7 @@ function startGridHandoff(event) {
     }
     entry.log('enter_details');
     row.entry = entry;
+    row.record = entry.dose.record;
     gridAssignments.delete(row.index);
   }
   clearGridCarry('row_missing');
@@ -5914,31 +5916,60 @@ function readGridDetailIdentity(form) {
     _vaxlinkOwner: { form }
   });
   return {
-    agent: panoramaAgentIdentity(getPanoramaCurrentAgentSelectionText(form)),
+    agent: getPanoramaCurrentAgentSelectionText(form),
     date: dateField?.value.trim()
   };
 }
 
-function matchesGridDetail(entry) {
-  const { agent, date } = readGridDetailIdentity(getPanoramaAutofillForm());
-  return agent === entry.agent && date === entry.date;
+function sameGridDate(left, right) {
+  // Panorama can display the same year-first date with either separator.
+  const canonical = (value) =>
+    value?.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1/$2/$3');
+  return !!left && canonical(left) === canonical(right);
 }
 
-function findGridDetailRow(handoff, form, step, total) {
-  const { agent, date } = readGridDetailIdentity(form);
-  if (!agent || !date) return;
-  // A shorter Details list can omit original rows. A match must still be
-  // in an original position that fits the displayed step and remaining count.
-  const firstIndex = step - 1;
-  const lastIndex = firstIndex + handoff.rows.length - total;
-  return handoff.rows.find(
-    (row, index) =>
-      row.entry &&
-      row.agent === agent &&
-      row.date === date &&
-      index >= firstIndex &&
-      index <= lastIndex
+function matchesGridDetail(entry) {
+  const detail = readGridDetailIdentity(getPanoramaAutofillForm());
+  const sameAgent = panoramaAgentIdentity(detail.agent) === entry.agent;
+  return (
+    sameGridDate(detail.date, entry.date) &&
+    (sameAgent ||
+      queueRecordMatchesPanoramaAgentText(entry.dose.record, detail.agent)) &&
+    ((!entry.requireSelectedLot && sameAgent) ||
+      panoramaLotSelectionMatches(getPanoramaLotWidget(), entry.lot))
   );
+}
+
+function identifyGridDetail(handoff, form, step, total) {
+  const detail = readGridDetailIdentity(form);
+  if (!detail.agent || !detail.date) return { reason: 'detail_fields_loading' };
+  const agent = panoramaAgentIdentity(detail.agent);
+  // Include unassigned and previously used rows in the ambiguity check.
+  const candidates = handoff.rows.filter(
+    (row) =>
+      row.agent === agent ||
+      (row.record &&
+        queueRecordMatchesPanoramaAgentText(row.record, detail.agent))
+  );
+  if (!candidates.length) return { reason: 'detail_agent_unmatched' };
+  if (candidates.length !== 1) return { reason: 'duplicate_agent' };
+  const [row] = candidates;
+  if (!row.entry) return { reason: 'detail_unassigned' };
+  if (!sameGridDate(detail.date, row.date))
+    return { reason: 'detail_date_unmatched' };
+  const index = handoff.rows.indexOf(row);
+  // A different display order or Agent label needs independent confirmation
+  // from the Lot already selected on this detail.
+  const requireSelectedLot =
+    row.agent !== agent ||
+    index < step - 1 ||
+    index > step - 1 + handoff.rows.length - total;
+  if (
+    requireSelectedLot &&
+    !panoramaLotSelectionMatches(getPanoramaLotWidget(), row.entry.lot)
+  )
+    return { reason: 'detail_lot_unconfirmed' };
+  return { row, requireSelectedLot };
 }
 
 const DIFFERENT_GRID_DETAIL_LOT =
@@ -5960,7 +5991,7 @@ async function releaseGridDetailStep() {
   const { step, total } = currentGridDetailStep();
   if (!(step > 0 && step <= total && total <= handoff.rows.length)) return;
   handoff.attempted = step;
-  const row = findGridDetailRow(
+  const { row } = identifyGridDetail(
     handoff,
     getPanoramaAutofillForm(),
     step,
@@ -6016,16 +6047,23 @@ async function advanceGridHandoff() {
     return;
   }
   if (!(step > 0 && step <= total)) return;
+  if (step !== handoff.step) handoff.retryUntil = performance.now() + 10000;
   handoff.step = step;
   clearTimeout(handoff.opening);
   if (handoff.attempted === step) return;
-  const row = context.ready && findGridDetailRow(handoff, form, step, total);
+  const { row, reason, requireSelectedLot } = context.ready
+    ? identifyGridDetail(handoff, form, step, total)
+    : { reason: 'detail_not_ready' };
   if (!row) {
+    // A widget can set its input value without generating a DOM mutation.
+    if (!handoff.retry && performance.now() < handoff.retryUntil) {
+      handoff.retry = setTimeout(() => {
+        handoff.retry = null;
+        if (gridDetailHandoff === handoff) void advanceGridHandoff();
+      }, 500);
+    }
     // A detail can open before its Agent and date are readable. Record why
     // this step is waiting without discarding a later, valid match.
-    const reason = context.ready
-      ? 'detail_identity_unmatched'
-      : 'detail_not_ready';
     if (handoff.lastWait !== `${step}:${reason}`) {
       handoff.lastWait = `${step}:${reason}`;
       for (const candidate of handoff.rows.slice(
@@ -6070,25 +6108,25 @@ async function advanceGridHandoff() {
       detail.step !== step ||
       detail.total !== total ||
       handoff.attempted === step ||
-      !matchesGridDetail(entry)
+      identifyGridDetail(handoff, form, step, total).row !== row
     )
       return;
 
-    // Release omitted or skipped rows only once the later row is confirmed.
-    // Their doses stay available because no product was written for them.
+    // Unvisited rows may still appear later in a different order.
     handoff.attempted = step;
     handled = true;
-    for (const earlier of handoff.rows) {
-      if (earlier === row) break;
-      if (!earlier.entry) continue;
-      void releaseGridAssignment(earlier.entry, 'skipped', step);
-      earlier.entry = null;
+    if (step === total) {
+      for (const other of handoff.rows) {
+        if (other === row || !other.entry) continue;
+        void releaseGridAssignment(other.entry, 'skipped', step);
+        other.entry = null;
+      }
     }
 
     const data = beginPanoramaAutofill({}, true, { automatic: true });
     if (!isPanoramaAutofillCurrent(data)) return;
     data._vaxlinkOwner.scannerRoute = route;
-    data._vaxlinkOwner.gridDetail = entry;
+    data._vaxlinkOwner.gridDetail = { ...entry, requireSelectedLot };
     entry.log('detail_matched', step);
     if (entry.trace)
       data._vaxlinkOwner.activity = {
