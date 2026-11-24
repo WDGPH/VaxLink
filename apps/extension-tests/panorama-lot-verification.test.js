@@ -9,14 +9,18 @@ const shown = () => ({ width: 100, height: 20 });
 function fixture() {
   const state = {
     controls: [],
+    trade: [],
     nodes: new Map(),
     extraPanels: [],
     step: 'first'
   };
   const form = {
     isConnected: true,
-    querySelectorAll: (selector) =>
-      selector.includes('LotInfo:lotNumberSelect:') ? state.controls : [],
+    querySelectorAll(selector) {
+      if (selector.includes('LotInfo:lotNumberSelect:')) return state.controls;
+      if (selector.includes('createImms_tradenameinput:')) return state.trade;
+      return [];
+    },
     contains: (node) => node?.form === form
   };
   class FormEvent {
@@ -185,4 +189,27 @@ test('an exact Lot wins over another spelling and ambiguous fallbacks are refuse
   select.options.pop();
   assert.equal(f.run('AB/123'), true);
   assert.equal(select.value, 'lot-option');
+});
+
+test('an older Trade-only row waits for the current select to retain its choice', () => {
+  const f = fixture();
+  const field = f.select('Priorix');
+  const replacement = f.select('Priorix');
+  field.id = replacement.id =
+    'recordImmsForm:immsDetailssection_createImms_tradenameinput:selectOneMenu_input';
+  field.dispatchEvent = ({ type }) => {
+    if (type !== 'change') return;
+    field.isConnected = false;
+    f.state.trade = [replacement];
+  };
+  f.state.trade = [field];
+  const data = f.context.beginPanoramaAutofill({ tradename: 'Priorix' });
+  const fill = () =>
+    f.context.runPanoramaAutofill(data, () =>
+      f.context.tryFillPanoramaLotOrTrade(data)
+    );
+  assert.equal(fill(), false);
+  assert.equal(replacement.value, '');
+  assert.equal(fill(), true);
+  assert.equal(f.context.hasPanoramaLotOrTradeSelection(data), true);
 });

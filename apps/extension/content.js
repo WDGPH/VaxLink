@@ -1269,16 +1269,27 @@ function fillSelectField(field, value) {
       );
     });
   }
-  if (!matched) return false;
+  if (!matched || matched.disabled) return false;
 
   assertPanoramaAutofillWrite();
   field.focus();
   assertPanoramaAutofillWrite();
+  // A focus handler can replace the options without replacing the select.
+  if (
+    field.isConnected === false ||
+    !Array.from(field.options || []).includes(matched) ||
+    matched.disabled
+  )
+    return false;
   field.value = matched.value;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
+  if (field.isConnected === false || field.value !== matched.value)
+    return false;
   field.dispatchEvent(new Event('change', { bubbles: true }));
   assertPanoramaAutofillWrite();
+  if (field.isConnected === false || field.value !== matched.value)
+    return false;
   if (field.id && field.id.endsWith('_input')) {
     const labelId = `${field.id.slice(0, -6)}_label`;
     const label = document.getElementById(labelId);
@@ -1553,10 +1564,7 @@ function getFieldFilledText(field) {
   const id = String(field.id || '');
   if (id.endsWith('_focus')) {
     const label = document.getElementById(id.slice(0, -6) + '_label');
-    if (label) {
-      const labelText = String(label.textContent || '').trim();
-      return labelText;
-    }
+    return String(label?.textContent || '').trim();
   }
   if (id.endsWith('_input')) {
     const label = document.getElementById(id.slice(0, -6) + '_label');
@@ -1567,34 +1575,6 @@ function getFieldFilledText(field) {
   return String(field.value || field.textContent || '').trim();
 }
 
-function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
-  const candidateNorm = normalizeForMatch(candidate);
-  if (!candidateNorm) return false;
-  const filledRaw = String(filledRawValue || '').trim();
-  const filledNorm = normalizeForMatch(filledRaw);
-  if (!filledNorm) return false;
-  if (filledNorm === candidateNorm) return true;
-  // Reject if the filled text is a compound variant of the candidate (e.g. "HB-pediatric" for "HB").
-  // normalizeForMatch converts dashes to spaces, so "HB-pediatric" → "hb pediatric", which would
-  // otherwise pass the .includes("hb") check below and falsely accept the pediatric agent for adults.
-  const candidateRaw = String(candidate || '').trim();
-  if (
-    candidateRaw &&
-    filledRaw
-      .trim()
-      .toLowerCase()
-      .startsWith(candidateRaw.toLowerCase() + '-')
-  )
-    return false;
-  if (filledNorm.includes(candidateNorm)) return true;
-
-  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
-  return (
-    candidateTokens.length > 0 &&
-    candidateTokens.every((t) => filledNorm.includes(t))
-  );
-}
-
 function isAgentTextAccepted(candidate, selected) {
   const expected = normalizeForMatch(candidate);
   return (
@@ -1602,10 +1582,6 @@ function isAgentTextAccepted(candidate, selected) {
     (normalizeForMatch(selected) === expected ||
       panoramaAgentIdentity(selected) === expected)
   );
-}
-
-function fieldFilledTextMatchesCandidate(field, candidate) {
-  return filledAgentTextMatchesCandidate(getFieldFilledText(field), candidate);
 }
 
 function isAgentCandidateAccepted(candidate, field) {
@@ -1711,26 +1687,43 @@ function getPanoramaTradeSelectors() {
 }
 
 function hasPanoramaTradeSelection(data) {
-  const candidates = getPanoramaTradeCandidates(data);
+  const candidates = getPanoramaTradeCandidates(data).map(normalizeForMatch);
   if (!candidates.length) return false;
-  const fields = getFields(getPanoramaTradeSelectors()).filter(
-    canFillPanoramaControl
+  const fields = getFields(
+    getPanoramaTradeSelectors(),
+    data?._vaxlinkOwner?.form
   );
-  if (!fields.length) return false;
-  return fields.some((field) =>
-    candidates.some((candidate) =>
-      fieldFilledTextMatchesCandidate(field, candidate)
-    )
-  );
+  return panoramaSelectionControls(fields)
+    .filter((field) => field.tagName !== 'SELECT' || !!field.value)
+    .some((field) =>
+      candidates.includes(normalizeForMatch(getFieldFilledText(field)))
+    );
 }
 
 function fillPanoramaTradeName(data) {
   const candidates = getPanoramaTradeCandidates(data);
   if (!candidates.length) return false;
-  const selectors = getPanoramaTradeSelectors();
-  for (const candidate of candidates) {
-    if (fillFirstMatchingField(selectors, candidate)) {
-      return true;
+  const fields = getFields(
+    getPanoramaTradeSelectors(),
+    data?._vaxlinkOwner?.form
+  );
+  for (const field of panoramaSelectionControls(fields).filter(
+    canFillPanoramaControl
+  )) {
+    for (const candidate of candidates) {
+      if (field.tagName === 'SELECT') {
+        const matches = Array.from(field.options || []).filter(
+          (option) =>
+            option.value &&
+            !option.disabled &&
+            normalizeForMatch(option.text) === normalizeForMatch(candidate)
+        );
+        if (matches.length !== 1) continue;
+        fillSelectField(field, matches[0].value);
+      } else if (!fillField(field, candidate)) {
+        continue;
+      }
+      return hasPanoramaTradeSelection(data);
     }
   }
   return false;
@@ -4902,14 +4895,11 @@ async function maybeAutoFillPanoramaMultipleGrid() {
 }
 
 function getPanoramaCurrentTradeSelectionText(scope) {
-  const fields = getFields(getPanoramaTradeSelectors(), scope).filter(
-    canFillPanoramaControl
-  );
-  for (const field of fields) {
+  const fields = getFields(getPanoramaTradeSelectors(), scope);
+  for (const field of panoramaSelectionControls(fields)) {
+    if (field.tagName === 'SELECT' && !field.value) continue;
     const text = normalizeForMatch(getFieldFilledText(field));
-    if (text && text !== 'select') {
-      return text;
-    }
+    if (text && text !== 'select' && text !== 'select one') return text;
   }
   return '';
 }

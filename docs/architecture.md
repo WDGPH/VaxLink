@@ -76,6 +76,8 @@ its selected value because the visible widget label can lag a refresh. The Lot
 must match the current chart widget. An exact Lot takes priority, and a
 punctuation-only difference is allowed only when it identifies one choice.
 VaxLink reads the current selection after Panorama handles the field event.
+For older saved records with a Trade name and no Lot, the current Trade
+selection provides that readback.
 
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
