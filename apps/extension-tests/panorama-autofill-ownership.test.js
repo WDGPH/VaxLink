@@ -342,6 +342,19 @@ test('overlapping context probes keep an in-transit scan valid on the same form'
   assert.equal(f.isScannerDeliveryContextCurrent(scanA), true);
 });
 
+test('popup focus preserves the deliberate chart context and retires the automatic route', () => {
+  const f = fixture();
+  f.beginPanoramaAutofill({}, true, { automatic: true });
+  const kind = 'provider_single';
+  const automatic = f.getScannerDeliveryContext(kind);
+  const explicit = f.getScannerDeliveryContext(kind, true);
+  f.windowListeners.get('blur').forEach((listener) => listener());
+  assert.equal(f.isScannerDeliveryContextCurrent(automatic, kind), false);
+  assert.equal(f.isScannerDeliveryContextCurrent(explicit, kind, true), true);
+  interaction(f);
+  assert.equal(f.isScannerDeliveryContextCurrent(explicit, kind, true), false);
+});
+
 test('context changes rotate the token and cannot revive an in-transit scan', () => {
   for (const change of [
     (f) => f.setMode('multiple'),

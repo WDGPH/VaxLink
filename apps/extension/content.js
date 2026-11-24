@@ -214,25 +214,30 @@ function logAnalyticsEvent(eventType, payload = {}) {
   }
 }
 
-function getScannerDeliveryContext(kind) {
-  // Inspecting the same form must not invalidate a scan already in transit.
-  if (isScannerDeliveryContextCurrent(scannerDeliveryContext?.token, kind)) {
-    return scannerDeliveryContext.token;
+let trayUseContext = null;
+let trayUseContextGeneration = 0;
+
+function getScannerDeliveryContext(kind, explicit = false) {
+  const current = explicit ? trayUseContext : scannerDeliveryContext;
+  if (isScannerDeliveryContextCurrent(current?.token, kind, explicit)) {
+    return current.token;
   }
-  scannerDeliveryContext = {
+  const context = {
     token: crypto.randomUUID(),
     form: getPanoramaAutofillForm(),
     url: location.href,
     step: getPanoramaMultiStepIndicatorKey({ visibleOnly: true }),
     kind: kind ?? getPanoramaFormContext({ checkReadiness: false }).kind,
     mode: activeWorkflowMode,
-    generation: panoramaContextGeneration
+    generation: explicit ? trayUseContextGeneration : panoramaContextGeneration
   };
-  return scannerDeliveryContext.form ? scannerDeliveryContext.token : null;
+  if (explicit) trayUseContext = context;
+  else scannerDeliveryContext = context;
+  return context.form ? context.token : null;
 }
 
-function isScannerDeliveryContextCurrent(token, kind) {
-  const context = scannerDeliveryContext;
+function isScannerDeliveryContextCurrent(token, kind, explicit = false) {
+  const context = explicit ? trayUseContext : scannerDeliveryContext;
   if (!token || context?.token !== token) return false;
   const current =
     context.form?.isConnected &&
@@ -240,10 +245,14 @@ function isScannerDeliveryContextCurrent(token, kind) {
     context.url === location.href &&
     context.step === getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) &&
     context.mode === activeWorkflowMode &&
-    context.generation === panoramaContextGeneration &&
+    context.generation ===
+      (explicit ? trayUseContextGeneration : panoramaContextGeneration) &&
     context.kind ===
       (kind ?? getPanoramaFormContext({ checkReadiness: false }).kind);
-  if (!current) scannerDeliveryContext = null;
+  if (!current) {
+    if (explicit) trayUseContext = null;
+    else scannerDeliveryContext = null;
+  }
   return !!current;
 }
 
@@ -259,7 +268,10 @@ function setupMessageListener() {
       const supported = isHandsFreeSupportedPage();
       const formContext = supported ? getPanoramaFormContext() : null;
       const contextToken = supported
-        ? getScannerDeliveryContext(formContext.kind)
+        ? getScannerDeliveryContext(
+            formContext.kind,
+            request.forTrayUse === true
+          )
         : null;
       const initialized = {
         listener: window.__vaxlinkMessageListenerInitialized === true,
@@ -2712,7 +2724,8 @@ function isPanoramaChartActive() {
 
 function invalidateAutomaticPanoramaContext() {
   // A return to this tab cannot revive a scan pinned before focus was lost.
-  if (panoramaAutofillOwner?.automatic) cancelPanoramaAutofill();
+  if (panoramaAutofillOwner?.automatic)
+    cancelPanoramaAutofill({ focusOnly: true });
   else panoramaContextGeneration += 1;
 }
 
@@ -2782,8 +2795,9 @@ function updatePanoramaWorkflowMode(mode) {
   activeWorkflowMode = mode;
 }
 
-function cancelPanoramaAutofill() {
+function cancelPanoramaAutofill({ focusOnly = false } = {}) {
   panoramaContextGeneration += 1;
+  if (!focusOnly) trayUseContextGeneration += 1;
   if (panoramaAutofillOwner) panoramaAutofillOwner.cancelled = true;
   if (stopPanoramaLotTradeWatcher) stopPanoramaLotTradeWatcher();
 }
