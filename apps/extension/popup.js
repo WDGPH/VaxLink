@@ -35,6 +35,7 @@ let inventoryModeBtn;
 let multipleModeSection;
 let inventoryModeSection;
 let nvcStatusDiv;
+let nvcStatusTimer;
 let refreshRecentActivity;
 let outputDiv;
 let analyticsSummaryDiv;
@@ -99,7 +100,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   const version = document.getElementById('extensionVersion');
   const manifest = chrome.runtime.getManifest();
   const name = document.getElementById('extensionName');
-  if (name) name.textContent = manifest.name;
+  if (name && manifest.name) {
+    const channel = document.getElementById('extensionChannel');
+    if (channel && /^VaxLink(?: |$)/.test(manifest.name))
+      channel.textContent = manifest.name.slice('VaxLink'.length);
+    else name.textContent = manifest.name;
+  }
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
 
@@ -344,27 +350,16 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (refreshNvcBtn) {
     refreshNvcBtn.addEventListener('click', () => {
-      refreshNvcBtn.disabled = true;
-      writeOutput('Refreshing NVC catalogue...', 'info');
-      if (nvcStatusDiv) {
-        nvcStatusDiv.hidden = false;
-        nvcStatusDiv.textContent = 'NVC is refreshing.';
-      }
-
+      clearTimeout(nvcStatusTimer);
+      setButtonBusy(refreshNvcBtn, true, 'Checking…');
       chrome.runtime.sendMessage({ action: 'refreshNVCBundle' }, (response) => {
-        refreshNvcBtn.disabled = false;
-        loadNVCStatus();
-        if (chrome.runtime.lastError) {
-          writeOutput(
-            `NVC refresh failed: ${chrome.runtime.lastError.message}`,
-            'error'
-          );
-          return;
-        }
-
-        writeOutput(
-          formatNVCRefreshMessage(response),
-          response?.success ? 'success' : 'error'
+        setButtonBusy(refreshNvcBtn, false);
+        const failed = chrome.runtime.lastError;
+        loadNVCStatus(
+          failed
+            ? 'Could not recheck the catalogue. Try again.'
+            : formatNVCRefreshMessage(response),
+          !failed && response?.success === true
         );
       });
     });
@@ -965,7 +960,7 @@ async function loadAnalyticsSummary() {
 
 function renderAnalyticsSummary(summary) {
   if (!summary || !analyticsSummaryDiv) return;
-  const metrics = (day, daysTracked) => {
+  const metrics = (day) => {
     const scannerCaptures = ['single', 'multiple', 'inventory'].reduce(
       (total, workflow) => total + (day.workflows?.[workflow]?.liveScans || 0),
       0
@@ -992,13 +987,11 @@ function renderAnalyticsSummary(summary) {
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
-      'Tray to chart': day.queues?.multipleUsed || 0,
-      'Days tracked': daysTracked
+      'Tray to chart': day.queues?.multipleUsed || 0
     };
   };
-  const today = summary.today || {};
-  const todayMetrics = metrics(today, Object.keys(today).length ? 1 : 0);
-  const allMetrics = metrics(summary.rollup || {}, summary.daysTracked);
+  const todayMetrics = metrics(summary.today || {});
+  const allMetrics = metrics(summary.rollup || {});
   const renderRow = (label) => `
     <tr><th scope="row">${escapeAnalyticsHtml(label)}</th><td>${formatAnalyticsNumber(todayMetrics[label])}</td><td>${formatAnalyticsNumber(allMetrics[label])}</td></tr>
   `;
@@ -1033,7 +1026,6 @@ function renderAnalyticsSummary(summary) {
       `
         )
         .join('')}
-      <tfoot>${renderRow('Days tracked')}</tfoot>
     </table>
   `;
 }
@@ -1240,7 +1232,7 @@ function parseImmunizationInput(raw, workflow, source) {
   return null;
 }
 
-function loadNVCStatus() {
+function loadNVCStatus(message, confirmed = false) {
   chrome.runtime.sendMessage({ action: 'getNVCUpdateStatus' }, (status) => {
     if (chrome.runtime.lastError || !status) {
       if (nvcStatusDiv) {
@@ -1250,8 +1242,10 @@ function loadNVCStatus() {
       }
       return;
     }
-    renderNVCStatus(status, nvcStatusDiv);
-    if (status?.state === 'refreshing') setTimeout(loadNVCStatus, 1000);
+    renderNVCStatus(status, nvcStatusDiv, message);
+    clearTimeout(nvcStatusTimer);
+    if (status.state === 'refreshing' || confirmed)
+      nvcStatusTimer = setTimeout(loadNVCStatus, confirmed ? 6000 : 1000);
   });
 }
 

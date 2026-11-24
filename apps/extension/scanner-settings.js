@@ -8,6 +8,7 @@ import { formatUsbId, ZEBRA_USB_VENDOR_ID } from './scanner/serial-profiles.js';
 import { isWebSerialSupported } from './scanner/serial-provider.js';
 
 let statusChangeVersion = 0;
+let actionNoticeTimer;
 
 const els = {};
 export function initializeScannerSettings() {
@@ -19,8 +20,7 @@ export function initializeScannerSettings() {
     'disconnectBtn',
     'forgetScannerBtn',
     'scannerActionNotice',
-    'connectionStatus',
-    'scannerIdentity'
+    'connectionStatus'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
   });
@@ -94,19 +94,6 @@ function applyDaemonStatus(status, source = 'live') {
           state === SCANNER_STATUS_STATES.UNAVAILABLE)
       ? 'error'
       : 'info';
-  setStatus(
-    els.connectionStatus,
-    [
-      getScannerConnectionLabel(status, source),
-      source === 'live' ? scannerStatusSnapshot.lastError : '',
-      source !== 'live' && scannerStatusSnapshot.lastKnownCaptureAt
-        ? `Last known capture ${new Date(scannerStatusSnapshot.lastKnownCaptureAt).toLocaleString()}.`
-        : ''
-    ]
-      .filter(Boolean)
-      .join(': '),
-    tone
-  );
   const identityKnown = !!scannerStatusSnapshot.profileId;
   const { usbVendorId, usbProductId } = scannerStatusSnapshot.portInfo || {};
   const vendor = formatUsbId(usbVendorId);
@@ -114,11 +101,21 @@ function applyDaemonStatus(status, source = 'live') {
   const usb = vendor && product ? `[USB ${vendor}:${product}]` : '';
   const name = usbVendorId === ZEBRA_USB_VENDOR_ID ? 'Zebra' : '';
   const description = [name, usb].filter(Boolean).join(' ');
-  els.scannerIdentity.hidden = !description;
-  els.scannerIdentity.textContent = description
-    ? `${connected ? 'Scanner' : 'Saved scanner'} ${description}`
-    : '';
-  els.scannerIdentity.title = usb
+  setStatus(
+    els.connectionStatus,
+    [
+      getScannerConnectionLabel(status, source),
+      description && (connected ? description : `Saved scanner ${description}`),
+      source === 'live' ? scannerStatusSnapshot.lastError : '',
+      source !== 'live' && scannerStatusSnapshot.lastKnownCaptureAt
+        ? `Last known capture ${new Date(scannerStatusSnapshot.lastKnownCaptureAt).toLocaleString()}`
+        : ''
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    tone
+  );
+  els.connectionStatus.title = usb
     ? 'USB vendor and product code. Different scanners can share this code.'
     : '';
   const stopping = state === SCANNER_STATUS_STATES.STOPPING;
@@ -169,15 +166,16 @@ async function refreshStatus() {
 }
 
 async function openPairingWindow() {
+  showActionNotice();
   try {
     await sendScannerDaemonCommand('scannerPairing.open');
   } catch (error) {
-    setStatus(els.scannerActionNotice, error.message, 'error');
+    showActionNotice(error.message, 'error');
   }
 }
 
 async function reconnectGrantedPort() {
-  setStatus(els.scannerActionNotice, '');
+  showActionNotice();
   setButtons({ canConnect: false, canDisconnect: true });
   setStatus(els.connectionStatus, 'Connecting…', 'info');
   try {
@@ -192,23 +190,31 @@ async function reconnectGrantedPort() {
 }
 
 async function stopScanner(action) {
-  setStatus(els.scannerActionNotice, '');
+  showActionNotice();
   setButtons({ canConnect: false, canDisconnect: false });
   if (els.forgetScannerBtn) els.forgetScannerBtn.disabled = true;
   try {
     const result = await sendScannerDaemonCommand(action);
     if (action === SCANNER_DAEMON_ACTIONS.FORGET) {
-      setStatus(
-        els.scannerActionNotice,
+      showActionNotice(
         result.permissionRemoved
-          ? 'Saved scanner and browser permission cleared.'
-          : 'Saved scanner cleared. You can remove any remaining serial port permission in your browser’s site settings.'
+          ? 'Scanner forgotten. Browser permission removed.'
+          : 'Scanner forgotten. Remove any remaining scanner permission in your browser’s site settings.',
+        'info',
+        8000
       );
     }
   } catch (error) {
-    setStatus(els.scannerActionNotice, error.message, 'error');
+    showActionNotice(error.message, 'error');
   }
   await refreshStatus();
+}
+
+function showActionNotice(message = '', type = 'info', duration = 0) {
+  clearTimeout(actionNoticeTimer);
+  setStatus(els.scannerActionNotice, message, type);
+  if (duration)
+    actionNoticeTimer = setTimeout(() => showActionNotice(), duration);
 }
 
 function setButtons({ canConnect, canDisconnect }) {

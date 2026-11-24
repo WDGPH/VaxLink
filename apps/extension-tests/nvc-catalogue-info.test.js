@@ -96,25 +96,25 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   assert.equal(restored.releaseDate, '2026-11-05');
   assert.equal(restored.lotCount, 2);
   assert.notEqual(restored.updatedAt, restored.releaseDate);
-  const version = {};
-  const check = {};
-  const statusNodes = { nvcSettingsVersion: version, nvcLastCheck: check };
+  const summary = {};
   const container = {
     ownerDocument: {
-      getElementById: (id) => statusNodes[id] || null
+      getElementById: (id) => (id === 'nvcSettingsState' ? summary : null)
     }
   };
   renderNVCStatus(restored, container);
-  assert.equal(
-    version.textContent,
-    'Version <img src=x onerror=alert(1)> · November 5, 2026'
+  assert.ok(
+    summary.textContent.includes(
+      'Version <img src=x onerror=alert(1)> · Nov 5, 2026 · Checked '
+    )
   );
   assert.equal(
-    check.textContent,
+    summary.title,
     `Last successful check ${new Date(restored.lastCheckAt).toLocaleString()}`
   );
   renderNVCStatus({ ...restored, lastCheckAt: null }, container);
-  assert.equal(check.textContent, 'No successful check recorded');
+  assert.match(summary.textContent, / · No successful check$/);
+  assert.equal(summary.title, '');
   assert.equal(container.textContent, '');
   assert.equal(container.hidden, true);
   const missing = await status(
@@ -122,8 +122,8 @@ test('accepted publication metadata survives reopening and popup renders upstrea
   );
   assert.equal(missing.releaseDate, null);
   assert.equal(missing.releaseVersion, null);
-  renderNVCStatus(missing, container);
-  assert.equal(version.textContent, 'Version unavailable');
+  renderNVCStatus({ ...missing, lastCheckAt: null }, container);
+  assert.equal(summary.textContent, 'Ready · check due · No successful check');
 });
 
 test('compact catalogue status distinguishes a usable cache from a recent successful check', () => {

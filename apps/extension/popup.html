@@ -81,6 +81,10 @@
         color: var(--ink);
       }
 
+      .brand-accent {
+        color: var(--accent);
+      }
+
       #extensionVersion {
         display: block;
         margin-top: 2px;
@@ -325,6 +329,10 @@
         border-radius: 8px;
         color: var(--ink);
         font-size: 12px;
+      }
+
+      #nvcSettingsState {
+        overflow-wrap: anywhere;
       }
 
       #nvcStatus {
@@ -760,22 +768,18 @@
         font-size: 12px;
       }
 
-      #scannerSettingsSection .settings-overview {
-        display: grid;
-        gap: 8px;
-      }
-
-      #scannerSettingsSection
-        .settings-overview:has(#connectionStatus[hidden]) {
-        grid-template-columns: 1fr auto;
+      #scannerSettingsSection .settings-overview,
+      #nvcSettingsSection .settings-overview {
         align-items: center;
       }
 
+      #connectionStatus,
       #scannerActionNotice {
         margin: 6px 0 0;
         color: var(--subtle);
         font-size: 11px;
         line-height: 16px;
+        overflow-wrap: anywhere;
       }
 
       #scannerActionNotice.error {
@@ -835,7 +839,7 @@
       }
 
       .analytics-summary {
-        margin-bottom: 14px;
+        margin-bottom: 10px;
       }
       .activity-table {
         width: 100%;
@@ -845,7 +849,7 @@
       }
       .activity-table th,
       .activity-table td {
-        padding: 4px 6px;
+        padding: 2px 6px;
         text-align: right;
       }
 
@@ -854,9 +858,6 @@
         white-space: nowrap;
       }
 
-      .activity-table thead {
-        border-bottom: 1px solid var(--tray-line);
-      }
       .activity-table th:first-child {
         padding-left: 0;
         text-align: left;
@@ -865,24 +866,17 @@
       .activity-table td:last-child {
         padding-right: 0;
       }
-      .activity-table tbody th,
-      .activity-table tfoot th {
+      .activity-table tbody th {
         font-weight: 400;
         color: var(--subtle);
       }
       .activity-table .activity-group th {
-        padding: 10px 0 4px;
+        padding: 6px 0 2px;
         color: var(--tray-accent);
         font-size: 12px;
         font-weight: 700;
       }
-      .activity-table tfoot th,
-      .activity-table tfoot td {
-        padding-top: 10px;
-        border-top: 1px solid var(--tray-line);
-      }
-      .activity-table tbody tr:not(.activity-group):hover,
-      .activity-table tfoot tr:hover {
+      .activity-table tbody tr:not(.activity-group):hover {
         background: #f1f8fa;
       }
       .activity-actions {
@@ -1067,7 +1061,10 @@
                 alt="VaxLink logo"
               />
               <div>
-                <h2 class="title" id="extensionName">VaxLink</h2>
+                <h2 class="title" id="extensionName">
+                  Vax<span class="brand-accent">Link</span
+                  ><span id="extensionChannel"></span>
+                </h2>
                 <small id="extensionVersion"></small>
               </div>
             </div>
@@ -1132,13 +1129,7 @@
               aria-labelledby="scannerSettingsTitle"
             >
               <div class="settings-overview">
-                <div class="settings-summary">
-                  <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
-                  <div id="connectionStatus" role="status">
-                    Checking scanner connection…
-                  </div>
-                  <p id="scannerIdentity" hidden></p>
-                </div>
+                <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
                 <div class="settings-controls">
                   <button id="requestPortBtn" type="button">
                     Scanner setup
@@ -1154,6 +1145,9 @@
                   </button>
                 </div>
               </div>
+              <p id="connectionStatus" role="status">
+                Checking scanner connection…
+              </p>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
                   A scan could not be saved or delivered. Check pending scans
@@ -1255,16 +1249,14 @@
               aria-labelledby="nvcSettingsTitle"
             >
               <div class="settings-overview">
-                <div class="settings-summary">
-                  <h3 id="nvcSettingsTitle">National Vaccine Catalogue</h3>
-                  <div id="nvcSettingsState" role="status">Checking</div>
-                  <p id="nvcSettingsVersion">Version unavailable</p>
-                  <p id="nvcLastCheck"></p>
-                </div>
+                <h3 id="nvcSettingsTitle">National Vaccine Catalogue</h3>
                 <div class="settings-controls">
                   <button id="refreshNvcBtn" type="button">Recheck</button>
                 </div>
               </div>
+              <p id="nvcSettingsState" class="settings-hint" role="status">
+                Checking
+              </p>
               <div
                 id="nvcStatus"
                 class="settings-hint"

@@ -27,41 +27,42 @@ export function formatNVCRefreshMessage(status) {
   return 'NVC catalogue updated — no new lot codes.';
 }
 
-export function renderNVCStatus(status, container) {
+export function renderNVCStatus(status, container, message) {
   if (!container || !status) return;
-  const state = getNVCStatusLabel(status);
-  const stateSummary =
-    container.ownerDocument?.getElementById('nvcSettingsState');
-  const versionSummary =
-    container.ownerDocument?.getElementById('nvcSettingsVersion');
-  if (stateSummary) stateSummary.textContent = state;
-  const publication =
-    status.releaseDate && !Number.isNaN(Date.parse(status.releaseDate))
-      ? new Date(status.releaseDate).toLocaleDateString('en-CA', {
-          year: 'numeric',
-          month: 'long',
+  const summary = container.ownerDocument?.getElementById('nvcSettingsState');
+  if (summary) {
+    const published = new Date(status.releaseDate || '');
+    const lastCheck = new Date(status.lastCheckAt || '');
+    const publication = Number.isFinite(published.getTime())
+      ? published.toLocaleDateString('en-US', {
+          month: 'short',
           day: 'numeric',
+          year: 'numeric',
           timeZone: 'UTC'
         })
-      : 'Unavailable';
-  if (versionSummary) {
-    versionSummary.textContent = [
-      status.releaseVersion
-        ? `Version ${status.releaseVersion}`
-        : 'Version unavailable',
-      publication !== 'Unavailable' ? publication : ''
+      : '';
+    const checked = Number.isFinite(lastCheck.getTime());
+    const checkTime = checked
+      ? lastCheck.toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit'
+        })
+      : '';
+    summary.textContent = [
+      getNVCStatusLabel(status),
+      status.releaseVersion ? `Version ${status.releaseVersion}` : '',
+      publication,
+      checked ? `Checked ${checkTime}` : 'No successful check'
     ]
       .filter(Boolean)
       .join(' · ');
+    summary.title = checked
+      ? `Last successful check ${lastCheck.toLocaleString()}`
+      : '';
   }
-  const checked = container.ownerDocument?.getElementById('nvcLastCheck');
-  if (checked) {
-    const time = Date.parse(status.lastCheckAt || '');
-    checked.textContent = Number.isFinite(time)
-      ? `Last successful check ${new Date(time).toLocaleString()}`
-      : 'No successful check recorded';
-  }
-  const health = describeNVCHealth(status);
+  const health = message || describeNVCHealth(status);
   container.textContent = health;
   container.hidden = !health;
 }
