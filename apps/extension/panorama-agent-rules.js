@@ -10,8 +10,14 @@
     {
       outputs: ['MMR'],
       clauses: [
-        { any: ['priorix', 'm-m-r ii', 'm m r ii', 'm-m-rvaxpro', 'mmr'] },
-        { all: ['measles', 'mumps', 'rubella'] }
+        {
+          any: ['priorix', 'm-m-r ii', 'm m r ii', 'm-m-rvaxpro', 'mmr'],
+          notAny: ['proquad', 'varicella', 'mmrv']
+        },
+        {
+          all: ['measles', 'mumps', 'rubella'],
+          notAny: ['proquad', 'varicella', 'mmrv']
+        }
       ]
     },
     {
@@ -867,10 +873,17 @@
         { all: ['recombivax hb'], notAny: ['dialysis', 'pediatric', '5'] },
         // Heplisav-B: adult-only product; no pediatric or dialysis formulation.
         { any: ['heplisav'], notAny: ['dialysis', 'pediatric'] },
-        // Generic hepatitis B adult (no specific brand identified).
+        // The brand rules above handle formulations with known strengths.
         {
           any: ['hepatitis b'],
-          notAny: ['dialysis', 'pediatric', 'hepatitis a', '5']
+          notAny: [
+            'engerix',
+            'recombivax',
+            'dialysis',
+            'pediatric',
+            'hepatitis a',
+            '5'
+          ]
         },
         // Strength fallback: Engerix-B 20 = adult (when brand is 'engerix' not full 'engerix b').
         { all: ['engerix', '20'], notAny: ['dialysis', 'pediatric'] },

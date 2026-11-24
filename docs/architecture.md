@@ -69,6 +69,11 @@ the Multiple detail step. Conflicting headings or controls and unavailable
 fields explain why a form is unready. Reading the same form repeatedly keeps
 its delivery token. A new form, workflow or step retires the old token.
 
+Vaccine rules match the Panorama Agent for the formulation. For example, MMR
+and MMR with varicella use different Agents, as do adult and pediatric
+hepatitis B products. Where Panorama provides a native select, VaxLink reads
+its selected value because the visible widget label can lag a refresh.
+
 The script receives routed scans, shows the floating VaxLink controls, and fills
 the immunization form. Each fill keeps the document, form, URL, workflow, and
 visible immunization step that started it. A newer fill, navigation, form

@@ -376,3 +376,41 @@ test('manual edit of a newly probed replacement form invalidates its token', () 
   interaction(f);
   assert.equal(f.isScannerDeliveryContextCurrent(token), false);
 });
+test('formulation-specific vaccines do not match the broader Agent on a detail step', () => {
+  const { context } = createContentHarness();
+  assert.equal(context.isAgentTextAccepted('MMR', 'MMRV'), false);
+  assert.equal(
+    context.isAgentTextAccepted('HB', 'Hepatitis B [HB-pediatric]'),
+    false
+  );
+  assert.equal(
+    context.isAgentTextAccepted('HB-pediatric', 'Hepatitis B [HB-pediatric]'),
+    true
+  );
+  for (const [record, intended, different] of [
+    [
+      { tradename: 'ProQuad', antigen: 'Measles, mumps, rubella, varicella' },
+      'MMR-Var',
+      'MMR'
+    ],
+    [
+      { tradename: 'Engerix-B', antigen: 'Hepatitis B', strength: '10' },
+      'HB-pediatric',
+      'HB'
+    ],
+    [
+      { tradename: 'Recombivax HB', antigen: 'Hepatitis B', strength: '10' },
+      'HB',
+      'HB-pediatric'
+    ]
+  ]) {
+    assert.equal(
+      context.queueRecordMatchesPanoramaAgentText(record, intended),
+      true
+    );
+    assert.equal(
+      context.queueRecordMatchesPanoramaAgentText(record, different),
+      false
+    );
+  }
+});

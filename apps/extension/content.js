@@ -1567,11 +1567,6 @@ function getFieldFilledText(field) {
   return String(field.value || field.textContent || '').trim();
 }
 
-function isShortAgentCandidate(value) {
-  const compact = normalizeForMatch(value).replace(/[^a-z0-9]/g, '');
-  return compact.length > 0 && compact.length <= 3;
-}
-
 function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   const candidateNorm = normalizeForMatch(candidate);
   if (!candidateNorm) return false;
@@ -1600,31 +1595,12 @@ function filledAgentTextMatchesCandidate(filledRawValue, candidate) {
   );
 }
 
-function isAgentTextAccepted(candidate, filledRawValue) {
-  const candidateNorm = normalizeForMatch(candidate);
-  const filledRaw = String(filledRawValue || '').trim();
-  const filledNorm = normalizeForMatch(filledRaw);
-  if (filledAgentTextMatchesCandidate(filledRaw, candidate)) return true;
-
-  if (isShortAgentCandidate(candidate)) {
-    const token = candidateNorm.replace(/[^a-z0-9]/g, '');
-    // Exact compact match: field shows precisely this code (e.g. "HB").
-    const filledCompact = filledNorm.replace(/[^a-z0-9]/g, '');
-    if (filledCompact === token) return true;
-    // Bracket code match: field shows a display name with code in brackets (e.g. "Hepatitis B [HB]").
-    // filledTokens.includes(token) is intentionally NOT used here — it would accept "HB-pediatric"
-    // (normalized to "hb pediatric") for the adult "HB" candidate since "hb" appears as a token.
-    const bracketMatch = filledNorm.match(/\[([^\]]+)\]/);
-    return !!(
-      bracketMatch &&
-      normalizeForMatch(bracketMatch[1]).replace(/[^a-z0-9]/g, '') === token
-    );
-  }
-
-  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
+function isAgentTextAccepted(candidate, selected) {
+  const expected = normalizeForMatch(candidate);
   return (
-    candidateTokens.length > 0 &&
-    candidateTokens.every((t) => filledNorm.includes(t))
+    !!expected &&
+    (normalizeForMatch(selected) === expected ||
+      panoramaAgentIdentity(selected) === expected)
   );
 }
 
@@ -1636,14 +1612,18 @@ function isAgentCandidateAccepted(candidate, field) {
   return isAgentTextAccepted(candidate, getFieldFilledText(field));
 }
 
-function fillPanoramaAgentField(selectors, candidate) {
+function fillPanoramaAgentField(selectors, candidate, scope) {
   if (!candidate) return false;
-  const fields = getFields(selectors).filter(canFillPanoramaControl);
+  const fields = getFields(selectors, scope).filter(canFillPanoramaControl);
   for (const field of fields) {
     if (!fillField(field, candidate)) {
       continue;
     }
-    if (isAgentCandidateAccepted(candidate, field)) {
+    if (
+      getPanoramaSelectedAgentTexts(scope).some((text) =>
+        isAgentTextAccepted(candidate, text)
+      )
+    ) {
       return true;
     }
   }
@@ -1763,44 +1743,62 @@ function getPanoramaAgentSelectors() {
   ];
 }
 
+function panoramaSelectionControls(fields) {
+  // The native selection can update before the visible widget label.
+  const selects = fields.filter((field) => field.tagName === 'SELECT');
+  return selects.length ? selects : fields;
+}
+
+function getPanoramaSelectedAgentTexts(scope) {
+  const fields = getFields(getPanoramaAgentSelectors(), scope);
+  return panoramaSelectionControls(fields)
+    .filter((field) => field.tagName !== 'SELECT' || !!field.value)
+    .map(getFieldFilledText)
+    .filter((text) => {
+      const normalized = normalizeForMatch(text);
+      return (
+        normalized && normalized !== 'select' && normalized !== 'select one'
+      );
+    });
+}
+
 function getPanoramaCurrentAgentSelectionText(scope) {
-  const fields = getFields(getPanoramaAgentSelectors(), scope).filter(
-    canFillPanoramaControl
-  );
-  for (const field of fields) {
-    const raw = String(getFieldFilledText(field) || '').trim();
-    const norm = normalizeForMatch(raw);
-    if (norm && norm !== 'select' && norm !== '--') {
-      return raw;
-    }
-  }
-  return '';
+  return getPanoramaSelectedAgentTexts(scope)[0] || '';
 }
 
 function hasPanoramaAgentSelection(data) {
-  const fields = getFields(getPanoramaAgentSelectors()).filter(
-    canFillPanoramaControl
-  );
-  if (!fields.length) return false;
-
+  const selected = getPanoramaSelectedAgentTexts(data?._vaxlinkOwner?.form);
   const candidates = getPanoramaAgentCandidates(data);
-  if (!candidates.length) {
-    return fields.some(
-      (field) => normalizeForMatch(getFieldFilledText(field)).length > 0
-    );
-  }
-
-  return fields.some((field) =>
-    candidates.some((candidate) => isAgentCandidateAccepted(candidate, field))
+  if (!candidates.length) return selected.length > 0;
+  const mappedAgents = getMappedPanoramaAgents(data);
+  return selected.some((text) =>
+    matchesExactPanoramaAgent(text, candidates, mappedAgents)
   );
+}
+
+function panoramaAgentIdentity(text) {
+  const code = String(text || '').match(/\[([^\]]+)\]/)?.[1];
+  return normalizeForMatch(code || text);
 }
 
 function queueRecordMatchesPanoramaAgentText(record, agentText) {
   const payload = buildAutofillPayloadFromQueueRecord(record);
   if (!payload) return false;
-  const candidates = getPanoramaAgentCandidates(payload);
-  return candidates.some((candidate) =>
-    isAgentTextAccepted(candidate, agentText)
+  return matchesExactPanoramaAgent(
+    agentText,
+    getPanoramaAgentCandidates(payload),
+    getMappedPanoramaAgents(payload)
+  );
+}
+
+function matchesExactPanoramaAgent(agentText, candidates, mappedAgents) {
+  const selected = panoramaAgentIdentity(agentText);
+  const compatible =
+    /\[[^\]]+\]/.test(agentText) && mappedAgents.length
+      ? mappedAgents
+      : candidates;
+  return compatible.some(
+    (candidate) => normalizeForMatch(candidate) === selected
   );
 }
 
@@ -1815,7 +1813,9 @@ function tryFillPanoramaAgent(data) {
   if (!candidates.length) return false;
   const selectors = getPanoramaAgentSelectors();
   for (const candidate of candidates) {
-    if (fillPanoramaAgentField(selectors, candidate)) {
+    if (
+      fillPanoramaAgentField(selectors, candidate, data?._vaxlinkOwner?.form)
+    ) {
       return true;
     }
   }
@@ -3255,6 +3255,13 @@ function panoramaAgentRuleMatches(sourceText, rule) {
   );
 }
 
+function getMappedPanoramaAgents(data) {
+  const sourceText = buildPanoramaAgentSourceText(data);
+  return PANORAMA_AGENT_RULES.filter((rule) =>
+    panoramaAgentRuleMatches(sourceText, rule)
+  ).flatMap((rule) => rule.outputs || []);
+}
+
 function getPanoramaAgentCandidates(data) {
   const values = [];
   const seen = new Set();
@@ -3271,14 +3278,7 @@ function getPanoramaAgentCandidates(data) {
   add(data?.generic_name);
   add(data?.name);
 
-  const sourceText = buildPanoramaAgentSourceText(data);
-  for (const rule of PANORAMA_AGENT_RULES) {
-    if (!panoramaAgentRuleMatches(sourceText, rule)) continue;
-    for (const output of rule.outputs || []) {
-      add(output);
-    }
-  }
-
+  for (const output of getMappedPanoramaAgents(data)) add(output);
   add(data?.din);
   return values;
 }
@@ -4724,28 +4724,10 @@ function getPanoramaMultipleGridDate1Field(rowIndex) {
   );
 }
 
-function gridAgentLabelMatchesCandidate(rowIndex, candidate) {
-  const labelRaw =
-    getPanoramaMultipleGridAgentLabel(rowIndex)?.textContent || '';
-  const labelText = normalizeForMatch(labelRaw);
-  const candidateNorm = normalizeForMatch(candidate);
-  if (!labelText || !candidateNorm) return false;
-  if (labelText === candidateNorm) return true;
-  // Reject if label is a compound variant of the candidate (e.g. "HB-pediatric" label for "HB").
-  const candidateRaw = String(candidate || '').trim();
-  if (
-    candidateRaw &&
-    labelRaw
-      .trim()
-      .toLowerCase()
-      .startsWith(candidateRaw.toLowerCase() + '-')
-  )
-    return false;
-  if (labelText.includes(candidateNorm)) return true;
-  const candidateTokens = candidateNorm.split(' ').filter((t) => t.length >= 3);
+function panoramaGridAgentMatchesCandidate(rowIndex, candidate) {
+  const field = getPanoramaMultipleGridAgentField(rowIndex);
   return (
-    candidateTokens.length > 0 &&
-    candidateTokens.every((t) => labelText.includes(t))
+    !!field?.value && isAgentTextAccepted(candidate, getFieldFilledText(field))
   );
 }
 
@@ -4770,24 +4752,20 @@ function getPanoramaMultipleGridRowState(rowIndex) {
 function fillPanoramaMultipleGridAgent(rowIndex, data) {
   const agentField = getPanoramaMultipleGridAgentField(rowIndex);
   const agentFocusField = getPanoramaMultipleGridAgentFocusField(rowIndex);
-  const agentLabel = getPanoramaMultipleGridAgentLabel(rowIndex);
   if (!agentField || !canFillPanoramaControl(agentField)) return false;
   const candidates = getPanoramaAgentCandidates(data);
   for (const candidate of candidates) {
     if (!candidate) continue;
+    if (panoramaGridAgentMatchesCandidate(rowIndex, candidate)) return true;
     if (
       fillField(agentField, candidate) &&
-      isAgentCandidateAccepted(candidate, agentField)
-    ) {
+      panoramaGridAgentMatchesCandidate(rowIndex, candidate)
+    )
       return true;
-    }
-    if (agentLabel && gridAgentLabelMatchesCandidate(rowIndex, candidate)) {
-      return true;
-    }
     if (
       agentFocusField &&
       fillField(agentFocusField, candidate) &&
-      isAgentCandidateAccepted(candidate, agentFocusField)
+      panoramaGridAgentMatchesCandidate(rowIndex, candidate)
     ) {
       return true;
     }
