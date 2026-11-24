@@ -58,7 +58,7 @@ test('one deferred use consumes once, distinct uses consume again, and unknown c
   const use = makeUse('vial');
   const first = context.finalizeDeferredPanoramaAutofill(use);
   await pending;
-  await context.finalizeDeferredPanoramaAutofill(use);
+  await context.finalizeDeferredPanoramaAutofill({ ...use });
   release();
   await first;
   assert.equal(harness.storageData.get(key)[0].remaining_doses, 2);
@@ -97,13 +97,18 @@ test('Local Activity preserves product names and skips lot aliases from saved ro
   context.chrome.runtime.sendMessage = (message, done) => {
     void worker.sendMessage(message, sender).then(done);
   };
+  const form = { isConnected: true };
+  Object.assign(context, {
+    getPanoramaAutofillForm: () => form,
+    getPanoramaFormContext: () => ({ kind: 'provider_single' }),
+    getPanoramaMultiStepIndicatorKey: () => '',
+    showVaxlinkToast() {}
+  });
   for (const recordId of ['legacy-alias', 'legacy-name']) {
-    assert.ok(
-      await context.consumeQueueRecordAfterDeferredAutofill({
-        storageKey: key,
-        recordId
-      })
-    );
+    const data = context.beginPanoramaAutofill({
+      _vaxlinkQueueContext: { storageKey: key, recordId }
+    });
+    await context.finalizeDeferredPanoramaAutofill(data);
   }
   assert.equal(worker.storageData.get(key).length, 0);
   const { data } = await worker.sendMessage({ action: 'getAnalyticsExport' });

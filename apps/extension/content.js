@@ -1497,10 +1497,6 @@ function isAgentTextAccepted(candidate, selected) {
   );
 }
 
-function isAgentCandidateAccepted(candidate, field) {
-  return isAgentTextAccepted(candidate, getFieldFilledText(field));
-}
-
 function fillPanoramaAgentField(fields, candidate, scope) {
   for (const field of fields) {
     if (!fillField(field, candidate)) {
@@ -3391,19 +3387,11 @@ function fillPanoramaImmunizationFields(data) {
     agentMatches = hasPanoramaAgentSelection(data);
   }
 
-  const productRequested =
-    !!data.lot || getPanoramaTradeCandidates(data).length > 0;
+  const tradeRequested = getPanoramaTradeCandidates(data).length > 0;
   let fillCount = agentMatches ? 1 : 0;
-  if ((!agentRequested || agentMatches) && productRequested) {
-    if (
-      !panoramaDetailProductMatches(data) &&
-      !isPanoramaLotListAwaitingRefresh(data) &&
-      !isPrimeFacesAjaxBusy()
-    ) {
+  if ((!agentRequested || agentMatches) && tradeRequested) {
+    if (!panoramaDetailProductMatches(data) && !isPrimeFacesAjaxBusy())
       tryFillPanoramaLotOrTrade(data);
-      if (data.lot && panoramaDetailProductMatches(data))
-        owner.consentReadyAt = performance.now() + 700;
-    }
     if (panoramaDetailProductMatches(data)) fillCount += 1;
   }
   fillCount += fillPanoramaDeferredDetailFields(data);
@@ -3414,11 +3402,7 @@ function fillPanoramaImmunizationFields(data) {
 
   const waitingForSelection =
     !panoramaDetailAgentMatches(data) || !panoramaDetailProductMatches(data);
-  if (
-    agentRequested ||
-    productRequested ||
-    hasPanoramaDeferredDetailData(data)
-  ) {
+  if (agentRequested || tradeRequested || hasPanoramaDeferredDetailData(data)) {
     schedulePanoramaLotOrTradeSelection(data, agentMatches ? 200 : 100, {
       finalizeOnResolved: waitingForSelection
     });
@@ -3655,50 +3639,52 @@ async function consumeQueueRecordAfterDeferredAutofill(queueContext) {
     manufacturer: record.manufacturer || '',
     expiryFlag
   });
-  logAnalyticsEvent('autofill_result', {
-    workflow,
-    source,
-    success: true,
-    deferred: true,
-    vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
-    manufacturer: record.manufacturer || '',
-    expiryFlag
-  });
-
   return { record, queueSizeAfter: nextRows.length };
+}
+
+function logDeferredAutofillResult(data, success, record) {
+  const context = data._vaxlinkQueueContext;
+  logAnalyticsEvent('autofill_result', {
+    workflow: context?.workflow || data._vaxlinkOwner.mode,
+    source: context
+      ? context.source || 'queue'
+      : data._vaxlinkResultSource || 'popup_button',
+    success,
+    ...(record && {
+      deferred: true,
+      vaccineLabel: globalThis.vaxlinkVaccineLabel(record),
+      manufacturer: record.manufacturer || '',
+      expiryFlag:
+        record.expiry_flag ||
+        getExpiryStatus(record.inventory_expiry || record.barcode_expiry).flag
+    })
+  });
 }
 
 function recordDeferredAutofillResult(data, success) {
   const owner = data._vaxlinkOwner;
-  if (owner.detailOutcomeRecorded) return;
-  owner.detailOutcomeRecorded = true;
-  logAnalyticsEvent('autofill_result', {
-    workflow: data._vaxlinkQueueContext?.workflow || owner.mode,
-    source:
-      data._vaxlinkQueueContext?.source ||
-      data._vaxlinkResultSource ||
-      'popup_button',
-    success
-  });
+  if (owner.detailOutcome) return;
+  owner.detailOutcome = success ? 'verified' : 'failed';
+  logDeferredAutofillResult(data, success);
 }
 
 async function finalizeDeferredPanoramaAutofill(data) {
-  if (!isPanoramaAutofillCurrent(data) || data._vaxlinkDeferredFinalized) {
-    return;
-  }
-  data._vaxlinkDeferredFinalized = true;
+  const owner = data._vaxlinkOwner;
+  if (!isPanoramaAutofillCurrent(data) || owner.detailOutcome) return;
+  // Funding retries can copy the payload, so claim this outcome on the owner.
+  owner.detailOutcome = 'verifying';
 
+  const queueContext = data._vaxlinkQueueContext;
   let consumed;
   try {
-    consumed = await consumeQueueRecordAfterDeferredAutofill(
-      data._vaxlinkQueueContext
-    );
+    consumed = await consumeQueueRecordAfterDeferredAutofill(queueContext);
   } catch (error) {
     console.warn('VaxLink deferred queue finalize failed:', error);
   }
-  if (consumed) data._vaxlinkOwner.detailOutcomeRecorded = true;
-  else recordDeferredAutofillResult(data, true);
-  if (isPanoramaAutofillCurrent(data)) showVaxlinkToast(data);
+  const verified = !queueContext || !!consumed;
+  owner.detailOutcome = verified ? 'verified' : 'failed';
+  logDeferredAutofillResult(data, verified, consumed?.record);
+  if (verified && isPanoramaAutofillCurrent(data)) showVaxlinkToast(data);
 }
 
 function autoFillPanorama(data) {
@@ -4039,7 +4025,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     toastRoutineSlot
       .querySelectorAll('[data-vl-funded-choice]')
       .forEach((button) => {
-        button.addEventListener('click', async () => {
+        button.addEventListener('click', () => {
           const funding = button.getAttribute('data-vl-funded-choice');
           if (
             answered ||
@@ -4057,13 +4043,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
           const { _fundingChoiceRequired, ...rest } = data;
           const next = { ...rest, _fundedRadioChoice: funding };
           const result = autoFillPanorama(next);
-          if (isAutofillSuccess(result))
-            await finalizeDeferredPanoramaAutofill(next);
-          else if (
-            !isAutofillPending(result) &&
-            isPanoramaAutofillCurrent(next)
-          )
+          if (!isAutofillPending(result) && isPanoramaAutofillCurrent(next)) {
             recordDeferredAutofillResult(next, false);
+          }
         });
       });
     toastRoutineSlot
@@ -4071,6 +4053,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
       ?.addEventListener('click', () => {
         answered = true;
         dismissToast(toastRoutineSlot);
+        if (isPanoramaAutofillCurrent(data)) cancelPanoramaAutofill();
       });
     return;
   }
