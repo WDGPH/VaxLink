@@ -201,6 +201,13 @@ passed locally, VaxLink blocks chart entry. Staff can confirm adding an expired
 lot by hand for reference in the tray. Inventory keeps expired lots for stock
 checks.
 
+A newly saved chart-tray row with no explicit quantity has one use. Older rows
+without a count keep their existing reuse behaviour. Staff can pin an
+uncounted chart row or type the number of remaining doses. The background
+checks the saved dose fields before applying the change, so a quantity edit
+does not overwrite a use that already occurred. Inventory retains its CSV
+columns.
+
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background routes it to a supported chart or retains
 it in a queue. Inventory uses the local catalogue when available and saves the

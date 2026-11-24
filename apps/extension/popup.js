@@ -1,4 +1,5 @@
 import './shared/vaccine-label.js';
+import './shared/tray-doses.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
@@ -26,6 +27,8 @@ import {
   buildScannerStatusDescriptor,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
+
+const { getTrayRemainingDoses } = globalThis.VaxLinkTrayDoses;
 
 let autoFillBtn;
 let refreshNvcBtn;
@@ -167,6 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     listEl: document.getElementById('multipleQueueList'),
     clearButton: clearMultipleBtn,
     onUseRecord: handleUseMultipleInjectRecord,
+    onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     showUseAction: true,
     useButtonLabel: 'Use for Chart',
     emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
@@ -180,6 +184,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     listEl: document.getElementById('inventoryList'),
     clearButton: clearInventoryBtn,
     exportButton: exportCsvBtn,
+    onNotice: (message) => writeOutput(escapeHtml(message), 'error'),
     emptySummary: 'Scan a vaccine barcode or select + to add it as text.',
     emptyMessage: '',
     summaryBuilder: buildInventorySummary,
@@ -1315,7 +1320,7 @@ async function addManualScanToMultipleQueue() {
       baseData.scanned_at = new Date().toISOString();
     }
     const enriched = await enrichParsedData(baseData, 'multiple');
-    const record = buildQueueRecord(enriched, rawBarcode);
+    const record = buildQueueRecord(enriched, rawBarcode, { chartDose: true });
     const expired = globalThis.VaxLinkExpiryDate.isExpiredVaccine(record);
     if (expired && !(await confirmExpiredTrayAdd(record.lot))) return;
     await multipleInjectManager.add(record, { confirmExpired: expired });
@@ -1502,7 +1507,7 @@ async function handleUseMultipleInjectRecord(record) {
       );
       return;
     }
-    const remainingDoses = getQueueRemainingDoses(record, null);
+    const remainingDoses = getTrayRemainingDoses(record);
     const nextRecord = await multipleInjectManager.consumeById(record.id);
     if (nextRecord) {
       multipleInjectManager.setActiveUse(nextRecord.id);
@@ -1513,7 +1518,7 @@ async function handleUseMultipleInjectRecord(record) {
       remainingDoses === null
         ? null
         : nextRecord
-          ? getQueueRemainingDoses(nextRecord, 1)
+          ? getTrayRemainingDoses(nextRecord)
           : 0;
     logAnalyticsEvent('queue_used', {
       workflow: 'multiple',

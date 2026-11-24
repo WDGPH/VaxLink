@@ -1,9 +1,17 @@
 import './shared/nvc-lot-report.js';
+import './shared/tray-doses.js';
 import { buildLegacyQueueRecord } from './queue-record.js';
 import { escapeHtml } from './popup-ui.js';
 
 export const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 export const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
+
+const {
+  getTrayRemainingDoses,
+  getTrayDoseFields,
+  canPinTrayDose,
+  defaultChartDose
+} = globalThis.VaxLinkTrayDoses;
 
 const CSV_COLUMNS = [
   'scan_index',
@@ -46,21 +54,13 @@ function normalizeDoseCount(value, fallback = null) {
   return parsed;
 }
 
-function getRemainingDoseCount(row, fallback = 1) {
-  const remaining = normalizeDoseCount(row && row.remaining_doses, null);
-  if (remaining !== null) {
-    return remaining;
-  }
-  const total = normalizeDoseCount(row && row.total_doses, null);
-  return total !== null ? total : fallback;
-}
-
 function getTotalDoseCount(row) {
   return normalizeDoseCount(row && row.total_doses, null);
 }
 
 function formatDoseSummary(row) {
-  const remaining = getRemainingDoseCount(row, null);
+  if (row.dose_tracking === 'retained') return 'Pinned for reuse';
+  const remaining = getTrayRemainingDoses(row);
   if (remaining === null) {
     // No dose count known — vial is treated as unlimited (multi-dose)
     return 'multi-dose';
@@ -117,6 +117,7 @@ export class ScanQueueManager {
     clearButton,
     exportButton = null,
     onUseRecord = null,
+    onNotice = () => {},
     showUseAction = false,
     useButtonLabel = 'Use for Chart',
     emptySummary = 'No saved scans yet.',
@@ -131,6 +132,7 @@ export class ScanQueueManager {
     this.exportButton = exportButton;
     this.onUseRecord = typeof onUseRecord === 'function' ? onUseRecord : null;
     this.showUseAction = !!showUseAction;
+    this.onNotice = onNotice;
     this.useButtonLabel = useButtonLabel;
     this.emptySummary = emptySummary;
     this.emptyMessage = emptyMessage;
@@ -186,24 +188,21 @@ export class ScanQueueManager {
     return this.mutateRows('update', { id: targetId, patch });
   }
 
-  async setDoseCounts(id, totalDoses) {
-    const targetId = String(id || '');
-    const total = normalizeDoseCount(totalDoses, null);
-    if (!targetId || total === null) {
-      return null;
+  async setDoseCounts(
+    id,
+    value,
+    expected = getTrayDoseFields(this.getById(id))
+  ) {
+    const text = String(value).trim();
+    const quantity = Number(text);
+    if (
+      !/^\d+$/.test(text) ||
+      !Number.isSafeInteger(quantity) ||
+      quantity < 1
+    ) {
+      throw new Error('Enter a whole number of doses greater than zero.');
     }
-
-    const row = this.getById(targetId);
-    if (!row) {
-      return null;
-    }
-
-    const remaining = total;
-    return this.updateById(targetId, {
-      total_doses: total,
-      remaining_doses: remaining,
-      dose_tracking: 'manual'
-    });
+    return this.mutateRows('setDoseCount', { id, quantity, expected });
   }
 
   async consumeById(id) {
@@ -273,6 +272,17 @@ export class ScanQueueManager {
   render() {
     if (!this.summaryEl || !this.listEl) return;
 
+    const editing = this.listEl.querySelector?.('.inventory-quantity:focus');
+    if (editing) editing.onblur = null;
+    if (editing && editing.value !== editing.defaultValue) {
+      const editedRow = this.getById(editing.dataset.setDosesId);
+      if (
+        !editedRow ||
+        editing.dataset.doseFields !== getTrayDoseFields(editedRow)
+      ) {
+        this.onNotice('The saved dose changed. Check the tray and try again.');
+      }
+    }
     if (!this.rows.length) {
       this.summaryEl.textContent = this.emptySummary;
       this.listEl.innerHTML = this.emptyMessage
@@ -314,36 +324,47 @@ export class ScanQueueManager {
         });
       });
     }
-    this.listEl.querySelectorAll('[data-set-doses-id]').forEach((button) => {
+    for (const button of this.listEl.querySelectorAll('[data-pin-dose-id]')) {
       button.addEventListener('click', async () => {
-        const id = button.getAttribute('data-set-doses-id');
-        const row = this.getById(id);
-        if (!row) {
-          return;
+        const row = this.getById(button.dataset.pinDoseId);
+        if (!row) return;
+        try {
+          await this.mutateRows('setDosePinned', {
+            id: row.id,
+            pinned: row.dose_tracking !== 'retained',
+            expected: getTrayDoseFields(row)
+          });
+        } catch (error) {
+          this.onNotice(error.message);
         }
-        const promptLabel =
-          row.tradename ||
-          row.generic_name ||
-          row.name ||
-          row.lot ||
-          'this vial';
-        const currentValue = getRemainingDoseCount(row, 1);
-        const nextValue = window.prompt(
-          `Set remaining doses for ${promptLabel}.`,
-          String(currentValue || '')
-        );
-        if (nextValue === null) {
-          return;
-        }
-
-        const nextDoseTotal = normalizeDoseCount(nextValue, null);
-        if (nextDoseTotal === null) {
-          return;
-        }
-
-        await this.setDoseCounts(id, nextDoseTotal);
       });
-    });
+    }
+    for (const input of this.listEl.querySelectorAll('[data-set-doses-id]')) {
+      const { setDosesId: id, doseFields: expected } = input.dataset;
+      input.onblur = async () => {
+        if (input.value === input.defaultValue) return;
+        try {
+          await this.setDoseCounts(id, input.value, expected);
+        } catch (error) {
+          input.value = input.defaultValue;
+          this.onNotice(error.message);
+        }
+      };
+      input.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== 'Escape') return;
+        event.preventDefault();
+        if (event.key === 'Escape') input.value = input.defaultValue;
+        input.blur();
+      });
+      if (
+        editing?.dataset.setDosesId === id &&
+        editing.dataset.doseFields === expected
+      ) {
+        input.value = editing.value;
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(editing.selectionStart, editing.selectionEnd);
+      }
+    }
 
     this.updateControls();
   }
@@ -376,7 +397,8 @@ export class ScanQueueManager {
   }
 }
 
-export function buildQueueRecord(data, rawBarcode) {
+export function buildQueueRecord(data, rawBarcode, { chartDose = false } = {}) {
+  if (chartDose) data = defaultChartDose(data);
   return buildLegacyQueueRecord(
     {
       ...data,
@@ -402,7 +424,7 @@ export function buildMultipleInjectSummary(rows) {
     (row) => row.expiry_flag === 'expiring_soon'
   ).length;
   const doseTotal = rows.reduce((total, row) => {
-    const remaining = getRemainingDoseCount(row, 0);
+    const remaining = getTrayRemainingDoses(row) ?? 0;
     return total + (Number.isFinite(remaining) ? remaining : 0);
   }, 0);
   let summary = `${count} vaccine(s) saved for later chart fill.`;
@@ -427,7 +449,7 @@ export function buildInventorySummary(rows) {
     (row) => row.expiry_flag === 'expiring_soon'
   ).length;
   const doseTotal = rows.reduce((total, row) => {
-    const remaining = getRemainingDoseCount(row, 0);
+    const remaining = getTrayRemainingDoses(row) ?? 0;
     return total + (Number.isFinite(remaining) ? remaining : 0);
   }, 0);
   let summary = `${count} scan(s) ready for inventory export.`;
@@ -465,7 +487,12 @@ function buildQueueItemMarkup(row, index, options) {
     options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
       ? `<button class="inventory-use" type="button" data-use-id="${id}">${escapeHtml(options.useButtonLabel)}</button>`
       : '';
-  const setDoseActionMarkup = `<button class="inventory-dose-set" type="button" data-set-doses-id="${id}">Set doses</button>`;
+  const pinned = row.dose_tracking === 'retained';
+  const quantity = getTrayRemainingDoses(row) ?? '';
+  const pinMarkup =
+    useActionMarkup && canPinTrayDose(row)
+      ? `<button class="inventory-dose-set" type="button" data-pin-dose-id="${id}" aria-pressed="${pinned}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${title}, lot ${lot}">${pinned ? 'Unpin' : 'Pin'}</button>`
+      : '';
 
   return `
     <div class="inventory-item${options.isActive ? ' active' : ''}">
@@ -476,7 +503,8 @@ function buildQueueItemMarkup(row, index, options) {
         </div>
         <div class="inventory-item-actions">
           ${useActionMarkup}
-          ${setDoseActionMarkup}
+          <input class="inventory-quantity" type="text" inputmode="numeric" value="${quantity}" placeholder="Qty" data-set-doses-id="${id}" data-dose-fields="${escapeHtml(getTrayDoseFields(row))}" aria-label="Remaining doses for ${title}, lot ${lot}" title="Press Enter to save or Escape to cancel">
+          ${pinMarkup}
           <button class="inventory-remove" type="button" data-remove-id="${id}">Remove</button>
         </div>
       </div>

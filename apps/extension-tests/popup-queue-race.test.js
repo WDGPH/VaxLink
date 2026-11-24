@@ -121,6 +121,58 @@ test('updateById patches the freshest copy of the row', async () => {
   );
 });
 
+test('a quantity edit retains a concurrent append and rejects a changed dose', async () => {
+  const counted = row('vial', { total_doses: 5, remaining_doses: 5 });
+  const incoming = row('scan');
+  store.set(QUEUE_KEY, [counted]);
+  const manager = makeManager();
+  await manager.load();
+  store.set(QUEUE_KEY, [counted, incoming]);
+  const edited = await manager.setDoseCounts('vial', '3');
+  assert.equal(edited.remaining_doses, 3);
+  assert.equal(store.get(QUEUE_KEY)[1].id, incoming.id);
+
+  store.set(QUEUE_KEY, [{ ...edited, remaining_doses: 2 }, incoming]);
+  await assert.rejects(
+    manager.setDoseCounts('vial', '4'),
+    /saved dose changed/
+  );
+  await assert.rejects(manager.setDoseCounts('vial', '1.5'), /whole number/);
+  assert.equal(store.get(QUEUE_KEY)[0].remaining_doses, 2);
+});
+
+test('new single-use rows, pinned rows, and older unknown counts keep their dose rules', async () => {
+  store.set(QUEUE_KEY, [row('legacy')]);
+  const manager = makeManager();
+  await manager.load();
+  await manager.add(row('new'));
+  assert.equal(manager.getById('new').dose_tracking, 'single_use');
+
+  const use = (id) => manager.consumeById(id);
+  assert.equal((await use('legacy')).id, 'legacy');
+
+  const pin = (pinned) => {
+    const current = manager.getById('new');
+    return manager.mutateRows('setDosePinned', {
+      id: current.id,
+      pinned,
+      expected: JSON.stringify([
+        current.dose_tracking,
+        current.total_doses,
+        current.remaining_doses
+      ])
+    });
+  };
+  assert.equal((await pin(true)).dose_tracking, 'retained');
+  assert.equal((await use('new')).dose_tracking, 'retained');
+  assert.equal((await pin(false)).dose_tracking, 'single_use');
+  assert.equal(await use('new'), null);
+  assert.deepEqual(
+    Array.from(store.get(QUEUE_KEY), (item) => item.id),
+    ['legacy']
+  );
+});
+
 test('consumption uses the latest dose count and preserves concurrent appends', async () => {
   store.set(QUEUE_KEY, [row('vial', { total_doses: 10, remaining_doses: 10 })]);
   const manager = makeManager();

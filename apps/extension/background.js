@@ -5,6 +5,14 @@ importScripts('shared/expiry-date.js');
 importScripts('shared/vaccine-label.js');
 importScripts('scanner/scanner-lock-session.js');
 importScripts('scanner/scanner-daemon-protocol.js');
+importScripts('shared/tray-doses.js');
+
+const {
+  getTrayRemainingDoses,
+  getTrayDoseFields,
+  canPinTrayDose,
+  defaultChartDose
+} = globalThis.VaxLinkTrayDoses;
 
 const {
   SCANNER_LOCK_STATE_KEY,
@@ -618,6 +626,10 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
   const rows =
     stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
 
+  if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
+    record = defaultChartDose(record);
+  }
+
   if (
     storageKey === MULTIPLE_INJECT_QUEUE_KEY &&
     options.preserveEveryScan !== true
@@ -681,7 +693,13 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
         throw new Error('Queue add requires an array of records with IDs');
       }
       if (
-        ['remove', 'update', 'consume'].includes(operation) &&
+        [
+          'remove',
+          'update',
+          'consume',
+          'setDoseCount',
+          'setDosePinned'
+        ].includes(operation) &&
         (typeof payload.id !== 'string' || !payload.id.trim())
       ) {
         throw new Error('Queue operation requires a record ID');
@@ -711,7 +729,7 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
                   payload.records.length === 1
                 )
                   return {
-                    ...row,
+                    ...defaultChartDose(row),
                     reference_only: true,
                     expiry_flag: 'expired'
                   };
@@ -719,7 +737,7 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
                   throw new Error(
                     'Confirm saving the expired lot for reference'
                   );
-                return row;
+                return defaultChartDose(row);
               })
             : payload.records;
         rows = [...rows, ...records];
@@ -734,17 +752,52 @@ function mutateQueue(storageKey, operation, payload = {}, popup = false) {
           if (row.reference_only === true) record.reference_only = true;
           return record;
         });
+      } else if (
+        operation === 'setDoseCount' ||
+        operation === 'setDosePinned'
+      ) {
+        const matches = rows.filter((row) => row?.id === payload.id);
+        const [current] = matches;
+        if (
+          matches.length !== 1 ||
+          payload.expected !== getTrayDoseFields(current)
+        ) {
+          throw new Error(
+            'The saved dose changed. Check the tray and try again.'
+          );
+        }
+        let changes;
+        if (operation === 'setDoseCount') {
+          if (!Number.isSafeInteger(payload.quantity) || payload.quantity < 1)
+            throw new Error('Enter a whole number of doses greater than zero.');
+          changes = {
+            total_doses: payload.quantity,
+            remaining_doses: payload.quantity,
+            dose_tracking: 'manual'
+          };
+        } else {
+          if (
+            storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+            typeof payload.pinned !== 'boolean' ||
+            !canPinTrayDose(current)
+          )
+            throw new Error(
+              'Only a single or uncounted chart dose can be pinned.'
+            );
+          changes = {
+            total_doses: null,
+            remaining_doses: null,
+            dose_tracking: payload.pinned ? 'retained' : 'single_use'
+          };
+        }
+        record = { ...current, ...changes };
+        rows = rows.map((row) => (row === current ? record : row));
       } else if (operation === 'consume') {
         // A legacy duplicate ID must not turn one use into several dose changes.
         const index = rows.findIndex((row) => row?.id === payload.id);
         if (index >= 0) {
           consumed = rows[index];
-          const count = (value) => {
-            const parsed = Number.parseInt(String(value ?? ''), 10);
-            return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-          };
-          const remaining =
-            count(consumed.remaining_doses) ?? count(consumed.total_doses);
+          const remaining = getTrayRemainingDoses(consumed);
           if (remaining === null) record = consumed;
           else if (remaining > 1) {
             record = { ...consumed, remaining_doses: remaining - 1 };
@@ -3668,6 +3721,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'mutateQueue') {
     const popup = sender.url === chrome.runtime.getURL('popup.html');
+    if (
+      ['setDoseCount', 'setDosePinned'].includes(request.operation) &&
+      !popup
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Dose changes require the popup.'
+      });
+      return false;
+    }
     mutateQueue(request.storageKey, request.operation, request.payload, popup)
       .then((result) => sendResponse({ success: true, ...result }))
       .catch((error) => sendResponse({ success: false, error: error.message }));
