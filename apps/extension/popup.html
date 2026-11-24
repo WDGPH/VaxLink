@@ -45,9 +45,12 @@
       }
 
       .brand {
-        padding: 14px 16px 10px;
+        padding: 14px 14px 10px;
+        background: var(--panel);
+      }
+
+      #panelHeader {
         border-bottom: 1px solid var(--line);
-        background: linear-gradient(120deg, #f7fbff 0%, #ecf7f7 100%);
       }
 
       .brand-row {
@@ -67,16 +70,15 @@
       .brand-logo {
         width: 38px;
         height: 38px;
-        border-radius: 12px;
+        border-radius: 9px;
         flex: 0 0 auto;
-        box-shadow: 0 4px 10px rgba(16, 33, 53, 0.14);
       }
 
       .title {
         margin: 0;
         font-size: 24px;
-        letter-spacing: 0.2px;
-        color: #0b3d4f;
+        letter-spacing: 0;
+        color: var(--ink);
       }
 
       #extensionVersion {
@@ -96,7 +98,7 @@
         border-radius: 8px;
         border: 0;
         background: transparent;
-        color: #14505f;
+        color: var(--tray-accent);
         box-shadow: none;
         font-size: 28px;
         line-height: 1;
@@ -105,7 +107,7 @@
       .header-icon-btn:hover,
       .header-icon-btn[aria-expanded='true'] {
         filter: none;
-        color: #0f8b8d;
+        background: #edf7f6;
       }
 
       .header-icon-btn:focus-visible {
@@ -141,7 +143,7 @@
         margin: 0 0 12px;
         padding: 4px;
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px;
         border: 1px solid #d5e2ec;
         border-radius: 16px;
@@ -707,47 +709,86 @@
       }
 
       .settings-panel {
-        margin: 0 0 12px;
         display: grid;
-        gap: 12px;
+        gap: 9px;
       }
 
       .settings-card {
         padding: 10px 11px;
-        border-radius: 16px;
-        border: 1px solid #c8d9e8;
-        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
       }
 
-      .settings-heading {
+      .settings-card h3 {
+        margin: 0;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 18px;
+      }
+
+      .settings-overview {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: 12px;
       }
-      .settings-card h3 {
-        margin: 0;
-        font-size: 13px;
-        color: var(--ink);
+
+      .settings-summary {
+        min-width: 0;
+        overflow-wrap: anywhere;
       }
-      .settings-card small {
-        display: block;
-        margin-top: 5px;
-        font-size: 11px;
+
+      .settings-summary > p,
+      .settings-summary > [role='status'] {
+        margin: 4px 0 0;
         color: var(--subtle);
+        font-size: 11px;
+        line-height: 16px;
       }
-      .settings-update {
-        flex-shrink: 0;
+
+      .settings-controls {
         display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
+        flex-wrap: wrap;
+        gap: 6px;
       }
-      .settings-state {
-        display: block;
-        margin-top: 5px;
-        font-size: 11px;
+
+      .settings-controls button {
+        width: auto;
+        padding: 7px 10px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+
+      #scannerSettingsSection .settings-overview {
+        display: grid;
+        gap: 8px;
+      }
+
+      #scannerSettingsSection
+        .settings-overview:has(#connectionStatus[hidden]) {
+        grid-template-columns: 1fr auto;
+        align-items: center;
+      }
+
+      #scannerActionNotice {
+        margin: 6px 0 0;
         color: var(--subtle);
+        font-size: 11px;
+        line-height: 16px;
+      }
+
+      #scannerActionNotice.error {
+        color: #b42318;
+      }
+
+      #scannerCaptureWarning {
+        margin-top: 8px;
+      }
+
+      #recentActivityStatus:empty + span,
+      #recentActivityNotice:empty {
+        display: none;
       }
 
       #workflowHeader[hidden],
@@ -767,21 +808,6 @@
         font-weight: 400;
       }
 
-      .technical-details {
-        margin-top: 12px;
-        font-size: 12px;
-        color: var(--subtle);
-      }
-
-      .technical-details summary {
-        cursor: pointer;
-      }
-
-      #connectionStatus {
-        font-size: 13px;
-        line-height: 1.45;
-        color: #1f3d58;
-      }
       #connectionStatus.success {
         color: #10683e;
       }
@@ -791,24 +817,11 @@
       #connectionStatus.warning {
         color: #9a3412;
       }
-      #scannerIdentity {
-        margin: 8px 0 0;
-        font-size: 13px;
-        color: var(--subtle);
-      }
-      .scanner-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        justify-content: flex-end;
-      }
-      .scanner-actions button {
-        width: auto;
-        padding: 9px 12px;
-        border-radius: 8px;
+      #requestPortBtn {
         background: #0e7490;
         color: #fff;
       }
+
       #connectGrantedBtn {
         background: #e7f3f4;
         border: 1px solid #bddadd;
@@ -832,8 +845,17 @@
       }
       .activity-table th,
       .activity-table td {
-        padding: 6px;
+        padding: 4px 6px;
         text-align: right;
+      }
+
+      .activity-table thead th {
+        width: 64px;
+        white-space: nowrap;
+      }
+
+      .activity-table thead {
+        border-bottom: 1px solid var(--tray-line);
       }
       .activity-table th:first-child {
         padding-left: 0;
@@ -849,21 +871,15 @@
         color: var(--subtle);
       }
       .activity-table .activity-group th {
-        padding: 16px 0 4px;
-      }
-      .activity-table .activity-group-title,
-      .activity-table .activity-group th {
-        font-size: 11px;
-        font-weight: 600;
-        color: #14505f;
-      }
-      .activity-table .activity-group-title {
-        padding-left: 0;
-        text-align: left;
+        padding: 10px 0 4px;
+        color: var(--tray-accent);
+        font-size: 12px;
+        font-weight: 700;
       }
       .activity-table tfoot th,
       .activity-table tfoot td {
-        padding-top: 16px;
+        padding-top: 10px;
+        border-top: 1px solid var(--tray-line);
       }
       .activity-table tbody tr:not(.activity-group):hover,
       .activity-table tfoot tr:hover {
@@ -876,6 +892,7 @@
       }
 
       #analyticsPanel button,
+      #exportRecentActivityBtn,
       .settings-card .actions button {
         width: auto;
         padding: 7px 10px;
@@ -892,7 +909,7 @@
       }
 
       .settings-check {
-        margin-top: 10px;
+        margin-top: 7px;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -1097,9 +1114,15 @@
               class="settings-card"
               aria-labelledby="scannerSettingsTitle"
             >
-              <div class="settings-heading">
-                <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
-                <div class="scanner-actions">
+              <div class="settings-overview">
+                <div class="settings-summary">
+                  <h3 id="scannerSettingsTitle" tabindex="-1">Scanner</h3>
+                  <div id="connectionStatus" role="status">
+                    Checking scanner connection…
+                  </div>
+                  <p id="scannerIdentity" hidden></p>
+                </div>
+                <div class="settings-controls">
                   <button id="requestPortBtn" type="button">
                     Scanner setup
                   </button>
@@ -1110,7 +1133,7 @@
                     Disconnect
                   </button>
                   <button id="forgetScannerBtn" type="button" hidden disabled>
-                    Forget
+                    Forget scanner
                   </button>
                 </div>
               </div>
@@ -1125,10 +1148,6 @@
                   </button>
                 </div>
               </div>
-              <div id="connectionStatus" role="status">
-                Checking scanner connection…
-              </div>
-              <p id="scannerIdentity" hidden></p>
               <p id="scannerActionNotice" role="status" hidden></p>
             </section>
             <section
@@ -1137,12 +1156,6 @@
               aria-labelledby="autofillSettingsTitle"
             >
               <h3 id="autofillSettingsTitle">Autofill</h3>
-              <label class="settings-check" for="autoResolveFundingToggle">
-                <input id="autoResolveFundingToggle" type="checkbox" />
-                <span
-                  >Choose funding automatically when one category matches</span
-                >
-              </label>
               <label class="settings-check" for="singleScanAutofillToggle">
                 <input id="singleScanAutofillToggle" type="checkbox" />
                 Fill an open single form from a scan
@@ -1154,6 +1167,12 @@
               <label class="settings-check" for="gridDetailAutofillToggle">
                 <input id="gridDetailAutofillToggle" type="checkbox" />
                 Carry a grid dose into Enter Details
+              </label>
+              <label class="settings-check" for="autoResolveFundingToggle">
+                <input id="autoResolveFundingToggle" type="checkbox" />
+                <span
+                  >Choose funding automatically when one category matches</span
+                >
               </label>
               <label class="settings-check" for="adminDateAutofillToggle">
                 <input id="adminDateAutofillToggle" type="checkbox" />
@@ -1178,7 +1197,7 @@
               aria-labelledby="recentActivitySettingsTitle"
               hidden
             >
-              <div class="settings-heading">
+              <div class="settings-overview">
                 <div class="settings-summary">
                   <h3 id="recentActivitySettingsTitle">Debug mode</h3>
                   <label class="settings-check" for="recentActivityToggle">
@@ -1196,7 +1215,7 @@
                     or browser restarted.
                   </p>
                 </div>
-                <div class="settings-update">
+                <div class="settings-controls">
                   <button
                     id="exportRecentActivityBtn"
                     type="button"
@@ -1218,24 +1237,20 @@
               class="settings-card"
               aria-labelledby="nvcSettingsTitle"
             >
-              <div class="settings-heading">
-                <div>
+              <div class="settings-overview">
+                <div class="settings-summary">
                   <h3 id="nvcSettingsTitle">National Vaccine Catalogue</h3>
-                  <small id="nvcSettingsVersion">Version unavailable</small>
-                  <small id="nvcLastCheck"></small>
+                  <div id="nvcSettingsState" role="status">Checking</div>
+                  <p id="nvcSettingsVersion">Version unavailable</p>
+                  <p id="nvcLastCheck"></p>
                 </div>
-                <div class="settings-update">
+                <div class="settings-controls">
                   <button id="refreshNvcBtn" type="button">Recheck</button>
-                  <span
-                    id="nvcSettingsState"
-                    class="settings-state"
-                    role="status"
-                    >Checking</span
-                  >
                 </div>
               </div>
               <div
                 id="nvcStatus"
+                class="settings-hint"
                 role="status"
                 aria-label="NVC catalogue status"
                 hidden

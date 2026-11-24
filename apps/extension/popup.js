@@ -960,12 +960,12 @@ function renderAnalyticsSummary(summary) {
   ];
   analyticsSummaryDiv.innerHTML = `
     <table class="activity-table" aria-label="Activity statistics">
-      <thead><tr><td class="activity-group-title">Scanning</td><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
+      <thead><tr><td></td><th scope="col">Today</th><th scope="col">All time</th></tr></thead>
       ${groups
         .map(
-          ([title, labels], index) => `
+          ([title, labels]) => `
         <tbody aria-label="${escapeAnalyticsHtml(title)}">
-          ${index === 0 ? '' : `<tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>`}
+          <tr class="activity-group"><th scope="rowgroup" colspan="3">${escapeAnalyticsHtml(title)}</th></tr>
           ${labels.map(renderRow).join('')}
         </tbody>
       `
