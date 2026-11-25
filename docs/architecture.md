@@ -90,8 +90,10 @@ Production offers a draft email to the Panorama Resolution Coordinator. Multiple
 detail also explains that completing the other immunizations may require deleting
 the current entry.
 Changing the grid row, the Lot or the active route stops automatic carry.
-Staff can still select a dose deliberately on the detail step. The grid
-assignment itself does not use a dose.
+A brief loss of focus can leave assignments pending while the grid stays
+visible. Enter Details still checks the original rows and active route before
+filling. Staff can choose a dose on the detail step. The grid assignment
+itself does not use a dose.
 
 ### User controls: popup
 
@@ -179,7 +181,10 @@ chart checks. The export groups related events by operation. It can include a
 scanned vaccine barcode. Chart field checks record statuses, and repeated
 observations are summarized. Detail readbacks record the funding radio, the native
 and visible Reason selections, time completeness, and which controls or Lot options
-changed between samples. The two scheduled late checks record their outcomes if
+changed between samples. Grid handoff events record the Enter Details click,
+the visible step and total, the matching row when known, the Lot evidence,
+and what released the assignment. A tray choice and other staff interaction
+have separate events. The two scheduled late checks record their outcomes if
 the page is still running. A completed request has a source label when the page
 exposes its JSF callback and the source belongs to the observed form. Otherwise
 the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
