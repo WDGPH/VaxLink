@@ -2,6 +2,24 @@
 
 Use the clinic’s designated browser and profile. Open VaxLink and choose the workflow before scanning. If several Panorama tabs are open, select the intended chart and keep it visible while VaxLink fills it.
 
+## What the scanner sounds mean
+
+With **Zebra DS8178 live feedback**, VaxLink checks the barcode and available catalogue, then asks the scanner to sound the result.
+
+| Sound                | Meaning                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| One short high beep  | The barcode and lot match a vaccine in the catalogue, with no detected expiry issue. |
+| Two short low beeps  | The scan needs attention. Check the message in VaxLink for the reason.               |
+| Three long low beeps | The barcode or catalogue shows the vaccine has expired.                              |
+
+The recognized sound can still require a funding choice. Review the product, lot and expiry and follow the workflow to save your work. With the normal decode beep off, you need a working VaxLink connection to hear a result. Scanner programming, connection and error sounds still operate.
+
+With **Zebra DS8178 long range**, the scanner’s own beep confirms it captured the barcode. VaxLink checks the barcode when it arrives. Select the workflow before docking the scanner in its powered cradle. Review the Inventory or Immunization tray and any held scans after upload. Each scan shows when VaxLink received it. VaxLink leaves any open chart unchanged during upload, and you choose **Use** when ready to enter a dose. The scanner’s storage is finite. Keep it powered until you have uploaded and accounted for its scans.
+
+With **Standard USB CDC**, the scanner controls its own beep.
+
+## Where to check after a scan
+
 | Where you are working                                 | Where to look after a scan                                                                                                        |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Inventory                                             | Open **Inventory** and check the tray. The same destination applies while the workstation is awake and locked.                    |
@@ -87,6 +105,6 @@ For support, start with the software version, scanner model, training or product
 
 Choose **Disconnect** before moving the USB plug. Wait for the reader to stop. Moving a cable, hub or dock breaks its open connection. After reconnecting, check Settings. The browser may ask you to choose the scanner again.
 
-In **Settings → Scanner**, choose **Setup**, then **Connect scanner** and select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
+In **Settings → Scanner**, choose **Setup**, select your setup, then choose **Connect scanner** and select the device. Setup closes and regular scanning continues. For an optional check, reopen setup and choose **Test saved scanner**. Samples stay out of trays and charts. In the live feedback setup, test each of the three sounds separately. Close setup to return to the previous capture setting. If two identical scanners are connected, unplug the extra one and choose again. For a cordless unit, test the handheld with its intended cradle.
 
 Use **Forget** when retiring the device. Keep it plugged in so VaxLink can remove the browser permission. If it is already gone, follow the permission instructions in Settings.
