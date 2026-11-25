@@ -157,6 +157,23 @@ test('live SSI feedback finishes while chart routing is waiting, even if the sou
   );
 });
 
+test('a fast expiry result cannot sound before the preceding live scan', async () => {
+  const feedback = [];
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { vaxlink_workflow_mode_v1: 'inventory' },
+    runtimeSendMessage(message, reply) {
+      if (message.action === 'scannerDaemon.feedback')
+        feedback.push(message.result);
+      reply({ success: true });
+    }
+  });
+  await Promise.all([
+    capture(harness, '10TESTLOT'),
+    capture(harness, '1701010110MISSING')
+  ]);
+  assert.deepEqual(feedback, ['works', 'expired']);
+});
+
 test('failed chart fill still shows the NVC failure and retains barcode fields', async () => {
   for (const error of [
     'NVC catalogue is unavailable',

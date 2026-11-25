@@ -92,6 +92,7 @@ let analyticsWriteQueue = Promise.resolve();
 let scannerQueueWriteQueue = Promise.resolve();
 let scannerWorkflowReceipts = Promise.resolve();
 let longRangeScanWrites = Promise.resolve();
+let liveScannerFeedbackWrites = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
 let scannerChartFocusGeneration = 0;
 const scannerRoutingEpoch = buildAnalyticsId();
@@ -2803,7 +2804,7 @@ async function assessLiveScannerCapture(rawText) {
   }
 }
 
-async function sendLiveScannerFeedback(scan, feedbackToken) {
+function sendLiveScannerFeedback(scan, feedbackToken) {
   if (
     scan?.device?.profileId !== LIVE_SSI_PROFILE_ID ||
     typeof feedbackToken !== 'string' ||
@@ -2812,15 +2813,20 @@ async function sendLiveScannerFeedback(scan, feedbackToken) {
   ) {
     return;
   }
-  const result = await assessLiveScannerCapture(scan.rawText);
-  // Feedback belongs to this capture on the current port. Opening a new host
-  // cannot recover a missed sound, and delivery must continue if it fails.
-  await sendRuntimeMessage({
-    target: SCANNER_DAEMON_TARGET,
-    action: SCANNER_DAEMON_ACTIONS.FEEDBACK,
-    feedbackToken,
-    result
-  });
+  const assessment = assessLiveScannerCapture(scan.rawText);
+  // A fast expiry check must not sound before an earlier catalogue lookup.
+  // The port owner discards old tokens while chart and tray work continues.
+  liveScannerFeedbackWrites = liveScannerFeedbackWrites
+    .then(async () => {
+      const result = await assessment;
+      void sendRuntimeMessage({
+        target: SCANNER_DAEMON_TARGET,
+        action: SCANNER_DAEMON_ACTIONS.FEEDBACK,
+        feedbackToken,
+        result
+      }).catch(() => undefined);
+    })
+    .catch(() => undefined);
 }
 
 function validateBundleShape(data) {
@@ -4770,9 +4776,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return false;
     }
-    void sendLiveScannerFeedback(request.scan, request.feedbackToken).catch(
-      () => undefined
-    );
+    sendLiveScannerFeedback(request.scan, request.feedbackToken);
     const started = performance.now();
     const traceTicket = recentActivity.open().catch(() => null);
     let routing;
