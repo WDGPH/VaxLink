@@ -4668,7 +4668,10 @@ function showVaxlinkToast(data, durationMs = 4000) {
     </div>`;
     slot
       .querySelector('.vl-toast-dismiss:not([data-carry-support])')
-      .addEventListener('click', () => dismissToast(slot));
+      .addEventListener('click', () => {
+        if (data._carrySupport) clearCarryProblem();
+        else dismissToast(slot);
+      });
     slot
       .querySelector('[data-carry-support]')
       ?.addEventListener('click', async (event) => {
@@ -4734,7 +4737,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._gridAdded) {
     showRoutineToast(
-      '<div class="vl-toast info show"><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">The vaccine stays in the tray for Enter Details.</div></div>',
+      '<div class="vl-toast info show" data-grid-added><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">The vaccine stays in the tray for Enter Details.</div></div>',
       durationMs
     );
     return;
@@ -6167,6 +6170,11 @@ function identifyGridDetail(handoff, form, step, total) {
 }
 
 function showCarryProblem(message) {
+  if (toastRoutineSlot?.querySelector('[data-grid-added]')) {
+    clearTimeout(toastDismissTimer);
+    toastDismissTimer = null;
+    toastRoutineSlot.innerHTML = '';
+  }
   showVaxlinkToast({ _entryWarning: message, _carrySupport: true });
 }
 
