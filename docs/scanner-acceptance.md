@@ -16,6 +16,7 @@ Use training records, known sample barcodes and the clinic’s designated browse
 4. Repeat in Inventory. Account for five new Inventory tray entries in the same order. Confirm that neither workflow filled the chart.
 5. Repeat a lock with the cradle disconnected during the session. After unlocking, check for the interruption message and reconcile the samples. Check for the message even when no scans were saved.
 6. Run a separate sleep and wake test. Record which samples arrived before sleep and after wake, and whether the reader needed reconnecting.
+7. Start a new lock from an open Multiple Immunizations grid with room for three doses. Scan three samples for distinct Agents. After unlock, check that the grid is still blank. Select **Resume 3 scans** once, then use **Enter Details** and **Next**. Check the Agent and Lot at each step. Repeat with a replacement chart and check that the scans stay held.
 
 ## Check the two Zebra DS8178 setups
 

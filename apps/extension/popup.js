@@ -74,6 +74,7 @@ let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
 let unlockReviewRead = 0;
+let recordedUnlockSummary = '';
 const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
 const REVIEWED_LOCK_SESSION_KEY = 'vaxlink_reviewed_lock_id';
 const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
@@ -639,6 +640,16 @@ async function loadUnlockReview() {
     document.getElementById('unlockReviewText').textContent =
       `${held} in Held scanner scans · ${inventory} in the Inventory tray`;
     document.getElementById('unlockInterruption').hidden = !session.interrupted;
+    const summary = `${session.id}/${held}/${inventory}/${!!session.interrupted}`;
+    if (!mainWorkflowPanel?.hidden && summary !== recordedUnlockSummary) {
+      recordedUnlockSummary = summary;
+      void sendRuntimeMessage({
+        action: 'recordLockSummary',
+        held,
+        inventory,
+        interrupted: !!session.interrupted
+      }).catch(() => {});
+    }
   } catch (error) {
     if (read === unlockReviewRead)
       writeOutput(error.message || 'Could not read the lock summary.', 'error');
@@ -852,7 +863,9 @@ function applyPopupPanel(panel) {
     settingsPanel.hidden = panel !== 'settings';
   }
   if (mainWorkflowPanel) {
+    const wasHidden = mainWorkflowPanel.hidden;
     mainWorkflowPanel.hidden = panel !== 'workflow';
+    if (panel === 'workflow' && wasHidden) void loadUnlockReview();
   }
   if (settingsToggleBtn) {
     settingsToggleBtn.setAttribute(
@@ -1002,7 +1015,14 @@ function renderAnalyticsSummary(summary) {
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
-      'Tray to chart': day.queues?.multipleUsed || 0
+      'Tray to chart': day.queues?.multipleUsed || 0,
+      'Detail carries attempted': day.chartResume?.chart_carry_attempt || 0,
+      'Detail carries verified': day.chartResume?.chart_carry_completed || 0,
+      'Manual uses after a stopped carry':
+        day.chartResume?.chart_carry_manual_use || 0,
+      'Locked batches resumed': day.chartResume?.locked_batch_resumed || 0,
+      'Batch resumes interrupted':
+        day.chartResume?.locked_batch_interrupted || 0
     };
   };
   const todayMetrics = metrics(summary.today || {});
@@ -1015,7 +1035,18 @@ function renderAnalyticsSummary(summary) {
       'Scanning',
       ['Scans', 'Scanner captures', 'Manual entries', 'Expiry notices shown']
     ],
-    ['Charting', ['Forms filled', 'Tray to chart']],
+    [
+      'Charting',
+      [
+        'Forms filled',
+        'Tray to chart',
+        'Detail carries attempted',
+        'Detail carries verified',
+        'Manual uses after a stopped carry',
+        'Locked batches resumed',
+        'Batch resumes interrupted'
+      ]
+    ],
     [
       'Funding',
       [

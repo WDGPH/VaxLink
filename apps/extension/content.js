@@ -35,6 +35,8 @@ const {
   normalizeWorkflowMode
 } = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
+const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
+const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
   'vaxlink_administered_datetime_autofill_v1';
 const ADMIN_DATE_AUTOFILL_KEY = 'vaxlink_administered_date_autofill_v1';
@@ -311,6 +313,18 @@ function setupMessageListener() {
 
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     vlog('autoFill message', request?.action, request?.data);
+    if (request.action === 'getLockedScanAnchor') {
+      if (!isScannerWorkerSender(sender) || window.top !== window.self)
+        return false;
+      const context = getLockedScanChart();
+      sendResponse({
+        anchor: context?.anchor,
+        kind: context?.kind,
+        ready: !!context,
+        buildAtLoad: contentBuildAtLoad
+      });
+      return false;
+    }
     if (request.action === 'getPanoramaIntegration') {
       const supported = isHandsFreeSupportedPage();
       const formContext = supported ? getPanoramaFormContext() : null;
@@ -979,6 +993,7 @@ function initHandsFreeScanner() {
   document.addEventListener('click', startGridHandoff, true);
   for (const type of ['pagehide', 'popstate', 'hashchange']) {
     window.addEventListener(type, () => {
+      lockedScanChart = null;
       clearGridCarry(type);
       cancelPanoramaAutofill();
       if (type === 'pagehide') chartActivity?.flush();
@@ -2873,6 +2888,7 @@ function isPanoramaAutofillCurrent(data) {
 
 function updatePanoramaWorkflowMode(mode) {
   if (activeWorkflowMode === mode) return;
+  lockedScanChart = null;
   clearGridCarry('workflow_changed');
   cancelPanoramaAutofill();
   panoramaAutofillOwner = null;
@@ -4189,12 +4205,22 @@ async function useTrayVaccine(
   }
 
   data._vaxlinkOwner.scannerRoute = scannerRoute;
-  return fillReservedTrayRecord(
+  const fallback =
+    !scannerRoute &&
+    failedGridCarry?.recordId === recordId &&
+    failedGridCarry.form === data._vaxlinkOwner.form &&
+    failedGridCarry.step === data._vaxlinkOwner.step;
+  const result = await fillReservedTrayRecord(
     recordId,
     data,
     scannerRoute ? 'web-serial' : 'queue',
     context.kind
   );
+  if (fallback && (isAutofillPending(result) || isAutofillSuccess(result))) {
+    failedGridCarry = null;
+    logAnalyticsEvent('chart_carry_manual_use', { workflow: 'multiple' });
+  }
+  return result;
 }
 
 async function fillReservedTrayRecord(
@@ -4205,6 +4231,7 @@ async function fillReservedTrayRecord(
   carriedDose = null
 ) {
   if (!isPanoramaAutofillCurrent(ownerData)) {
+    if (carriedDose?.reserved) await releaseUnusedTrayDose(carriedDose);
     throw new Error(
       'Panorama changed. Check the chart and choose the vaccine again.'
     );
@@ -4214,6 +4241,7 @@ async function fillReservedTrayRecord(
     return createAutofillResult('failed', {
       error: 'This chart already has a tray fill.'
     });
+  owner.lockedResume = source === 'locked-resume';
   const dose = carriedDose || { recordId, token: crypto.randomUUID() };
   dose.owner = owner;
   owner.trayDose = dose;
@@ -4224,7 +4252,11 @@ async function fillReservedTrayRecord(
     const { record, reserved } = await mutateQueueViaBackground(
       MULTIPLE_INJECT_QUEUE_KEY,
       'reserve_dose',
-      { id: recordId, token: dose.token }
+      {
+        id: recordId,
+        token: dose.token,
+        requireReservation: !!carriedDose?.reserved
+      }
     );
     dose.reserved = reserved;
     if (!reserved) activeTrayReservations.delete(dose.token);
@@ -4240,7 +4272,11 @@ async function fillReservedTrayRecord(
       })) ||
         !isPanoramaAutofillCurrent(ownerData) ||
         autofillSettings[
-          owner.gridDetail ? GRID_DETAIL_AUTOFILL_KEY : GRID_SCAN_AUTOFILL_KEY
+          owner.gridDetail
+            ? GRID_DETAIL_AUTOFILL_KEY
+            : requiredKind === 'multiple_grid'
+              ? GRID_SCAN_AUTOFILL_KEY
+              : SINGLE_SCAN_AUTOFILL_KEY
         ] === false)
     )
       throw new Error('The grid changed. The vaccine remains in the tray.');
@@ -4340,6 +4376,18 @@ async function fillReservedTrayRecord(
       if (dose.reserved) await stopTrayDose(owner, confirmedNoProductWrite);
       else activeTrayReservations.delete(dose.token);
     }
+  }
+}
+
+async function releaseUnusedTrayDose({ recordId, token }) {
+  try {
+    await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'stop_dose', {
+      id: recordId,
+      token,
+      written: false
+    });
+  } finally {
+    activeTrayReservations.delete(token);
   }
 }
 
@@ -4481,9 +4529,11 @@ async function finalizeDeferredPanoramaAutofill(data) {
     reason: verified ? 'settled' : 'error'
   });
   logDeferredAutofillResult(data, verified, consumed?.record);
+  if (verified && owner.gridDetail)
+    logAnalyticsEvent('chart_carry_completed', { workflow: 'multiple' });
   if (owner.detailOutcome === 'failed') {
     await stopTrayDose(owner);
-  } else if (isPanoramaAutofillCurrent(data)) {
+  } else if (!owner.lockedResume && isPanoramaAutofillCurrent(data)) {
     showVaxlinkToast(data);
   }
 }
@@ -5011,6 +5061,15 @@ let hudShadow = null;
 let hudCountEl = null;
 let hudContainer = null;
 let hudQueueWrap = null;
+let hudResumeButton = null;
+let hudResumeStatus = null;
+let lockedScanChart = null;
+let resumeOffer = null;
+let resumeRead = 0;
+let resumeRunning = false;
+let lastResumeProbe;
+let lastResumeCapacity;
+let failedGridCarry = null;
 let hudQueueListEl = null;
 let hudClearBtn = null;
 let hudMiniEl = null;
@@ -5085,6 +5144,12 @@ function initHud() {
       gap: 8px;
     }
     .vl-hud-queue.hidden { display: none; }
+    .vl-hud-resume-status {
+      max-width: 220px;
+      font-size: 12px;
+      line-height: 1.4;
+      margin: 0;
+    }
     .vl-hud-count {
       background: rgba(207, 250, 254, .14);
       color: #dffaff;
@@ -5252,6 +5317,20 @@ function initHud() {
   head.appendChild(hideBtn);
   hudContainer.appendChild(head);
 
+  hudResumeButton = document.createElement('button');
+  hudResumeButton.type = 'button';
+  hudResumeButton.className = 'vl-hud-btn';
+  hudResumeButton.hidden = true;
+  hudResumeButton.addEventListener('click', (event) => {
+    if (event.isTrusted) void resumeLockedScans();
+  });
+  hudContainer.appendChild(hudResumeButton);
+  hudResumeStatus = document.createElement('p');
+  hudResumeStatus.className = 'vl-hud-resume-status';
+  hudResumeStatus.setAttribute('role', 'status');
+  hudResumeStatus.hidden = true;
+  hudContainer.appendChild(hudResumeStatus);
+
   hudQueueWrap = document.createElement('div');
   hudQueueWrap.className = 'vl-hud-queue hidden';
 
@@ -5379,6 +5458,26 @@ function initHud() {
   });
 
   window.addEventListener('focus', updateHudState);
+  let resumeRefreshScheduled = false;
+  const refreshResume = () => {
+    if (resumeRefreshScheduled || !isPanoramaChartActive()) return;
+    resumeRefreshScheduled = true;
+    requestAnimationFrame(() => {
+      resumeRefreshScheduled = false;
+      updateLockedScanResume();
+    });
+  };
+  new MutationObserver(refreshResume).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+  document.addEventListener('change', (event) => {
+    if (
+      lockedScanChart?.kind === 'multiple_grid' &&
+      lockedScanChart.form.contains(event.target)
+    )
+      refreshResume();
+  });
   // Restore saved position and hidden state
   chrome.storage.local.get([HUD_POSITION_KEY, HUD_HIDDEN_KEY], (stored) => {
     if (stored && stored[HUD_POSITION_KEY]) {
@@ -5397,6 +5496,11 @@ function initHud() {
     if (area !== 'local') return;
     if (
       MULTIPLE_INJECT_QUEUE_KEY in changes ||
+      SCANNER_LOCK_SESSION_KEY in changes ||
+      HELD_SCANS_KEY in changes ||
+      SINGLE_SCAN_AUTOFILL_KEY in changes ||
+      GRID_SCAN_AUTOFILL_KEY in changes ||
+      GRID_DETAIL_AUTOFILL_KEY in changes ||
       WORKFLOW_MODE_KEY in changes ||
       LEGACY_POPUP_MODE_KEY in changes
     ) {
@@ -5440,6 +5544,7 @@ function setHudHidden(hidden) {
 }
 
 function updateHudState() {
+  updateLockedScanResume(true);
   chrome.storage.local.get([MULTIPLE_INJECT_QUEUE_KEY], (stored) => {
     const rows =
       stored && Array.isArray(stored[MULTIPLE_INJECT_QUEUE_KEY])
@@ -5464,6 +5569,205 @@ function updateHudState() {
     }
     renderHudQueueList(rows, showQueueControls);
   });
+}
+
+function availablePanoramaGridRows() {
+  return getPanoramaMultipleGridRows().filter((row) => {
+    const index = row.getAttribute('data-ri');
+    return (
+      /^\d+$/.test(index) &&
+      isVisible(row) &&
+      !getPanoramaMultipleGridRowState(index).agentText
+    );
+  });
+}
+
+function getLockedScanChart() {
+  if (
+    !panoramaSettingsInitialized ||
+    activeWorkflowMode !== 'immunization' ||
+    panoramaEntryBlockReason()
+  )
+    return null;
+  const { kind, ready } = getPanoramaFormContext();
+  const grid = kind === 'multiple_grid';
+  const form = getPanoramaAutofillForm();
+  const control =
+    form &&
+    (grid
+      ? getPanoramaMultipleGridAgentField(0)
+      : getPanoramaDetailAgentFields(form)[0]);
+  const url = location.href;
+  if (
+    lockedScanChart &&
+    (lockedScanChart.form !== form ||
+      lockedScanChart.control !== control ||
+      lockedScanChart.url !== url ||
+      lockedScanChart.kind !== kind)
+  )
+    lockedScanChart = null;
+  if (
+    !control ||
+    !ready ||
+    (grid
+      ? autofillSettings[GRID_SCAN_AUTOFILL_KEY] === false ||
+        autofillSettings[GRID_DETAIL_AUTOFILL_KEY] === false
+      : !['provider_single', 'non_provider_single'].includes(kind) ||
+        autofillSettings[SINGLE_SCAN_AUTOFILL_KEY] === false)
+  )
+    return null;
+  lockedScanChart ??= { form, control, url, kind, anchor: crypto.randomUUID() };
+  return lockedScanChart;
+}
+
+function lockedScanCapacity(chart) {
+  return chart.kind === 'multiple_grid'
+    ? availablePanoramaGridRows().length
+    : 1;
+}
+
+function readLockedScanOffer(chart, capacity = lockedScanCapacity(chart)) {
+  return chrome.runtime.sendMessage({
+    action: 'getLockedScanResume',
+    anchor: chart.anchor,
+    kind: chart.kind,
+    capacity
+  });
+}
+
+function updateLockedScanResume(refresh = false) {
+  if (!hudResumeButton || resumeRunning) return;
+  const chart = isPanoramaChartActive() ? getLockedScanChart() : null;
+  const capacity = chart ? lockedScanCapacity(chart) : 0;
+  if (!refresh && chart === lastResumeProbe && capacity === lastResumeCapacity)
+    return;
+  if (chart !== lastResumeProbe) hudResumeStatus.hidden = true;
+  lastResumeProbe = chart;
+  lastResumeCapacity = capacity;
+  const read = ++resumeRead;
+  resumeOffer = null;
+  hudResumeButton.hidden = true;
+  if (!chart) return;
+  void readLockedScanOffer(chart, capacity)
+    .then((offer) => {
+      if (
+        !offer?.success ||
+        !offer.count ||
+        read !== resumeRead ||
+        !isPanoramaChartActive() ||
+        getLockedScanChart() !== chart
+      )
+        return;
+      resumeOffer = { ...offer, chart };
+      hudResumeButton.textContent = `Resume ${offer.count} scan${offer.count === 1 ? '' : 's'}`;
+      hudResumeButton.hidden = false;
+    })
+    .catch(() => {});
+}
+
+async function resumeLockedScans() {
+  if (resumeRunning || !resumeOffer) return;
+  const { chart, sessionId, count } = resumeOffer;
+  let generation = panoramaContextGeneration;
+  const current = () =>
+    generation === panoramaContextGeneration &&
+    isPanoramaChartActive() &&
+    getLockedScanChart() === chart;
+  if (!current()) return updateLockedScanResume(true);
+  const trace = chartActivity?.begin(
+    chart.kind === 'multiple_grid' ? 'multiple' : 'single',
+    chart.kind === 'multiple_grid' ? 'grid' : 'detail'
+  );
+  let offer = resumeOffer;
+  let filled = 0;
+  let stopReason = 'chart_changed';
+  let waitingDose;
+  resumeRunning = true;
+  hudResumeButton.disabled = true;
+  hudResumeStatus.hidden = true;
+  logAnalyticsEvent('locked_batch_resumed', { workflow: 'immunization' });
+  try {
+    while (filled < count && current() && offer?.sessionId === sessionId) {
+      if (
+        chart.kind === 'multiple_grid' &&
+        !availablePanoramaGridRows().length
+      ) {
+        stopReason = 'no_grid_rows';
+        break;
+      }
+      // Claim the token before the worker can expose the reserved tray row.
+      waitingDose = {
+        recordId: offer.captureId,
+        token: crypto.randomUUID(),
+        reserved: true
+      };
+      activeTrayReservations.add(waitingDose.token);
+      const moved = await chrome.runtime.sendMessage({
+        action: 'resumeLockedScan',
+        anchor: chart.anchor,
+        kind: chart.kind,
+        sessionId,
+        captureId: offer.captureId,
+        token: waitingDose.token
+      });
+      if (!moved?.success) {
+        stopReason = moved?.reason || 'resume_unavailable';
+        break;
+      }
+      if (!current()) {
+        await releaseUnusedTrayDose(waitingDose);
+        break;
+      }
+      const data = beginPanoramaAutofill({}, true, {
+        automatic: true,
+        startBy: moved.scannerRoute.startBy
+      });
+      generation = panoramaContextGeneration;
+      data._vaxlinkOwner.scannerRoute = moved.scannerRoute;
+      const dose = waitingDose;
+      waitingDose = null;
+      const result = await fillReservedTrayRecord(
+        moved.recordId,
+        data,
+        'locked-resume',
+        chart.kind,
+        dose
+      );
+      if (
+        chart.kind === 'multiple_grid'
+          ? result.status !== 'grid_added' || !result.carryToDetails
+          : !isAutofillPending(result) && !isAutofillSuccess(result)
+      ) {
+        stopReason = 'fill_stopped';
+        break;
+      }
+      filled += 1;
+      if (filled < count && current()) offer = await readLockedScanOffer(chart);
+    }
+  } catch (error) {
+    stopReason = 'error';
+    vlog('Locked scan resume stopped', error.message);
+  } finally {
+    if (waitingDose) activeTrayReservations.delete(waitingDose.token);
+    resumeRunning = false;
+    hudResumeButton.disabled = false;
+    const complete = filled === count;
+    chartActivity?.record(trace, 'locked_resume', {
+      result: complete ? 'assigned' : stopReason,
+      count: filled
+    });
+    if (!complete) {
+      logAnalyticsEvent('locked_batch_interrupted', {
+        workflow: 'immunization'
+      });
+      if (current()) {
+        hudResumeStatus.textContent =
+          'Check this chart, the tray and any held scans before continuing.';
+        hudResumeStatus.hidden = false;
+      }
+    }
+    updateLockedScanResume(true);
+  }
 }
 
 function renderHudQueueList(rows, visible) {
@@ -5780,14 +6084,7 @@ function assignTrayVaccineToGrid(data) {
   const candidates = getPanoramaAgentCandidates(data);
   if (!candidates.length) return null;
   const { _vaxlinkOwner: owner } = data;
-  const row = getPanoramaMultipleGridRows().find((candidate) => {
-    const index = candidate.getAttribute('data-ri');
-    return (
-      /^\d+$/.test(index) &&
-      isVisible(candidate) &&
-      !getPanoramaMultipleGridRowState(index).agentText
-    );
-  });
+  const [row] = availablePanoramaGridRows();
   if (!row) return null;
   const index = row.getAttribute('data-ri');
   const key = row.getAttribute('data-rk');
@@ -5872,6 +6169,7 @@ function releaseGridAssignment(entry, reason = 'context_changed', step = 0) {
 
 function clearGridCarry(reason = 'context_changed') {
   clearCarryProblem();
+  failedGridCarry = null;
   for (const entry of gridAssignments.values())
     void releaseGridAssignment(entry, reason);
   gridAssignments.clear();
@@ -6364,6 +6662,10 @@ async function advanceGridHandoff() {
     return;
   const check = { row, form, step, total };
   handoff.checking = check;
+  if (!entry.carryCounted) {
+    entry.carryCounted = true;
+    logAnalyticsEvent('chart_carry_attempt', { workflow: 'multiple' });
+  }
 
   let handled = false;
   try {
@@ -6373,10 +6675,16 @@ async function advanceGridHandoff() {
     if (gridDetailHandoff !== handoff || handoff.checking !== check) return;
     if (!active) {
       clearGridCarry('route_changed');
-      if (isPanoramaChartActive())
+      if (isPanoramaChartActive()) {
+        failedGridCarry = {
+          form,
+          step: getPanoramaMultiStepIndicatorKey({ visibleOnly: true }),
+          recordId: entry.dose.recordId
+        };
         showCarryProblem(
           'VaxLink could not confirm the original chart. Check the chart and the Immunization tray.'
         );
+      }
       return;
     }
     const current = getPanoramaFormContext();

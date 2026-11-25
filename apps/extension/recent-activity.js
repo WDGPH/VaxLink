@@ -54,6 +54,28 @@
   );
   const details = {
     scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
+    lock_observed: {},
+    locked_capture: { result: choices('held', 'tray', 'save_failed') },
+    lock_summary: {
+      held: integer(0, 250),
+      inventory: integer(0, 100000),
+      interrupted: choices(true, false)
+    },
+    locked_resume: {
+      result: choices(
+        'assigned',
+        'chart_changed',
+        'no_grid_rows',
+        'resume_unavailable',
+        'missing_lot',
+        'parse_error',
+        'expired',
+        'unknown_agent',
+        'fill_stopped',
+        'error'
+      ),
+      count: integer(0, 250)
+    },
     barcode: {
       result: choices('parsed', 'malformed', 'missing_lot'),
       barcode: (value) => value === '' || validBarcode(value)
