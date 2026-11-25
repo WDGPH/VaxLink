@@ -6305,12 +6305,11 @@ function panoramaEntryBlockReason() {
   if (!ids.includes(chrome.runtime.id)) {
     return 'Refresh the chart to load VaxLink before filling.';
   }
-  if (
-    (contentBuildAtLoad.name !== 'VaxLink' ||
-      !contentBuildAtLoad.fingerprint) &&
-    location.hostname !== PANORAMA_TRAINING_HOST
-  ) {
-    return 'VaxLink Alpha and development copies fill training charts only.';
+  const isPackagedBuild =
+    !!contentBuildAtLoad.fingerprint &&
+    ['VaxLink', 'VaxLink Alpha'].includes(contentBuildAtLoad.name);
+  if (!isPackagedBuild && location.hostname !== PANORAMA_TRAINING_HOST) {
+    return 'VaxLink development copies fill training charts only.';
   }
   return '';
 }
