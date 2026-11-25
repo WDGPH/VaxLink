@@ -8,6 +8,20 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [2.0.0-rc3](https://github.com/WDGPH/VaxLink/compare/v2.0.0-rc2...v2.0.0-rc3) (2026-11-25)
+
+
+### Fixed
+
+* clarify grid failures in Debug ([27d5515](https://github.com/WDGPH/VaxLink/commit/27d5515521fefb940b97027008291af681c9be35))
+* keep the carry notice and Debug actions clear ([2be18d8](https://github.com/WDGPH/VaxLink/commit/2be18d8ec870f0b6a190163a0fb4417ddbefe0ef))
+* make Debug logs easier to share ([ac6c6c7](https://github.com/WDGPH/VaxLink/commit/ac6c6c73448b64e164d0fc514db38ee09978ddff))
+* open support email after downloading the log ([d28d7b4](https://github.com/WDGPH/VaxLink/commit/d28d7b450cfa6ebb417bdc0259dd096da01ad2e4))
+* **panorama:** allow packaged Alpha on production charts ([0a3f65c](https://github.com/WDGPH/VaxLink/commit/0a3f65cb8d71b3a34a665dceebdf19d45e608d47))
+* **panorama:** allow packaged Alpha on production charts ([09830a4](https://github.com/WDGPH/VaxLink/commit/09830a4f321e609bd99ab0f9dbe68ffce0804b35))
+* **panorama:** carry saved doses into Enter Details ([6bd0956](https://github.com/WDGPH/VaxLink/commit/6bd0956f7d82c52b863d2c7ae2b0bd93b9337f65))
+* **panorama:** carry saved doses into Enter Details ([e27524a](https://github.com/WDGPH/VaxLink/commit/e27524ab7856d766126206e15694d3b32f8f3a9b))
+
 ## [2.0.0-rc2](https://github.com/WDGPH/VaxLink/compare/v2.0.0-rc1...v2.0.0-rc2) (2026-11-24)
 
 
