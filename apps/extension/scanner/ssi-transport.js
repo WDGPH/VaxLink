@@ -38,12 +38,17 @@ function hostPacket(opcode, status = 0, data = []) {
   return Uint8Array.from([...message, check >> 8, check & 0xff]);
 }
 
+function decodeKey(status, data) {
+  return bytesToHex([status & ~RETRANSMIT, ...data]);
+}
+
 export function createSsiTransport(writer, onFrame) {
   let packet = [];
   let lastBytesAt = 0;
   let lastScannerPacketAt = -Infinity;
   let partialBarcode = null;
   let lastDecodePacket = null;
+  let rejectedFirstAt = -Infinity;
   let cancelledDecodePacket = null;
   let feedbackTail = Promise.resolve();
   let pendingFeedback = 0;
@@ -62,13 +67,17 @@ export function createSsiTransport(writer, onFrame) {
   }
 
   function decodeBarcode(data, status, now) {
+    const retransmitted = (status & RETRANSMIT) !== 0;
     const continued = (status & CONTINUATION) !== 0;
     const [codeType, ...fragment] = data;
     // Option 1 resends the last unacknowledged packet. A deliberate repeat
     // has the retransmit bit clear and is accepted even if the bytes match.
-    const key = bytesToHex([status & ~RETRANSMIT, ...data]);
+    const key = decodeKey(status, data);
+    const retriesRejectedFirst =
+      now - rejectedFirstAt < PARTIAL_BARCODE_TIMEOUT_MS;
+    rejectedFirstAt = -Infinity;
     if (
-      status & RETRANSMIT &&
+      retransmitted &&
       cancelledDecodePacket?.key === key &&
       now - cancelledDecodePacket.at < PARTIAL_BARCODE_TIMEOUT_MS
     ) {
@@ -77,12 +86,19 @@ export function createSsiTransport(writer, onFrame) {
     }
     cancelledDecodePacket = null;
     if (
-      status & RETRANSMIT &&
+      retransmitted &&
+      !retriesRejectedFirst &&
       lastDecodePacket?.key === key &&
       now - lastDecodePacket.at < PARTIAL_BARCODE_TIMEOUT_MS
     ) {
+      if (partialBarcode) partialBarcode.rejected = 0;
       void write(hostPacket(ACK));
       return;
+    }
+    if (!retransmitted && partialBarcode?.rejected) {
+      // An outstanding NAK requires a retry for this barcode to continue.
+      // A first transmission means the scanner has started a new barcode.
+      partialBarcode = null;
     }
     const bytes = partialBarcode?.bytes ?? [];
     if (
@@ -102,7 +118,9 @@ export function createSsiTransport(writer, onFrame) {
 
     lastDecodePacket = { key, at: now };
     bytes.push(...fragment);
-    partialBarcode = continued ? { codeType, bytes, at: now } : null;
+    partialBarcode = continued
+      ? { codeType, bytes, at: now, rejected: 0 }
+      : null;
     void write(hostPacket(ACK));
     if (!continued) {
       // Type 0x99 contains structured PDF417 records, not plain decode text.
@@ -118,8 +136,30 @@ export function createSsiTransport(writer, onFrame) {
   function receive(message, now) {
     const [length, opcode, , status] = message;
     const actualChecksum = (message[length] << 8) | message[length + 1];
-    if (actualChecksum !== checksum(message.slice(0, length))) {
+    const expectedChecksum = checksum(message.slice(0, length));
+    if (actualChecksum !== expectedChecksum) {
       if (opcode === DECODE_DATA) {
+        if (partialBarcode && ++partialBarcode.rejected > RETRIES) {
+          // The scanner has exhausted this fragment's attempts. Discard the
+          // prefix so the next scan cannot be joined to an abandoned barcode.
+          partialBarcode = null;
+          rejectedFirstAt = -Infinity;
+          const key = decodeKey(status, message.slice(HEADER_LENGTH, length));
+          cancelledDecodePacket = { key, at: now };
+          void write(hostPacket(NAK, 0, [CANCEL]));
+          return;
+        }
+        if (!(status & RETRANSMIT)) {
+          // Option 1 retries only one outstanding packet. Its damaged bytes
+          // can differ from the retry and cannot identify it. If restoring
+          // the retry bit exactly matches the last accepted packet, it could
+          // instead be that packet's retry with a damaged status byte.
+          const acceptedRetry =
+            actualChecksum === ((expectedChecksum - 1) & 0xffff) &&
+            lastDecodePacket?.key ===
+              decodeKey(status, message.slice(HEADER_LENGTH, length));
+          if (!acceptedRetry) rejectedFirstAt = now;
+        }
         void write(hostPacket(NAK, 0, [RESEND]));
       }
       return;
@@ -137,7 +177,7 @@ export function createSsiTransport(writer, onFrame) {
     }
   }
 
-  function beepAttempt(result, attempt) {
+  function beepAttempt(result, attempt, expiresAt) {
     return new Promise((resolve) => {
       let finished = false;
       let wakeTimer;
@@ -155,6 +195,10 @@ export function createSsiTransport(writer, onFrame) {
 
       function send() {
         if (finished) return;
+        if (Date.now() >= expiresAt) {
+          finish('expired');
+          return;
+        }
         onCommandReply = finish;
         void write(
           hostPacket(BEEP, attempt ? RETRANSMIT : 0, [BEEP_CODES[result]])
@@ -170,7 +214,9 @@ export function createSsiTransport(writer, onFrame) {
       }
 
       cancelCommand = () => finish('closed');
-      if (Date.now() - lastScannerPacketAt < WAKE_SETTLE_MS) {
+      if (Date.now() >= expiresAt) {
+        finish('expired');
+      } else if (Date.now() - lastScannerPacketAt < WAKE_SETTLE_MS) {
         send();
       } else {
         // The USB cradle may bypass wired RTS/CTS. Wake an idle scanner before
@@ -193,12 +239,15 @@ export function createSsiTransport(writer, onFrame) {
         error: 'Reconnect the scanner before testing feedback again.'
       };
     let reply;
+    let timedOut = false;
     for (let attempt = 0; attempt <= RETRIES; attempt++) {
-      reply = await beepAttempt(result, attempt);
+      if (Date.now() >= expiresAt) break;
+      reply = await beepAttempt(result, attempt, expiresAt);
+      timedOut ||= reply === 'timeout';
       if (reply !== 'timeout' && reply !== 'resend') break;
     }
     if (reply === 'ack') return { success: true };
-    if (reply === 'timeout' || reply === 'writeFailed') {
+    if (timedOut || reply === 'writeFailed') {
       // ACKs carry no command ID. A late ACK must not confirm a different beep.
       feedbackAvailable = false;
     }
@@ -260,6 +309,7 @@ export function createSsiTransport(writer, onFrame) {
       packet = [];
       partialBarcode = null;
       lastDecodePacket = null;
+      rejectedFirstAt = -Infinity;
       cancelledDecodePacket = null;
       // Release immediately so port.close can interrupt a stalled serial write.
       void writer.abort().catch(() => undefined);

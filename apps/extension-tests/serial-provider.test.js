@@ -121,7 +121,8 @@ test('all CDC profiles receive scans without writing commands', async () => {
   }
 });
 
-test('SSI ACKs a capture while a feedback command waits and uses only the three fixed BEEP packets', async () => {
+test('SSI ACKs a capture while a feedback command waits and uses only the three fixed BEEP packets', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
   const { port, writes, receive } = fakeSerialPort();
   const scans = [];
   const connection = await openSerialScanner(
@@ -192,7 +193,8 @@ test('SSI retries a BEEP at most twice and a late ACK cannot confirm another res
   await connection.close();
 });
 
-test('SSI disconnect cancels a pending feedback command and releases both locks', async () => {
+test('SSI disconnect cancels a pending feedback command and releases both locks', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
   const { port, writes, receive } = fakeSerialPort();
   const connection = await openSerialScanner(port, 'zebra-ds8178-ssi-live');
   receive(decodePacket('FIRST'));
@@ -205,4 +207,33 @@ test('SSI disconnect cancels a pending feedback command and releases both locks'
   assert.equal(port.readable, null);
   assert.equal(port.writable, null);
   assert.equal(writes.filter((bytes) => bytes[1] === 0xe6).length, 1);
+});
+
+test('expired live feedback cannot write a BEEP after wake or a delayed retry', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const { port, writes, receive } = fakeSerialPort();
+  const connection = await openSerialScanner(port, 'zebra-ds8178-ssi-live');
+  const beepCount = () => writes.filter((bytes) => bytes[1] === 0xe6).length;
+  const expiring = connection.playFeedback('works', Date.now() + 50);
+  await settle();
+  t.mock.timers.tick(100);
+  assert.equal((await expiring).success, false);
+  assert.equal(beepCount(), 0);
+
+  receive(decodePacket('RECENT'));
+  await settle();
+  const noReply = connection.playFeedback('attention', Date.now() + 3000);
+  await settle();
+  assert.equal(beepCount(), 1);
+  t.mock.timers.tick(2000);
+  await settle();
+  t.mock.timers.tick(100);
+  await settle();
+  assert.equal(beepCount(), 2);
+  t.mock.timers.tick(2000);
+  assert.equal((await noReply).success, false);
+  receive(scannerPacket(0xd0));
+  assert.equal((await connection.playFeedback('expired')).success, false);
+  assert.equal(beepCount(), 2);
+  await connection.close();
 });

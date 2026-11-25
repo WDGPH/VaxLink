@@ -7,6 +7,7 @@ import {
 } from './helpers/ssi-serial.js';
 
 test('live result tokens are single-use and expire when the port reopens', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
   const { port, writes, receive } = fakeSerialPort();
   const messages = [];
   const settle = () => new Promise(setImmediate);

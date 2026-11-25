@@ -30,6 +30,8 @@ Use the provided programming sheet with the intended handheld and cradle. Record
 
 Record whether docking reliably starts upload after an out-of-range scan. Automatic reconnection on return to radio range requires a separate check. Bring the scanner back to its cradle before its memory fills, and keep it powered until you have reviewed the upload.
 
+For SSI, check the cradle’s USB serial control signals (DTR and RTS) and confirm the first result after idle sounds once. If you can observe serial traffic during an interrupted connection, check what the scanner sounds when VaxLink retries a command whose acknowledgement did not arrive.
+
 ## Other release checks
 
 | Exercise                                                              | What to check                                                                                                                                             |

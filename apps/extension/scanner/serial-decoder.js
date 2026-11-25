@@ -45,6 +45,11 @@ export function createLineFrameDecoder(options = {}) {
   let byteBuffer = [];
   let discarding = false;
 
+  const oversizedFrame = () => ({
+    text: 'Barcode exceeded the scanner capture limit.',
+    rawBytesHex: ''
+  });
+
   const emitFrame = (terminator = '') => {
     const terminatorLength = terminator.length;
     const frameText =
@@ -58,8 +63,9 @@ export function createLineFrameDecoder(options = {}) {
     textBuffer = '';
     byteBuffer = [];
     const trimmed = frameText.trim();
-    if (!trimmed || (requireTerminator && frameText.length > maxFrameLength))
-      return null;
+    if (requireTerminator && frameText.length > maxFrameLength)
+      return oversizedFrame();
+    if (!trimmed) return null;
     return {
       text: trimmed,
       rawBytesHex: bytesToHex(frameBytes)
@@ -77,6 +83,7 @@ export function createLineFrameDecoder(options = {}) {
             ? ''
             : textBuffer.slice(textBuffer.length - delimiterTail);
           discarding = !terminator;
+          if (terminator) frames.push(oversizedFrame());
           continue;
         }
         byteBuffer.push(byte);
@@ -90,7 +97,8 @@ export function createLineFrameDecoder(options = {}) {
           requireTerminator &&
           textBuffer.length > maxFrameLength + delimiterTail
         ) {
-          // A broken upload must never turn its trailing bytes into a scan.
+          // Wait for the delimiter so the queue can hold this unreadable
+          // capture once, without treating any of its tail as another scan.
           textBuffer = textBuffer.slice(textBuffer.length - delimiterTail);
           byteBuffer = [];
           discarding = true;

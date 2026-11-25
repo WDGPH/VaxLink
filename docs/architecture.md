@@ -46,7 +46,11 @@ and owns the live connection and reconnect attempts. `scanner/serial-provider.js
 reads incoming bytes and assembles complete scans. The worker sends those scans
 and connection status back to the hidden host.
 
-This stage reads scanner messages; parsing their vaccine fields happens later.
+`scanner/serial-decoder.js` handles CDC text. `scanner/ssi-transport.js` checks
+SSI packet checksums, joins barcode fragments and sends acknowledgements and
+the three fixed sound commands. The reader owns the serial writer so it can
+acknowledge a scan while a sound command awaits its reply. Parsing vaccine
+fields happens after capture.
 
 ### Panorama integration: `content.js`
 

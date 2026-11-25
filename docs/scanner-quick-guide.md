@@ -14,6 +14,8 @@ With **Zebra DS8178 live feedback**, VaxLink checks the barcode and available ca
 
 The recognized sound can still require a funding choice. Review the product, lot and expiry and follow the workflow to save your work. With the normal decode beep off, you need a working VaxLink connection to hear a result. Scanner programming, connection and error sounds still operate.
 
+If a scan is silent, check the tray and held scans before repeating it. If sounds stop, reconnect the scanner and test the sounds in Scanner setup.
+
 With **Zebra DS8178 long range**, the scanner’s own beep confirms it captured the barcode. VaxLink checks the barcode when it arrives. Select the workflow before docking the scanner in its powered cradle. Review the Inventory or Immunization tray and any held scans after upload. Each scan shows when VaxLink received it. VaxLink leaves any open chart unchanged during upload, and you choose **Use** when ready to enter a dose. The scanner’s storage is finite. Keep it powered until you have uploaded and accounted for its scans.
 
 With **Standard USB CDC**, the scanner controls its own beep.

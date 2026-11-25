@@ -59,7 +59,7 @@ test('long-range decoding waits for complete frames and drains an oversized fram
   );
   assert.deepEqual(
     decoder.push(Buffer.from('\nLOT2\r\n')).map(({ text }) => text),
-    ['LOT2']
+    ['Barcode exceeded the scanner capture limit.', 'LOT2']
   );
 });
 
@@ -128,4 +128,76 @@ test('SSI cancels a timed-out barcode and its retry before accepting another cap
     '05 d1 04 00 0a ff 1c',
     '04 d0 04 00 ff 28'
   ]);
+});
+
+test('a valid SSI retry recovers a rejected repeat without replaying an accepted capture', () => {
+  const writes = [];
+  const captured = [];
+  const transport = createSsiTransport(
+    {
+      async write(bytes) {
+        writes.push(bytes[1]);
+      }
+    },
+    (frame) => captured.push(frame.text)
+  );
+  const barcode = '10TESTLOT';
+  const damagedRetry = decodePacket(barcode, 1);
+  damagedRetry[3] = 0;
+
+  transport.push(
+    Buffer.concat([
+      decodePacket(barcode, 0),
+      damagedRetry,
+      decodePacket(barcode, 1)
+    ])
+  );
+  assert.deepEqual(captured, [barcode]);
+
+  for (const [offset, mask] of [
+    [-1, 4],
+    [7, 4],
+    [7, 1]
+  ]) {
+    const rejectedOriginal = decodePacket(barcode, 0);
+    rejectedOriginal[offset === -1 ? rejectedOriginal.length - 1 : offset] ^=
+      mask;
+    transport.push(Buffer.concat([rejectedOriginal, decodePacket(barcode, 1)]));
+  }
+  assert.deepEqual(captured, [barcode, barcode, barcode, barcode]);
+  assert.deepEqual(
+    writes,
+    [0xd0, 0xd1, 0xd0, 0xd1, 0xd0, 0xd1, 0xd0, 0xd1, 0xd0]
+  );
+});
+
+test('SSI forgets a prefix after the scanner exhausts a corrupt final packet', () => {
+  for (const initialWasLost of [false, true]) {
+    const replies = [];
+    const captured = [];
+    const transport = createSsiTransport(
+      {
+        async write(bytes) {
+          replies.push(bytesToHex(bytes));
+        }
+      },
+      (frame) => captured.push(frame.text)
+    );
+    transport.push(decodePacket('10WRONG', 2));
+    for (const attempt of initialWasLost ? [1, 1] : [0, 1, 1]) {
+      const bad = decodePacket('TAIL', attempt);
+      bad[bad.length - 1] ^= 1;
+      transport.push(bad);
+    }
+    assert.deepEqual(captured, []);
+    transport.push(decodePacket('10NEXT', 0));
+    assert.deepEqual(captured, ['10NEXT']);
+    assert.deepEqual(replies, [
+      '04 d0 04 00 ff 28',
+      '05 d1 04 00 01 ff 25',
+      '05 d1 04 00 01 ff 25',
+      ...(!initialWasLost ? ['05 d1 04 00 0a ff 1c'] : []),
+      '04 d0 04 00 ff 28'
+    ]);
+  }
 });
