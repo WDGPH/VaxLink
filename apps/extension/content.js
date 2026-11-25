@@ -3576,7 +3576,7 @@ function schedulePanoramaLotOrTradeSelection(
       checkingRoute = false;
       if (stopped) return;
       if (!active || !isPanoramaAutofillCurrent(data)) {
-        stopUnverified();
+        stopUnverified(active ? 'context' : 'route_unavailable');
         return;
       }
     }
@@ -4815,6 +4815,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._fundingChoiceRequired) {
     const owner = data._vaxlinkOwner;
+    // Reaching the prompt satisfies the deadline for starting this scan.
+    // Staff can take time to choose. Recheck the chart before writing.
+    owner.startBy = null;
     const workflow = data._vaxlinkQueueContext?.workflow || owner.mode;
     const reason = data._fundingChoiceRequired;
     const options = PANORAMA_FUNDING_CHOICES.filter(
@@ -4854,7 +4857,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     toastRoutineSlot
       .querySelectorAll('[data-vl-funded-choice]')
       .forEach((button) => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
           const funding = button.getAttribute('data-vl-funded-choice');
           if (
             answered ||
@@ -4864,6 +4867,18 @@ function showVaxlinkToast(data, durationMs = 4000) {
             return;
           answered = true;
           toastRoutineSlot.innerHTML = '';
+          const delivery =
+            owner.scannerDelivery ||
+            (owner.scannerRoute && { scannerRoute: owner.scannerRoute });
+          if (delivery && !(await checkPanoramaScannerRoute(delivery))) {
+            chartActivity?.record(owner.activity, 'stop', {
+              reason: 'route_unavailable'
+            });
+            recordDeferredAutofillResult(data, false);
+            stopPanoramaFillOwner(owner);
+            return;
+          }
+          if (!isPanoramaAutofillCurrent(data)) return;
           if (blockIneligibleChartUse(data)) {
             recordDeferredAutofillResult(data, false);
             stopPanoramaFillOwner(data._vaxlinkOwner);

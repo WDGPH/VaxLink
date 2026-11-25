@@ -230,6 +230,7 @@
         'takeover',
         'context',
         'replaced',
+        'route_unavailable',
         'funding',
         'funding_exhausted',
         'lot_not_matched',
