@@ -31,6 +31,7 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   globalThis.Worker = FakeWorker;
   globalThis.chrome = {
     runtime: {
+      id: 'vaxlink-test',
       lastError: null,
       getURL: (path) => `chrome-extension://vaxlink-test/${path}`,
       onMessage: { addListener: (listener) => runtimeListeners.push(listener) },
@@ -148,6 +149,68 @@ test('offscreen daemon starts its worker, forwards connect, and echoes routed sc
   runtimeListeners[0](connectRequest, {}, () => {});
   assert.equal(workers.length, previousWorkers + 1);
   assert.equal(workers.at(-1).messages.at(-1).type, 'connectGranted');
+
+  const liveProfile = 'zebra-ds8178-ssi-live';
+  runtimeListeners[0](
+    { ...connectRequest, profileId: liveProfile },
+    {},
+    () => {}
+  );
+  const liveWorker = workers.at(-1);
+  liveWorker.emit('message', {
+    type: 'status',
+    status: { state: 'connected', profileId: liveProfile }
+  });
+  const feedbackToken = 'capture-a';
+  liveWorker.emit('message', {
+    type: 'scan',
+    scan: { rawText: 'LIVE' },
+    feedbackToken
+  });
+  await new Promise(setImmediate);
+  const capture = runtimeMessages.find(
+    (message) => message.scan?.rawText === 'LIVE'
+  );
+  assert.equal(capture.feedbackToken, feedbackToken);
+  const feedback = {
+    target: 'scannerDaemon',
+    action: 'scannerDaemon.feedback',
+    result: 'works',
+    feedbackToken
+  };
+  const sender = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/background.js'
+  };
+  const send = (message, from) =>
+    new Promise((resolve) => runtimeListeners[0](message, from, resolve));
+  const priorMessages = liveWorker.messages.length;
+  assert.equal(
+    (
+      await send(feedback, {
+        ...sender,
+        url: 'chrome-extension://vaxlink-test/popup.html'
+      })
+    ).success,
+    false
+  );
+  assert.equal(
+    (await send({ ...feedback, result: 'arbitrary' }, sender)).success,
+    false
+  );
+  assert.equal(liveWorker.messages.length, priorMessages);
+  assert.equal((await send(feedback, sender)).success, true);
+  assert.deepEqual(liveWorker.messages.at(-1), {
+    type: 'feedback',
+    result: 'works',
+    feedbackToken
+  });
+  assert.ok(
+    !runtimeMessages.find(
+      (message) =>
+        message.action === 'scannerDaemon.scanEcho' && message.feedbackToken
+    )
+  );
 
   await new Promise((resolve) => queueMicrotask(resolve));
   delete globalThis.Worker;

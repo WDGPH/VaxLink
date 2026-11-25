@@ -1,6 +1,7 @@
 import { makeScanEvent } from './scanner-events.js';
 import { createLineFrameDecoder } from './serial-decoder.js';
 import { getSerialScannerProfile } from './serial-profiles.js';
+import { createSsiTransport } from './ssi-transport.js';
 
 export function isWebSerialSupported() {
   return !!(globalThis.navigator && 'serial' in globalThis.navigator);
@@ -31,7 +32,11 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
   const onError =
     typeof handlers.onError === 'function' ? handlers.onError : () => {};
   const { signal } = handlers;
-  const decoder = createLineFrameDecoder(profile.decoder || {});
+  const decoder =
+    profile.protocol === 'ssi'
+      ? null
+      : createLineFrameDecoder(profile.decoder || {});
+  let ssi = null;
   const idleFlushMs = Number(profile.decoder?.idleFlushMs || 0);
   let keepReading = true;
   let activeReader = null;
@@ -45,22 +50,18 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     }
   };
 
-  const emitFrames = (frames) => {
-    for (const frame of frames) {
-      const scan = makeScanEvent({
-        rawText: frame.text,
-        source: 'web-serial',
-        rawBytesHex: frame.rawBytesHex,
-        device: {
-          profileId: profile.id,
-          label: profile.label,
-          usbInfo: port.getInfo()
-        }
-      });
-      if (typeof onScan === 'function') {
-        onScan(scan);
+  const emitFrame = (frame) => {
+    const scan = makeScanEvent({
+      rawText: frame.text,
+      source: 'web-serial',
+      rawBytesHex: frame.rawBytesHex,
+      device: {
+        profileId: profile.id,
+        label: profile.label,
+        usbInfo: port.getInfo()
       }
-    }
+    });
+    if (typeof onScan === 'function') onScan(scan);
   };
 
   const scheduleIdleFlush = () => {
@@ -69,7 +70,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     idleFlushTimer = setTimeout(() => {
       idleFlushTimer = null;
       if (!keepReading || signal?.aborted || !decoder.hasBufferedData()) return;
-      emitFrames(decoder.flush());
+      decoder.flush().forEach(emitFrame);
     }, idleFlushMs);
   };
 
@@ -101,6 +102,11 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     await port.close();
     return null;
   }
+  if (!decoder) {
+    if (!port.writable)
+      throw new Error('The SSI scanner port is not writable.');
+    ssi = createSsiTransport(port.writable.getWriter(), emitFrame);
+  }
   onStatus({ state: 'open', profile, portInfo: port.getInfo() });
 
   const readLoop = (async () => {
@@ -110,9 +116,11 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
         while (keepReading) {
           const { value, done } = await activeReader.read();
           if (done || !keepReading || signal?.aborted) break;
-          const frames = decoder.push(value);
-          emitFrames(frames);
-          scheduleIdleFlush();
+          if (ssi) ssi.push(value);
+          else {
+            decoder.push(value).forEach(emitFrame);
+            scheduleIdleFlush();
+          }
         }
       } catch (error) {
         if (keepReading) {
@@ -125,6 +133,7 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
       }
     }
     clearIdleFlush();
+    ssi?.close();
     if (terminalReadError) {
       if (port.readable || port.writable) {
         await port.close().catch(() => undefined);
@@ -141,10 +150,12 @@ export async function openSerialScanner(port, profileConfig, handlers = {}) {
     get readable() {
       return keepReading;
     },
+    playFeedback: ssi?.playFeedback,
     async close() {
       keepReading = false;
       clearIdleFlush();
-      decoder.reset();
+      decoder?.reset();
+      ssi?.close();
       if (activeReader) {
         await activeReader.cancel().catch(() => undefined);
       }

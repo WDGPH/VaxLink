@@ -1,10 +1,12 @@
 import {
+  LIVE_SSI_PROFILE_ID,
   SCANNER_DAEMON_ACTIONS,
   SCANNER_DAEMON_BACKGROUND_TARGET,
   SCANNER_DAEMON_TARGET,
   SCANNER_STATUS_STATES,
   SCANNER_WORKER_MESSAGES,
   createScannerStatusSnapshot,
+  isScannerFeedbackResult,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
@@ -88,7 +90,7 @@ function ensureWorker() {
       desiredConnection &&
       !desiredConnection.testing
     ) {
-      void routeScannerScan(data.scan);
+      void routeScannerScan(data.scan, data.feedbackToken);
     }
   });
   daemonWorker.addEventListener('error', (event) => {
@@ -130,12 +132,13 @@ async function sendRuntimeMessage(message) {
   });
 }
 
-async function routeScannerScan(scan) {
+async function routeScannerScan(scan, feedbackToken) {
   let response = null;
   try {
     response = await sendRuntimeMessage({
       action: 'scannerScanCaptured',
-      scan
+      scan,
+      ...(feedbackToken ? { feedbackToken } : {})
     });
   } catch (error) {
     response = { success: false, error: error.message || 'Scan route failed.' };
@@ -212,6 +215,51 @@ function refreshGrantedPorts() {
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request?.target !== SCANNER_DAEMON_TARGET) {
+    return false;
+  }
+
+  if (
+    request.action === SCANNER_DAEMON_ACTIONS.FEEDBACK ||
+    request.action === SCANNER_DAEMON_ACTIONS.TEST_FEEDBACK
+  ) {
+    const testing = request.action === SCANNER_DAEMON_ACTIONS.TEST_FEEDBACK;
+    if (
+      sender.id !== chrome.runtime.id ||
+      sender.url !== chrome.runtime.getURL('background.js') ||
+      !isScannerFeedbackResult(request.result) ||
+      !daemonWorker ||
+      stopping ||
+      currentStatus.state !== SCANNER_STATUS_STATES.CONNECTED ||
+      currentStatus.profileId !== LIVE_SSI_PROFILE_ID ||
+      desiredConnection?.profileId !== LIVE_SSI_PROFILE_ID ||
+      desiredConnection.testing !== testing ||
+      currentStatus.testing !== testing
+    ) {
+      sendResponse({
+        success: false,
+        error: 'Scanner feedback is unavailable.'
+      });
+      return false;
+    }
+    const result = request.result;
+    if (testing) {
+      requestWorker(
+        daemonWorker,
+        { type: SCANNER_WORKER_MESSAGES.TEST_FEEDBACK, result },
+        13000
+      ).then(sendResponse);
+      return true;
+    }
+    if (typeof request.feedbackToken !== 'string' || !request.feedbackToken) {
+      sendResponse({ success: false });
+      return false;
+    }
+    daemonWorker.postMessage({
+      type: SCANNER_WORKER_MESSAGES.FEEDBACK,
+      result,
+      feedbackToken: request.feedbackToken
+    });
+    sendResponse({ success: true });
     return false;
   }
 

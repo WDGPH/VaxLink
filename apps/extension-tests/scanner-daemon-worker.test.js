@@ -1,5 +1,89 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  decodePacket,
+  fakeSerialPort,
+  scannerPacket
+} from './helpers/ssi-serial.js';
+
+test('live result tokens are single-use and expire when the port reopens', async (t) => {
+  const { port, writes, receive } = fakeSerialPort();
+  const messages = [];
+  const settle = () => new Promise(setImmediate);
+  let onMessage;
+  globalThis.self = {
+    postMessage: (message) => messages.push(message),
+    addEventListener: (_, listener) => {
+      onMessage = listener;
+    }
+  };
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { serial: { getPorts: async () => [port] } }
+  });
+  t.after(() => {
+    delete globalThis.self;
+    delete globalThis.navigator;
+  });
+  await import('../extension/scanner/scanner-daemon-worker.js?feedback');
+  const send = (type, fields) => onMessage({ data: { type, ...fields } });
+  const open = async (testing = false) => {
+    send('connectGranted', { profileId: 'zebra-ds8178-ssi-live', testing });
+    await settle();
+  };
+  const stop = async () => {
+    send('disconnect');
+    await settle();
+    assert.equal(messages.at(-1).status.state, 'disabled');
+  };
+  const otherBeeps = () => writes.filter((packet) => packet[1] === 0xe6);
+
+  await open();
+  receive(decodePacket('FIRST'));
+  await settle();
+  const firstToken = messages.at(-1).feedbackToken;
+  assert.equal(typeof firstToken, 'string');
+  send('feedback', { feedbackToken: firstToken, result: 'works' });
+  send('feedback', { feedbackToken: firstToken, result: 'expired' });
+  await settle();
+  assert.deepEqual(
+    otherBeeps().map((packet) => packet[4]),
+    [0]
+  );
+  receive(scannerPacket(0xd0));
+  receive(decodePacket('SECOND'));
+  await settle();
+  const secondToken = messages.at(-1).feedbackToken;
+  assert.ok(secondToken && secondToken !== firstToken);
+  await stop();
+
+  await open();
+  receive(decodePacket('THIRD'));
+  await settle();
+  send('feedback', { feedbackToken: secondToken, result: 'expired' });
+  send('testFeedback', { requestId: 1, result: 'expired' });
+  await settle();
+  assert.equal(messages.at(-1).requestId, 1);
+  assert.equal(otherBeeps().length, 1);
+  await stop();
+
+  await open(true);
+  receive(decodePacket('SAMPLE'));
+  await settle();
+  assert.equal(messages.at(-1).status.sampleReceived, true);
+  assert.equal(messages.filter(({ type }) => type === 'scan').length, 3);
+  send('testFeedback', { requestId: 2, result: 'attention' });
+  await settle();
+  receive(scannerPacket(0xd0));
+  await settle();
+  assert.equal(messages.at(-1).requestId, 2);
+  assert.equal(messages.at(-1).success, true);
+  assert.deepEqual(
+    otherBeeps().map((packet) => packet[4]),
+    [0, 6]
+  );
+  await stop();
+});
 
 test('scanner reads and disconnects even when optional control signals fail', async () => {
   const workerMessages = [];

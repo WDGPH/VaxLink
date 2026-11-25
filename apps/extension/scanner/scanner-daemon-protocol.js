@@ -6,6 +6,12 @@
   const SCANNER_DAEMON_OFFSCREEN_PATH = 'scanner-daemon.html';
   const SCANNER_DAEMON_TARGET = 'scannerDaemon';
   const SCANNER_DAEMON_BACKGROUND_TARGET = 'scannerDaemonBackground';
+  const LIVE_SSI_PROFILE_ID = 'zebra-ds8178-ssi-live';
+  const LONG_RANGE_PROFILE_ID = 'zebra-ds8178-cdc-long-range';
+
+  function isScannerFeedbackResult(result) {
+    return result === 'works' || result === 'attention' || result === 'expired';
+  }
 
   const SCANNER_DAEMON_ACTIONS = Object.freeze({
     ENSURE: 'scannerDaemon.ensure',
@@ -19,7 +25,9 @@
     ENABLE_AUTOSTART: 'scannerDaemon.enableAutostart',
     STATUS_CHANGED: 'scannerDaemon.statusChanged',
     SCAN_ECHO: 'scannerDaemon.scanEcho',
-    STATUS_UPDATE: 'scannerDaemon.statusUpdate'
+    STATUS_UPDATE: 'scannerDaemon.statusUpdate',
+    FEEDBACK: 'scannerDaemon.feedback',
+    TEST_FEEDBACK: 'scannerDaemon.testFeedback'
   });
 
   const SCANNER_WORKER_MESSAGES = Object.freeze({
@@ -29,7 +37,9 @@
     REFRESH_PORTS: 'refreshPorts',
     STATUS: 'status',
     REPLY: 'reply',
-    SCAN: 'scan'
+    SCAN: 'scan',
+    FEEDBACK: 'feedback',
+    TEST_FEEDBACK: 'testFeedback'
   });
 
   const SCANNER_STATUS_STATES = Object.freeze({
@@ -144,6 +154,9 @@
     SCANNER_DAEMON_OFFSCREEN_PATH,
     SCANNER_DAEMON_TARGET,
     SCANNER_DAEMON_BACKGROUND_TARGET,
+    LIVE_SSI_PROFILE_ID,
+    LONG_RANGE_PROFILE_ID,
+    isScannerFeedbackResult,
     SCANNER_DAEMON_ACTIONS,
     SCANNER_WORKER_MESSAGES,
     SCANNER_STATUS_STATES,

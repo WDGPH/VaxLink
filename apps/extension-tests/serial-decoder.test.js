@@ -5,6 +5,8 @@ import {
   bytesToHex,
   createLineFrameDecoder
 } from '../extension/scanner/serial-decoder.js';
+import { createSsiTransport } from '../extension/scanner/ssi-transport.js';
+import { decodePacket, scannerPacket } from './helpers/ssi-serial.js';
 
 test('line decoder emits CRLF-terminated ASCII frames', () => {
   const decoder = createLineFrameDecoder();
@@ -41,4 +43,89 @@ test('line decoder flush emits unterminated frame', () => {
 test('line decoder ignores empty terminator-only frames', () => {
   const decoder = createLineFrameDecoder();
   assert.deepEqual(decoder.push(Buffer.from('\r\n')), []);
+});
+
+test('long-range decoding waits for complete frames and drains an oversized frame', () => {
+  const decoder = createLineFrameDecoder({
+    delimiters: ['\r\n'],
+    requireTerminator: true,
+    maxFrameLength: 4
+  });
+  assert.deepEqual(decoder.push(Buffer.from('LOT1\r')), []);
+  assert.deepEqual(decoder.flush(), []);
+  assert.deepEqual(
+    decoder.push(Buffer.from('\nLOT1\r\nTOO-LONG\r')).map(({ text }) => text),
+    ['LOT1', 'LOT1']
+  );
+  assert.deepEqual(
+    decoder.push(Buffer.from('\nLOT2\r\n')).map(({ text }) => text),
+    ['LOT2']
+  );
+});
+
+test('SSI assembles checked packets, keeps GS1 separators and ACKs retransmissions once per fragment', () => {
+  const writes = [];
+  const captured = [];
+  const transport = createSsiTransport(
+    {
+      async write(bytes) {
+        writes.push(bytesToHex(bytes));
+      }
+    },
+    (frame) => captured.push(frame)
+  );
+  const first = decodePacket(']d201', 2);
+  transport.push(first.slice(0, 4));
+  assert.deepEqual(writes, []);
+  transport.push(first.slice(4));
+  assert.deepEqual(captured, []);
+  const bad = decodePacket('01234567890128\x1d10LOT', 0);
+  bad[bad.length - 1] ^= 1;
+  transport.push(
+    Buffer.concat([
+      decodePacket(']d201', 3),
+      bad,
+      scannerPacket(0xd0),
+      scannerPacket(0xd1, 0, [6]),
+      decodePacket('01234567890128\x1d10LOT', 1),
+      decodePacket('01234567890128\x1d10LOT', 1),
+      decodePacket(']d20101234567890128\x1d10LOT', 0)
+    ])
+  );
+  const text = ']d20101234567890128\x1d10LOT';
+  assert.deepEqual(
+    captured.map((frame) => frame.text),
+    [text, text]
+  );
+  assert.equal(captured[0].rawBytesHex, bytesToHex(Buffer.from(text)));
+  const ack = '04 d0 04 00 ff 28';
+  assert.deepEqual(writes, [ack, ack, '05 d1 04 00 01 ff 25', ack, ack, ack]);
+});
+
+test('SSI cancels a timed-out barcode and its retry before accepting another capture', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  const writes = [];
+  const captured = [];
+  const transport = createSsiTransport(
+    {
+      async write(bytes) {
+        writes.push(bytesToHex(bytes));
+      }
+    },
+    (frame) => captured.push(frame.text)
+  );
+  transport.push(decodePacket('FIRST', 2));
+  t.mock.timers.tick(6000);
+  const last = 'ORPHAN';
+  transport.push(decodePacket(last, 0));
+  transport.push(decodePacket(last, 1));
+  assert.deepEqual(captured, []);
+  transport.push(decodePacket('NEXT', 0));
+  assert.deepEqual(captured, ['NEXT']);
+  assert.deepEqual(writes, [
+    '04 d0 04 00 ff 28',
+    '05 d1 04 00 0a ff 1c',
+    '05 d1 04 00 0a ff 1c',
+    '04 d0 04 00 ff 28'
+  ]);
 });

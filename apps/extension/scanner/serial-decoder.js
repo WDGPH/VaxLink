@@ -38,8 +38,12 @@ export function createLineFrameDecoder(options = {}) {
       ? options.delimiters
       : ['\r\n', '\n', '\r'];
   const maxFrameLength = Number(options.maxFrameLength || 512);
+  const requireTerminator = options.requireTerminator === true;
+  const delimiterTail =
+    Math.max(...delimiters.map((delimiter) => delimiter.length)) - 1;
   let textBuffer = '';
   let byteBuffer = [];
+  let discarding = false;
 
   const emitFrame = (terminator = '') => {
     const terminatorLength = terminator.length;
@@ -54,7 +58,8 @@ export function createLineFrameDecoder(options = {}) {
     textBuffer = '';
     byteBuffer = [];
     const trimmed = frameText.trim();
-    if (!trimmed) return null;
+    if (!trimmed || (requireTerminator && frameText.length > maxFrameLength))
+      return null;
     return {
       text: trimmed,
       rawBytesHex: bytesToHex(frameBytes)
@@ -66,16 +71,30 @@ export function createLineFrameDecoder(options = {}) {
       const frames = [];
       for (const byte of toByteArray(chunk)) {
         textBuffer += byteToText(byte, encoding);
-        byteBuffer.push(byte);
-
         const terminator = findTerminator(textBuffer, delimiters);
+        if (discarding) {
+          textBuffer = terminator
+            ? ''
+            : textBuffer.slice(textBuffer.length - delimiterTail);
+          discarding = !terminator;
+          continue;
+        }
+        byteBuffer.push(byte);
         if (terminator) {
           const frame = emitFrame(terminator);
           if (frame) frames.push(frame);
           continue;
         }
 
-        if (textBuffer.length > maxFrameLength) {
+        if (
+          requireTerminator &&
+          textBuffer.length > maxFrameLength + delimiterTail
+        ) {
+          // A broken upload must never turn its trailing bytes into a scan.
+          textBuffer = textBuffer.slice(textBuffer.length - delimiterTail);
+          byteBuffer = [];
+          discarding = true;
+        } else if (!requireTerminator && textBuffer.length > maxFrameLength) {
           const frame = emitFrame('');
           if (frame) frames.push(frame);
         }
@@ -84,6 +103,7 @@ export function createLineFrameDecoder(options = {}) {
     },
 
     flush() {
+      if (requireTerminator) return [];
       const frame = emitFrame('');
       return frame ? [frame] : [];
     },
@@ -95,6 +115,7 @@ export function createLineFrameDecoder(options = {}) {
     reset() {
       textBuffer = '';
       byteBuffer = [];
+      discarding = false;
     }
   };
 }

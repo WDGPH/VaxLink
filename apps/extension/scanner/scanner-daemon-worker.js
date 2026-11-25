@@ -1,9 +1,11 @@
 import {
+  LIVE_SSI_PROFILE_ID,
   SCANNER_STATUS_STATES,
   SCANNER_WORKER_MESSAGES,
   classifyScannerConnectionFailure,
   createScannerStatusSnapshot,
   getScannerReconnectDelayMs,
+  isScannerFeedbackResult,
   normalizeScannerPortInfo,
   normalizeScannerStatusSnapshot,
   portInfoMatches,
@@ -30,6 +32,9 @@ let closingPromise = null;
 let stopping = false;
 let recoverAttemptCount = 0;
 let currentStatus = createScannerStatusSnapshot();
+const feedbackCaptures = new Map();
+const FEEDBACK_MAX_AGE_MS = 3000;
+const MAX_FEEDBACK_CAPTURES = 32;
 
 function postToHost(message) {
   self.postMessage(message);
@@ -51,6 +56,7 @@ function clearReconnectTimer() {
 }
 
 function closeActiveConnection() {
+  feedbackCaptures.clear();
   closingPromise ??= (async () => {
     if (activeConnection) {
       await activeConnection.close();
@@ -219,7 +225,18 @@ function connectGrantedPort() {
           lastCaptureAt: scan.capturedAt || new Date().toISOString(),
           captureCount: currentStatus.captureCount + 1
         });
-        postToHost({ type: SCANNER_WORKER_MESSAGES.SCAN, scan });
+        const capture = { type: SCANNER_WORKER_MESSAGES.SCAN, scan };
+        if (profile.id === LIVE_SSI_PROFILE_ID) {
+          capture.feedbackToken = crypto.randomUUID();
+          if (feedbackCaptures.size >= MAX_FEEDBACK_CAPTURES) {
+            feedbackCaptures.delete(feedbackCaptures.keys().next().value);
+          }
+          feedbackCaptures.set(
+            capture.feedbackToken,
+            Date.now() + FEEDBACK_MAX_AGE_MS
+          );
+        }
+        postToHost(capture);
       },
       onStatus: (status) => {
         if (!desiredConnected || signal.aborted || activePort !== port) return;
@@ -269,6 +286,27 @@ function connectGrantedPort() {
 
 function reply(requestId, fields) {
   postToHost({ type: SCANNER_WORKER_MESSAGES.REPLY, requestId, ...fields });
+}
+
+async function playScannerFeedback(data, testing) {
+  if (
+    !desiredConnected ||
+    closingPromise ||
+    currentStatus.state !== SCANNER_STATUS_STATES.CONNECTED ||
+    currentStatus.testing !== testing ||
+    activeConnection?.profile.id !== LIVE_SSI_PROFILE_ID ||
+    !isScannerFeedbackResult(data.result)
+  ) {
+    if (testing)
+      reply(data.requestId, {
+        error: 'Start a connected live feedback test first.'
+      });
+    return;
+  }
+  const expiresAt = feedbackCaptures.get(data.feedbackToken);
+  if (!testing && !feedbackCaptures.delete(data.feedbackToken)) return;
+  const result = await activeConnection.playFeedback(data.result, expiresAt);
+  if (testing) reply(data.requestId, result);
 }
 
 async function disconnectScanner({ requestId, forget, portInfo }) {
@@ -351,6 +389,7 @@ self.addEventListener('message', (event) => {
     case SCANNER_WORKER_MESSAGES.CONNECT_GRANTED:
       if (stopping || (!desiredConnected && activePort)) break;
       desiredConnected = true;
+      if (data.testing === true) feedbackCaptures.clear();
       updateStatus({
         selectionRequired: false,
         testing: data.testing === true,
@@ -374,6 +413,12 @@ self.addEventListener('message', (event) => {
       break;
     case SCANNER_WORKER_MESSAGES.GET_STATUS:
       reply(data.requestId, { status: currentStatus });
+      break;
+    case SCANNER_WORKER_MESSAGES.FEEDBACK:
+      void playScannerFeedback(data, false);
+      break;
+    case SCANNER_WORKER_MESSAGES.TEST_FEEDBACK:
+      void playScannerFeedback(data, true);
       break;
     default:
       break;
