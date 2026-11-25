@@ -81,6 +81,33 @@ test('Debug rejects unexpected fields and requires a chart sender to append and 
   assert.equal(exported.token, undefined);
 });
 
+test('a carry report opens Debug in the background and only the extension page can export', async () => {
+  const opened = [];
+  const worker = fixture({ createTab: async (tab) => opened.push(tab) });
+  const reportPage = { ...popup, url: `${popup.url}#carry-support` };
+  assert.equal((await worker.manage('openCarrySupport')).success, false);
+  assert.equal(
+    (await worker.manage('openCarrySupport', { url: popup.url }, chart))
+      .success,
+    false
+  );
+  assert.equal(
+    (await worker.manage('openCarrySupport', {}, chart)).success,
+    true
+  );
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].url, reportPage.url);
+  assert.equal(opened[0].active, false);
+  assert.equal(
+    (await worker.manage('exportRecentActivity', {}, chart)).success,
+    false
+  );
+  assert.equal(
+    (await worker.manage('exportRecentActivity', {}, reportPage)).success,
+    true
+  );
+});
+
 test('Debug retains only the newest 3,000 rows across worker restarts', async () => {
   const sessionStorage = new Map();
   const worker = fixture({ sessionStorage });
@@ -395,4 +422,30 @@ test('Debug keeps the observed routing reason when a chart has no delivery token
   assert.equal(exported.settingsAtExport.autofill.administrationDate, false);
   assert.equal(exported.settingsAtExport.autofill.administrationTime, true);
   assert.doesNotMatch(JSON.stringify(exported.rows), /TRAINING|ehealthontario/);
+});
+
+test('an expired scan on the Multiple grid is traced before chart entry', async () => {
+  const logged = Promise.withResolvers();
+  const worker = fixture({
+    buildId: 'training-build',
+    tabs: [{ id: 4, active: true, url: chartUrl }],
+    tabResponse: {
+      supported: true,
+      contextToken: 'training-grid',
+      formContext: { kind: 'multiple_grid', ready: true }
+    },
+    beforeSessionSet(values) {
+      if (Object.values(values)[0].rows?.length) logged.resolve();
+    }
+  });
+  const result = await worker.captureScannerScan({
+    rawText: '01001234567890121700010110TRAINING'
+  });
+  assert.equal(result.response?.status, 'expired');
+  await logged.promise;
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.equal(rows[0].routing.form, 'multiple_grid');
+  assert.equal(rows[1].reason, 'expired');
+  assert.equal(rows[1].mode, 'multiple');
+  assert.equal(rows[1].stage, 'none');
 });

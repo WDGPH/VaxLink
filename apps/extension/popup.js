@@ -25,6 +25,7 @@ import {
   normalizeScannerStatusSnapshot
 } from './scanner/scanner-daemon-shared.js';
 
+const carrySupportPage = globalThis.location?.hash === '#carry-support';
 let refreshNvcBtn;
 let addBatchBtn;
 let exportCsvBtn;
@@ -101,6 +102,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const manifest = chrome.runtime.getManifest();
   if (version)
     version.textContent = `v${manifest.version_name || manifest.version}`;
+
+  if (carrySupportPage) {
+    settingsPanel = document.getElementById('settingsPanel');
+    mainWorkflowPanel = document.getElementById('mainWorkflowPanel');
+    for (const section of settingsPanel.children)
+      section.hidden = section.id !== 'recentActivitySettings';
+    refreshRecentActivity = setupRecentActivityControls();
+    applyPopupPanel('settings');
+    document.getElementById('recentActivitySettingsTitle')?.focus();
+    document
+      .getElementById('closePanelBtn')
+      .addEventListener('click', () => globalThis.close());
+    return;
+  }
 
   refreshNvcBtn = document.getElementById('refreshNvcBtn');
   addBatchBtn = document.getElementById('addBatchBtn');
@@ -816,14 +831,18 @@ function applyPopupPanel(panel) {
   const panelHeader = document.getElementById('panelHeader');
   const panelTitle = document.getElementById('panelTitle');
   const closeButton = document.getElementById('closePanelBtn');
-  const title = panel === 'settings' ? 'Settings' : 'Local Activity';
+  const title = carrySupportPage
+    ? 'Report carry problem'
+    : panel === 'settings'
+      ? 'Settings'
+      : 'Local Activity';
   if (workflowHeader) workflowHeader.hidden = panel !== 'workflow';
   if (panelHeader) panelHeader.hidden = panel === 'workflow';
   if (panelTitle) panelTitle.textContent = title;
   closeButton?.setAttribute('aria-label', `Close ${title}`);
   closeButton?.setAttribute('title', `Close ${title}`);
   if (panel === 'settings') {
-    initializeScannerSettings();
+    if (!carrySupportPage) initializeScannerSettings();
     void refreshRecentActivity?.();
   }
   if (settingsPanel) {
@@ -1048,6 +1067,23 @@ function setupRecentActivityControls() {
   const status = document.getElementById('recentActivityStatus');
   const notice = document.getElementById('recentActivityNotice');
   const exportButton = document.getElementById('exportRecentActivityBtn');
+  const emailButton = document.getElementById('emailRecentActivityBtn');
+  const emailLink = document.getElementById('openSupportEmailLink');
+  const filename = 'vaxlink-debug-details.json';
+  const subject = carrySupportPage
+    ? 'VaxLink could not carry a dose into Enter Details'
+    : 'VaxLink troubleshooting details';
+  const body = [
+    carrySupportPage
+      ? 'VaxLink could not carry a saved dose into Enter Details.'
+      : 'I need help with VaxLink.',
+    '',
+    'I downloaded the Debug log from VaxLink Settings.',
+    `[Attach ${filename} from Downloads before sending.]`,
+    '',
+    'Describe what happened here.'
+  ].join('\r\n');
+  emailLink.href = `mailto:innovation@wdgpublichealth.ca?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   let snapshot = null;
   let busy = false;
   let requestNumber = 0;
@@ -1056,6 +1092,7 @@ function setupRecentActivityControls() {
     if (!busy) toggle.checked = snapshot?.enabled === true;
     toggle.disabled = busy || !snapshot;
     exportButton.disabled = busy || !snapshot?.retained;
+    emailButton.disabled = exportButton.disabled;
     const retained = snapshot?.retained ?? 0;
     status.textContent = snapshot
       ? `${retained.toLocaleString()} ${retained === 1 ? 'event' : 'events'}`
@@ -1065,10 +1102,18 @@ function setupRecentActivityControls() {
       message ||
       (overwritten
         ? `${overwritten.toLocaleString()} older ${overwritten === 1 ? 'event was' : 'events were'} removed to make room.`
-        : '');
+        : carrySupportPage && !retained
+          ? 'Collect troubleshooting details, then try the carry again.'
+          : carrySupportPage
+            ? 'Email support opens your mail app and downloads the Debug log for you to attach.'
+            : '');
   }
 
-  async function request(action = 'getRecentActivity', payload = {}) {
+  async function request(
+    action = 'getRecentActivity',
+    payload = {},
+    email = false
+  ) {
     if (busy) return;
     const number = ++requestNumber;
     if (action !== 'getRecentActivity') {
@@ -1084,15 +1129,21 @@ function setupRecentActivityControls() {
       if (action === 'exportRecentActivity') {
         const { format, build, settingsAtExport, retained, overwritten, rows } =
           result;
-        downloadTextFile(
-          'vaxlink-debug-details.json',
-          JSON.stringify(
-            { format, build, settingsAtExport, retained, overwritten, rows },
-            null,
-            2
-          ),
-          'application/json;charset=utf-8'
+        if (!retained) {
+          message = 'There are no troubleshooting details to share.';
+          return;
+        }
+        const log = JSON.stringify(
+          { format, build, settingsAtExport, retained, overwritten, rows },
+          null,
+          2
         );
+        downloadTextFile(filename, log, 'application/json;charset=utf-8');
+        if (email) {
+          message = `Attach ${filename} from Downloads after reviewing it.`;
+          emailLink.hidden = false;
+          emailLink.click();
+        }
       }
     } catch (_) {
       message = 'Could not access troubleshooting details. Try again.';
@@ -1112,6 +1163,10 @@ function setupRecentActivityControls() {
   exportButton.addEventListener(
     'click',
     () => void request('exportRecentActivity')
+  );
+  emailButton.addEventListener(
+    'click',
+    () => void request('exportRecentActivity', {}, true)
   );
   chrome.storage.onChanged.addListener((changes, area) => {
     if (

@@ -768,6 +768,10 @@
         align-items: center;
       }
 
+      #recentActivitySettings .settings-controls {
+        flex-shrink: 0;
+      }
+
       #connectionStatus,
       #scannerActionNotice {
         margin: 6px 0 0;
@@ -882,6 +886,7 @@
 
       #analyticsPanel button,
       #exportRecentActivityBtn,
+      #emailRecentActivityBtn,
       .settings-card .actions button {
         width: auto;
         padding: 7px 10px;
@@ -1218,7 +1223,9 @@
             >
               <div class="settings-overview">
                 <div class="settings-summary">
-                  <h3 id="recentActivitySettingsTitle">Debug mode</h3>
+                  <h3 id="recentActivitySettingsTitle" tabindex="-1">
+                    Debug mode
+                  </h3>
                   <label class="settings-check" for="recentActivityToggle">
                     <input
                       id="recentActivityToggle"
@@ -1243,6 +1250,9 @@
                   >
                     Download
                   </button>
+                  <button id="emailRecentActivityBtn" type="button" disabled>
+                    Email support
+                  </button>
                 </div>
               </div>
               <p
@@ -1250,6 +1260,9 @@
                 class="settings-hint"
                 role="status"
               ></p>
+              <a id="openSupportEmailLink" class="settings-hint" hidden>
+                Open email again
+              </a>
             </section>
             <section
               id="nvcSettingsSection"

@@ -108,7 +108,83 @@
         'detail_date_unmatched',
         'detail_lot_unconfirmed',
         'detail_not_ready',
-        'detail_matched'
+        'detail_matched',
+        'grid_blurred',
+        'window_blur',
+        'tab_hidden',
+        'pagehide',
+        'popstate',
+        'hashchange',
+        'workflow_changed',
+        'grid_cancel',
+        'grid_close',
+        'grid_reset',
+        'chart_inactive',
+        'chart_url_changed',
+        'grid_form_changed',
+        'grid_returned',
+        'single_form_opened',
+        'detail_step_reversed',
+        'unexpected_step_total',
+        'detail_form_changed'
+      )
+    },
+    grid_click: {
+      result: choices(
+        'accepted',
+        'no_assignments',
+        'button_outside_form',
+        'chart_inactive',
+        'grid_not_open',
+        'no_matching_rows'
+      )
+    },
+    grid_detail_decision: {
+      row: integer(0, 100000),
+      step: integer(1, 100000),
+      total: integer(1, 100000),
+      reason: choices(
+        'candidate_ready',
+        'detail_not_ready',
+        'detail_fields_loading',
+        'detail_agent_unmatched',
+        'duplicate_agent',
+        'detail_unassigned',
+        'detail_date_unmatched',
+        'detail_lot_unconfirmed'
+      ),
+      waitExpired: choices(true, false),
+      alias: choices(true, false),
+      reordered: choices(true, false),
+      lotEvidence: choices(
+        'not_checked',
+        'not_required',
+        'selected',
+        'native_option',
+        'panel_option',
+        'blank_final',
+        'missing',
+        'conflicting_selection',
+        'disabled',
+        'refreshing',
+        'native_no_match',
+        'panel_unlinked',
+        'panel_hidden',
+        'panel_unavailable',
+        'panel_no_match'
+      ),
+      funding
+    },
+    grid_takeover: {
+      row: integer(0, 100000),
+      step: integer(1, 100000),
+      total: integer(1, 100000),
+      trigger: choices('staff_input', 'tray_use'),
+      reservation: choices(
+        'no_matching_assignment',
+        'not_reserved',
+        'released',
+        'unconfirmed'
       )
     },
     detail_position: { step: integer(1, 9999), total: integer(1, 9999) },

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import vm from 'node:vm';
 import {
   createBackgroundHarness,
   createContentHarness,
@@ -32,10 +33,12 @@ function fixture() {
       this.type = type;
     }
   }
-  const { context } = createContentHarness({
-    MouseEvent: FormEvent,
-    Event: FormEvent
-  });
+  const { context, windowListeners, documentListeners, storageListeners } =
+    createContentHarness({
+      MouseEvent: FormEvent,
+      Event: FormEvent,
+      getComputedStyle: () => ({ visibility: 'visible' })
+    });
   Object.assign(context, {
     getPanoramaAutofillForm: () => form,
     getPanoramaFormContext: () => ({ kind: 'provider_single' }),
@@ -106,7 +109,18 @@ function fixture() {
     });
     return item;
   }
-  return { context, state, select, run, panel, label, root };
+  return {
+    context,
+    state,
+    select,
+    run,
+    panel,
+    label,
+    root,
+    windowListeners,
+    documentListeners,
+    storageListeners
+  };
 }
 
 test('the last reordered assignment can enter an empty detail after reservation is checked again', () => {
@@ -139,6 +153,41 @@ test('the last reordered assignment can enter an empty detail after reservation 
   assert.equal(context.matchesGridDetail({ ...entry, ...match }), true);
   field.value = 'lot-option';
   assert.equal(context.matchesGridDetail({ ...entry, ...match }), false);
+});
+
+test('grid carry uses exact enabled Lot evidence on the current widget', () => {
+  const { context, state, root, select, panel, label } = fixture();
+  const lot = 'SAMPLE-1';
+  const field = select(lot, 'lot-option');
+  state.controls = [root, field];
+  const evidence = () => context.readGridDetailLotEvidence(lot, false);
+
+  assert.equal(evidence(), 'selected');
+  label.textContent = 'DIFFERENT';
+  assert.equal(evidence(), 'conflicting_selection');
+  label.textContent = 'Select';
+  field.options[1].text = 'SAMPLE1';
+  assert.equal(evidence(), 'conflicting_selection');
+  field.options[1].text = lot;
+  field.options[1].disabled = true;
+  assert.equal(evidence(), 'disabled');
+
+  field.value = '';
+  const item = panel(`${id}_panel`, lot);
+  root.contains = (node) =>
+    node === field || node === state.nodes.get(`${id}_panel`);
+  assert.equal(evidence(), 'disabled', 'the native choices take precedence');
+  field.options.pop();
+  assert.equal(evidence(), 'panel_option');
+  context.getPanoramaFundedRadioValue = () => 'NON_PUBLICLY_FUNDED';
+  assert.equal(evidence(), 'panel_no_match');
+  item.textContent = `N-${lot}`;
+  assert.equal(evidence(), 'panel_option');
+  item.getAttribute = (name) => (name === 'aria-disabled' ? 'true' : null);
+  assert.equal(evidence(), 'panel_unavailable');
+
+  state.controls = [{ ...root, contains: (node) => node === field }, field];
+  assert.equal(evidence(), 'panel_unlinked', 'the old panel still has its ID');
 });
 
 test('a terminal miss clears the owned filter and closes only the same open Lot menu', () => {
@@ -628,6 +677,9 @@ test('Enter Details carries only the exact grid row and foreground route', async
     'navigate_during_cleanup',
     'manual_takeover_while_waiting',
     'lock_cycle',
+    'toolbar_blur',
+    'hidden_before_click',
+    'blur_after_click',
     'carry_off'
   ]) {
     const f = fixture();
@@ -726,10 +778,21 @@ test('Enter Details carries only the exact grid row and foreground route', async
 
     if (scenario === 'replace_before') rows = [makeRow(0)];
     if (scenario === 'duplicate_agent') rows.push(makeRow(1));
+    if (scenario === 'toolbar_blur') {
+      f.windowListeners.get('blur')[0]();
+      assert.equal(saved().dose_reservations?.[0]?.token, token);
+      assert.equal(productFill, undefined);
+    }
+    if (scenario === 'hidden_before_click') {
+      context.document.visibilityState = 'hidden';
+      f.documentListeners.get('visibilitychange')[0]();
+      context.document.visibilityState = 'visible';
+    }
     context.startGridHandoff({
       isTrusted: true,
       target: { closest: () => ({ textContent: 'Enter Details', form }) }
     });
+    if (scenario === 'blur_after_click') f.windowListeners.get('blur')[0]();
     if (scenario === 'replace_during') {
       rows = [makeRow(0)];
       await context.advanceGridHandoff();
@@ -777,13 +840,22 @@ test('Enter Details carries only the exact grid row and foreground route', async
       !['different_lot', 'sole_lot', 'navigate_during_cleanup'].includes(
         scenario
       )
-    )
-      assert.deepEqual(warnings, [], scenario);
-    if (scenario === 'normal' || scenario === 'manual_use') {
+    ) {
+      const expected = {
+        replace_before:
+          'VaxLink could not match the saved doses to the grid. Check the Immunization tray.',
+        duplicate_agent:
+          'VaxLink could not match the saved doses to the grid. Check the Immunization tray.',
+        lock_cycle:
+          'VaxLink could not confirm the original chart. Check the chart and the Immunization tray.'
+      }[scenario];
+      assert.deepEqual(warnings, expected ? [expected] : [], scenario);
+    }
+    if (['normal', 'manual_use', 'toolbar_blur'].includes(scenario)) {
       assert.ok(productFill, scenario);
       assert.equal(
         saved().dose_reservations[0].token === token,
-        scenario === 'normal',
+        scenario !== 'manual_use',
         scenario
       );
       await context.finalizeDeferredPanoramaAutofill(productFill);
@@ -814,9 +886,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'skipped_step',
     'shorter_list',
     'ambiguous_agent',
-    'reordered_rows'
+    'reordered_rows',
+    'manual_use_after_lot_wait',
+    'unconfirmed_release'
   ]) {
-    const { context, state } = fixture();
+    const { context, state, storageListeners } = fixture();
     const url = context.location.href;
     const form = context.getPanoramaAutofillForm();
     const tab = { id: 42, url, active: true };
@@ -843,8 +917,16 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       url,
       tab
     };
+    let release;
     context.chrome.runtime.sendMessage = (message, reply) => {
-      const result = worker.sendMessage(message, sender);
+      const result =
+        release && message.operation === 'stop_dose'
+          ? release.promise.then(() =>
+              scenario === 'unconfirmed_release'
+                ? { success: true, rows: saved() }
+                : worker.sendMessage(message, sender)
+            )
+          : worker.sendMessage(message, sender);
       if (reply) void result.then(reply);
       return result;
     };
@@ -858,7 +940,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }));
     let kind = 'multiple_grid';
     let visibleRows = gridRows;
-    const reordered = scenario === 'reordered_rows';
+    const manualUse = [
+      'manual_use_after_lot_wait',
+      'unconfirmed_release'
+    ].includes(scenario);
+    const reordered = scenario === 'reordered_rows' || manualUse;
     let detailAgent = agents[reordered ? 2 : 0];
     let detailDate = reordered ? '2026-11-24' : date;
     let selectedLot = '';
@@ -882,16 +968,18 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         dateField: { value: detailDate }
       }),
       getPanoramaLotWidget: () => ({
+        label: { textContent: selectedLot },
         select: {
+          tagName: 'SELECT',
+          value: selectedLot ? 'chosen' : '',
+          selectedIndex: selectedLot ? 2 : -1,
           options: [
-            { text: 'SAMPLE-2', value: 'pf' },
-            { text: 'N-SAMPLE-2', value: 'npf' }
+            { text: manualUse ? 'OTHER' : 'SAMPLE-2', value: 'pf' },
+            { text: manualUse ? 'N-OTHER' : 'N-SAMPLE-2', value: 'npf' },
+            ...(selectedLot ? [{ text: selectedLot, value: 'chosen' }] : [])
           ]
         }
       }),
-      getPanoramaDisplayedLot: () => selectedLot,
-      panoramaLotSelectionMatches: (_widget, lot) =>
-        !!lot && selectedLot === lot,
       autoFillPanorama(data) {
         fills.push(data);
         return { status: 'pending' };
@@ -908,6 +996,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       }
     });
 
+    if (manualUse) {
+      const changes = { vaxlink_recent_activity_enabled: { newValue: true } };
+      for (const listener of storageListeners) listener(changes, 'local');
+      await new Promise(setImmediate);
+    }
     for (const { id } of records) {
       const result = await context.useTrayVaccine(
         id,
@@ -933,9 +1026,32 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         0,
         'a different Lot cannot authorize a reordered detail'
       );
-      selectedLot = ''; // Both funding buckets offer the target, neither is selected.
-      retry();
-      await new Promise(setImmediate);
+      selectedLot = '';
+      if (manualUse) {
+        await context.advanceGridHandoff();
+        const pendingToken = saved()[2].dose_reservations[0].token;
+        assert.equal(fills.length, 0);
+        release = Promise.withResolvers();
+        void context.releaseGridDetailStep('staff_input');
+        const token = context.getScannerDeliveryContext(kind, true);
+        const using = context.useTrayVaccine('2', token);
+        await new Promise(setImmediate);
+        assert.equal(saved()[2].dose_reservations.length, 1);
+        assert.equal(saved()[2].dose_reservations[0].token, pendingToken);
+        release.resolve();
+        if (scenario === 'unconfirmed_release') {
+          await assert.rejects(using, /Check the original chart/);
+          assert.equal(fills.length, 0);
+          assert.equal(saved()[2].dose_reservations[0].token, pendingToken);
+          continue;
+        }
+        assert.equal((await using).status, 'pending');
+        assert.notEqual(saved()[2].dose_reservations[0].token, pendingToken);
+      } else {
+        // Both funding categories offer the target, neither is selected.
+        retry();
+        await new Promise(setImmediate);
+      }
     } else await context.advanceGridHandoff();
     assert.deepEqual(
       fills.map(({ lot }) => lot),
@@ -982,5 +1098,37 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       saved().every(({ dose_reservations }) => !dose_reservations),
       scenario
     );
+    if (manualUse) {
+      vm.runInContext('chartActivity.flush()', context);
+      const trace = await worker.sendMessage(
+        { action: 'exportRecentActivity' },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/popup.html'
+        }
+      );
+      const assigned = trace.rows.find(
+        (row) =>
+          row.event === 'grid_handoff' &&
+          row.row === 3 &&
+          row.result === 'assigned'
+      );
+      const wait = trace.rows.find(
+        (row) =>
+          row.event === 'grid_detail_decision' &&
+          row.lotEvidence === 'native_no_match'
+      );
+      assert.equal(wait.operation, assigned.operation);
+      assert.equal(wait.row, 3);
+      assert.equal(wait.step, 1);
+      assert.equal(wait.total, 3);
+      assert.equal(wait.reordered, true);
+      const takeover = trace.rows.find(
+        (row) => row.event === 'grid_takeover' && row.trigger === 'tray_use'
+      );
+      assert.equal(takeover.operation, assigned.operation);
+      assert.equal(takeover.trigger, 'tray_use');
+      assert.equal(takeover.reservation, 'released');
+    }
   }
 });
