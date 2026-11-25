@@ -423,3 +423,29 @@ test('Debug keeps the observed routing reason when a chart has no delivery token
   assert.equal(exported.settingsAtExport.autofill.administrationTime, true);
   assert.doesNotMatch(JSON.stringify(exported.rows), /TRAINING|ehealthontario/);
 });
+
+test('an expired scan on the Multiple grid is traced before chart entry', async () => {
+  const logged = Promise.withResolvers();
+  const worker = fixture({
+    buildId: 'training-build',
+    tabs: [{ id: 4, active: true, url: chartUrl }],
+    tabResponse: {
+      supported: true,
+      contextToken: 'training-grid',
+      formContext: { kind: 'multiple_grid', ready: true }
+    },
+    beforeSessionSet(values) {
+      if (Object.values(values)[0].rows?.length) logged.resolve();
+    }
+  });
+  const result = await worker.captureScannerScan({
+    rawText: '01001234567890121700010110TRAINING'
+  });
+  assert.equal(result.response?.status, 'expired');
+  await logged.promise;
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.equal(rows[0].routing.form, 'multiple_grid');
+  assert.equal(rows[1].reason, 'expired');
+  assert.equal(rows[1].mode, 'multiple');
+  assert.equal(rows[1].stage, 'none');
+});

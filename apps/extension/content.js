@@ -4275,7 +4275,7 @@ async function fillReservedTrayRecord(
         return createAutofillResult('failed');
       chartActivity?.record(owner.activity, 'lot_cleanup', { result });
       chartActivity?.record(owner.activity, 'stop', {
-        reason: 'lot_not_matched'
+        reason: 'different_lot_selected'
       });
       if (result === 'cleared') {
         confirmedNoProductWrite = true;

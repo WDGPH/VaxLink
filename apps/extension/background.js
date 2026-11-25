@@ -4653,7 +4653,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               mode:
                 result.workflow === 'inventory'
                   ? 'inventory'
-                  : result.queuedToWorkflow || stage === 'grid'
+                  : result.queuedToWorkflow ||
+                      stage === 'grid' ||
+                      routing?.form === 'multiple_grid'
                     ? 'multiple'
                     : 'single',
               stage
