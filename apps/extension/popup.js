@@ -513,10 +513,10 @@ async function renderHeldScannerScans() {
       const captured = new Date(scan.capturedAt);
       const time =
         scan.capturedAt && Number.isFinite(captured.getTime())
-          ? captured.toLocaleString(undefined, {
+          ? `Received ${captured.toLocaleString(undefined, {
               dateStyle: 'short',
               timeStyle: 'medium'
-            })
+            })}`
           : 'Time unknown';
       const reason =
         {
@@ -525,6 +525,9 @@ async function renderHeldScannerScans() {
           inactive_chart: 'Chart unavailable',
           lock_unavailable: 'Lock check unavailable',
           lock_unknown: 'Lock state unknown',
+          expired: 'Expired vaccine',
+          missing_lot: 'No lot number',
+          parse_error: 'Unrecognized barcode',
           check_chart: 'Delivery unconfirmed',
           checking_chart: 'Awaiting verification'
         }[scan.reviewState] ||

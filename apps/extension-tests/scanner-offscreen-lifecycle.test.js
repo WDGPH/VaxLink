@@ -6,6 +6,57 @@ import {
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
+test('only the active setup test owner can request one of the three test sounds', async () => {
+  const writes = [];
+  const sessionStorage = new Map([['vaxlink_scanner_test_owner_v1', 4]]);
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    sessionStorage,
+    runtimeSendMessage(message, reply) {
+      if (message.target === 'scannerDaemon') writes.push({ ...message });
+      reply({ success: true });
+    }
+  });
+  const owner = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/scanner-pairing.html',
+    tab: { id: 4 }
+  };
+  const play = (result, sender = owner) =>
+    harness.sendMessage(
+      {
+        action: 'scannerDaemon.testFeedback',
+        result
+      },
+      sender
+    );
+
+  assert.equal(
+    (await play('works', { ...owner, tab: { id: 5 } })).success,
+    false
+  );
+  assert.equal(
+    (
+      await play('works', {
+        ...owner,
+        url: 'chrome-extension://vaxlink-test/popup.html'
+      })
+    ).success,
+    false
+  );
+  assert.equal((await play([0, 6, 17])).success, false);
+  assert.equal((await play('attention')).success, true);
+  sessionStorage.clear();
+  assert.equal((await play('expired')).success, false);
+  assert.deepEqual(writes, [
+    {
+      action: 'scannerDaemon.testFeedback',
+      target: 'scannerDaemon',
+      result: 'attention'
+    }
+  ]);
+  assert.equal(harness.offscreenCreations.length, 0);
+});
+
 test('background creates exactly one persistent WORKERS offscreen document', async () => {
   const harness = createBackgroundHarness(makeTestNvcBundle());
 
