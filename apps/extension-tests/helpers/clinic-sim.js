@@ -138,7 +138,10 @@ const BACKGROUND_DIR = path.dirname(BACKGROUND_PATH);
 
 // Load the real content scripts with the same VM approach as the background.
 // Startup stays before DOM readiness and the initial settings response.
-export function createContentHarness(globals = {}) {
+export function createContentHarness(
+  globals = {},
+  extensionDir = BACKGROUND_DIR
+) {
   const documentListeners = new Map();
   const messageListeners = [];
   const storageReads = [];
@@ -203,11 +206,11 @@ export function createContentHarness(globals = {}) {
     }
   });
   const manifest = JSON.parse(
-    readFileSync(path.join(BACKGROUND_DIR, 'manifest.json'), 'utf8')
+    readFileSync(path.join(extensionDir, 'manifest.json'), 'utf8')
   );
   for (const file of manifest.content_scripts[0].js) {
     vm.runInContext(
-      readFileSync(path.join(BACKGROUND_DIR, file), 'utf8'),
+      readFileSync(path.join(extensionDir, file), 'utf8'),
       context,
       { filename: file }
     );

@@ -59,9 +59,10 @@ page-library variable may be unavailable even when the page is still updating.
 
 The integration records the extension's public ID on the chart document. When
 two copies are present, both stop filling. Disable the extra copy and refresh
-the chart after checking unsaved work. Development and Alpha can fill training
-charts. The packaged production build can also fill production charts. Scanner
-capture and local trays remain available while chart entry is blocked.
+the chart after checking unsaved work. Packaged Alpha and production builds can
+fill supported training and production charts. Development copies fill training
+charts only. Scanner capture and local trays remain available while chart entry
+is blocked.
 
 The chart integration reports the visible form and its readiness to callers.
 It distinguishes provider and non-provider single forms, the Multiple grid and

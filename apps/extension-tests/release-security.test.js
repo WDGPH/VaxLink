@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { createContentHarness } from './helpers/clinic-sim.js';
 
 function packageProject(t) {
   const source = fileURLToPath(new URL('../..', import.meta.url));
@@ -145,6 +146,39 @@ test('successive Alpha prereleases have increasing Chrome versions and cannot sh
       /Production packages require a stable package version/
     );
   }
+});
+
+test('the Alpha package allows chart entry in production and training Panorama', (t) => {
+  const root = packageProject(t);
+  const version = '2.0.0-rc2';
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ version }));
+  const { manifest } = buildPackage(root, 'alpha', version);
+  assert.equal(manifest.name, 'VaxLink Alpha');
+
+  const extensionDir = join(root, 'alpha-package');
+  execFileSync('python3', [
+    '-m',
+    'zipfile',
+    '-e',
+    join(root, 'dist', `vaxlink-alpha-${version}.zip`),
+    extensionDir
+  ]);
+
+  for (const host of [
+    'www.panorama.prod.ehealthontario.ca',
+    'panorama.prod.ehealthontario.ca',
+    'trpanoramadhir.prod.ehealthontario.ca'
+  ]) {
+    const location = new URL(`https://${host}/ImmsWeb/pages/recordImms/form`);
+    const { context } = createContentHarness({ location }, extensionDir);
+    assert.equal(context.panoramaEntryBlockReason(), '', host);
+  }
+
+  const location = new URL(
+    'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
+  );
+  const { context } = createContentHarness({ location });
+  assert.match(context.panoramaEntryBlockReason(), /training charts/);
 });
 
 test('Alpha automation targets alpha with advancing prerelease versions', () => {
