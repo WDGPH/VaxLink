@@ -375,6 +375,7 @@ export function createBackgroundHarness(bundle, options = {}) {
       ...options.windows
     },
     tabs: {
+      create: options.createTab,
       onActivated: { addListener: (fn) => tabActivatedListeners.push(fn) },
       onRemoved: { addListener: (fn) => tabRemovedListeners.push(fn) },
       async get(tabId) {

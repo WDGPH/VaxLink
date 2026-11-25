@@ -4223,13 +4223,15 @@ const traceMessageFields = {
 function handleRecentActivityMessage(request, sender, sendResponse) {
   const { action } = request;
   const fields = traceMessageFields[action];
+  const popupUrl = chrome.runtime.getURL('popup.html');
   const chartAction =
     action === 'openRecentActivity' || action === 'appendRecentActivity';
   if (
     sender.id !== chrome.runtime.id ||
     (chartAction
       ? !isChartMessageSender(sender)
-      : sender.url !== chrome.runtime.getURL('popup.html')) ||
+      : sender.url !== popupUrl &&
+        sender.url !== `${popupUrl}#carry-support`) ||
     Object.keys(request).length !== fields.length + 1 ||
     !fields.every((key) => Object.hasOwn(request, key)) ||
     (action === 'setRecentActivity' && typeof request.enabled !== 'boolean')
@@ -4258,6 +4260,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     Object.hasOwn(traceMessageFields, request.action)
   )
     return handleRecentActivityMessage(request, sender, sendResponse);
+  if (request?.action === 'openCarrySupport') {
+    if (!isChartMessageSender(sender) || Object.keys(request).length !== 1) {
+      sendResponse({ success: false });
+      return false;
+    }
+    // Keep the chart visible so a later detail can still use its saved dose.
+    chrome.tabs
+      .create({
+        url: chrome.runtime.getURL('popup.html#carry-support'),
+        active: false
+      })
+      .then(
+        () => sendResponse({ success: true }),
+        () => sendResponse({ success: false })
+      );
+    return true;
+  }
   if (request?.action === 'scannerPairing.open') {
     if (
       sender.id !== chrome.runtime.id ||

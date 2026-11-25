@@ -21,6 +21,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       'recentActivityStatus',
       'recentActivityNotice',
       'exportRecentActivityBtn',
+      'emailRecentActivityBtn',
       'workflowHeader',
       'panelHeader',
       'panelTitle',

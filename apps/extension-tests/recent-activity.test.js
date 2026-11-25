@@ -81,6 +81,33 @@ test('Debug rejects unexpected fields and requires a chart sender to append and 
   assert.equal(exported.token, undefined);
 });
 
+test('a carry report opens Debug in the background and only the extension page can export', async () => {
+  const opened = [];
+  const worker = fixture({ createTab: async (tab) => opened.push(tab) });
+  const reportPage = { ...popup, url: `${popup.url}#carry-support` };
+  assert.equal((await worker.manage('openCarrySupport')).success, false);
+  assert.equal(
+    (await worker.manage('openCarrySupport', { url: popup.url }, chart))
+      .success,
+    false
+  );
+  assert.equal(
+    (await worker.manage('openCarrySupport', {}, chart)).success,
+    true
+  );
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].url, reportPage.url);
+  assert.equal(opened[0].active, false);
+  assert.equal(
+    (await worker.manage('exportRecentActivity', {}, chart)).success,
+    false
+  );
+  assert.equal(
+    (await worker.manage('exportRecentActivity', {}, reportPage)).success,
+    true
+  );
+});
+
 test('Debug retains only the newest 3,000 rows across worker restarts', async () => {
   const sessionStorage = new Map();
   const worker = fixture({ sessionStorage });
