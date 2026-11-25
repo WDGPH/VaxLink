@@ -1,6 +1,5 @@
 import './shared/workflow.js';
 import './shared/vaccine-label.js';
-import { makeDebugEmail } from './shared/debug-email.js';
 import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
@@ -1069,6 +1068,22 @@ function setupRecentActivityControls() {
   const notice = document.getElementById('recentActivityNotice');
   const exportButton = document.getElementById('exportRecentActivityBtn');
   const emailButton = document.getElementById('emailRecentActivityBtn');
+  const emailLink = document.getElementById('openSupportEmailLink');
+  const filename = 'vaxlink-debug-details.json';
+  const subject = carrySupportPage
+    ? 'VaxLink could not carry a dose into Enter Details'
+    : 'VaxLink troubleshooting details';
+  const body = [
+    carrySupportPage
+      ? 'VaxLink could not carry a saved dose into Enter Details.'
+      : 'I need help with VaxLink.',
+    '',
+    'I downloaded the Debug log from VaxLink Settings.',
+    `[Attach ${filename} from Downloads before sending.]`,
+    '',
+    'Describe what happened here.'
+  ].join('\r\n');
+  emailLink.href = `mailto:innovation@wdgpublichealth.ca?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   let snapshot = null;
   let busy = false;
   let requestNumber = 0;
@@ -1090,7 +1105,7 @@ function setupRecentActivityControls() {
         : carrySupportPage && !retained
           ? 'Collect troubleshooting details, then try the carry again.'
           : carrySupportPage
-            ? 'Prepare a support email with the current Debug log attached.'
+            ? 'Email support opens your mail app and downloads the Debug log for you to attach.'
             : '');
   }
 
@@ -1123,20 +1138,11 @@ function setupRecentActivityControls() {
           null,
           2
         );
+        downloadTextFile(filename, log, 'application/json;charset=utf-8');
         if (email) {
-          downloadTextFile(
-            'vaxlink-support-draft.eml',
-            makeDebugEmail(log, carrySupportPage),
-            'message/rfc822'
-          );
-          message =
-            'Open the downloaded email draft. Review the attached log before sending.';
-        } else {
-          downloadTextFile(
-            'vaxlink-debug-details.json',
-            log,
-            'application/json;charset=utf-8'
-          );
+          message = `Attach ${filename} from Downloads after reviewing it.`;
+          emailLink.hidden = false;
+          emailLink.click();
         }
       }
     } catch (_) {

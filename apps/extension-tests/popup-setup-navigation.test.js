@@ -22,6 +22,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       'recentActivityNotice',
       'exportRecentActivityBtn',
       'emailRecentActivityBtn',
+      'openSupportEmailLink',
       'workflowHeader',
       'panelHeader',
       'panelTitle',
@@ -72,10 +73,14 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
   };
   let ready;
   const opened = [];
+  const emailActions = [];
+  nodes.openSupportEmailLink.click = () =>
+    emailActions.push(nodes.openSupportEmailLink.href);
   const queries = [];
   const requests = [];
   const messages = [];
   const writes = [];
+  const storageListeners = [];
   const localData = {
     vaxlink_analytics_v1: {
       deviceId: 'SAMPLE-DEVICE-ID',
@@ -102,6 +107,13 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
   let runtimeListener;
   globalThis.document = {
     getElementById: (id) => nodes[id] || null,
+    createElement: () => ({
+      click() {
+        emailActions.push({ filename: this.download, url: this.href });
+      },
+      remove() {}
+    }),
+    body: { appendChild() {} },
     addEventListener(_type, listener) {
       ready = listener;
     }
@@ -128,7 +140,11 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
       }
     },
     storage: {
-      onChanged: { addListener() {} },
+      onChanged: {
+        addListener(listener) {
+          storageListeners.push(listener);
+        }
+      },
       local: {
         get(keys, done) {
           done(Object.fromEntries(keys.map((key) => [key, localData[key]])));
@@ -173,6 +189,53 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     assert.equal(nodes.recentActivityToggle.checked, true);
     assert.equal(nodes.recentActivityStatus.textContent, '0 events');
     assert.equal(nodes.exportRecentActivityBtn.disabled, true);
+    assert.equal(nodes.emailRecentActivityBtn.disabled, true);
+    const url =
+      'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
+    const chart = { id: 'vaxlink-test', frameId: 0, url, tab: { id: 2, url } };
+    const { token, source } = await background.sendMessage(
+      { action: 'openRecentActivity' },
+      chart
+    );
+    const appended = await background.sendMessage(
+      {
+        action: 'appendRecentActivity',
+        token,
+        source,
+        rows: [
+          {
+            event: 'scan',
+            operation: 1,
+            ms: 0,
+            mode: 'single',
+            stage: 'none',
+            decision: 'accepted'
+          }
+        ]
+      },
+      chart
+    );
+    assert.equal(appended.success, true);
+    for (const listener of storageListeners)
+      listener({ vaxlink_recent_activity_v1: {} }, 'session');
+    await Promise.all(requests);
+    assert.equal(nodes.emailRecentActivityBtn.disabled, false);
+    await listeners['emailRecentActivityBtn:click']();
+    await Promise.all(requests);
+    assert.equal(emailActions.length, 2);
+    const [download, openedEmail] = emailActions;
+    assert.equal(download.filename, 'vaxlink-debug-details.json');
+    const saved = await (await fetch(download.url)).json();
+    assert.equal(saved.rows[0].decision, 'accepted');
+    const mail = new URL(openedEmail);
+    assert.equal(mail.protocol, 'mailto:');
+    assert.equal(mail.pathname, 'innovation@wdgpublichealth.ca');
+    assert.match(
+      mail.searchParams.get('body'),
+      /Attach vaxlink-debug-details\.json/
+    );
+    assert.doesNotMatch(mail.searchParams.get('body'), /"operation"|"rows"/);
+    assert.equal(nodes.openSupportEmailLink.hidden, false);
     nodes.recentActivityToggle.checked = false;
     listeners['recentActivityToggle:change']();
     await Promise.all(requests);

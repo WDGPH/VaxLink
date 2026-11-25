@@ -72,13 +72,12 @@ or turning collection off. The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
 
-Choose **Email draft** to download an email addressed to
-`innovation@wdgpublichealth.ca` with the current Debug log attached. Open the
-draft in your mail app and review the attachment before sending. When a dose
-cannot carry into Enter Details, **Report carry problem** opens Debug mode in
-another tab. Choose **Email draft** there to include the carry problem.
-If your mail app opens the draft as read-only, use **Download** and attach the
-JSON file to a new email to the same address.
+Choose **Email support** to download the current Debug log and open a message
+to `innovation@wdgpublichealth.ca`. Review the JSON file and attach it from
+Downloads before sending. Select **Open email again** if the mail app stays
+closed. When a dose cannot carry into Enter Details, **Report carry problem**
+opens Debug mode in another tab. Choose **Email support** there for a message
+about the carry problem.
 
 For support, start with the software version, scanner model, training or production environment, package type, printed lot, catalogue status and exact message. Use a sample record for screenshots. Review any barcode, email recipients and Debug download before sharing through an approved private channel. [Privacy assessment guide](privacy-assessment.md)
 
