@@ -123,7 +123,7 @@
           Use this for an existing USB CDC setup or a generic scanner. The
           scanner controls its own beep.
         </p>
-        <details id="zebraSetup" hidden>
+        <details id="zebraSetup">
           <summary>Program your Zebra DS8178</summary>
           <p>
             Upload any stored scans, then choose <strong>Disconnect</strong> in
@@ -135,47 +135,34 @@
               href="scanner/vaxlink-ds8178-setup-barcodes.pdf"
               target="_blank"
               rel="noopener"
-              >Open the printable setup sheet (PDF)</a
-            >. Print at 100% scale and scan one symbol per step.
+              >Open the single-scan setup sheet (PDF)</a
+            >. Print at 100% scale. Scan only the barcode for the setup you
+            selected.
           </p>
           <p>
-            For an optional clean start, scan
-            <strong>Set Factory Defaults</strong> first. This clears custom
-            defaults and settings.
+            Each barcode clears custom defaults and settings, then applies the
+            chosen setup. Wait for the USB port to return before connecting.
+            Test on a training workstation while hardware validation is pending.
           </p>
-          <div id="liveSetup" hidden>
-            <ol>
-              <li>Normal (do not batch)</li>
-              <li>Auto-Reconnect Immediately</li>
-              <li>SSI over USB CDC. Wait for the connection to restart.</li>
-              <li>Send Packeted Decode Data</li>
-              <li>Enable ACK/NAK</li>
-              <li>Data As Is</li>
-              <li>Do Not Beep After Good Decode</li>
-            </ol>
+          <div id="basicSetup">
             <p>
-              If your SSI settings were customized, use the Zebra guide to set
-              Multipacket Option 1 (page 9-19) and the 2-second Host Serial
-              Response Timeout (page 9-17).
+              To reset and program a DS8178, scan
+              <strong>Standard USB CDC</strong> on page 3. If your scanner
+              already uses USB CDC, choose <strong>Connect scanner</strong>.
             </p>
+          </div>
+          <div id="liveSetup" hidden>
             <p>
-              Connect the scanner, reopen setup and choose
+              Scan <strong>Live feedback</strong> on page 1. Connect the
+              scanner, reopen setup and choose
               <strong>Test saved scanner</strong> to test the three sounds.
             </p>
           </div>
           <div id="longRangeSetup" hidden>
-            <ol>
-              <li>USB CDC Host. Wait for the connection to restart.</li>
-              <li>Add Enter Key (Carriage Return/Line Feed)</li>
-              <li>Beep After Good Decode</li>
-              <li>Enable Pair On Contacts</li>
-              <li>Disable Auto-Reconnect</li>
-              <li>Out of Range Batch Mode</li>
-            </ol>
             <p>
-              Connect with this setup in VaxLink and choose the intended
-              workflow before docking to upload. Review the tray and any held
-              scans after upload.
+              Scan <strong>Long range</strong> on page 2. Connect the scanner
+              and choose the workflow before docking to upload. Review the tray
+              and any held scans after upload.
             </p>
           </div>
         </details>

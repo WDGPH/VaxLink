@@ -35,7 +35,7 @@ profileSelect.addEventListener('change', showProfileInstructions);
 function showProfileInstructions() {
   const live = profileSelect.value === LIVE_SSI_PROFILE_ID;
   const longRange = profileSelect.value === LONG_RANGE_PROFILE_ID;
-  document.getElementById('zebraSetup').hidden = !(live || longRange);
+  document.getElementById('basicSetup').hidden = live || longRange;
   document.getElementById('liveSetup').hidden = !live;
   document.getElementById('longRangeSetup').hidden = !longRange;
   document.getElementById('profileHint').textContent = live

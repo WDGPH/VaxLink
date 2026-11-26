@@ -430,6 +430,7 @@ export function createBackgroundHarness(bundle, options = {}) {
     storage: {
       session: {
         async get(key) {
+          await options.beforeSessionGet?.(key);
           return sessionData.has(key)
             ? { [key]: structuredClone(sessionData.get(key)) }
             : {};

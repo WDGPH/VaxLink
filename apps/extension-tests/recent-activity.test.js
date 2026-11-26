@@ -81,6 +81,35 @@ test('Debug rejects unexpected fields and requires a chart sender to append and 
   assert.equal(exported.token, undefined);
 });
 
+test('Debug records locked capture outcomes and an identifier-free popup summary', async () => {
+  const worker = fixture({ idleState: 'locked' });
+  const rawText = '01001234567890121729123110SAMPLE-LOCK';
+  assert.equal((await worker.captureScannerScan({ rawText })).locked, true);
+  const summary = { held: 1, inventory: 0, interrupted: false };
+  assert.equal(
+    (await worker.manage('recordLockSummary', summary, chart)).success,
+    false
+  );
+  assert.equal(
+    (await worker.manage('recordLockSummary', summary)).success,
+    true
+  );
+  const exported = await worker.manage('exportRecentActivity');
+  assert.ok(exported.rows.some(({ event }) => event === 'lock_observed'));
+  assert.equal(
+    exported.rows.find(({ event }) => event === 'locked_capture').result,
+    'held'
+  );
+  assert.equal(
+    exported.rows.find(({ event }) => event === 'lock_summary').held,
+    1
+  );
+  assert.doesNotMatch(
+    JSON.stringify(exported),
+    /SAMPLE-LOCK|lockedAt|captureId/
+  );
+});
+
 test('a carry report opens Debug in the background and only the extension page can export', async () => {
   const opened = [];
   const worker = fixture({ createTab: async (tab) => opened.push(tab) });

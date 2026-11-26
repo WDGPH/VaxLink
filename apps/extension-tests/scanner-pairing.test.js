@@ -17,7 +17,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       'scannerProfile',
       'profileControls',
       'profileHint',
-      'zebraSetup',
+      'basicSetup',
       'liveSetup',
       'longRangeSetup',
       'testFeedbackPanel',
@@ -181,7 +181,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       });
       nodes.scannerProfile.value = profileId;
       nodes.scannerProfile.change();
-      assert.equal(nodes.zebraSetup.hidden, false);
+      assert.equal(nodes.basicSetup.hidden, true);
       assert.equal(section.hidden, false);
       const pending = nodes.chooseScannerBtn.click();
       await started;
@@ -192,6 +192,11 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       releaseCommand({ success: false, error: 'Connection request failed' });
       await pending;
     }
+    nodes.scannerProfile.value = '';
+    nodes.scannerProfile.change();
+    assert.equal(nodes.basicSetup.hidden, false);
+    assert.equal(nodes.liveSetup.hidden, true);
+    assert.equal(nodes.longRangeSetup.hidden, true);
 
     assert.equal(nodes.testScannerBtn.hidden, false);
     const begin = nodes.testScannerBtn.click();

@@ -19,6 +19,13 @@ const popup = {
   id: 'vaxlink-test',
   url: 'chrome-extension://vaxlink-test/popup.html'
 };
+const chart = {
+  id: 'vaxlink-test',
+  tab,
+  frameId: 0,
+  url: tab.url,
+  documentId: 'original-document'
+};
 const row = (rawText) => ({
   rawText,
   source: 'web-serial',
@@ -336,8 +343,10 @@ test('only the popup can inspect or discard a held scan', async () => {
 
 test('a timed-out delivery remains held even if its callback arrives late', async () => {
   const delivery = gate();
+  const sessionStorage = new Map();
   let timeout;
   const h = harness({
+    sessionStorage,
     setTimeout(fn, ms, ...args) {
       if (ms === 10000) {
         timeout = () => fn(...args);
@@ -353,6 +362,41 @@ test('a timed-out delivery remains held even if its callback arrives late', asyn
   });
   const result = capture(h, 'uncertain');
   await delivery.started;
+  const { scan, contextToken, scannerRoute } = h.tabMessages[1].message;
+  const claim = { captureId: scan.captureId, contextToken, scannerRoute };
+  assert.equal(
+    (await h.sendMessage({ action: 'checkScannerChart', ...claim }, chart))
+      .success,
+    true
+  );
+  const replacement = harness({
+    sessionStorage,
+    storage: Object.fromEntries(h.storageData)
+  });
+  assert.equal(
+    (
+      await replacement.sendMessage(
+        { action: 'checkScannerChart', ...claim },
+        chart
+      )
+    ).reason,
+    'delivery_unavailable'
+  );
+  assert.equal(
+    (
+      await replacement.sendMessage(
+        {
+          action: 'verifyScannerChartFields',
+          ...claim,
+          verified: true
+        },
+        chart
+      )
+    ).success,
+    false
+  );
+  assert.equal(replacement.storageData.get(inbox)[0].rawText, 'uncertain');
+  assert.deepEqual(replacement.tabMessages, []);
   timeout();
   await result;
   assert.equal(h.storageData.get(inbox)[0].rawText, 'uncertain');
@@ -501,7 +545,7 @@ test('only the hidden scanner host can submit a physical capture', async () => {
   assert.equal(h.storageData.has(inbox), false);
 });
 
-test('a pending response clears and adds recent history only when the matching chart verifies', async () => {
+test('a restarted worker finalizes an acknowledged scan only for its original document', async () => {
   const delivery = gate();
   const sessionStorage = new Map();
   const recent = 'vaxlink_recent_chart_lots_v1';
@@ -519,19 +563,12 @@ test('a pending response clears and adds recent history only when the matching c
       return true;
     }
   });
-  const sender = {
-    id: 'vaxlink-test',
-    tab,
-    frameId: 0,
-    url: tab.url,
-    documentId: 'original-document'
-  };
   const captured = capture(h, 'pending');
   await delivery.started;
   const { scan, contextToken, scannerRoute } = h.tabMessages[1].message;
   const claim = { captureId: scan.captureId, contextToken, scannerRoute };
   assert.equal(
-    (await h.sendMessage({ action: 'checkScannerChart', ...claim }, sender))
+    (await h.sendMessage({ action: 'checkScannerChart', ...claim }, chart))
       .success,
     true
   );
@@ -549,31 +586,106 @@ test('a pending response clears and adds recent history only when the matching c
   delivery.release();
   assert.equal((await captured).queued, true);
   assert.equal(h.storageData.get(inbox)[0].reviewState, 'checking_chart');
+  const replacement = harness({
+    sessionStorage,
+    storage: Object.fromEntries(h.storageData)
+  });
+  assert.equal(
+    (
+      await replacement.sendMessage(
+        { action: 'checkScannerChart', ...claim },
+        chart
+      )
+    ).success,
+    true
+  );
   for (const [request, from] of [
-    [verification, { ...sender, documentId: 'replacement' }],
-    [{ ...verification, contextToken: 'old' }, sender],
+    [verification, { ...chart, documentId: 'replacement' }],
+    [{ ...verification, contextToken: 'old' }, chart],
     [
       {
         ...verification,
         scannerRoute: { ...scannerRoute, epoch: 'old-worker' }
       },
-      sender
+      chart
     ],
-    [verification, { ...sender, frameId: 1 }]
+    [verification, { ...chart, frameId: 1 }]
   ]) {
-    assert.equal((await h.sendMessage(request, from)).success, false);
-    assert.equal(h.storageData.get(inbox).length, 1);
+    assert.equal((await replacement.sendMessage(request, from)).success, false);
+    assert.equal(replacement.storageData.get(inbox).length, 1);
     assert.equal(sessionStorage.has(recent), false);
   }
   const copies = await Promise.all([
-    h.sendMessage(verification, sender),
-    h.sendMessage(verification, sender)
+    replacement.sendMessage(verification, chart),
+    replacement.sendMessage(verification, chart)
   ]);
   assert.equal(copies.filter((result) => result.success).length, 1);
-  assert.equal(h.storageData.get(inbox).length, 0);
+  assert.equal(replacement.storageData.get(inbox).length, 0);
   assert.equal(sessionStorage.get(recent).length, 1);
   assert.equal(sessionStorage.get(recent)[0].lot, 'LOT1');
   assert.equal('raw_barcode' in sessionStorage.get(recent)[0], false);
+  assert.deepEqual(replacement.tabMessages, []);
+});
+
+test('a grid handoff keeps its route across restart until focus changes or the machine locks', async () => {
+  for (const invalidate of [
+    (worker) => {
+      worker.activateTab(45);
+      worker.activateTab(44);
+    },
+    (worker) => {
+      worker.setIdleState('locked');
+      worker.setIdleState('active');
+    }
+  ]) {
+    const tabs = [{ ...tab }, { ...tab, id: 45, active: false }];
+    const sessionStorage = new Map();
+    const first = harness({ sessionStorage, tabs });
+    const { scannerRoute } = await first.sendMessage(
+      { action: 'checkScannerChart' },
+      chart
+    );
+    const confirm = (worker) =>
+      worker.sendMessage({ action: 'checkScannerChart', scannerRoute }, chart);
+    const replacement = harness({ sessionStorage, tabs });
+    assert.equal((await confirm(replacement)).success, true);
+    const restore = gate();
+    const restoring = harness({
+      sessionStorage,
+      tabs,
+      beforeSessionGet(key) {
+        if (key === 'vaxlink_scanner_chart_route_v1')
+          return new Promise((resolve) => restore.hold(resolve));
+      }
+    });
+    const check = confirm(restoring);
+    await restore.started;
+    invalidate(restoring);
+    restore.release();
+    assert.equal((await check).reason, 'route_changed');
+    assert.equal((await confirm(restoring)).reason, 'route_changed');
+    const restartedAgain = harness({ sessionStorage, tabs });
+    assert.equal((await confirm(restartedAgain)).reason, 'route_changed');
+  }
+});
+
+test('a route check that discovers a lock retires the old route after unlock', async () => {
+  const sessionStorage = new Map();
+  const first = harness({ sessionStorage });
+  const { scannerRoute } = await first.sendMessage(
+    { action: 'checkScannerChart' },
+    chart
+  );
+  const confirm = (worker) =>
+    worker.sendMessage({ action: 'checkScannerChart', scannerRoute }, chart);
+  const locked = harness({ sessionStorage, idleState: 'locked' });
+  assert.equal((await confirm(locked)).reason, 'inactive_chart');
+  locked.setIdleState('active');
+  assert.equal((await confirm(locked)).reason, 'route_changed');
+  assert.equal(
+    (await confirm(harness({ sessionStorage }))).reason,
+    'route_changed'
+  );
 });
 
 test('an unavailable or unknown lock check and a stale chart keep the original scan held', async () => {

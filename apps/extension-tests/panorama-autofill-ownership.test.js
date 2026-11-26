@@ -812,6 +812,60 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
   );
 });
 
+test('a delayed funding choice rechecks the scanner route and the same form before filling', async () => {
+  for (const outcome of ['same chart', 'changed form', 'rejected route']) {
+    const f = fixture();
+    const { promise, resolve } = Promise.withResolvers();
+    let click;
+    let checks = 0;
+    let resumed;
+    const slot = {
+      innerHTML: '',
+      querySelector: () => null,
+      querySelectorAll: () => [
+        {
+          getAttribute: () => 'NON_PUBLICLY_FUNDED',
+          addEventListener: (_event, handler) => (click = handler)
+        }
+      ]
+    };
+    Object.assign(f.context, {
+      testSlot: slot,
+      ensureToastHost() {},
+      escapeToastHtml: (text) => text,
+      isAutofillPending: (result) => result?.status === 'pending',
+      checkPanoramaScannerRoute: () => {
+        checks += 1;
+        return promise;
+      },
+      autoFillPanorama: (data) => {
+        resumed = data._fundedRadioChoice;
+        return { status: 'pending' };
+      }
+    });
+    vm.runInContext('toastRoutineSlot = testSlot;', f.context);
+    const data = f.beginPanoramaAutofill({ lot: 'LOT1' }, true, {
+      automatic: true,
+      startBy: f.state.now + 10
+    });
+    data._vaxlinkOwner.scannerDelivery = { captureId: 'scan' };
+    f.showVaxlinkToast({ ...data, _fundingChoiceRequired: 'manual' });
+    f.state.now += 60_000;
+    const pending = click();
+    await click();
+    assert.equal(checks, 1, outcome);
+    assert.equal(resumed, undefined);
+    if (outcome === 'changed form') f.state.form = { ...f.form };
+    resolve(outcome !== 'rejected route');
+    await pending;
+    assert.equal(
+      resumed,
+      outcome === 'same chart' ? 'NON_PUBLICLY_FUNDED' : undefined,
+      outcome
+    );
+  }
+});
+
 test('automatic comparison waits for the Agent refresh before offering both funding choices', () => {
   const f = fixture();
   const select = {
