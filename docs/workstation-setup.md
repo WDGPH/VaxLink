@@ -33,10 +33,10 @@ Existing USB CDC scanners keep their saved setup. Use the Zebra options only wit
 
 1. Finish uploading any stored scans. Then choose **Disconnect** in **VaxLink → Settings → Scanner** before changing the scanner’s settings. Keep the scanner near its powered, paired cradle.
 2. In **VaxLink → Settings → Scanner → Setup**, choose the Zebra setup you want. Open **Program your Zebra DS8178** and print the single-scan sheet at 100% scale.
-3. Scan **Live feedback** on page 1 or **Long range** on page 2. Each barcode clears custom defaults and settings, then applies the chosen setup. Wait for the USB port to return. The browser may ask you to choose the scanner again.
+3. Scan **Live feedback** on page 1, **Long range** on page 2, or **Standard USB CDC** on page 3. Each barcode clears custom defaults and settings, then applies the chosen setup. Wait for the USB port to return. The browser may ask you to choose the scanner again.
 4. Return to setup and choose **Connect scanner**. For live feedback, reopen setup and choose **Test saved scanner**. Listen for each of the three sounds. For long range, choose the workflow before docking the scanner to upload, then review the tray and any held scans. Finish any scanner test before uploading stored scans.
 
-The combined barcodes have passed software decoding checks. Use them on a training workstation and complete the [scanner acceptance checks](scanner-acceptance.md#check-the-two-zebra-ds8178-setups) on the intended scanner and cradle before clinical use. [Zebra DS8178 Product Reference Guide](https://www.zebra.com/content/dam/support-dam/en/documentation/unrestricted/guide/product/ds8178-prg-en.pdf)
+The combined barcodes have passed software decoding checks. Use them on a training workstation and complete the [scanner acceptance checks](scanner-acceptance.md#check-the-zebra-ds8178-setups) on the intended scanner and cradle before clinical use. [Zebra DS8178 Product Reference Guide](https://www.zebra.com/content/dam/support-dam/en/documentation/unrestricted/guide/product/ds8178-prg-en.pdf)
 
 ## Before clinical use
 
