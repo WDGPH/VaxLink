@@ -8,6 +8,25 @@ Channels: **Alpha** (`dev` branch, "VaxLink Alpha" Web Store listing) and **Prod
 
 ---
 
+## [2.0.0-rc4](https://github.com/WDGPH/VaxLink/compare/v2.0.0-rc3...v2.0.0-rc4) (2026-11-26)
+
+
+### Added
+
+* add Zebra live feedback and long-range scanner setup ([8de034a](https://github.com/WDGPH/VaxLink/commit/8de034a34632144b83b430852d7fbf854807a0d7))
+* check live scans and send long-range arrivals to review ([159d03b](https://github.com/WDGPH/VaxLink/commit/159d03b4f691cdd94565dd300cae108f4d04e008))
+* connect Zebra scanners in live and long-range modes ([552b4ff](https://github.com/WDGPH/VaxLink/commit/552b4ffe2ad93afa1d26f0732703c4ed7bd72988))
+* guide staff through scanner setup and sound tests ([83c2861](https://github.com/WDGPH/VaxLink/commit/83c2861308bf2f060117218211eef3cc051879a1))
+* resume locked scans from the chart ([1731b83](https://github.com/WDGPH/VaxLink/commit/1731b83d88e5079d9b5e30ece6f79215dff3d5b8))
+* resume locked scans from the chart ([e3cf72f](https://github.com/WDGPH/VaxLink/commit/e3cf72f0bbbbf3be3f8c9c5a095b0b9059a819d6))
+
+
+### Fixed
+
+* keep scanner result sounds in capture order ([040e295](https://github.com/WDGPH/VaxLink/commit/040e295ce8bf38142215024062e22feb8cc8336b))
+* keep vaccine selections through a pause ([1a7d52a](https://github.com/WDGPH/VaxLink/commit/1a7d52aea5e2386ed5bfa9c2f5cb7b9bf9bb84f0))
+* recover scanner retries without mixing captures ([4b14141](https://github.com/WDGPH/VaxLink/commit/4b141412ad4e4db358ecea873ddb8e1e01648d20))
+
 ## [2.0.0-rc3](https://github.com/WDGPH/VaxLink/compare/v2.0.0-rc2...v2.0.0-rc3) (2026-11-25)
 
 
