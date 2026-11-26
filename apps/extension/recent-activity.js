@@ -52,6 +52,12 @@
     'stability',
     'late'
   );
+  const lotList = {
+    count: integer(0, 100000),
+    funding,
+    control: choices('select', 'panel', 'missing'),
+    site: choices('training', 'production')
+  };
   const details = {
     scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
     lock_observed: {},
@@ -86,15 +92,14 @@
       ),
       catalogueVersion
     },
-    options: {
-      target: choices(true, false),
-      count: integer(0, 100000),
-      funding,
-      control: choices('select', 'panel', 'missing'),
-      site: choices('training', 'production')
+    options: { ...lotList, target: choices(true, false) },
+    lot_search_end: {
+      ...lotList,
+      result: choices('target_absent', 'target_listed', 'unreadable')
     },
     lot_miss: { funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED') },
     lot_cleanup: { result: choices('empty', 'cleared', 'review') },
+    lot_tray_release: { result: choices('released', 'unconfirmed') },
     funding_comparison: { outcome: choices('single', 'both', 'unmatched') },
     funding_prompt: { reason: choices('manual', 'both', 'other') },
     funding_choice: {

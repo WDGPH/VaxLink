@@ -3249,6 +3249,45 @@ function schedulePanoramaLotOrTradeSelection(
     if (owner?.trayDose || owner?.scannerDelivery) stopPanoramaFillOwner(owner);
   };
 
+  function readLotSearchOptions(widget, currentFunding) {
+    const list = readPanoramaLotList();
+    const selectedFunding = isExplicitPanoramaFundingValue(currentFunding)
+      ? currentFunding
+      : undefined;
+    return {
+      count: list?.rows.length ?? 0,
+      target:
+        list?.rows.some(({ text }) =>
+          panoramaLotLabelMatches(text, data.lot, selectedFunding)
+        ) === true,
+      funding:
+        selectedFunding || (currentFunding === 'SHOW_ALL' ? 'SHOW_ALL' : ''),
+      control: !list
+        ? 'missing'
+        : list.control === widget?.select
+          ? 'select'
+          : 'panel',
+      site:
+        location.hostname === PANORAMA_TRAINING_HOST ? 'training' : 'production'
+    };
+  }
+
+  function recordLotSearchEnd(unreadable) {
+    if (!chartActivity?.isCurrent(trace)) return;
+    const { target, ...list } = readLotSearchOptions(
+      getPanoramaLotWidget(),
+      getPanoramaFundedRadioValue()
+    );
+    chartActivity.record(trace, 'lot_search_end', {
+      ...list,
+      result: unreadable
+        ? 'unreadable'
+        : target
+          ? 'target_listed'
+          : 'target_absent'
+    });
+  }
+
   function readUsableLotList() {
     const list = readPanoramaLotList();
     if (!list) return null;
@@ -3265,6 +3304,7 @@ function schedulePanoramaLotOrTradeSelection(
   }
 
   function finishLotMiss(unreadable = false) {
+    recordLotSearchEnd(unreadable);
     if (
       !unreadable &&
       !getPanoramaLotFundingChoices(getPanoramaLotWidget(), data.lot).length
@@ -3322,6 +3362,9 @@ function schedulePanoramaLotOrTradeSelection(
       ) {
         owner.lotMissNotice = true;
         void stopTrayDose(owner, true).then((released) => {
+          chartActivity?.record(trace, 'lot_tray_release', {
+            result: released === true ? 'released' : 'unconfirmed'
+          });
           if (
             panoramaAutofillOwner === owner &&
             owner.form === getPanoramaAutofillForm() &&
@@ -3427,36 +3470,12 @@ function schedulePanoramaLotOrTradeSelection(
       const funding = hasLot
         ? getPanoramaLotFundingChoices(widget, data.lot)
         : [];
-      if (hasLot && chartActivity?.isCurrent(trace)) {
-        const options = readPanoramaLotList();
-        chartActivity.record(trace, 'options', {
-          count: options?.rows.length ?? 0,
-          target:
-            options?.rows.some(({ text }) =>
-              panoramaLotLabelMatches(
-                text,
-                data.lot,
-                isExplicitPanoramaFundingValue(currentFunding)
-                  ? currentFunding
-                  : undefined
-              )
-            ) === true,
-          funding:
-            isExplicitPanoramaFundingValue(currentFunding) ||
-            currentFunding === 'SHOW_ALL'
-              ? currentFunding
-              : '',
-          control: options
-            ? options.control === widget?.select
-              ? 'select'
-              : 'panel'
-            : 'missing',
-          site:
-            location.hostname === PANORAMA_TRAINING_HOST
-              ? 'training'
-              : 'production'
-        });
-      }
+      if (hasLot && chartActivity?.isCurrent(trace))
+        chartActivity.record(
+          trace,
+          'options',
+          readLotSearchOptions(widget, currentFunding)
+        );
       if (funding.length === 2 && !isPrimeFacesAjaxBusy()) {
         recordFundingComparison(data, 'both');
         showVaxlinkToast({ ...data, _fundingChoiceRequired: 'both' });
@@ -3713,6 +3732,7 @@ function schedulePanoramaLotOrTradeSelection(
               finishLotMiss(true);
               return null;
             }
+            if (hasLot && !productVerified) recordLotSearchEnd(true);
             return productVerified
               ? {
                   _fillFeedback: 'deadline_details',

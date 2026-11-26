@@ -14,6 +14,7 @@ const shown = () => ({ width: 100, height: 20 });
 function fixture() {
   const state = {
     controls: [],
+    funding: [],
     trade: [],
     nodes: new Map(),
     extraPanels: [],
@@ -24,6 +25,7 @@ function fixture() {
     querySelectorAll(selector) {
       if (selector.includes('LotInfo:lotNumberSelect:')) return state.controls;
       if (selector.includes('createImms_tradenameinput:')) return state.trade;
+      if (selector.includes('fundedRadio:selectOneRadio')) return state.funding;
       return [];
     },
     contains: (node) => node?.form === form
@@ -960,21 +962,22 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'ordered_duplicates',
     'next_then_delete',
     'reordered_after_delete',
+    'reordered_after_delete_missing_lot',
     'browser_history',
     'history_expired',
     'reordered_rows',
     'manual_use_after_lot_wait',
     'unconfirmed_release'
   ]) {
-    const { context, state, storageListeners, windowListeners } = fixture();
+    const { context, state, root, select, storageListeners, windowListeners } =
+      fixture();
     const url = context.location.href;
     const form = context.getPanoramaAutofillForm();
     const tab = { id: 42, url, active: true };
+    const deleteFirst = scenario.startsWith('reordered_after_delete');
     const agents = [
       'MMR',
-      ['ordered_duplicates', 'reordered_after_delete'].includes(scenario)
-        ? 'MMR'
-        : 'HPV',
+      scenario === 'ordered_duplicates' || deleteFirst ? 'MMR' : 'HPV',
       ['ambiguous_agent', 'next_then_delete'].includes(scenario) ? 'HPV' : 'HB'
     ];
     const records = agents.map((agent, index) => ({
@@ -1029,6 +1032,8 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     let retry;
     let detailReady = true;
     const fills = [];
+    const realFill = context.autoFillPanorama;
+    const realLotWidget = context.getPanoramaLotWidget;
     Object.assign(context, {
       getPanoramaFormContext: () => ({ kind, ready: detailReady }),
       getPanoramaMultipleGridRows: () => visibleRows,
@@ -1075,7 +1080,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       }
     });
 
-    if (manualUse) {
+    if (manualUse || deleteFirst) {
       const changes = { vaxlink_recent_activity_enabled: { newValue: true } };
       for (const listener of storageListeners) listener(changes, 'local');
       await new Promise(setImmediate);
@@ -1114,7 +1119,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }
     kind = 'multiple_detail';
     state.step = reordered ? '1-of-2' : '1-of-3';
-    if (scenario === 'reordered_after_delete') {
+    if (deleteFirst) {
       const click = (textContent) =>
         context.startGridHandoff({
           isTrusted: true,
@@ -1134,16 +1139,145 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       click('Next');
       state.step = '2-of-2';
       detailAgent = agents[1];
-      await context.advanceGridHandoff();
-      assert.deepEqual(
-        fills.map(({ lot }) => lot),
-        ['SAMPLE-2', 'SAMPLE-1']
+
+      // Panorama returned an enabled, blank Lot select containing other lots.
+      // The grid can match this detail without proving the dose can be filled.
+      const lot = select('OTHER-1 - Exp. 2099-01-31');
+      for (const index of [2, 3, 4, 5, 6]) {
+        lot.options.push({
+          text: `${index === 6 ? 'N-' : ''}OTHER-${index} - Exp. 2099-01-31`,
+          value: `other-${index}`
+        });
+      }
+      const writes = [];
+      lot.dispatchEvent = (event) => writes.push([event.type, lot.value]);
+      state.controls = [root, lot];
+      context.document.querySelector = (selector) =>
+        selector.includes('LotInfo:lotNumberSelect:selectOneMenu_input')
+          ? lot
+          : null;
+      const fundingClicks = [];
+      state.funding = [
+        'SHOW_ALL',
+        'PUBLICLY_FUNDED',
+        'NON_PUBLICLY_FUNDED'
+      ].map((value) => ({
+        value,
+        checked: false,
+        closest: () => ({
+          querySelector: () => ({ click: () => fundingClicks.push(value) })
+        })
+      }));
+      const feedback = [];
+      const timers = new Set();
+      let now = performance.now();
+      Object.assign(context, {
+        autoFillPanorama: realFill,
+        getPanoramaLotWidget: realLotWidget,
+        getPanoramaSelectedAgentTexts: () => [detailAgent],
+        getPanoramaAdministeredDateTimeFields: () => ({
+          dateField: { value: detailDate },
+          timeField: { value: '09:30' }
+        }),
+        showVaxlinkToast: (data) => feedback.push(data),
+        performance: { now: () => now },
+        setTimeout(callback, delay) {
+          const timer = { callback, at: now + delay };
+          timers.add(timer);
+          return timer;
+        },
+        clearTimeout: (timer) => timers.delete(timer)
+      });
+      const tick = async () => {
+        const timer = [...timers].sort((a, b) => a.at - b.at)[0];
+        assert.ok(timer, 'the Lot watcher should still be running');
+        timers.delete(timer);
+        now = timer.at;
+        await timer.callback();
+        await new Promise(setImmediate);
+      };
+      assert.equal(context.getPanoramaLotWidget()?.select, lot);
+      assert.equal(
+        context.readGridDetailLotEvidence('SAMPLE-1', true),
+        'blank_final'
       );
-      await context.finalizeDeferredPanoramaAutofill(fills[1]);
+      await context.advanceGridHandoff();
+      await tick();
+      assert.deepEqual(writes, []);
+      assert.equal(saved()[1].remaining_doses, 2);
+      assert.equal(saved()[1].dose_reservations.length, 1);
+
+      const missingLot = scenario === 'reordered_after_delete_missing_lot';
+      // Separate from the recorded miss, exercise a synthetic list refresh.
+      if (!missingLot)
+        lot.options.push({
+          text: 'SAMPLE-1 - Exp. 2099-01-31',
+          value: 'requested-lot'
+        });
+      for (let attempt = 0; attempt < 40 && timers.size; attempt++)
+        await tick();
+
+      assert.deepEqual(fundingClicks, []);
+      assert.deepEqual(
+        writes,
+        missingLot
+          ? []
+          : [
+              ['input', 'requested-lot'],
+              ['change', 'requested-lot']
+            ]
+      );
       assert.deepEqual(
         saved().map(({ remaining_doses }) => remaining_doses),
-        [2, 1, 1]
+        [2, missingLot ? 2 : 1, 1]
       );
+      assert.equal(saved()[1].dose_reservations, undefined);
+      if (missingLot) {
+        const notice = feedback.find(
+          ({ _fillFeedback }) => _fillFeedback === 'lot_not_matched'
+        );
+        assert.equal(notice?._doseKept, true);
+        assert.equal(lot.value, '');
+      }
+
+      vm.runInContext('chartActivity.flush()', context);
+      const { rows } = await worker.sendMessage(
+        { action: 'exportRecentActivity' },
+        {
+          id: 'vaxlink-test',
+          url: 'chrome-extension://vaxlink-test/popup.html'
+        }
+      );
+      const decision = rows.find(
+        ({ event, step, reordered }) =>
+          event === 'grid_detail_decision' && step === 2 && reordered
+      );
+      assert.equal(decision?.row, 2);
+      assert.equal(decision.lotEvidence, 'blank_final');
+      const operation = rows.filter(
+        ({ operation }) => operation === decision.operation
+      );
+      const end = operation.find(({ event }) => event === 'lot_search_end');
+      const release = operation.find(
+        ({ event }) => event === 'lot_tray_release'
+      );
+      if (missingLot) {
+        const { result, control, count, funding, site } = end;
+        assert.deepEqual(
+          [result, control, count, funding, site],
+          ['target_absent', 'select', 6, '', 'training']
+        );
+        assert.equal(release?.result, 'released');
+        assert.doesNotMatch(JSON.stringify([end, release]), /SAMPLE-1|OTHER-/);
+      } else {
+        assert.equal(end, undefined);
+        assert.equal(release, undefined);
+        assert.ok(
+          operation.some(
+            ({ event, reason }) => event === 'stop' && reason === 'settled'
+          )
+        );
+      }
       continue;
     }
 
