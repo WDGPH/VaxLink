@@ -4191,7 +4191,7 @@ async function useTrayVaccine(
   );
   if (!scannerRoute && context.kind === 'multiple_detail') {
     clearCarryProblem();
-    if (!(await releaseGridDetailStep('tray_use')))
+    if (!(await releaseGridDetailStep('tray_use', recordId)))
       throw new Error(
         'Check the original chart before using the held tray dose again.'
       );
@@ -6250,8 +6250,6 @@ function startGridHandoff(event) {
     else if (entry.form !== form) reason = 'grid_form_changed';
     else if (row.row !== entry.row) reason = 'row_replaced';
     else if (!sameGridAssignment(row, entry)) reason = 'row_changed';
-    else if (rows.some((other) => other !== row && other.agent === row.agent))
-      reason = 'duplicate_agent';
     if (reason) {
       gridAssignments.delete(row.index);
       void releaseGridAssignment(entry, reason);
@@ -6432,19 +6430,24 @@ function identifyGridDetail(handoff, form, step, total) {
   const detail = readGridDetailIdentity(form);
   if (!detail.agent || !detail.date) return { reason: 'detail_fields_loading' };
   const agent = panoramaAgentIdentity(detail.agent);
-  // Include unassigned and previously used rows in the ambiguity check.
-  const candidates = handoff.rows.filter(
+  // Enter Details follows the grid positions the scans filled. Keep manual
+  // rows in that order so a gap cannot shift a scanned dose to another step.
+  const ordered = total === handoff.rows.length ? handoff.rows[step - 1] : null;
+  const candidates = (ordered ? [ordered] : handoff.rows).filter(
     (row) =>
       row.agent === agent ||
       (row.record &&
         queueRecordMatchesPanoramaAgentText(row.record, detail.agent))
   );
-  if (!candidates.length) return { reason: 'detail_agent_unmatched' };
-  if (candidates.length !== 1) return { reason: 'duplicate_agent' };
-  const [row] = candidates;
+  if (!candidates.length)
+    return { candidate: ordered, reason: 'detail_agent_unmatched' };
+  // A shorter list may have skipped a row. A repeated Agent then needs a
+  // unique date match across every original row, including earlier steps.
+  const dated = candidates.filter((row) => sameGridDate(detail.date, row.date));
+  if (dated.length > 1) return { reason: 'duplicate_agent' };
+  const row = dated[0] || ordered;
+  if (!dated.length) return { candidate: row, reason: 'detail_date_unmatched' };
   if (!row.entry) return { candidate: row, reason: 'detail_unassigned' };
-  if (!sameGridDate(detail.date, row.date))
-    return { candidate: row, reason: 'detail_date_unmatched' };
   const index = handoff.rows.indexOf(row);
   // A different display order or Agent label needs independent confirmation
   // from the Lot selected or offered on this detail.
@@ -6494,7 +6497,7 @@ function hasDifferentGridDetailLot(entry) {
   return !intended || displayed !== intended;
 }
 
-async function releaseGridDetailStep(trigger) {
+async function releaseGridDetailStep(trigger, recordId) {
   const handoff = gridDetailHandoff;
   if (!handoff) return true;
   const { step, total } = currentGridDetailStep();
@@ -6516,7 +6519,14 @@ async function releaseGridDetailStep(trigger) {
     // A form action and a tray click can overlap. Wait for the worker to
     // confirm the old reservation stopped before taking a new one.
     if (trigger === 'staff_input') return true;
-    return report(latestRelease.entry, await latestRelease.outcome);
+    const outcome = await latestRelease.outcome;
+    if (
+      outcome === 'unconfirmed' ||
+      !recordId ||
+      latestRelease.entry.dose.recordId === recordId
+    )
+      return report(latestRelease.entry, outcome);
+    if (gridDetailHandoff !== handoff) return false;
   }
 
   const alreadyAttempted = handoff.attempted === step;
@@ -6527,11 +6537,14 @@ async function releaseGridDetailStep(trigger) {
     step,
     total
   );
-  // Agent/date can identify the pending reservation even when the Lot cannot
-  // authorize a fill. Release it so staff can make a deliberate tray choice.
-  const row =
-    match.row ||
-    (match.reason === 'detail_lot_unconfirmed' ? match.candidate : null);
+  // Give an explicit tray choice its own unused reservation back, even
+  // when the current detail could not be matched automatically.
+  const matched = match.row || match.candidate;
+  const chosen =
+    recordId && matched?.entry?.dose.recordId !== recordId
+      ? handoff.rows.find((row) => row.entry?.dose.recordId === recordId)
+      : null;
+  const row = chosen || matched;
   const entry = row?.entry;
   if (!entry)
     return alreadyAttempted && trigger === 'staff_input'

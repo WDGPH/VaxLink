@@ -146,8 +146,8 @@ test('the last reordered assignment can enter an empty detail after reservation 
   const match = context.identifyGridDetail(
     { rows },
     context.getPanoramaAutofillForm(),
-    3,
-    3
+    2,
+    2
   );
   assert.equal(match.allowEmptyFinalLot, true);
   assert.equal(context.matchesGridDetail({ ...entry, ...match }), true);
@@ -844,14 +844,16 @@ test('Enter Details carries only the exact grid row and foreground route', async
       const expected = {
         replace_before:
           'VaxLink could not match the saved doses to the grid. Check the Immunization tray.',
-        duplicate_agent:
-          'VaxLink could not match the saved doses to the grid. Check the Immunization tray.',
         lock_cycle:
           'VaxLink could not confirm the original chart. Check the chart and the Immunization tray.'
       }[scenario];
       assert.deepEqual(warnings, expected ? [expected] : [], scenario);
     }
-    if (['normal', 'manual_use', 'toolbar_blur'].includes(scenario)) {
+    if (
+      ['normal', 'manual_use', 'toolbar_blur', 'duplicate_agent'].includes(
+        scenario
+      )
+    ) {
       assert.ok(productFill, scenario);
       assert.equal(
         saved().dose_reservations[0].token === token,
@@ -886,6 +888,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'skipped_step',
     'shorter_list',
     'ambiguous_agent',
+    'ordered_duplicates',
     'reordered_rows',
     'manual_use_after_lot_wait',
     'unconfirmed_release'
@@ -896,7 +899,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     const tab = { id: 42, url, active: true };
     const agents = [
       'MMR',
-      'HPV',
+      scenario === 'ordered_duplicates' ? 'MMR' : 'HPV',
       scenario === 'ambiguous_agent' ? 'HPV' : 'HB'
     ];
     const records = agents.map((agent, index) => ({
@@ -1017,7 +1020,28 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       await context.advanceGridHandoff();
     }
     kind = 'multiple_detail';
-    state.step = '1-of-3';
+    state.step = reordered ? '1-of-2' : '1-of-3';
+    if (scenario === 'ordered_duplicates') {
+      // A different Agent on step 1 must not select a later reservation.
+      detailAgent = agents[2];
+      await context.advanceGridHandoff();
+      assert.equal(fills.length, 0);
+      detailAgent = agents[0];
+      for (const [index, { lot }] of records.entries()) {
+        state.step = `${index + 1}-of-3`;
+        detailAgent = agents[index];
+        await context.advanceGridHandoff();
+        await context.advanceGridHandoff();
+        assert.equal(fills.length, index + 1);
+        assert.equal(fills[index].lot, lot);
+        await context.finalizeDeferredPanoramaAutofill(fills[index]);
+      }
+      assert.deepEqual(
+        saved().map(({ remaining_doses }) => remaining_doses),
+        [1, 1, 1]
+      );
+      continue;
+    }
     if (reordered) {
       selectedLot = 'SAMPLE-0';
       await context.advanceGridHandoff();
@@ -1080,6 +1104,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     await context.advanceGridHandoff();
     if (scenario === 'ambiguous_agent') {
       assert.equal(fills.length, 1, scenario);
+      context.clearGridCarry();
     } else {
       assert.deepEqual(
         fills.map(({ lot }) => lot),
@@ -1121,7 +1146,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       assert.equal(wait.operation, assigned.operation);
       assert.equal(wait.row, 3);
       assert.equal(wait.step, 1);
-      assert.equal(wait.total, 3);
+      assert.equal(wait.total, 2);
       assert.equal(wait.reordered, true);
       const takeover = trace.rows.find(
         (row) => row.event === 'grid_takeover' && row.trigger === 'tray_use'
