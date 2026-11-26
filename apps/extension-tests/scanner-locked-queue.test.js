@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { LONG_RANGE_PROFILE_ID } from '../extension/scanner/scanner-daemon-shared.js';
 
 import {
   createBackgroundHarness,
@@ -255,4 +256,256 @@ test('a reader interruption received while locked survives a delayed lock and un
   assert.equal(session.interrupted, true);
   assert.equal(harness.storageData.has(PENDING_KEY), false);
   assert.equal(harness.storageData.has(INVENTORY_KEY), false);
+});
+
+function resumeFixture(kind = 'multiple_grid', extra = {}) {
+  const tab = {
+    id: 44,
+    windowId: 9,
+    active: true,
+    url: 'https://www.panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/chart'
+  };
+  const anchor = '9d57447b-9d52-45cc-ac31-fcf702201787';
+  const reply = {
+    anchor,
+    kind,
+    ready: true,
+    buildAtLoad: {
+      name: 'VaxLink Alpha',
+      version: '1.1.5',
+      versionName: '1.2.0-alpha'
+    }
+  };
+  const worker = createBackgroundHarness(makeTestNvcBundle('LOCKLOT1'), {
+    tabs: [tab],
+    tabResponse: reply,
+    ...extra
+  });
+  const sender = {
+    id: 'vaxlink-test',
+    tab,
+    url: tab.url,
+    frameId: 0,
+    documentId: 'original-document'
+  };
+  return {
+    worker,
+    reply,
+    sender,
+    capture: (data = {}) =>
+      worker.captureScannerScan({ ...makeScan(), ...data }),
+    offer: (capacity = 3, from = sender) =>
+      worker.sendMessage(
+        { action: 'getLockedScanResume', anchor, kind, capacity },
+        from
+      ),
+    claim: ({ sessionId, captureId }, from = sender) =>
+      worker.sendMessage(
+        {
+          action: 'resumeLockedScan',
+          anchor,
+          kind,
+          sessionId,
+          captureId,
+          token: crypto.randomUUID()
+        },
+        from
+      )
+  };
+}
+
+test('three locked grid captures hand off individually, even with identical barcodes and duplicate claims', async () => {
+  const { worker, sender, capture, offer, claim } = resumeFixture();
+  await offer();
+  worker.setIdleState('locked');
+  await Promise.all([capture(), capture(), capture()]);
+  const ids = Array.from(
+    worker.storageData.get(PENDING_KEY),
+    (row) => row.captureId
+  );
+  assert.equal(new Set(ids).size, 3);
+  worker.setIdleState('active');
+  const first = await offer(2);
+  assert.equal(first.count, 2);
+  assert.equal(first.captureId, ids[0]);
+  assert.equal(
+    (await claim(first, { ...sender, documentId: 'replacement' })).success,
+    false
+  );
+  const results = await Promise.all([claim(first), claim(first)]);
+  assert.equal(results.filter(({ success }) => success).length, 1);
+  const accepted = [results.find(({ success }) => success)];
+  accepted.push(await claim(await offer()), await claim(await offer()));
+  assert.deepEqual(
+    accepted.map((entry) => entry.recordId),
+    ids
+  );
+  const tray = worker.storageData.get(MULTIPLE_KEY);
+  for (const [index, record] of tray.entries()) {
+    assert.equal(record.dose_reservations[0].token, accepted[index].token);
+    assert.equal(record.dose_reservations[0].documentId, sender.documentId);
+    assert.equal(record.remaining_doses, 1);
+  }
+  assert.equal(worker.storageData.get(PENDING_KEY).length, 0);
+  assert.equal((await offer()).count, 0);
+});
+
+test('a Single offer waits for a locked second capture when unlock overtakes its write', async () => {
+  let finishSecond;
+  let started;
+  const secondStarted = new Promise((resolve) => (started = resolve));
+  const { worker, capture, offer } = resumeFixture('provider_single', {
+    delayStorageSet(values, resume) {
+      if (values[PENDING_KEY]?.length !== 2 || finishSecond) return false;
+      finishSecond = resume;
+      started();
+      return true;
+    }
+  });
+  await offer();
+  worker.setIdleState('locked');
+  await capture();
+  const second = capture();
+  await secondStarted;
+  worker.setIdleState('active');
+  const afterUnlock = offer();
+  finishSecond();
+  await second;
+  assert.equal((await afterUnlock).count, 0);
+  assert.equal(worker.storageData.get(PENDING_KEY).length, 2);
+  assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
+});
+
+test('a Single handoff persists both sides before granting the reservation', async () => {
+  let failHandoff = true;
+  const { worker, sender, capture, offer, claim } = resumeFixture(
+    'provider_single',
+    {
+      failStorageSet: (values) =>
+        failHandoff && PENDING_KEY in values && MULTIPLE_KEY in values
+    }
+  );
+  await offer(1);
+  worker.setIdleState('locked');
+  await capture();
+  worker.setIdleState('active');
+  const selection = await offer(1);
+  assert.equal(selection.count, 1);
+  assert.equal((await claim(selection)).success, false);
+  assert.equal(worker.storageData.get(PENDING_KEY).length, 1);
+  assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
+  failHandoff = false;
+  const moved = await claim(selection);
+  assert.equal(moved.recordId, selection.captureId);
+  assert.equal((await claim(selection)).success, false);
+  const mutation = {
+    action: 'mutateQueue',
+    storageKey: MULTIPLE_KEY,
+    payload: { id: moved.recordId, token: moved.token }
+  };
+  assert.equal(
+    (
+      await worker.sendMessage(
+        {
+          ...mutation,
+          operation: 'stop_dose',
+          payload: { ...mutation.payload, written: false }
+        },
+        sender
+      )
+    ).success,
+    true
+  );
+  const adoption = await worker.sendMessage(
+    {
+      ...mutation,
+      operation: 'reserve_dose',
+      payload: { ...mutation.payload, requireReservation: true }
+    },
+    sender
+  );
+  assert.equal(adoption.success, false);
+  assert.equal(
+    worker.storageData.get(MULTIPLE_KEY)[0].dose_reservations,
+    undefined
+  );
+});
+
+test('an unfocused chart can supply a lock witness only after recent focus loss', async () => {
+  for (const elapsed of [10, 60000]) {
+    const sessionStorage = new Map();
+    const { sender, offer } = resumeFixture('provider_single', {
+      sessionStorage
+    });
+    await offer();
+    const key = 'vaxlink_scanner_resume_witness_v1';
+    sessionStorage.get(key).blurredAt = Date.now() - elapsed;
+    let focused = false;
+    const locked = resumeFixture('provider_single', {
+      sessionStorage,
+      windows: {
+        async getLastFocused() {
+          return { focused, tabs: [sender.tab] };
+        }
+      }
+    });
+    locked.worker.setIdleState('locked');
+    await locked.capture();
+    focused = true;
+    locked.worker.setIdleState('active');
+    assert.equal((await locked.offer()).count, elapsed < 5000 ? 1 : 0);
+  }
+});
+
+test('a captured barcode without a lot remains available for review', async () => {
+  const { worker, capture, offer, claim } = resumeFixture('provider_single');
+  await offer();
+  worker.setIdleState('locked');
+  await capture({ rawText: '0100123456789012' });
+  worker.setIdleState('active');
+  assert.equal((await claim(await offer())).reason, 'missing_lot');
+  assert.equal((await offer()).count, 0);
+  assert.equal(
+    worker.storageData.get(PENDING_KEY)[0].reviewState,
+    'missing_lot'
+  );
+  assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
+});
+
+test('no Resume is offered without pre-lock evidence, after a form change, or after interruption', async () => {
+  for (const scenario of [
+    'no_witness',
+    'changed_form',
+    'interrupted',
+    'long_range',
+    'capture_failure'
+  ]) {
+    const { worker, reply, capture, offer } = resumeFixture('provider_single', {
+      storage: { [STATUS_KEY]: { state: 'connected' } },
+      failStorageSet: (values) =>
+        scenario === 'capture_failure' && values[PENDING_KEY]?.length === 2
+    });
+    if (scenario !== 'no_witness') await offer();
+    worker.setIdleState('locked');
+    await capture(
+      scenario === 'long_range'
+        ? { device: { profileId: LONG_RANGE_PROFILE_ID } }
+        : {}
+    );
+    if (scenario === 'changed_form')
+      reply.anchor = '91591bb4-6fd7-4edb-9b83-e70b0e107345';
+    if (scenario === 'capture_failure')
+      assert.equal((await capture()).success, false);
+    if (scenario === 'interrupted') {
+      await worker.sendMessage({
+        target: 'scannerDaemonBackground',
+        action: 'scannerDaemon.statusUpdate',
+        status: { state: 'recovering' }
+      });
+    }
+    worker.setIdleState('active');
+    assert.equal((await offer()).count, 0, scenario);
+    assert.equal(worker.storageData.get(PENDING_KEY).length, 1, scenario);
+    assert.equal(worker.storageData.has(MULTIPLE_KEY), false, scenario);
+  }
 });

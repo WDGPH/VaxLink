@@ -94,13 +94,19 @@ let scannerWorkflowReceipts = Promise.resolve();
 let longRangeScanWrites = Promise.resolve();
 let liveScannerFeedbackWrites = Promise.resolve();
 let pendingInboxWriteQueue = Promise.resolve();
-let scannerChartFocusGeneration = 0;
-const scannerRoutingEpoch = buildAnalyticsId();
+const SCANNER_CHART_ROUTE_KEY = 'vaxlink_scanner_chart_route_v1';
+let scannerChartRoute;
 const activeScannerDeliveries = new Map();
 const SCANNER_CHART_RESPONSE_MS = 10000;
 let scannerStatusWriteQueue = Promise.resolve();
 let scannerControlQueue = Promise.resolve();
 let scannerLockStateWrites = Promise.resolve();
+let lockedScannerCaptureWrites = Promise.resolve();
+const SCANNER_RESUME_WITNESS_KEY = 'vaxlink_scanner_resume_witness_v1';
+const LOCK_FOCUS_GRACE_MS = 5000;
+let scannerResumeWitness;
+let scannerForegroundChanges = 0;
+let interruptedScannerLockId;
 let lastScannerIdleState = null;
 let iconInitPromise = null;
 const {
@@ -108,6 +114,7 @@ const {
   LEGACY_POPUP_MODE_KEY,
   SINGLE_SCAN_AUTOFILL_KEY,
   GRID_SCAN_AUTOFILL_KEY,
+  GRID_DETAIL_AUTOFILL_KEY,
   normalizeWorkflowMode
 } = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
@@ -347,12 +354,7 @@ function persistScannerStatusSnapshot(snapshot) {
       ) {
         const interruptedId = await interruptedSession;
         if (interruptedId)
-          await withScannerLockSession((session) => {
-            if (session?.id === interruptedId && !session.interrupted)
-              return setStorage({
-                [SCANNER_LOCK_SESSION_KEY]: { ...session, interrupted: true }
-              });
-          }).catch(() => {});
+          await interruptScannerLock(interruptedId).catch(() => {});
       }
       normalized.lastKnownCaptureAt =
         [
@@ -1049,7 +1051,10 @@ function mutateQueue(
             throw new Error(
               'This lot is expired or saved for reference. Choose another tray item.'
             );
-          if (reservation && (!ownsReservation || reservation.review))
+          if (
+            (payload.requireReservation === true && !reservation) ||
+            (reservation && (!ownsReservation || reservation.review))
+          )
             throw new Error(DOSE_REVIEW);
           const remaining = getTrayRemainingDoses(current);
           if (remaining === null) return { record: current, reserved: false };
@@ -1388,22 +1393,69 @@ function withScannerLockSession(action) {
   return result;
 }
 
-async function ensureLockedScannerSession(existing) {
+function interruptScannerLock(id) {
+  return withScannerLockSession((session) => {
+    if (session?.id !== id || session.interrupted) return;
+    interruptedScannerLockId = id;
+    return setStorage({
+      [SCANNER_LOCK_SESSION_KEY]: { ...session, interrupted: true }
+    });
+  });
+}
+
+function readScannerResumeWitness() {
+  scannerResumeWitness ??= chrome.storage.session
+    .get(SCANNER_RESUME_WITNESS_KEY)
+    .then((stored) => stored[SCANNER_RESUME_WITNESS_KEY])
+    .catch(() => null);
+  return scannerResumeWitness;
+}
+
+function saveScannerResumeWitness(witness, blurredAt) {
+  scannerResumeWitness = readScannerResumeWitness()
+    .then(async (previous) => {
+      const saved =
+        blurredAt && previous ? { ...previous, blurredAt } : witness;
+      await chrome.storage.session.set({
+        [SCANNER_RESUME_WITNESS_KEY]: saved
+      });
+      return saved;
+    })
+    .catch(async () => {
+      await chrome.storage.session
+        .remove(SCANNER_RESUME_WITNESS_KEY)
+        .catch(() => {});
+      return null;
+    });
+  return scannerResumeWitness;
+}
+
+async function ensureLockedScannerSession(existing, witness) {
   if (isLockedScannerSession(existing)) return existing;
-  const activeTabs = await queryTabs({ active: true, currentWindow: true });
-  const activeTab = activeTabs.find(tabMayBeSupportedChart) || null;
+  const target = await witness;
+  const activeTab = target
+    ? { id: target.tabId, windowId: target.windowId }
+    : (await queryTabs({ active: true, currentWindow: true })).find(
+        tabMayBeSupportedChart
+      );
   const session = createLockedScannerSession({ activeTab });
+  if (target) {
+    session.resumeTarget = target;
+    session.resumeCaptureCount = 0;
+  }
   await setStorage({
     [SCANNER_LOCK_STATE_KEY]: 'locked',
     [SCANNER_LOCK_SESSION_KEY]: session
   });
+  recordScannerLockActivity('lock_observed', {});
   return session;
 }
 
-function updateScannerLockState(state) {
+function updateScannerLockState(state, witness) {
   const normalized = normalizeMachineIdleState(state);
   return withScannerLockSession(async (existing) => {
-    if (normalized === 'locked') return ensureLockedScannerSession(existing);
+    if (normalized === 'locked')
+      return ensureLockedScannerSession(existing, witness);
     const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
     if (isLockedScannerSession(existing))
       values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
@@ -1416,7 +1468,7 @@ function observeScannerLockAtCapture() {
   const idle =
     lastScannerIdleState === 'locked'
       ? Promise.resolve('locked')
-      : queryMachineIdleState();
+      : queryScannerIdleState();
   return withScannerLockSession(async (existing) => {
     const idleState = await idle;
     const lockSession = shouldQueueScannerScan(idleState)
@@ -1427,16 +1479,53 @@ function observeScannerLockAtCapture() {
 }
 
 function initializeScannerLockMonitoring() {
-  const invalidateChartRoute = () => {
-    scannerChartFocusGeneration += 1;
+  const forgetForeground = () => {
+    scannerForegroundChanges++;
+    void saveScannerResumeWitness(null);
   };
-  chrome.tabs.onActivated?.addListener(invalidateChartRoute);
-  chrome.windows?.onFocusChanged?.addListener(invalidateChartRoute);
+  chrome.tabs.onActivated?.addListener(() => {
+    forgetForeground();
+    invalidateScannerChartRoute();
+  });
+  chrome.windows?.onFocusChanged?.addListener((windowId) => {
+    // Windows can report focus loss just before the lock event. An old
+    // unfocused chart is not evidence of which chart was open at lock.
+    if (windowId >= 0) {
+      forgetForeground();
+    } else {
+      scannerForegroundChanges++;
+      void saveScannerResumeWitness(null, Date.now());
+    }
+    invalidateScannerChartRoute();
+  });
   if (chrome.idle?.onStateChanged) {
     chrome.idle.onStateChanged.addListener((state) => {
+      let witness;
+      if (state === 'locked' && lastScannerIdleState !== 'locked') {
+        const lockedAt = Date.now();
+        witness = Promise.all([
+          readScannerResumeWitness(),
+          getFocusedScannerTab({ allowUnfocused: true })
+        ])
+          .then(async ([target, tab]) => {
+            const sinceBlur = lockedAt - target?.blurredAt;
+            if (
+              !target ||
+              tab?.id !== target.tabId ||
+              tab.windowId !== target.windowId ||
+              (!tab.windowFocused &&
+                !(sinceBlur >= 0 && sinceBlur <= LOCK_FOCUS_GRACE_MS)) ||
+              !(await matchesLockedScanAnchor(target))
+            )
+              return null;
+            return target;
+          })
+          .catch(() => null);
+        forgetForeground();
+        invalidateScannerChartRoute();
+      }
       lastScannerIdleState = normalizeMachineIdleState(state);
-      if (state === 'locked') invalidateChartRoute();
-      void updateScannerLockState(state).catch((error) => {
+      void updateScannerLockState(state, witness).catch((error) => {
         console.warn('Could not update scanner lock state:', error);
       });
     });
@@ -1444,7 +1533,7 @@ function initializeScannerLockMonitoring() {
 }
 
 function synchronizeScannerLockState() {
-  void queryMachineIdleState()
+  void queryScannerIdleState()
     .then((state) => {
       if (
         lastScannerIdleState !== null ||
@@ -1481,34 +1570,89 @@ function tabMayBeSupportedChart(tab) {
   return isSupportedChartUrl(tab.url);
 }
 
-async function getFocusedScannerTab() {
+async function getFocusedScannerTab({ allowUnfocused = false } = {}) {
   try {
     const window = await chrome.windows.getLastFocused({ populate: true });
-    if (!window.focused || window.state === 'minimized') return null;
-    return (
-      window.tabs?.find((tab) => tab.active && tabMayBeSupportedChart(tab)) ||
-      null
+    if ((!window.focused && !allowUnfocused) || window.state === 'minimized')
+      return null;
+    const tab = window.tabs?.find(
+      (tab) => tab.active && tabMayBeSupportedChart(tab)
     );
+    return allowUnfocused && tab
+      ? { ...tab, windowFocused: window.focused }
+      : tab || null;
   } catch (_) {
     return null;
   }
 }
 
-function scannerRouteMatches(route) {
+function isScannerChartRoute(route) {
   return (
-    route?.epoch === scannerRoutingEpoch &&
-    route.generation === scannerChartFocusGeneration
+    typeof route?.epoch === 'string' &&
+    !!route.epoch &&
+    Number.isSafeInteger(route.generation) &&
+    route.generation >= 0
   );
 }
 
-async function getActiveScannerChartRoute(tabId, route) {
-  const snapshot = {
-    epoch: scannerRoutingEpoch,
-    generation: scannerChartFocusGeneration
-  };
-  const [idle, tab] = await Promise.all([
-    queryMachineIdleState(),
-    getFocusedScannerTab()
+function sameScannerChartRoute(route, current) {
+  return (
+    !!current &&
+    route?.epoch === current.epoch &&
+    route.generation === current.generation
+  );
+}
+
+async function saveScannerChartRoute(route) {
+  await chrome.storage.session.set({ [SCANNER_CHART_ROUTE_KEY]: route });
+  return route;
+}
+
+function observeScannerChartRoute() {
+  scannerChartRoute ??= chrome.storage.session
+    .get(SCANNER_CHART_ROUTE_KEY)
+    .then(({ [SCANNER_CHART_ROUTE_KEY]: route }) =>
+      isScannerChartRoute(route)
+        ? route
+        : saveScannerChartRoute({ epoch: buildAnalyticsId(), generation: 0 })
+    )
+    .catch(() => null);
+  return scannerChartRoute;
+}
+
+function invalidateScannerChartRoute() {
+  // Replace the snapshot immediately so an in-flight check cannot accept it.
+  // Save changes in order so a replacement worker also sees the latest route.
+  scannerChartRoute = observeScannerChartRoute()
+    .then((route) =>
+      saveScannerChartRoute(
+        route && route.generation < Number.MAX_SAFE_INTEGER
+          ? { epoch: route.epoch, generation: route.generation + 1 }
+          : { epoch: buildAnalyticsId(), generation: 0 }
+      )
+    )
+    .catch(async () => {
+      await chrome.storage.session
+        .remove(SCANNER_CHART_ROUTE_KEY)
+        .catch(() => {});
+      return null;
+    });
+}
+
+async function queryScannerIdleState() {
+  const state = await queryMachineIdleState();
+  // A cold worker can learn about a lock before receiving the state event.
+  if (state === 'locked' && lastScannerIdleState !== 'locked')
+    invalidateScannerChartRoute();
+  return state;
+}
+
+async function getActiveScannerChartRoute(tabId, route, windowId) {
+  const snapshot = observeScannerChartRoute();
+  const [idle, tab, current] = await Promise.all([
+    queryScannerIdleState(),
+    getFocusedScannerTab(),
+    snapshot
   ]);
   if (idle === 'unknown' || idle === 'unavailable')
     return {
@@ -1518,11 +1662,16 @@ async function getActiveScannerChartRoute(tabId, route) {
   if (
     idle === 'locked' ||
     tab?.id !== tabId ||
-    !scannerRouteMatches(snapshot) ||
-    (route && !scannerRouteMatches(route))
+    (windowId !== undefined && tab.windowId !== windowId)
   )
     return { success: false, reason: 'inactive_chart' };
-  return { success: true, scannerRoute: snapshot };
+  if (!current) return { success: false, reason: 'route_unavailable' };
+  if (
+    snapshot !== scannerChartRoute ||
+    (route !== undefined && !sameScannerChartRoute(route, current))
+  )
+    return { success: false, reason: 'route_changed' };
+  return { success: true, scannerRoute: current };
 }
 
 function matchesScannerChartBuild(build) {
@@ -1553,6 +1702,27 @@ function getScannerDestinationContext(tabId) {
           stale: !matchesScannerChartBuild(reply.buildAtLoad),
           formContext: reply.formContext
         });
+      }
+    );
+  });
+}
+
+function matchesLockedScanAnchor(target, requireReady = false) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000);
+    chrome.tabs.sendMessage(
+      target.tabId,
+      { action: 'getLockedScanAnchor' },
+      { documentId: target.documentId },
+      (reply) => {
+        clearTimeout(timer);
+        resolve(
+          !chrome.runtime.lastError &&
+            reply?.anchor === target.anchor &&
+            reply.kind === target.kind &&
+            (!requireReady || reply.ready === true) &&
+            matchesScannerChartBuild(reply.buildAtLoad)
+        );
       }
     );
   });
@@ -1685,10 +1855,7 @@ function buildQueueRecordFromParsed(data, rawBarcode, context = {}) {
   };
 }
 
-async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
-  const storageKey = getQueueStorageKeyForWorkflow(mode);
-  if (!storageKey) return null;
-
+async function prepareScannerQueueRecord(scan, mode, options) {
   const parser = globalThis.VaxLinkGS1Parser;
   if (!parser || typeof parser.parseGS1Barcode !== 'function') {
     throw new Error('VaxLink GS1 parser is not loaded');
@@ -1744,11 +1911,24 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     options.context || {}
   );
   const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(draft);
-  const blocked = immunization && !!expiry;
   if (expiry) draft.expiry_flag = 'expired';
-  const record = blocked
-    ? draft
-    : await appendQueueRecord(storageKey, draft, {
+  return {
+    record: draft,
+    ...(immunization &&
+      expiry && {
+        rejection: { status: 'expired', lot: draft.lot, expiry }
+      })
+  };
+}
+
+async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
+  const storageKey = getQueueStorageKeyForWorkflow(mode);
+  if (!storageKey) return null;
+  const prepared = await prepareScannerQueueRecord(scan, mode, options);
+  if (!prepared.record) return prepared;
+  const record = prepared.rejection
+    ? prepared.record
+    : await appendQueueRecord(storageKey, prepared.record, {
         preserveEveryScan: options.preserveEveryScan === true,
         inReceiptOrder: options.reviewOnly === true
       });
@@ -1762,7 +1942,7 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     expiryFlag
   };
   void logAnalyticsEvent('scan_captured', activity).catch(() => {});
-  if (!blocked && !record.duplicate_ignored) {
+  if (!prepared.rejection && !record.duplicate_ignored) {
     void logAnalyticsEvent('queue_saved', {
       ...activity,
       queue: mode === 'inventory' ? 'inventory' : 'multiple',
@@ -1770,8 +1950,7 @@ async function saveScannerScanToWorkflowQueue(scan, mode, options = {}) {
     }).catch(() => {});
   }
 
-  if (blocked)
-    return { rejection: { status: 'expired', lot: record.lot, expiry } };
+  if (prepared.rejection) return { rejection: prepared.rejection };
   return {
     queuedToWorkflow: true,
     workflow: mode,
@@ -1787,7 +1966,7 @@ function mutatePendingInbox(action) {
 }
 
 function enqueuePendingScan(scan) {
-  return mutatePendingInbox(async () => {
+  const write = async (session) => {
     const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
     const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
       ? stored[PENDING_SCAN_INBOX_KEY]
@@ -1802,9 +1981,18 @@ function enqueuePendingScan(scan) {
         'Held scans are full. Inspect them in the VaxLink popup before scanning again.'
       );
     }
-    await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
+    const values = { [PENDING_SCAN_INBOX_KEY]: nextRows };
+    if (scan.resumeEligible && session?.id === scan.lock_session_id)
+      values[SCANNER_LOCK_SESSION_KEY] = {
+        ...session,
+        resumeCaptureCount: Math.min(session.resumeCaptureCount + 1, 2)
+      };
+    await setStorage(values);
     return nextRows.length;
-  });
+  };
+  return mutatePendingInbox(() =>
+    scan.resumeEligible ? withScannerLockSession(write) : write()
+  );
 }
 
 async function getHeldScannerScans() {
@@ -1812,6 +2000,227 @@ async function getHeldScannerScans() {
   return Array.isArray(stored?.[PENDING_SCAN_INBOX_KEY])
     ? stored[PENDING_SCAN_INBOX_KEY]
     : [];
+}
+
+const LOCKED_SCAN_SETTINGS = [
+  WORKFLOW_MODE_KEY,
+  LEGACY_POPUP_MODE_KEY,
+  GRID_SCAN_AUTOFILL_KEY,
+  GRID_DETAIL_AUTOFILL_KEY,
+  SINGLE_SCAN_AUTOFILL_KEY
+];
+
+function lockedScanTarget(request, sender) {
+  if (
+    !isChartMessageSender(sender) ||
+    typeof sender.documentId !== 'string' ||
+    !sender.documentId ||
+    !Number.isInteger(sender.tab.windowId) ||
+    typeof request.anchor !== 'string' ||
+    !/^[a-f0-9-]{36}$/.test(request.anchor) ||
+    !['multiple_grid', 'provider_single', 'non_provider_single'].includes(
+      request.kind
+    )
+  )
+    return null;
+  return {
+    tabId: sender.tab.id,
+    windowId: sender.tab.windowId,
+    documentId: sender.documentId,
+    anchor: request.anchor,
+    kind: request.kind
+  };
+}
+
+function lockedScanEnabled(target, settings) {
+  return (
+    normalizeWorkflowMode(settings) === 'immunization' &&
+    (target.kind === 'multiple_grid'
+      ? settings[GRID_SCAN_AUTOFILL_KEY] !== false &&
+        settings[GRID_DETAIL_AUTOFILL_KEY] !== false
+      : settings[SINGLE_SCAN_AUTOFILL_KEY] !== false)
+  );
+}
+
+function eligibleLockedScans(target, session, rows) {
+  if (
+    session?.state !== 'active' ||
+    !session.unlockedAt ||
+    session.interrupted ||
+    session.id === interruptedScannerLockId ||
+    (target.kind !== 'multiple_grid' && session.resumeCaptureCount !== 1) ||
+    !Object.keys(target).every(
+      (key) => target[key] === session.resumeTarget?.[key]
+    )
+  )
+    return [];
+  return rows.filter(
+    (row) =>
+      row.resumeEligible === true &&
+      row.captured_while_locked === true &&
+      row.lock_session_id === session.id &&
+      row.pending_workflow === 'immunization' &&
+      row.device?.profileId !== LONG_RANGE_PROFILE_ID &&
+      typeof row.captureId === 'string' &&
+      !row.reviewState
+  );
+}
+
+async function waitForLockedScannerWrites() {
+  const writes = [
+    lockedScannerCaptureWrites,
+    longRangeScanWrites,
+    scannerStatusWriteQueue,
+    scannerWorkflowReceipts
+  ];
+  await Promise.allSettled(writes);
+  await scannerLockStateWrites;
+  return writes;
+}
+
+async function getLockedScanResume(target, capacity) {
+  const empty = { success: true, sessionId: null, captureId: null, count: 0 };
+  const foreground = scannerForegroundChanges;
+  await waitForLockedScannerWrites();
+  const [route, anchor, settings, rows] = await Promise.all([
+    getActiveScannerChartRoute(target.tabId, undefined, target.windowId),
+    matchesLockedScanAnchor(target, true),
+    getStorage([SCANNER_LOCK_SESSION_KEY, ...LOCKED_SCAN_SETTINGS]),
+    getHeldScannerScans()
+  ]);
+  if (
+    !route.success ||
+    !anchor ||
+    foreground !== scannerForegroundChanges ||
+    !lockedScanEnabled(target, settings)
+  )
+    return empty;
+  await saveScannerResumeWitness(target);
+  const session = settings[SCANNER_LOCK_SESSION_KEY];
+  const eligible = eligibleLockedScans(target, session, rows);
+  if (!capacity || !eligible.length || foreground !== scannerForegroundChanges)
+    return empty;
+  return {
+    success: true,
+    sessionId: session.id,
+    captureId: eligible[0].captureId,
+    count: Math.min(eligible.length, capacity)
+  };
+}
+
+async function resumeLockedScan(target, { sessionId, captureId, token }) {
+  const unavailable = {
+    success: false,
+    reason: 'resume_unavailable',
+    error:
+      'The chart or held scans changed. Check the held scans before proceeding.'
+  };
+  await waitForLockedScannerWrites();
+  const [route, settings, held] = await Promise.all([
+    getActiveScannerChartRoute(target.tabId, undefined, target.windowId),
+    getStorage([SCANNER_LOCK_SESSION_KEY, ...LOCKED_SCAN_SETTINGS]),
+    getHeldScannerScans()
+  ]);
+  const session = settings[SCANNER_LOCK_SESSION_KEY];
+  const scan = eligibleLockedScans(target, session, held)[0];
+  if (
+    !route.success ||
+    !lockedScanEnabled(target, settings) ||
+    session?.id !== sessionId ||
+    scan?.captureId !== captureId
+  )
+    return unavailable;
+
+  const prepared = await prepareScannerQueueRecord(scan, 'multiple', {});
+  const record = prepared.record;
+  const rejection =
+    prepared.rejection?.status ||
+    (!record?.lookup_error &&
+    (globalThis.vaxlinkVaccineLabel(record) || record?.din)
+      ? null
+      : 'unknown_agent');
+  const [captureWrites, uploadWrites, statusWrites, workflowWrites] =
+    await waitForLockedScannerWrites();
+  // Every writer for the two trays must wait for the same handoff. Catalogue
+  // lookup and earlier status/capture writes must finish before taking these locks.
+  return mutatePendingInbox(() => {
+    const handoff = scannerQueueWriteQueue
+      .catch(() => {})
+      .then(() =>
+        withScannerLockSession(async (current) => {
+          const snapshot = scannerChartRoute;
+          const [active, anchor, stored] = await Promise.all([
+            getActiveScannerChartRoute(
+              target.tabId,
+              route.scannerRoute,
+              target.windowId
+            ),
+            matchesLockedScanAnchor(target, true),
+            getStorage([
+              PENDING_SCAN_INBOX_KEY,
+              MULTIPLE_INJECT_QUEUE_KEY,
+              ...LOCKED_SCAN_SETTINGS
+            ])
+          ]);
+          const rows = stored[PENDING_SCAN_INBOX_KEY] || [];
+          const tray = stored[MULTIPLE_INJECT_QUEUE_KEY] || [];
+          const next = eligibleLockedScans(target, current, rows)[0];
+          if (
+            !active.success ||
+            !anchor ||
+            snapshot !== scannerChartRoute ||
+            captureWrites !== lockedScannerCaptureWrites ||
+            uploadWrites !== longRangeScanWrites ||
+            statusWrites !== scannerStatusWriteQueue ||
+            workflowWrites !== scannerWorkflowReceipts ||
+            lastScannerIdleState === 'locked' ||
+            !lockedScanEnabled(target, stored) ||
+            current?.id !== sessionId ||
+            next?.captureId !== captureId ||
+            tray.some((row) => row.id === captureId)
+          )
+            return unavailable;
+
+          if (rejection) {
+            await setStorage({
+              [PENDING_SCAN_INBOX_KEY]: rows.map((row) =>
+                row === next ? { ...row, reviewState: rejection } : row
+              )
+            });
+            return {
+              success: false,
+              reason: rejection,
+              error: 'Review this barcode in Held scanner scans.'
+            };
+          }
+          const reserved = {
+            ...record,
+            id: captureId,
+            dose_tracking: 'single_use',
+            remaining_doses: 1,
+            total_doses: 1,
+            dose_reservations: [
+              { token, tabId: target.tabId, documentId: target.documentId }
+            ]
+          };
+          await setStorage({
+            [PENDING_SCAN_INBOX_KEY]: rows.filter((row) => row !== next),
+            [MULTIPLE_INJECT_QUEUE_KEY]: [...tray, reserved]
+          });
+          return {
+            success: true,
+            recordId: captureId,
+            token,
+            scannerRoute: {
+              ...active.scannerRoute,
+              startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+            }
+          };
+        })
+      );
+    scannerQueueWriteQueue = handoff;
+    return handoff;
+  });
 }
 
 function discardHeldScannerScan(scan) {
@@ -1843,46 +2252,103 @@ function updateScannerDelivery(delivery, reviewState) {
         row.reviewState === 'checking_chart'
     );
     if (index < 0) return false;
-    if (
-      reviewState === 'verified' &&
-      delivery.scannerRoute &&
-      !scannerRouteMatches(delivery.scannerRoute)
-    )
-      return false;
-    if (reviewState === 'verified') rows.splice(index, 1);
-    else rows[index] = { ...rows[index], reviewState };
+    if (reviewState === 'verified' || reviewState === 'checking_chart') {
+      const snapshot = observeScannerChartRoute();
+      const current = await snapshot;
+      if (
+        snapshot !== scannerChartRoute ||
+        !sameScannerChartRoute(delivery.scannerRoute, current)
+      )
+        return false;
+    }
+    if (reviewState === 'verified') {
+      rows.splice(index, 1);
+    } else {
+      const { acknowledgedDelivery, ...scan } = rows[index];
+      rows[index] = { ...scan, reviewState };
+      if (reviewState === 'checking_chart') {
+        rows[index].acknowledgedDelivery = {
+          documentId: delivery.documentId,
+          scannerRoute: delivery.scannerRoute
+        };
+      }
+    }
     await setStorage({ [PENDING_SCAN_INBOX_KEY]: rows });
     return true;
   });
 }
 
+function readAcknowledgedScannerDelivery(captureId) {
+  return mutatePendingInbox(async () => {
+    const row = (await getHeldScannerScans()).find(
+      (scan) =>
+        scan?.captureId === captureId && scan.reviewState === 'checking_chart'
+    );
+    const receipt = row?.acknowledgedDelivery;
+    if (
+      typeof receipt?.documentId !== 'string' ||
+      !receipt.documentId ||
+      !isScannerChartRoute(receipt.scannerRoute) ||
+      !Number.isFinite(receipt.scannerRoute.startBy)
+    )
+      return null;
+    return {
+      captureId,
+      intendedTabId: row.intendedTabId,
+      contextToken: row.contextToken,
+      documentId: receipt.documentId,
+      scannerRoute: receipt.scannerRoute
+    };
+  });
+}
+
+function scannerDeliveryReviewState(reason) {
+  if (reason === 'route_changed') return 'inactive_chart';
+  if (reason === 'route_unavailable') return 'check_chart';
+  return reason;
+}
+
 async function checkScannerDelivery(request, sender) {
-  const delivery = activeScannerDeliveries.get(request.captureId);
   if (
-    !delivery ||
-    delivery.intendedTabId !== sender.tab.id ||
-    delivery.contextToken !== request.contextToken ||
-    delivery.scannerRoute.epoch !== request.scannerRoute?.epoch ||
-    delivery.scannerRoute.generation !== request.scannerRoute?.generation ||
-    delivery.scannerRoute.startBy !== request.scannerRoute?.startBy ||
+    typeof request.captureId !== 'string' ||
+    !request.captureId ||
+    typeof request.contextToken !== 'string' ||
+    !request.contextToken ||
+    !isScannerChartRoute(request.scannerRoute) ||
+    !Number.isFinite(request.scannerRoute.startBy) ||
     typeof sender.documentId !== 'string' ||
-    !sender.documentId ||
-    (delivery.documentId && delivery.documentId !== sender.documentId)
+    !sender.documentId
   )
     return { success: false };
+  const snapshot = observeScannerChartRoute();
+  const active = activeScannerDeliveries.get(request.captureId);
   const route = await getActiveScannerChartRoute(
     sender.tab.id,
-    delivery.scannerRoute
+    request.scannerRoute
   );
+  // Read after the browser check so a discard during that check takes effect.
+  const delivery = active
+    ? activeScannerDeliveries.get(request.captureId)
+    : await readAcknowledgedScannerDelivery(request.captureId);
+  if (!delivery || (active && delivery !== active))
+    return { success: false, reason: 'delivery_unavailable' };
   if (
-    activeScannerDeliveries.get(request.captureId) !== delivery ||
-    (delivery.documentId && delivery.documentId !== sender.documentId)
+    delivery.intendedTabId !== sender.tab.id ||
+    delivery.contextToken !== request.contextToken ||
+    !sameScannerChartRoute(request.scannerRoute, delivery.scannerRoute) ||
+    delivery.scannerRoute.startBy !== request.scannerRoute.startBy
   )
     return { success: false };
-  if (!route.success) {
-    activeScannerDeliveries.delete(request.captureId);
-    await updateScannerDelivery(delivery, route.reason).catch(() => {});
-    return route;
+  if (delivery.documentId && delivery.documentId !== sender.documentId)
+    return { success: false, reason: 'document_changed' };
+  if (!route.success || snapshot !== scannerChartRoute) {
+    const reason = route.reason || 'route_changed';
+    if (active) activeScannerDeliveries.delete(request.captureId);
+    await updateScannerDelivery(
+      delivery,
+      scannerDeliveryReviewState(reason)
+    ).catch(() => {});
+    return { success: false, reason };
   }
   delivery.documentId = sender.documentId;
   return { success: true, delivery };
@@ -1891,13 +2357,15 @@ async function checkScannerDelivery(request, sender) {
 async function verifyScannerChartFields(request, sender) {
   const delivery = activeScannerDeliveries.get(request.captureId);
   // Verification can arrive before the original tab response reaches the worker.
-  const reply = await delivery?.reply;
-  if (reply?.accepted !== true || reply.pending !== true) return false;
+  if (delivery) {
+    await delivery.reply;
+    if (!delivery.acknowledged) return false;
+  }
   const check = await checkScannerDelivery(request, sender);
-  if (!check.success || check.delivery !== delivery) return false;
+  if (!check.success || (delivery && check.delivery !== delivery)) return false;
   activeScannerDeliveries.delete(request.captureId);
   const saved = await updateScannerDelivery(
-    delivery,
+    check.delivery,
     request.verified ? 'verified' : 'check_chart'
   );
   if (saved && request.verified && request.vaccine) {
@@ -1930,10 +2398,10 @@ function inScannerWorkflowOrder(action) {
   return receipt;
 }
 
-function showScannerWorkflowCommand(destination, generation, mode) {
+function showScannerWorkflowCommand(destination, snapshot, mode) {
   void destination
     .then((tab) => {
-      if (!tab || generation !== scannerChartFocusGeneration) return;
+      if (!tab || snapshot !== scannerChartRoute) return;
       chrome.tabs.sendMessage(
         tab.id,
         { action: 'showScannerWorkflowCommand', mode },
@@ -1960,7 +2428,7 @@ async function routePhysicalScannerCapture(rawScan, observeRouting) {
   const command = getScannerWorkflowCommand(scan.rawText);
   if (command !== undefined) {
     if (command) {
-      const generation = scannerChartFocusGeneration;
+      const snapshot = observeScannerChartRoute();
       const destination = getFocusedScannerTab();
       await inScannerWorkflowOrder(() =>
         setStorage({ [WORKFLOW_MODE_KEY]: command })
@@ -1969,7 +2437,7 @@ async function routePhysicalScannerCapture(rawScan, observeRouting) {
         workflow: command,
         source: 'scanner_command'
       }).catch(() => {});
-      showScannerWorkflowCommand(destination, generation, command);
+      showScannerWorkflowCommand(destination, snapshot, command);
     }
     return { commandHandled: true, workflow: command || undefined };
   }
@@ -1984,7 +2452,15 @@ async function routePhysicalScannerCapture(rawScan, observeRouting) {
   // Start both snapshots at receipt, even while an earlier frame is saving.
   const write = longRangeScanWrites.then(async () => {
     const [workflow, { lockSession }] = await receipt;
-    return saveScannerScanForReview(scan, workflow, lockSession, true);
+    try {
+      return await saveScannerScanForReview(scan, workflow, lockSession, true);
+    } catch (error) {
+      if (lockSession)
+        await interruptScannerLock(lockSession.id).catch(() => {});
+      if (lockSession)
+        recordScannerLockActivity('locked_capture', { result: 'save_failed' });
+      throw error;
+    }
   });
   void receipt.catch(() => {});
   longRangeScanWrites = write.catch(() => {});
@@ -2019,8 +2495,18 @@ async function saveScannerScanForReview(
       ...scan,
       ...context,
       pending_workflow: workflow,
+      ...(lockSession?.resumeTarget &&
+        workflow === 'immunization' &&
+        !reviewOnly && { resumeEligible: true }),
       ...(saved?.rejection ? { reviewState: saved.rejection.status } : {})
     });
+    if (lockSession) {
+      recordScannerLockActivity('locked_capture', { result: 'held' });
+      if (workflow === 'immunization')
+        void logAnalyticsEvent('scan_captured', { workflow: 'multiple' }).catch(
+          () => {}
+        );
+    }
     return {
       ...review,
       queuedToWorkflow: false,
@@ -2028,6 +2514,8 @@ async function saveScannerScanForReview(
       response: saved?.rejection
     };
   }
+  if (lockSession)
+    recordScannerLockActivity('locked_capture', { result: 'tray' });
   return {
     ...review,
     queuedToWorkflow: true,
@@ -2039,25 +2527,40 @@ async function saveScannerScanForReview(
 async function routeScanToActiveSupportedTab(scan, observeRouting) {
   const scannerResultSound = scan.device?.profileId === LIVE_SSI_PROFILE_ID;
   // Pin the destination before storage waits; focus changes never redirect it.
-  const scannerRoute = {
-    epoch: scannerRoutingEpoch,
-    generation: scannerChartFocusGeneration
-  };
-  const [captureLock, routeContext, workflowMode] = await Promise.all([
-    observeScannerLockAtCapture(),
-    getFocusedScannerTab().then(async (destination) => {
-      const chart =
-        destination && scannerRouteMatches(scannerRoute)
-          ? getScannerDestinationContext(destination.id)
-          : Promise.resolve(null);
-      const preferences = await getStorage([
-        SINGLE_SCAN_AUTOFILL_KEY,
-        GRID_SCAN_AUTOFILL_KEY
-      ]);
-      return { destination, chart: await chart, preferences };
-    }),
-    readScannerWorkflowAtCapture()
-  ]);
+  const snapshot = observeScannerChartRoute();
+  const capture = observeScannerLockAtCapture();
+  const workflow = readScannerWorkflowAtCapture();
+  // Assign a place in the locked inbox when the frame arrives. A slow chart
+  // probe or an unlock must not reorder captures or hide a second Single scan.
+  const lockedWrite = lockedScannerCaptureWrites.then(async () => {
+    const { lockSession } = await capture;
+    if (!lockSession) return null;
+    try {
+      return await saveScannerScanForReview(scan, await workflow, lockSession);
+    } catch (error) {
+      await interruptScannerLock(lockSession.id).catch(() => {});
+      recordScannerLockActivity('locked_capture', { result: 'save_failed' });
+      throw error;
+    }
+  });
+  lockedScannerCaptureWrites = lockedWrite.catch(() => {});
+  const [captureLock, routeContext, workflowMode, scannerRoute] =
+    await Promise.all([
+      capture,
+      getFocusedScannerTab().then(async (destination) => {
+        const chart =
+          destination && snapshot === scannerChartRoute
+            ? getScannerDestinationContext(destination.id)
+            : Promise.resolve(null);
+        const preferences = await getStorage([
+          SINGLE_SCAN_AUTOFILL_KEY,
+          GRID_SCAN_AUTOFILL_KEY
+        ]);
+        return { destination, chart: await chart, preferences };
+      }),
+      workflow,
+      snapshot
+    ]);
   const { idleState, lockSession } = captureLock;
   const { destination, chart, preferences } = routeContext;
   const contextToken = chart?.contextToken || null;
@@ -2082,13 +2585,13 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
     preferences[GRID_SCAN_AUTOFILL_KEY] !== false &&
     readyKind === 'multiple_grid';
 
-  if (lockSession)
-    return saveScannerScanForReview(scan, workflowMode, lockSession);
+  if (lockSession) return lockedWrite;
   let reviewState;
   if (idleState === 'unavailable') reviewState = 'lock_unavailable';
   else if (idleState === 'unknown') reviewState = 'lock_unknown';
   else if (chart?.stale) reviewState = 'stale_chart';
-  else if (destination && !scannerRouteMatches(scannerRoute))
+  else if ((direct || sendToGrid) && !scannerRoute) reviewState = 'check_chart';
+  else if (destination && snapshot !== scannerChartRoute)
     reviewState = 'inactive_chart';
 
   // No selected chart receives a replay. A grid gets only the row just saved.
@@ -2171,7 +2674,10 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
       scannerRoute
     );
     if (!active.success) {
-      await updateScannerDelivery(held, active.reason);
+      await updateScannerDelivery(
+        held,
+        scannerDeliveryReviewState(active.reason)
+      );
     } else {
       const route = {
         ...scannerRoute,
@@ -2192,13 +2698,22 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
           contextToken,
           scannerResultSound,
           scannerRoute: route
+        }).then(async (response) => {
+          if (
+            response?.accepted === true &&
+            response.pending === true &&
+            delivery.documentId &&
+            activeScannerDeliveries.get(held.captureId) === delivery
+          ) {
+            delivery.acknowledged = await updateScannerDelivery(
+              delivery,
+              'checking_chart'
+            );
+          }
+          return response;
         });
         const response = await delivery.reply;
-        if (
-          response?.accepted === true &&
-          response.pending === true &&
-          delivery.documentId
-        ) {
+        if (delivery.acknowledged) {
           return {
             routed: true,
             queued: true,
@@ -2293,6 +2808,7 @@ function createAnalyticsDay(dayKey) {
     lookup: { success: 0, error: 0 },
     autofill: { attempts: 0, success: 0, failure: 0, fromQueueSuccess: 0 },
     funding: { prompts: 0, choices: 0, single: 0, both: 0, unmatched: 0 },
+    chartResume: {},
     queues: {
       multipleSaved: 0,
       multipleUsed: 0,
@@ -2495,6 +3011,14 @@ function applyAnalyticsEvent(day, event) {
       }
       break;
     }
+    case 'chart_carry_attempt':
+    case 'chart_carry_completed':
+    case 'chart_carry_manual_use':
+    case 'locked_batch_resumed':
+    case 'locked_batch_interrupted':
+      day.chartResume ??= {};
+      incrementMap(day.chartResume, event.eventType, count);
+      break;
     case 'autofill_result':
       if (event.pending) break;
       if (event.success) {
@@ -2599,6 +3123,7 @@ function aggregateAnalyticsDays(days) {
     sumObjectCounters(rollup.parsing, day.parsing);
     sumObjectCounters(rollup.lookup, day.lookup);
     sumObjectCounters(rollup.funding, day.funding);
+    sumObjectCounters(rollup.chartResume, day.chartResume);
     ['attempts', 'success', 'failure', 'fromQueueSuccess'].forEach((key) => {
       rollup.autofill[key] += day.autofill?.[key] || 0;
     });
@@ -4343,8 +4868,29 @@ const traceMessageFields = {
   appendRecentActivity: ['token', 'source', 'rows'],
   getRecentActivity: [],
   setRecentActivity: ['enabled'],
+  recordLockSummary: ['held', 'inventory', 'interrupted'],
   exportRecentActivity: []
 };
+
+function recordScannerLockActivity(event, fields) {
+  return recentActivity
+    .open()
+    .then((ticket) =>
+      ticket?.token
+        ? recentActivity.append(ticket.token, ticket.source, [
+            {
+              operation: 1,
+              mode: 'multiple',
+              stage: 'none',
+              ms: 0,
+              event,
+              ...fields
+            }
+          ])
+        : undefined
+    )
+    .catch(() => {});
+}
 
 function handleRecentActivityMessage(request, sender, sendResponse) {
   const { action } = request;
@@ -4370,6 +4916,13 @@ function handleRecentActivityMessage(request, sender, sendResponse) {
   if (action === 'openRecentActivity') result = recentActivity.open();
   else if (action === 'appendRecentActivity') {
     result = recentActivity.append(request.token, request.source, request.rows);
+  } else if (action === 'recordLockSummary') {
+    const { held, inventory, interrupted } = request;
+    result = recordScannerLockActivity('lock_summary', {
+      held,
+      inventory,
+      interrupted
+    });
   } else result = recentActivity.manage(action, request.enabled);
 
   result.then(
@@ -4754,14 +5307,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         () => sendResponse({ success: false })
       );
     } else {
-      const check = request.captureId
-        ? checkScannerDelivery(request, sender).then(({ success, reason }) => ({
-            success,
-            reason
-          }))
-        : getActiveScannerChartRoute(sender.tab.id, request.scannerRoute);
+      const check =
+        request.captureId !== undefined
+          ? checkScannerDelivery(request, sender).then(
+              ({ success, reason }) => ({
+                success,
+                reason
+              })
+            )
+          : getActiveScannerChartRoute(sender.tab.id, request.scannerRoute);
       check.then(sendResponse, () => sendResponse({ success: false }));
     }
+    return true;
+  }
+
+  if (['getLockedScanResume', 'resumeLockedScan'].includes(request.action)) {
+    const target = lockedScanTarget(request, sender);
+    const offer = request.action === 'getLockedScanResume';
+    const validId = (value) =>
+      typeof value === 'string' && value.length <= 120 && !!value.trim();
+    if (
+      !target ||
+      (offer
+        ? !Number.isSafeInteger(request.capacity) || request.capacity < 0
+        : !validId(request.sessionId) ||
+          !validId(request.captureId) ||
+          typeof request.token !== 'string' ||
+          !/^[a-f0-9-]{36}$/.test(request.token))
+    ) {
+      sendResponse({ success: false });
+      return false;
+    }
+    const result = offer
+      ? getLockedScanResume(target, request.capacity)
+      : resumeLockedScan(target, request);
+    result.then(sendResponse, () =>
+      sendResponse({
+        success: false,
+        reason: 'resume_unavailable',
+        error:
+          'Could not hand off the scan. Check the chart and the trays before continuing.'
+      })
+    );
     return true;
   }
 
@@ -4891,7 +5478,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     const result =
       request.action === 'getHeldScannerScans'
-        ? getHeldScannerScans().then((scans) => ({ success: true, scans }))
+        ? getHeldScannerScans().then((scans) => ({
+            success: true,
+            scans: scans.map(({ acknowledgedDelivery, ...scan }) => scan)
+          }))
         : discardHeldScannerScan(request.scan).then(() => ({ success: true }));
     result
       .then(sendResponse)

@@ -27,9 +27,15 @@ With **Standard USB CDC**, the scanner controls its own beep.
 | Inventory                                             | Open **Inventory** and check the tray. The same destination applies while the workstation is awake and locked.                    |
 | Immunization with a ready single form                 | With automatic entry on, check the fields in the visible chart. Review the agent, lot and other fields before saving in Panorama. |
 | Immunization with a ready Multiple Immunizations grid | Check the Immunization tray and the grid row. The tray keeps the dose for the detail step.                                        |
-| Immunization while locked                             | After unlock, open **Immunization → Held scanner scans**. Unlocking leaves the chart alone.                                       |
+| Immunization while locked                             | Return to the original chart and choose **Resume scans** when offered. Find other captures under **Held scanner scans**.          |
 
 With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Held scanner scans** for the next step. Check the original chart before using a scan that may have filled fields.
+
+For Multiple Immunizations, **Resume scans** places eligible doses in the
+available grid rows. Select **Enter Details**, then **Next** as you check each
+dose. A ready Single Immunization form can resume one eligible scan. If
+Resume is unavailable or stops, check the chart, the tray and Held scanner
+scans before trying again.
 
 On a single form, a scan may stay pending while Panorama updates. If VaxLink
 cannot confirm the fields, follow the message and check the original chart

@@ -374,11 +374,15 @@ one use, and Inventory starts with an unknown count.
 
 VaxLink saves a direct single-form scan before sending it once to its original
 foreground chart. The worker checks the chart build, document context, focus,
-and workstation lock again after waits. The current worker instance and the
-original chart document identify the same delivery.
+and workstation lock again after waits. The focus check lasts for the current
+browser session so a worker restart alone does not lose a grid assignment.
+Tab activation, browser window focus changes, and workstation lock retire the
+previous check.
 
 A pending acknowledgement means the chart started handling the scan. VaxLink
-keeps the saved barcode until the same chart verifies its fields. A timeout,
+keeps the saved barcode and the original document's acknowledgement until
+that chart verifies its fields. A replacement worker can check the same
+delivery using that acknowledgement. A timeout,
 stale build, lost focus, unavailable lock check, or unverified result leaves a
 held scan for staff review. If VaxLink cannot identify the Agent for a scanned
 lot, it holds the barcode before any field interaction and shows a warning.
@@ -393,7 +397,16 @@ Inventory captures stay in Inventory. Repeated physical scans are kept.
 Lock and unlock changes save in order, and captures retain the session they
 started in even if storage is slow. The popup shows the remaining scans from
 the last lock and warns if capture was interrupted, even when no barcode was
-saved. Unlocking does not start a chart fill.
+saved. Unlocking does not start a chart fill. The chart can offer Resume for
+eligible connected scanner captures from the last lock. It confirms the
+original foreground document and form before making the offer and again
+before moving a scan. A move saves the dose and binds it to the original
+document before chart entry begins. Any scan with uncertain delivery stays
+available for review.
+
+Multiple Immunizations uses the regular grid assignments and detail fill.
+Single Immunization requires exactly one eligible capture. Long-range
+arrivals use their receipt time and stay available for review.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan
