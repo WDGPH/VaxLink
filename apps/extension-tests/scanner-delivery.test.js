@@ -169,6 +169,49 @@ test('a grid receives only the new saved row when automatic grid entry is enable
   }
 });
 
+test('grid fills follow scan receipt order when the first chart probe is delayed', async () => {
+  const firstProbe = gate();
+  let probeCount = 0;
+  let secondSaved;
+  const secondInTray = new Promise((resolve) => {
+    secondSaved = resolve;
+  });
+  const h = harness({
+    tabResponse: {
+      supported: true,
+      contextToken: 'grid-document',
+      formContext: { kind: 'multiple_grid', ready: true },
+      status: 'grid_added'
+    },
+    delayTabMessage(_tabId, message, resume) {
+      if (message.action !== 'getPanoramaIntegration' || ++probeCount !== 1)
+        return false;
+      firstProbe.hold(resume);
+      return true;
+    },
+    delayStorageSet(values) {
+      if (values[immunizationTray]?.some((row) => row.lot === 'SECOND'))
+        secondSaved();
+      return false;
+    }
+  });
+  const first = capture(h, '10FIRST');
+  await firstProbe.started;
+  const second = capture(h, '10SECOND');
+  await secondInTray;
+  firstProbe.release();
+  assert.ok((await Promise.all([first, second])).every(({ routed }) => routed));
+  const lots = new Map(
+    Array.from(h.storageData.get(immunizationTray), ({ id, lot }) => [id, lot])
+  );
+  assert.deepEqual(
+    h.tabMessages
+      .filter(({ message }) => message.action === 'vaxlinkGridScanCaptured')
+      .map(({ message }) => lots.get(message.recordId)),
+    ['FIRST', 'SECOND']
+  );
+});
+
 test('long-range frames bypass ready Single and Multiple forms and keep repeated scans in receipt order', async () => {
   for (const kind of ['provider_single', 'multiple_grid']) {
     const h = harness({

@@ -102,6 +102,7 @@ let scannerStatusWriteQueue = Promise.resolve();
 let scannerControlQueue = Promise.resolve();
 let scannerLockStateWrites = Promise.resolve();
 let lockedScannerCaptureWrites = Promise.resolve();
+let gridScannerDeliveries = Promise.resolve();
 const SCANNER_RESUME_WITNESS_KEY = 'vaxlink_scanner_resume_witness_v1';
 const LOCK_FOCUS_GRACE_MS = 5000;
 let scannerResumeWitness;
@@ -2505,7 +2506,29 @@ async function saveScannerScanForReview(
   };
 }
 
-async function routeScanToActiveSupportedTab(scan, observeRouting) {
+function routeScanToActiveSupportedTab(scan, observeRouting) {
+  // Take a turn at receipt, before a chart probe or lookup can finish out of
+  // order. Only grid fills hold the turn until the chart responds.
+  const earlierGridScans = gridScannerDeliveries;
+  let finishGridTurn;
+  const turn = new Promise((resolve) => {
+    finishGridTurn = resolve;
+  });
+  gridScannerDeliveries = earlierGridScans.then(() => turn);
+  return routeScannerScan(
+    scan,
+    observeRouting,
+    earlierGridScans,
+    finishGridTurn
+  ).finally(finishGridTurn);
+}
+
+async function routeScannerScan(
+  scan,
+  observeRouting,
+  earlierGridScans,
+  finishGridTurn
+) {
   const scannerResultSound = scan.device?.profileId === LIVE_SSI_PROFILE_ID;
   // Pin the destination before storage waits; focus changes never redirect it.
   const snapshot = observeScannerChartRoute();
@@ -2566,6 +2589,7 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
     preferences[GRID_SCAN_AUTOFILL_KEY] !== false &&
     readyKind === 'multiple_grid';
 
+  if (lockSession || !sendToGrid) finishGridTurn();
   if (lockSession) return lockedWrite;
   let reviewState;
   if (idleState === 'unavailable') reviewState = 'lock_unavailable';
@@ -2612,22 +2636,21 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
     const saved = workflowQueueResult.record;
     const queued = !saved?.duplicate_ignored;
     let response;
-    if (
-      sendToGrid &&
-      queued &&
-      saved?.id &&
-      (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
-    ) {
-      response = await sendScanToTab(destination.id, {
-        action: 'vaxlinkGridScanCaptured',
-        recordId: saved.id,
-        contextToken,
-        scannerResultSound,
-        scannerRoute: {
-          ...scannerRoute,
-          startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
-        }
-      }).catch(() => null);
+    if (sendToGrid && queued && saved?.id) {
+      await earlierGridScans;
+      if (
+        (await getActiveScannerChartRoute(destination.id, scannerRoute)).success
+      )
+        response = await sendScanToTab(destination.id, {
+          action: 'vaxlinkGridScanCaptured',
+          recordId: saved.id,
+          contextToken,
+          scannerResultSound,
+          scannerRoute: {
+            ...scannerRoute,
+            startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
+          }
+        }).catch(() => null);
     }
     return {
       routed: response?.status === 'grid_added',
