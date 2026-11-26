@@ -1,5 +1,11 @@
 {
   "singleQuote": true,
   "tabWidth": 2,
-  "trailingComma": "none"
+  "trailingComma": "none",
+  "overrides": [
+    {
+      "files": "apps/extension/manifest.json",
+      "options": { "parser": "json-stringify" }
+    }
+  ]
 }
