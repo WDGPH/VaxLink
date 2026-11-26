@@ -1004,12 +1004,29 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       for (const listener of storageListeners) listener(changes, 'local');
       await new Promise(setImmediate);
     }
+    const orderedScans = scenario === 'ordered_duplicates';
+    const gridToken = orderedScans && context.getScannerDeliveryContext(kind);
+    const route =
+      orderedScans &&
+      (await worker.sendMessage({ action: 'checkScannerChart' }, sender))
+        .scannerRoute;
     for (const { id } of records) {
       const result = await context.useTrayVaccine(
         id,
-        context.getScannerDeliveryContext(kind, true)
+        gridToken || context.getScannerDeliveryContext(kind, true),
+        route ? { ...route, startBy: Date.now() + 10000 } : null
       );
       assert.equal(result.status, 'grid_added', scenario);
+    }
+    if (orderedScans) {
+      context.cancelPanoramaAutofill();
+      await assert.rejects(
+        context.useTrayVaccine(records[0].id, gridToken, {
+          ...route,
+          startBy: Date.now() + 10000
+        }),
+        /ready for entry/
+      );
     }
     context.startGridHandoff({
       isTrusted: true,

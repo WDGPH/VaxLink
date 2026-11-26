@@ -4188,6 +4188,10 @@ async function useTrayVaccine(
     true,
     { automatic: !!scannerRoute, startBy: scannerRoute?.startBy ?? null }
   );
+  // Starting a grid fill changes the writer. The next scanner frame can
+  // still use its original token if it saw this same grid.
+  if (scannerRoute && scannerDeliveryContext?.token === contextToken)
+    scannerDeliveryContext.generation = panoramaContextGeneration;
   if (!scannerRoute && context.kind === 'multiple_detail') {
     clearCarryProblem();
     if (!(await releaseGridDetailStep('tray_use', recordId)))
