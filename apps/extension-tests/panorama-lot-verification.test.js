@@ -1151,10 +1151,12 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       }
       const writes = [];
       lot.dispatchEvent = (event) => writes.push([event.type, lot.value]);
+      let currentLot = lot;
+      let ajaxBusy = false;
       state.controls = [root, lot];
       context.document.querySelector = (selector) =>
         selector.includes('LotInfo:lotNumberSelect:selectOneMenu_input')
-          ? lot
+          ? currentLot
           : null;
       const fundingClicks = [];
       state.funding = [
@@ -1175,6 +1177,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         autoFillPanorama: realFill,
         getPanoramaLotWidget: realLotWidget,
         getPanoramaSelectedAgentTexts: () => [detailAgent],
+        isPrimeFacesAjaxBusy: () => ajaxBusy,
         getPanoramaAdministeredDateTimeFields: () => ({
           dateField: { value: detailDate },
           timeField: { value: '09:30' }
@@ -1208,12 +1211,20 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       assert.equal(saved()[1].dose_reservations.length, 1);
 
       const missingLot = scenario === 'reordered_after_delete_missing_lot';
-      // Separate from the recorded miss, exercise a synthetic list refresh.
-      if (!missingLot)
-        lot.options.push({
-          text: 'SAMPLE-1 - Exp. 2099-01-31',
-          value: 'requested-lot'
-        });
+      if (!missingLot) {
+        // Panorama's partial response can replace the whole detail widget.
+        ajaxBusy = true;
+        lot.isConnected = false;
+        currentLot = select('SAMPLE-1 - Exp. 2099-01-31');
+        currentLot.options[1].value = 'requested-lot';
+        currentLot.dispatchEvent = (event) =>
+          writes.push([event.type, currentLot.value]);
+        state.controls = [root, currentLot];
+        await tick();
+        assert.deepEqual(writes, []);
+        assert.equal(saved()[1].remaining_doses, 2);
+        ajaxBusy = false;
+      }
       for (let attempt = 0; attempt < 40 && timers.size; attempt++)
         await tick();
 
@@ -1232,12 +1243,12 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         [2, missingLot ? 2 : 1, 1]
       );
       assert.equal(saved()[1].dose_reservations, undefined);
+      assert.equal(lot.value, '', 'the original Lot select stays untouched');
       if (missingLot) {
         const notice = feedback.find(
           ({ _fillFeedback }) => _fillFeedback === 'lot_not_matched'
         );
         assert.equal(notice?._doseKept, true);
-        assert.equal(lot.value, '');
       }
 
       vm.runInContext('chartActivity.flush()', context);
