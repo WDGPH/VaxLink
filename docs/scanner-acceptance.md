@@ -12,11 +12,11 @@ Use training records, known sample barcodes and the clinic’s designated browse
 
 1. Select Immunization, open a training chart and record its starting fields. Confirm the scanner is connected. Close the popup and lock Windows with Win+L.
 2. Scan five known samples in a recorded order. Scan the same barcode twice consecutively.
-3. Unlock and open VaxLink. Check **Scans from the last lock**, then open **Immunization → Held scanner scans**. Account for five new entries in capture order, including both copies of the repeated barcode. Check that unlocking and opening the popup left the training chart untouched.
+3. Unlock and open VaxLink. Open the **Immunization Tray**. Account for five new entries in capture order, including both copies of the repeated barcode. Check that unlocking and opening the popup left the training chart untouched.
 4. Repeat in Inventory. Account for five new Inventory tray entries in the same order. Confirm that neither workflow filled the chart.
-5. Repeat a lock with the cradle disconnected during the session. After unlocking, check for the interruption message and reconcile the samples. Check for the message even when no scans were saved.
+5. Repeat a lock with the cradle disconnected during the session. After unlocking, check the scanner status and reconcile the samples against the tray. Check that an empty lock does not show a summary card.
 6. Run a separate sleep and wake test. Record which samples arrived before sleep and after wake, and whether the reader needed reconnecting.
-7. Start a new lock from an open Multiple Immunizations grid with room for three doses. Scan three samples for distinct Agents. After unlock, check that the grid is still blank. Select **Resume 3 scans** once, then use **Enter Details** and **Next**. Check the Agent and Lot at each step. Repeat with a replacement chart and check that the scans stay held.
+7. Start a new lock from an open Multiple Immunizations grid with room for three doses. Scan three samples, including two with the same Agent and different lots. After unlock, check that the grid is still blank. Select **Resume 3 scans** once, then use **Enter Details** and **Next**. Check the Agent and Lot at each step. Repeat with a replacement chart and check that the scans stay in the tray.
 
 ## Check the Zebra DS8178 setups
 

@@ -257,18 +257,19 @@ test('long-range rejections stay visible in held scans and expired stock stays f
   );
 });
 
-test('long-range scans keep locked Inventory rows and held Immunization captures distinct', async () => {
+test('long-range scans save to the selected tray while locked', async () => {
   const h = harness({ idleState: 'locked' });
   await captureLongRange(h, '10IMMLOT');
   await captureLongRange(h, 'VAXLINK:INVENTORY');
   await captureLongRange(h, '10INVLOT');
-  assert.equal(h.storageData.has(immunizationTray), false);
-  const held = h.storageData.get(inbox)[0];
-  const saved = h.storageData.get(inventoryTray)[0];
-  assert.equal(held.pending_workflow, 'immunization');
-  assert.equal(held.captured_while_locked, true);
-  assert.equal(saved.captured_while_locked, true);
-  assert.equal(saved.lock_session_id, held.lock_session_id);
+  const immunization = h.storageData.get(immunizationTray)[0];
+  const inventory = h.storageData.get(inventoryTray)[0];
+  assert.equal(immunization.lot, 'IMMLOT');
+  assert.equal(immunization.captured_while_locked, true);
+  assert.equal(inventory.lot, 'INVLOT');
+  assert.equal(inventory.captured_while_locked, true);
+  assert.equal(inventory.lock_session_id, immunization.lock_session_id);
+  assert.equal(h.storageData.has(inbox), false);
 });
 
 test('held scans are not replayed on startup, unlock, or a drain request', async () => {

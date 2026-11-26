@@ -73,10 +73,6 @@ let inventoryManager;
 let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
-let unlockReviewRead = 0;
-let recordedUnlockSummary = '';
-const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
-const REVIEWED_LOCK_SESSION_KEY = 'vaxlink_reviewed_lock_id';
 const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
 
@@ -445,24 +441,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('queueSaveNotice').hidden = true;
     });
 
-  document
-    .getElementById('dismissUnlockReview')
-    ?.addEventListener('click', async () => {
-      const sessionId =
-        document.getElementById('unlockReview')?.dataset.session;
-      if (!sessionId) return;
-      try {
-        await setLocalStorage({ [REVIEWED_LOCK_SESSION_KEY]: sessionId });
-      } catch (error) {
-        writeOutput(
-          error.message || 'Could not dismiss the lock summary.',
-          'error'
-        );
-      }
-    });
   loadNVCStatus();
   void renderHeldScannerScans();
-  void loadUnlockReview();
   void loadRecentChartLots();
 });
 
@@ -498,7 +478,7 @@ async function renderHeldScannerScans() {
     if (!result?.success) return;
     host.hidden = !result.scans.length;
     document.getElementById('heldScannerScanCount').textContent =
-      `Held scanner scans (${result.scans.length})`;
+      `Scanner issues (${result.scans.length})`;
     list.replaceChildren();
     for (const scan of result.scans) {
       const row = document.createElement('li');
@@ -584,7 +564,7 @@ async function renderHeldScannerScans() {
         }
       });
       const discard = document.createElement('button');
-      discard.textContent = 'Discard held scan';
+      discard.textContent = 'Discard scan';
       discard.addEventListener('click', async () => {
         discard.disabled = true;
         try {
@@ -608,51 +588,6 @@ async function renderHeldScannerScans() {
     }
   } catch (error) {
     writeOutput(error.message, 'error');
-  }
-}
-
-async function loadUnlockReview() {
-  const panel = document.getElementById('unlockReview');
-  if (!panel) return;
-  const read = ++unlockReviewRead;
-  try {
-    const stored = await getLocalStorage([
-      SCANNER_LOCK_SESSION_KEY,
-      REVIEWED_LOCK_SESSION_KEY,
-      HELD_SCANS_KEY,
-      INVENTORY_BATCH_KEY
-    ]);
-    if (read !== unlockReviewRead) return;
-    const session = stored[SCANNER_LOCK_SESSION_KEY];
-    const count = (rows) =>
-      Array.isArray(rows)
-        ? rows.filter((row) => row.lock_session_id === session?.id).length
-        : 0;
-    const held = count(stored[HELD_SCANS_KEY]);
-    const inventory = count(stored[INVENTORY_BATCH_KEY]);
-    panel.hidden =
-      !session?.id ||
-      session.state !== 'active' ||
-      session.id === stored[REVIEWED_LOCK_SESSION_KEY] ||
-      (!held && !inventory && !session.interrupted);
-    if (panel.hidden) return;
-    panel.dataset.session = session.id;
-    document.getElementById('unlockReviewText').textContent =
-      `${held} in Held scanner scans · ${inventory} in the Inventory tray`;
-    document.getElementById('unlockInterruption').hidden = !session.interrupted;
-    const summary = `${session.id}/${held}/${inventory}/${!!session.interrupted}`;
-    if (!mainWorkflowPanel?.hidden && summary !== recordedUnlockSummary) {
-      recordedUnlockSummary = summary;
-      void sendRuntimeMessage({
-        action: 'recordLockSummary',
-        held,
-        inventory,
-        interrupted: !!session.interrupted
-      }).catch(() => {});
-    }
-  } catch (error) {
-    if (read === unlockReviewRead)
-      writeOutput(error.message || 'Could not read the lock summary.', 'error');
   }
 }
 
@@ -754,16 +689,6 @@ function handlePopupStorageChanged(changes, area) {
     renderRecentChartLots(changes[RECENT_CHART_LOTS_KEY]?.newValue);
   if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
     void loadAutofillSettings();
-  if (
-    area === 'local' &&
-    [
-      SCANNER_LOCK_SESSION_KEY,
-      REVIEWED_LOCK_SESSION_KEY,
-      HELD_SCANS_KEY,
-      INVENTORY_BATCH_KEY
-    ].some((key) => key in changes)
-  )
-    void loadUnlockReview();
   if (area === 'local' && HELD_SCANS_KEY in changes)
     void renderHeldScannerScans();
 }
@@ -862,11 +787,7 @@ function applyPopupPanel(panel) {
   if (settingsPanel) {
     settingsPanel.hidden = panel !== 'settings';
   }
-  if (mainWorkflowPanel) {
-    const wasHidden = mainWorkflowPanel.hidden;
-    mainWorkflowPanel.hidden = panel !== 'workflow';
-    if (panel === 'workflow' && wasHidden) void loadUnlockReview();
-  }
+  if (mainWorkflowPanel) mainWorkflowPanel.hidden = panel !== 'workflow';
   if (settingsToggleBtn) {
     settingsToggleBtn.setAttribute(
       'aria-expanded',

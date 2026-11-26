@@ -671,7 +671,9 @@ async function appendQueueRecordNow(storageKey, record, options = {}) {
   }
   const stored = await getStorage([storageKey]);
   const rows =
-    stored && Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+    stored && Array.isArray(stored[storageKey])
+      ? stored[storageKey].slice()
+      : [];
 
   if (storageKey === MULTIPLE_INJECT_QUEUE_KEY) {
     record = defaultChartDose(record);
@@ -889,6 +891,7 @@ function mutateQueue(
               Array.isArray(row) ||
               typeof row.id !== 'string' ||
               !row.id.trim() ||
+              'locked_resume_order' in row ||
               'dose_reservations' in row
           ))
       ) {
@@ -983,6 +986,7 @@ function mutateQueue(
           : INVENTORY_BATCH_KEY;
         const transferred = moving.map((row) => {
           const moved = { ...row, id: crypto.randomUUID() };
+          delete moved.locked_resume_order;
           if (!toImmunization) return moved;
           if (typeof row.lot !== 'string' || !row.lot.trim())
             throw new Error(
@@ -1075,6 +1079,8 @@ function mutateQueue(
               documentId: chart.documentId
             }
           ]);
+          // A dose staff chose directly should not be offered by Resume later.
+          delete rows[index].locked_resume_order;
           await setStorage({ [storageKey]: rows });
           return { record: current, reserved: true };
         }
@@ -1188,6 +1194,7 @@ function mutateQueue(
         rows = rows.map((row) => {
           if (row?.id !== payload.id) return row;
           record = { ...row, ...payload.patch };
+          delete record.locked_resume_order;
           if (row.reference_only === true) record.reference_only = true;
           return record;
         });
@@ -1230,6 +1237,7 @@ function mutateQueue(
           };
         }
         record = { ...current, ...changes };
+        delete record.locked_resume_order;
         rows = rows.map((row) => (row === current ? record : row));
       } else if (operation === 'consume' || consumeReviewed) {
         if (index >= 0) {
@@ -1966,7 +1974,7 @@ function mutatePendingInbox(action) {
 }
 
 function enqueuePendingScan(scan) {
-  const write = async (session) => {
+  return mutatePendingInbox(async () => {
     const stored = await getStorage([PENDING_SCAN_INBOX_KEY]);
     const rows = Array.isArray(stored && stored[PENDING_SCAN_INBOX_KEY])
       ? stored[PENDING_SCAN_INBOX_KEY]
@@ -1981,18 +1989,9 @@ function enqueuePendingScan(scan) {
         'Held scans are full. Inspect them in the VaxLink popup before scanning again.'
       );
     }
-    const values = { [PENDING_SCAN_INBOX_KEY]: nextRows };
-    if (scan.resumeEligible && session?.id === scan.lock_session_id)
-      values[SCANNER_LOCK_SESSION_KEY] = {
-        ...session,
-        resumeCaptureCount: Math.min(session.resumeCaptureCount + 1, 2)
-      };
-    await setStorage(values);
+    await setStorage({ [PENDING_SCAN_INBOX_KEY]: nextRows });
     return nextRows.length;
-  };
-  return mutatePendingInbox(() =>
-    scan.resumeEligible ? withScannerLockSession(write) : write()
-  );
+  });
 }
 
 async function getHeldScannerScans() {
@@ -2054,16 +2053,23 @@ function eligibleLockedScans(target, session, rows) {
     )
   )
     return [];
-  return rows.filter(
-    (row) =>
-      row.resumeEligible === true &&
-      row.captured_while_locked === true &&
-      row.lock_session_id === session.id &&
-      row.pending_workflow === 'immunization' &&
-      row.device?.profileId !== LONG_RANGE_PROFILE_ID &&
-      typeof row.captureId === 'string' &&
-      !row.reviewState
-  );
+  return (Array.isArray(rows) ? rows : [])
+    .filter(
+      (row) =>
+        row?.lock_session_id === session.id &&
+        row.captured_while_locked === true &&
+        typeof row.lot === 'string' &&
+        row.lot.trim() &&
+        Number.isSafeInteger(row.locked_resume_order) &&
+        row.locked_resume_order > 0 &&
+        row.dose_tracking === 'single_use' &&
+        getTrayRemainingDoses(row) === 1 &&
+        !doseReservations(row).length &&
+        !row.lookup_error &&
+        (globalThis.vaxlinkVaccineLabel(row) || row.din) &&
+        !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
+    )
+    .sort((a, b) => a.locked_resume_order - b.locked_resume_order);
 }
 
 async function waitForLockedScannerWrites() {
@@ -2082,11 +2088,14 @@ async function getLockedScanResume(target, capacity) {
   const empty = { success: true, sessionId: null, captureId: null, count: 0 };
   const foreground = scannerForegroundChanges;
   await waitForLockedScannerWrites();
-  const [route, anchor, settings, rows] = await Promise.all([
+  const [route, anchor, settings] = await Promise.all([
     getActiveScannerChartRoute(target.tabId, undefined, target.windowId),
     matchesLockedScanAnchor(target, true),
-    getStorage([SCANNER_LOCK_SESSION_KEY, ...LOCKED_SCAN_SETTINGS]),
-    getHeldScannerScans()
+    getStorage([
+      SCANNER_LOCK_SESSION_KEY,
+      MULTIPLE_INJECT_QUEUE_KEY,
+      ...LOCKED_SCAN_SETTINGS
+    ])
   ]);
   if (
     !route.success ||
@@ -2097,13 +2106,17 @@ async function getLockedScanResume(target, capacity) {
     return empty;
   await saveScannerResumeWitness(target);
   const session = settings[SCANNER_LOCK_SESSION_KEY];
-  const eligible = eligibleLockedScans(target, session, rows);
+  const eligible = eligibleLockedScans(
+    target,
+    session,
+    settings[MULTIPLE_INJECT_QUEUE_KEY]
+  );
   if (!capacity || !eligible.length || foreground !== scannerForegroundChanges)
     return empty;
   return {
     success: true,
     sessionId: session.id,
-    captureId: eligible[0].captureId,
+    captureId: eligible[0].id,
     count: Math.min(eligible.length, capacity)
   };
 }
@@ -2112,115 +2125,73 @@ async function resumeLockedScan(target, { sessionId, captureId, token }) {
   const unavailable = {
     success: false,
     reason: 'resume_unavailable',
-    error:
-      'The chart or held scans changed. Check the held scans before proceeding.'
+    error: 'The chart or tray changed. Check the tray before continuing.'
   };
-  await waitForLockedScannerWrites();
-  const [route, settings, held] = await Promise.all([
-    getActiveScannerChartRoute(target.tabId, undefined, target.windowId),
-    getStorage([SCANNER_LOCK_SESSION_KEY, ...LOCKED_SCAN_SETTINGS]),
-    getHeldScannerScans()
-  ]);
-  const session = settings[SCANNER_LOCK_SESSION_KEY];
-  const scan = eligibleLockedScans(target, session, held)[0];
-  if (
-    !route.success ||
-    !lockedScanEnabled(target, settings) ||
-    session?.id !== sessionId ||
-    scan?.captureId !== captureId
-  )
-    return unavailable;
-
-  const prepared = await prepareScannerQueueRecord(scan, 'multiple', {});
-  const record = prepared.record;
-  const rejection =
-    prepared.rejection?.status ||
-    (!record?.lookup_error &&
-    (globalThis.vaxlinkVaccineLabel(record) || record?.din)
-      ? null
-      : 'unknown_agent');
-  const [captureWrites, uploadWrites, statusWrites, workflowWrites] =
+  const [captures, uploads, statuses, workflows] =
     await waitForLockedScannerWrites();
-  // Every writer for the two trays must wait for the same handoff. Catalogue
-  // lookup and earlier status/capture writes must finish before taking these locks.
-  return mutatePendingInbox(() => {
-    const handoff = scannerQueueWriteQueue
-      .catch(() => {})
-      .then(() =>
-        withScannerLockSession(async (current) => {
-          const snapshot = scannerChartRoute;
-          const [active, anchor, stored] = await Promise.all([
-            getActiveScannerChartRoute(
-              target.tabId,
-              route.scannerRoute,
-              target.windowId
-            ),
-            matchesLockedScanAnchor(target, true),
-            getStorage([
-              PENDING_SCAN_INBOX_KEY,
-              MULTIPLE_INJECT_QUEUE_KEY,
-              ...LOCKED_SCAN_SETTINGS
-            ])
-          ]);
-          const rows = stored[PENDING_SCAN_INBOX_KEY] || [];
-          const tray = stored[MULTIPLE_INJECT_QUEUE_KEY] || [];
-          const next = eligibleLockedScans(target, current, rows)[0];
-          if (
-            !active.success ||
-            !anchor ||
-            snapshot !== scannerChartRoute ||
-            captureWrites !== lockedScannerCaptureWrites ||
-            uploadWrites !== longRangeScanWrites ||
-            statusWrites !== scannerStatusWriteQueue ||
-            workflowWrites !== scannerWorkflowReceipts ||
-            lastScannerIdleState === 'locked' ||
-            !lockedScanEnabled(target, stored) ||
-            current?.id !== sessionId ||
-            next?.captureId !== captureId ||
-            tray.some((row) => row.id === captureId)
-          )
-            return unavailable;
+  const route = await getActiveScannerChartRoute(
+    target.tabId,
+    undefined,
+    target.windowId
+  );
+  if (!route.success) return unavailable;
 
-          if (rejection) {
-            await setStorage({
-              [PENDING_SCAN_INBOX_KEY]: rows.map((row) =>
-                row === next ? { ...row, reviewState: rejection } : row
-              )
-            });
-            return {
-              success: false,
-              reason: rejection,
-              error: 'Review this barcode in Held scanner scans.'
-            };
+  // Resume and ordinary Use reserve the same existing tray dose. Holding the
+  // tray writer here prevents either action from claiming it twice.
+  const handoff = scannerQueueWriteQueue
+    .catch(() => {})
+    .then(() =>
+      withScannerLockSession(async (session) => {
+        const snapshot = scannerChartRoute;
+        const [active, anchor, stored] = await Promise.all([
+          getActiveScannerChartRoute(
+            target.tabId,
+            route.scannerRoute,
+            target.windowId
+          ),
+          matchesLockedScanAnchor(target, true),
+          getStorage([MULTIPLE_INJECT_QUEUE_KEY, ...LOCKED_SCAN_SETTINGS])
+        ]);
+        const tray = stored[MULTIPLE_INJECT_QUEUE_KEY] || [];
+        const next = eligibleLockedScans(target, session, tray)[0];
+        if (
+          !active.success ||
+          !anchor ||
+          snapshot !== scannerChartRoute ||
+          captures !== lockedScannerCaptureWrites ||
+          uploads !== longRangeScanWrites ||
+          statuses !== scannerStatusWriteQueue ||
+          workflows !== scannerWorkflowReceipts ||
+          lastScannerIdleState === 'locked' ||
+          !lockedScanEnabled(target, stored) ||
+          session?.id !== sessionId ||
+          next?.id !== captureId ||
+          tray.filter((row) => row?.id === captureId).length !== 1
+        )
+          return unavailable;
+
+        const reserved = withDoseReservations(next, [
+          { token, tabId: target.tabId, documentId: target.documentId }
+        ]);
+        delete reserved.locked_resume_order;
+        await setStorage({
+          [MULTIPLE_INJECT_QUEUE_KEY]: tray.map((row) =>
+            row === next ? reserved : row
+          )
+        });
+        return {
+          success: true,
+          recordId: captureId,
+          token,
+          scannerRoute: {
+            ...active.scannerRoute,
+            startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
           }
-          const reserved = {
-            ...record,
-            id: captureId,
-            dose_tracking: 'single_use',
-            remaining_doses: 1,
-            total_doses: 1,
-            dose_reservations: [
-              { token, tabId: target.tabId, documentId: target.documentId }
-            ]
-          };
-          await setStorage({
-            [PENDING_SCAN_INBOX_KEY]: rows.filter((row) => row !== next),
-            [MULTIPLE_INJECT_QUEUE_KEY]: [...tray, reserved]
-          });
-          return {
-            success: true,
-            recordId: captureId,
-            token,
-            scannerRoute: {
-              ...active.scannerRoute,
-              startBy: Date.now() + SCANNER_CHART_RESPONSE_MS
-            }
-          };
-        })
-      );
-    scannerQueueWriteQueue = handoff;
-    return handoff;
-  });
+        };
+      })
+    );
+  scannerQueueWriteQueue = handoff;
+  return handoff;
 }
 
 function discardHeldScannerScan(scan) {
@@ -2482,31 +2453,41 @@ async function saveScannerScanForReview(
     : {};
   const context = lockSession ? buildLockedScanQueueContext(lockSession) : {};
   const review = { routed: false, queued: true, workflow, ...locked };
-  const saved =
-    lockSession && workflow === 'immunization'
-      ? null
-      : await saveScannerScanToWorkflowQueue(
-          scan,
-          workflow === 'immunization' ? 'multiple' : 'inventory',
-          { context, preserveEveryScan: true, reviewOnly }
-        );
-  if (!saved || saved.rejection) {
+  if (lockSession && workflow === 'immunization') {
+    Object.assign(context, {
+      id: scan.captureId,
+      dose_tracking: 'single_use',
+      remaining_doses: 1,
+      total_doses: 1
+    });
+    if (lockSession.resumeTarget && !reviewOnly) {
+      // Count even rejected scans. Removing a scan must never turn a batch
+      // into an offer to fill a Single Immunization form.
+      const order = await withScannerLockSession(async (session) => {
+        if (session?.id !== lockSession.id) return 0;
+        const count = session.resumeCaptureCount + 1;
+        await setStorage({
+          [SCANNER_LOCK_SESSION_KEY]: { ...session, resumeCaptureCount: count }
+        });
+        return count;
+      });
+      if (order) context.locked_resume_order = order;
+    }
+  }
+  const saved = await saveScannerScanToWorkflowQueue(
+    scan,
+    workflow === 'immunization' ? 'multiple' : 'inventory',
+    { context, preserveEveryScan: true, reviewOnly }
+  );
+  if (saved.rejection) {
     const pendingCount = await enqueuePendingScan({
       ...scan,
-      ...context,
+      ...buildLockedScanQueueContext(lockSession),
       pending_workflow: workflow,
-      ...(lockSession?.resumeTarget &&
-        workflow === 'immunization' &&
-        !reviewOnly && { resumeEligible: true }),
-      ...(saved?.rejection ? { reviewState: saved.rejection.status } : {})
+      reviewState: saved.rejection.status
     });
-    if (lockSession) {
+    if (lockSession)
       recordScannerLockActivity('locked_capture', { result: 'held' });
-      if (workflow === 'immunization')
-        void logAnalyticsEvent('scan_captured', { workflow: 'multiple' }).catch(
-          () => {}
-        );
-    }
     return {
       ...review,
       queuedToWorkflow: false,
@@ -2530,7 +2511,7 @@ async function routeScanToActiveSupportedTab(scan, observeRouting) {
   const snapshot = observeScannerChartRoute();
   const capture = observeScannerLockAtCapture();
   const workflow = readScannerWorkflowAtCapture();
-  // Assign a place in the locked inbox when the frame arrives. A slow chart
+  // Assign a place in the tray when the frame arrives. A slow chart
   // probe or an unlock must not reorder captures or hide a second Single scan.
   const lockedWrite = lockedScannerCaptureWrites.then(async () => {
     const { lockSession } = await capture;
@@ -4868,7 +4849,6 @@ const traceMessageFields = {
   appendRecentActivity: ['token', 'source', 'rows'],
   getRecentActivity: [],
   setRecentActivity: ['enabled'],
-  recordLockSummary: ['held', 'inventory', 'interrupted'],
   exportRecentActivity: []
 };
 
@@ -4916,13 +4896,6 @@ function handleRecentActivityMessage(request, sender, sendResponse) {
   if (action === 'openRecentActivity') result = recentActivity.open();
   else if (action === 'appendRecentActivity') {
     result = recentActivity.append(request.token, request.source, request.rows);
-  } else if (action === 'recordLockSummary') {
-    const { held, inventory, interrupted } = request;
-    result = recordScannerLockActivity('lock_summary', {
-      held,
-      inventory,
-      interrupted
-    });
   } else result = recentActivity.manage(action, request.enabled);
 
   result.then(
@@ -5385,12 +5358,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (!ticket?.token) return;
             const status = result.response?.status;
             const accepted =
-              !result.locked &&
-              (result.routed ||
-                result.queuedToWorkflow ||
-                result.duplicate_ignored ||
-                (!result.pendingCount &&
-                  ['expired', 'missing_lot', 'parse_error'].includes(status)));
+              result.queuedToWorkflow ||
+              (!result.locked &&
+                (result.routed ||
+                  result.duplicate_ignored ||
+                  (!result.pendingCount &&
+                    ['expired', 'missing_lot', 'parse_error'].includes(
+                      status
+                    ))));
             const stage =
               status === 'grid_added'
                 ? 'grid'

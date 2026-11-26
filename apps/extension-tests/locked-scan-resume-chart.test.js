@@ -249,7 +249,7 @@ for (const failure of [
     assert.equal(chart.button().disabled, false);
     if (failure !== 'form replaced') {
       assert.equal(chart.status().hidden, false);
-      assert.match(chart.status().textContent, /held scans/);
+      assert.match(chart.status().textContent, /Immunization tray/);
     }
   });
 }

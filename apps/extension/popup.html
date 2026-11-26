@@ -1310,20 +1310,6 @@
             </div>
           </div>
           <div id="mainWorkflowPanel">
-            <section id="unlockReview" class="settings-card" hidden>
-              <h3>Scans from the last lock</h3>
-              <p id="unlockReviewText" role="status"></p>
-              <p id="unlockInterruption" hidden>
-                Scanner connection was interrupted. Check for missing scans.
-              </p>
-              <button
-                id="dismissUnlockReview"
-                type="button"
-                aria-label="Dismiss lock summary"
-              >
-                Dismiss
-              </button>
-            </section>
             <div
               class="mode-switch"
               role="tablist"
@@ -1368,10 +1354,10 @@
             </section>
             <p id="scannerConnectionNote" role="status" hidden></p>
             <details id="heldScannerScans" class="tray-history" hidden>
-              <summary id="heldScannerScanCount">Held scanner scans</summary>
+              <summary id="heldScannerScanCount">Scanner issues</summary>
               <p class="held-instruction">
-                Review the barcode before using it. If a scan may have filled a
-                chart, check that chart first.
+                These scans need attention. If a scan may have filled a chart,
+                check that chart before using it again.
               </p>
               <ul id="heldScannerScanList"></ul>
             </details>

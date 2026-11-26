@@ -81,28 +81,20 @@ test('Debug rejects unexpected fields and requires a chart sender to append and 
   assert.equal(exported.token, undefined);
 });
 
-test('Debug records locked capture outcomes and an identifier-free popup summary', async () => {
+test('Debug records the destination of locked captures without identifiers', async () => {
   const worker = fixture({ idleState: 'locked' });
   const rawText = '01001234567890121729123110SAMPLE-LOCK';
   assert.equal((await worker.captureScannerScan({ rawText })).locked, true);
-  const summary = { held: 1, inventory: 0, interrupted: false };
-  assert.equal(
-    (await worker.manage('recordLockSummary', summary, chart)).success,
-    false
-  );
-  assert.equal(
-    (await worker.manage('recordLockSummary', summary)).success,
-    true
-  );
+  await new Promise(setImmediate);
   const exported = await worker.manage('exportRecentActivity');
   assert.ok(exported.rows.some(({ event }) => event === 'lock_observed'));
   assert.equal(
     exported.rows.find(({ event }) => event === 'locked_capture').result,
-    'held'
+    'tray'
   );
   assert.equal(
-    exported.rows.find(({ event }) => event === 'lock_summary').held,
-    1
+    exported.rows.find(({ event }) => event === 'scan').decision,
+    'accepted'
   );
   assert.doesNotMatch(
     JSON.stringify(exported),

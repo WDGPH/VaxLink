@@ -36,7 +36,6 @@ const {
 } = globalThis.VaxLinkWorkflow;
 const MULTIPLE_INJECT_QUEUE_KEY = 'multiple_inject_queue_v1';
 const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
-const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
 const LEGACY_ADMIN_DATETIME_AUTOFILL_KEY =
   'vaxlink_administered_datetime_autofill_v1';
 const ADMIN_DATE_AUTOFILL_KEY = 'vaxlink_administered_date_autofill_v1';
@@ -5497,7 +5496,6 @@ function initHud() {
     if (
       MULTIPLE_INJECT_QUEUE_KEY in changes ||
       SCANNER_LOCK_SESSION_KEY in changes ||
-      HELD_SCANS_KEY in changes ||
       SINGLE_SCAN_AUTOFILL_KEY in changes ||
       GRID_SCAN_AUTOFILL_KEY in changes ||
       GRID_DETAIL_AUTOFILL_KEY in changes ||
@@ -5762,7 +5760,7 @@ async function resumeLockedScans() {
       });
       if (current()) {
         hudResumeStatus.textContent =
-          'Check this chart, the tray and any held scans before continuing.';
+          'Check this chart and the Immunization tray before continuing.';
         hudResumeStatus.hidden = false;
       }
     }
@@ -6436,12 +6434,11 @@ function identifyGridDetail(handoff, form, step, total) {
   // Enter Details follows the grid positions the scans filled. Keep manual
   // rows in that order so a gap cannot shift a scanned dose to another step.
   const ordered = total === handoff.rows.length ? handoff.rows[step - 1] : null;
-  const candidates = (ordered ? [ordered] : handoff.rows).filter(
-    (row) =>
-      row.agent === agent ||
-      (row.record &&
-        queueRecordMatchesPanoramaAgentText(row.record, detail.agent))
-  );
+  const matchesAgent = (row) =>
+    row.agent === agent ||
+    (row.record &&
+      queueRecordMatchesPanoramaAgentText(row.record, detail.agent));
+  const candidates = (ordered ? [ordered] : handoff.rows).filter(matchesAgent);
   if (!candidates.length)
     return { candidate: ordered, reason: 'detail_agent_unmatched' };
   // A shorter list may have skipped a row. A repeated Agent then needs a

@@ -21,7 +21,7 @@ function makeScan(capturedAt) {
   };
 }
 
-test('locked captures from a saved Multiple preference are held once per barcode', async () => {
+test('locked captures from a saved Multiple preference each go straight to the tray', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'multiple' },
@@ -47,20 +47,20 @@ test('locked captures from a saved Multiple preference are held once per barcode
   assert.equal(first.locked, true);
   assert.equal(first.pinnedTabId, 44);
   assert.equal(
-    second.pendingCount,
+    second.queueSizeAfter,
     2,
     'two deliberate identical scans must both survive lock capture'
   );
 
-  const rows = harness.storageData.get(PENDING_KEY);
+  const rows = harness.storageData.get(MULTIPLE_KEY);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].captured_while_locked, true);
   assert.equal(rows[0].lock_session_tab_id, 44);
   assert.equal(rows[0].lock_session_id, rows[1].lock_session_id);
-  assert.equal(harness.storageData.has(MULTIPLE_KEY), false);
+  assert.equal(harness.storageData.has(PENDING_KEY), false);
 });
 
-test('scans captured while Windows is locked in Single mode remain held', async () => {
+test('scans captured while Windows is locked in Single mode go to the tray', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'single' },
@@ -82,12 +82,14 @@ test('scans captured while Windows is locked in Single mode remain held', async 
   assert.equal(response.success, true);
   assert.equal(response.locked, true);
   assert.equal(response.workflow, 'immunization');
-  assert.equal(response.pendingCount, 1);
-  assert.equal(harness.storageData.get(MULTIPLE_KEY), undefined);
-  assert.equal(harness.storageData.get(PENDING_KEY).length, 1);
+  assert.equal(response.queueSizeAfter, 1);
+  assert.equal(harness.storageData.has(PENDING_KEY), false);
+  assert.equal(harness.storageData.get(MULTIPLE_KEY)[0].remaining_doses, 1);
   assert.equal(
-    harness.storageData.get(PENDING_KEY)[0].pending_workflow,
-    'immunization'
+    harness.tabMessages.some(
+      ({ message }) => message.action === 'vaxlinkScanCaptured'
+    ),
+    false
   );
 });
 
@@ -138,7 +140,7 @@ test('an upgraded Multiple preference goes to the tray unless there is a confirm
   );
 });
 
-test('a rapid locked scanner burst cannot lose held rows to storage races', async () => {
+test('a rapid locked scanner burst cannot lose tray rows to storage races', async () => {
   const harness = createBackgroundHarness(EMPTY_BUNDLE, {
     idleState: 'locked',
     storage: { vaxlink_workflow_mode_v1: 'multiple' }
@@ -155,7 +157,7 @@ test('a rapid locked scanner burst cannot lose held rows to storage races', asyn
     responses.every((response) => response.success && response.locked),
     true
   );
-  const rows = harness.storageData.get(PENDING_KEY);
+  const rows = harness.storageData.get(MULTIPLE_KEY);
   assert.equal(rows.length, 20);
   assert.equal(new Set(rows.map((row) => row.lock_session_id)).size, 1);
 });
@@ -196,7 +198,7 @@ function delayFirstLock() {
 }
 
 for (const [workflow, storageKey] of [
-  ['immunization', PENDING_KEY],
+  ['immunization', MULTIPLE_KEY],
   ['inventory', INVENTORY_KEY]
 ]) {
   test(`${workflow} preserves repeated captures when unlock overtakes lock storage`, async () => {
@@ -319,10 +321,7 @@ test('three locked grid captures hand off individually, even with identical barc
   await offer();
   worker.setIdleState('locked');
   await Promise.all([capture(), capture(), capture()]);
-  const ids = Array.from(
-    worker.storageData.get(PENDING_KEY),
-    (row) => row.captureId
-  );
+  const ids = Array.from(worker.storageData.get(MULTIPLE_KEY), (row) => row.id);
   assert.equal(new Set(ids).size, 3);
   worker.setIdleState('active');
   const first = await offer(2);
@@ -346,8 +345,45 @@ test('three locked grid captures hand off individually, even with identical barc
     assert.equal(record.dose_reservations[0].documentId, sender.documentId);
     assert.equal(record.remaining_doses, 1);
   }
-  assert.equal(worker.storageData.get(PENDING_KEY).length, 0);
+  assert.equal(worker.storageData.has(PENDING_KEY), false);
   assert.equal((await offer()).count, 0);
+});
+
+test('ordinary Use and Resume cannot reserve the same locked dose', async () => {
+  const { worker, sender, capture, offer, claim } = resumeFixture();
+  await offer();
+  worker.setIdleState('locked');
+  await capture();
+  worker.setIdleState('active');
+  const selection = await offer();
+  const token = crypto.randomUUID();
+  const mutation = {
+    action: 'mutateQueue',
+    storageKey: MULTIPLE_KEY,
+    payload: { id: selection.captureId, token }
+  };
+  const [use, resumed] = await Promise.all([
+    worker.sendMessage({ ...mutation, operation: 'reserve_dose' }, sender),
+    claim(selection)
+  ]);
+  assert.equal(Number(use.success) + Number(resumed.success), 1);
+  const stop = await worker.sendMessage(
+    {
+      ...mutation,
+      operation: 'stop_dose',
+      payload: {
+        ...mutation.payload,
+        token: resumed.token || token,
+        written: false
+      }
+    },
+    sender
+  );
+  assert.equal(stop.success, true);
+  assert.equal((await offer()).count, 0);
+  const [dose] = worker.storageData.get(MULTIPLE_KEY);
+  assert.equal(dose.remaining_doses, 1);
+  assert.equal(dose.dose_reservations, undefined);
 });
 
 test('a Single offer waits for a locked second capture when unlock overtakes its write', async () => {
@@ -356,7 +392,7 @@ test('a Single offer waits for a locked second capture when unlock overtakes its
   const secondStarted = new Promise((resolve) => (started = resolve));
   const { worker, capture, offer } = resumeFixture('provider_single', {
     delayStorageSet(values, resume) {
-      if (values[PENDING_KEY]?.length !== 2 || finishSecond) return false;
+      if (values[MULTIPLE_KEY]?.length !== 2 || finishSecond) return false;
       finishSecond = resume;
       started();
       return true;
@@ -372,17 +408,18 @@ test('a Single offer waits for a locked second capture when unlock overtakes its
   finishSecond();
   await second;
   assert.equal((await afterUnlock).count, 0);
-  assert.equal(worker.storageData.get(PENDING_KEY).length, 2);
-  assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
+  assert.equal(worker.storageData.get(MULTIPLE_KEY).length, 2);
+  assert.equal(worker.storageData.has(PENDING_KEY), false);
 });
 
-test('a Single handoff persists both sides before granting the reservation', async () => {
+test('Resume leaves the tray dose available if saving its reservation fails', async () => {
   let failHandoff = true;
   const { worker, sender, capture, offer, claim } = resumeFixture(
     'provider_single',
     {
       failStorageSet: (values) =>
-        failHandoff && PENDING_KEY in values && MULTIPLE_KEY in values
+        failHandoff &&
+        values[MULTIPLE_KEY]?.some((row) => row.dose_reservations)
     }
   );
   await offer(1);
@@ -392,8 +429,11 @@ test('a Single handoff persists both sides before granting the reservation', asy
   const selection = await offer(1);
   assert.equal(selection.count, 1);
   assert.equal((await claim(selection)).success, false);
-  assert.equal(worker.storageData.get(PENDING_KEY).length, 1);
-  assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
+  assert.equal(worker.storageData.get(MULTIPLE_KEY).length, 1);
+  assert.equal(
+    worker.storageData.get(MULTIPLE_KEY)[0].dose_reservations,
+    undefined
+  );
   failHandoff = false;
   const moved = await claim(selection);
   assert.equal(moved.recordId, selection.captureId);
@@ -416,6 +456,7 @@ test('a Single handoff persists both sides before granting the reservation', asy
     ).success,
     true
   );
+  assert.equal((await offer(1)).count, 0);
   const adoption = await worker.sendMessage(
     {
       ...mutation,
@@ -458,12 +499,11 @@ test('an unfocused chart can supply a lock witness only after recent focus loss'
 });
 
 test('a captured barcode without a lot remains available for review', async () => {
-  const { worker, capture, offer, claim } = resumeFixture('provider_single');
+  const { worker, capture, offer } = resumeFixture('provider_single');
   await offer();
   worker.setIdleState('locked');
   await capture({ rawText: '0100123456789012' });
   worker.setIdleState('active');
-  assert.equal((await claim(await offer())).reason, 'missing_lot');
   assert.equal((await offer()).count, 0);
   assert.equal(
     worker.storageData.get(PENDING_KEY)[0].reviewState,
@@ -483,7 +523,7 @@ test('no Resume is offered without pre-lock evidence, after a form change, or af
     const { worker, reply, capture, offer } = resumeFixture('provider_single', {
       storage: { [STATUS_KEY]: { state: 'connected' } },
       failStorageSet: (values) =>
-        scenario === 'capture_failure' && values[PENDING_KEY]?.length === 2
+        scenario === 'capture_failure' && values[MULTIPLE_KEY]?.length === 2
     });
     if (scenario !== 'no_witness') await offer();
     worker.setIdleState('locked');
@@ -505,7 +545,7 @@ test('no Resume is offered without pre-lock evidence, after a form change, or af
     }
     worker.setIdleState('active');
     assert.equal((await offer()).count, 0, scenario);
-    assert.equal(worker.storageData.get(PENDING_KEY).length, 1, scenario);
-    assert.equal(worker.storageData.has(MULTIPLE_KEY), false, scenario);
+    assert.equal(worker.storageData.get(MULTIPLE_KEY).length, 1, scenario);
+    assert.equal(worker.storageData.has(PENDING_KEY), false, scenario);
   }
 });

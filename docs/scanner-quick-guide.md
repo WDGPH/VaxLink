@@ -27,15 +27,14 @@ With **Standard USB CDC**, the scanner controls its own beep.
 | Inventory                                             | Open **Inventory** and check the tray. The same destination applies while the workstation is awake and locked.                    |
 | Immunization with a ready single form                 | With automatic entry on, check the fields in the visible chart. Review the agent, lot and other fields before saving in Panorama. |
 | Immunization with a ready Multiple Immunizations grid | Check the Immunization tray and the grid row. The tray keeps the dose for the detail step.                                        |
-| Immunization while locked                             | Return to the original chart and choose **Resume scans** when offered. Find other captures under **Held scanner scans**.          |
+| Immunization while locked                             | Check the Immunization tray. On the original chart, choose **Resume scans** when offered.                                         |
 
-With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Held scanner scans** for the next step. Check the original chart before using a scan that may have filled fields.
+With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Scanner issues** for the next step. Check the original chart before using a scan that may have filled fields.
 
 For Multiple Immunizations, **Resume scans** places eligible doses in the
 available grid rows. Select **Enter Details**, then **Next** as you check each
 dose. A ready Single Immunization form can resume one eligible scan. If
-Resume is unavailable or stops, check the chart, the tray and Held scanner
-scans before trying again.
+Resume is unavailable or stops, check the chart and tray before trying again.
 
 On a single form, a scan may stay pending while Panorama updates. If VaxLink
 cannot confirm the fields, follow the message and check the original chart
@@ -53,8 +52,8 @@ If the unit label is hard to scan and your clinic allows a carton scan, keep the
 
 ## The scanner beeped but nothing appeared
 
-1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Held scanner scans** in Immunization. The unlock summary shows scans available from the last lock.
-2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard held scan** once you have accounted for that capture.
+1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Scanner issues** if a capture needs attention.
+2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard scan** once you have accounted for that capture.
 3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
 4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
 

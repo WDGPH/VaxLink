@@ -395,21 +395,18 @@ popup. Held scans never replay automatically, including after unlock. Field
 verification reflects what the browser observed. Staff still verify and save
 the record in Panorama.
 
-While the workstation is locked, Immunization captures stay held and
-Inventory captures stay in Inventory. Repeated physical scans are kept.
-Lock and unlock changes save in order, and captures retain the session they
-started in even if storage is slow. The popup shows the remaining scans from
-the last lock and warns if capture was interrupted, even when no barcode was
-saved. Unlocking does not start a chart fill. The chart can offer Resume for
-eligible connected scanner captures from the last lock. It confirms the
-original foreground document and form before making the offer and again
-before moving a scan. A move saves the dose and binds it to the original
-document before chart entry begins. Any scan with uncertain delivery stays
-available for review.
+While the workstation is locked, valid captures go straight to the selected
+workflow tray. Repeated physical scans are kept. Captures retain their
+original lock session even if a write finishes after unlock. Unlocking
+leaves the chart untouched.
 
-Multiple Immunizations uses the regular grid assignments and detail fill.
-Single Immunization requires exactly one eligible capture. Long-range
-arrivals use their receipt time and stay available for review.
+On the original chart, **Resume scans** reserves doses already in the
+Immunization tray, in capture order. The worker checks the original
+foreground document and form before offering or claiming a dose. Choosing
+a dose in the tray also removes it from the Resume list. A Single
+Immunization form needs a lock session with exactly one capture. Long-range
+arrivals stay in the tray for deliberate selection. Rejected captures and
+scans with uncertain delivery stay available under **Scanner issues**.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan
