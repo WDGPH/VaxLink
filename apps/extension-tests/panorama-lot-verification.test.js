@@ -533,6 +533,16 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
     '',
     'a terminal miss clears an owned Agent even with an empty Lot'
   );
+  agent.value = 'lot-option';
+  f.label.textContent = 'STALE OTHER LOT';
+  assert.equal(cleanup(), 'changed');
+  assert.equal(
+    agent.value,
+    '',
+    'a stale Lot label does not keep an owned Agent'
+  );
+  assert.equal(field.value, '', 'the blank native Lot was left alone');
+  f.label.textContent = 'Select';
   owner.initialAgent = 'owned agent';
   agent.value = 'lot-option';
   assert.equal(cleanup(), 'empty');
@@ -583,6 +593,23 @@ test('a failed search can leave a pre-existing nonmatching lot unchanged', () =>
     ),
     false
   );
+});
+
+test('the clear action requires a visible and editable Lot control', () => {
+  const { context, state, select, label, root } = fixture();
+  const field = select('OTHER', 'lot-option');
+  label.textContent = 'OTHER';
+  state.controls = [root, field];
+  root.getBoundingClientRect = shown;
+  root.getAttribute = () => null;
+  root.classList = { contains: () => false };
+  const form = context.getPanoramaAutofillForm();
+  assert.equal(context.getClearableGridLot(form).field, field);
+  field.matches = (selector) => selector === ':disabled';
+  assert.equal(context.getClearableGridLot(form), null);
+  field.matches = () => false;
+  root.getBoundingClientRect = () => ({ width: 0, height: 0 });
+  assert.equal(context.getClearableGridLot(form), null);
 });
 
 test('a carried sole Lot is cleared after a refresh unless staff take over', async () => {
@@ -932,6 +959,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'ambiguous_agent',
     'ordered_duplicates',
     'next_then_delete',
+    'reordered_after_delete',
     'browser_history',
     'history_expired',
     'reordered_rows',
@@ -944,7 +972,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     const tab = { id: 42, url, active: true };
     const agents = [
       'MMR',
-      scenario === 'ordered_duplicates' ? 'MMR' : 'HPV',
+      ['ordered_duplicates', 'reordered_after_delete'].includes(scenario)
+        ? 'MMR'
+        : 'HPV',
       ['ambiguous_agent', 'next_then_delete'].includes(scenario) ? 'HPV' : 'HB'
     ];
     const records = agents.map((agent, index) => ({
@@ -1019,6 +1049,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         label: { textContent: selectedLot },
         select: {
           tagName: 'SELECT',
+          isConnected: true,
           value: selectedLot ? 'chosen' : '',
           selectedIndex: selectedLot ? 2 : -1,
           options: [
@@ -1083,6 +1114,39 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }
     kind = 'multiple_detail';
     state.step = reordered ? '1-of-2' : '1-of-3';
+    if (scenario === 'reordered_after_delete') {
+      const click = (textContent) =>
+        context.startGridHandoff({
+          isTrusted: true,
+          target: { closest: () => ({ textContent, form }) }
+        });
+      await context.releaseGridDetailStep('staff_input');
+      click('Delete');
+      windowListeners.get('popstate')[0]();
+      state.step = '1-of-2';
+      detailAgent = agents[2];
+      await context.advanceGridHandoff();
+      assert.deepEqual(
+        fills.map(({ lot }) => lot),
+        ['SAMPLE-2']
+      );
+      await context.finalizeDeferredPanoramaAutofill(fills[0]);
+      click('Next');
+      state.step = '2-of-2';
+      detailAgent = agents[1];
+      await context.advanceGridHandoff();
+      assert.deepEqual(
+        fills.map(({ lot }) => lot),
+        ['SAMPLE-2', 'SAMPLE-1']
+      );
+      await context.finalizeDeferredPanoramaAutofill(fills[1]);
+      assert.deepEqual(
+        saved().map(({ remaining_doses }) => remaining_doses),
+        [2, 1, 1]
+      );
+      continue;
+    }
+
     if (scenario === 'ordered_duplicates') {
       // A different Agent on step 1 must not select a later reservation.
       detailAgent = agents[2];

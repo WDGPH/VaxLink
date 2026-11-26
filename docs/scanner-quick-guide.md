@@ -40,10 +40,13 @@ On a single form, a scan may stay pending while Panorama updates. If VaxLink
 cannot confirm the fields, follow the message and check the original chart
 before trying again. Review and save the record in Panorama.
 
-If a lot is unavailable while entering multiple immunizations, check Vaccine
-Details. Choose **Delete** in Panorama if you intend to skip that immunization.
-VaxLink can still carry the next matching scan. Remove the skipped scan from
-the tray if you no longer need it, or use **Check original chart** if shown.
+If Panorama selects a different lot while entering multiple immunizations,
+compare it with the scanned lot. **Clear Lot and retry** clears that selection
+and tries the same dose again. Check Vaccine Details. Choose **Delete** in
+Panorama if you intend to skip an unavailable immunization. VaxLink can still
+carry the next dose when the Agent, date and lot verify the assignment. Remove
+the skipped scan from the tray if you no longer need it, or use **Check original
+chart** if shown.
 
 The Inventory tray shows captured lots and recent scans.
 
