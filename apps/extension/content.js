@@ -5877,7 +5877,7 @@ function showDoseReview(row, token) {
     <div class="vl-toast-actions">
       <button class="vl-toast-action" data-used="true" type="button">Remove one from tray</button>
       <button class="vl-toast-action" data-used="false" type="button">Keep in tray</button>
-      <button class="vl-toast-dismiss" type="button">Not now</button>
+      <button class="vl-toast-action secondary" data-dose-review-dismiss type="button">Not now</button>
     </div>
   </div>`;
   toastWarningSlot.querySelectorAll('[data-used]').forEach((button) => {
@@ -5899,7 +5899,7 @@ function showDoseReview(row, token) {
     });
   });
   toastWarningSlot
-    .querySelector('.vl-toast-dismiss')
+    .querySelector('[data-dose-review-dismiss]')
     .addEventListener('click', () => dismissToast(toastWarningSlot));
 }
 
