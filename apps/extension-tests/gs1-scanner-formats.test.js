@@ -38,6 +38,12 @@ test('AIM prefixes on GTIN-led barcodes parse identically', () => {
   assert.equal(plain.lot, 'ABCD34');
 });
 
+test('a GTIN can stand alone or precede a separator and expiry', () => {
+  const gtin = '0100012345678905';
+  assert.equal(parseGS1Barcode(gtin).gtin, '00012345678905');
+  assert.equal(parseGS1Barcode(`${gtin}${GS}17251201`).expiry, '12/01/2025');
+});
+
 test('lot-only scans parse even when the lot contains "01"', () => {
   // The 01 re-anchor heuristic used to fire on the "01" inside Y016312 and
   // truncate the payload to "016312" → "AI(01) GTIN incomplete".

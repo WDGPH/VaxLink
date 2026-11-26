@@ -418,20 +418,11 @@ if (!bundlePath) {
   // -------------------------------------------------------------------------
 
   const failures = [];
-  const overriddenLots = [];
-  const results = {
-    HB: 0,
-    'HB-pediatric': 0,
-    'HB-dialysis': 0,
-    ambiguous: 0,
-    unclassified: 0
-  };
 
   for (const { lotNumber, refs } of hbLots) {
     const vaccineInfo = lookupHbLot(lotNumber, indexes);
     if (!vaccineInfo) {
       failures.push({ lot: lotNumber, reason: 'lookup returned null' });
-      results.unclassified++;
       continue;
     }
 
@@ -442,11 +433,8 @@ if (!bundlePath) {
 
     const refCodes = refs.map((r) => r.code);
     const expected = expectedClassification(lotNumber, refCodes);
-    const hasOverride = !!resolveTradenameCodeOverrideByLot(lotNumber);
-    if (hasOverride) overriddenLots.push(lotNumber);
 
     if (hbOutputs.length === 0) {
-      results.unclassified++;
       failures.push({
         lot: lotNumber,
         expected,
@@ -461,7 +449,6 @@ if (!bundlePath) {
       const hasBoth =
         hbOutputs.includes('HB') && hbOutputs.includes('HB-pediatric');
       if (hasBoth) {
-        results.ambiguous++;
         failures.push({
           lot: lotNumber,
           expected,
@@ -471,14 +458,9 @@ if (!bundlePath) {
           strength: vaccineInfo.strength,
           refs: vaccineInfo._allRefs
         });
-      } else {
-        // e.g. HB-dialysis appearing alongside something else — not a conflict
-        const primary = hbOutputs[0];
-        results[primary] = (results[primary] || 0) + 1;
       }
     } else {
       const got = hbOutputs[0];
-      results[got] = (results[got] || 0) + 1;
       if (expected && got !== expected) {
         failures.push({
           lot: lotNumber,
@@ -487,26 +469,11 @@ if (!bundlePath) {
           tradename: vaccineInfo.tradename,
           generic: vaccineInfo.generic_name,
           strength: vaccineInfo.strength,
-          refs: vaccineInfo._allRefs,
-          overridden: hasOverride
+          refs: vaccineInfo._allRefs
         });
       }
     }
   }
-
-  // Print summary
-  test('NVC HB lots: classification summary (informational)', () => {
-    console.log('\n  Classification results:');
-    console.log(`    HB (adult):     ${results['HB']}`);
-    console.log(`    HB-pediatric:   ${results['HB-pediatric']}`);
-    console.log(`    HB-dialysis:    ${results['HB-dialysis']}`);
-    console.log(`    Ambiguous:      ${results.ambiguous}`);
-    console.log(`    Unclassified:   ${results.unclassified}`);
-    console.log(
-      `    Lot overrides applied: ${overriddenLots.join(', ') || '(none)'}`
-    );
-    assert.ok(true); // always passes — informational only
-  });
 
   test('NVC HB lots: overridden adult lots (Y020519, Y016312) classify as HB', () => {
     for (const lot of ['Y020519', 'Y016312']) {

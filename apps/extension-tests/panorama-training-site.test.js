@@ -5,6 +5,7 @@ import vm from 'node:vm';
 
 import {
   createBackgroundHarness,
+  createContentHarness,
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
 
@@ -105,6 +106,54 @@ test('runtime gates recognize supported URLs and preserve the hands-free frame b
       `${url} (iframe=${iframe})`
     );
   }
+});
+
+test('keyboard and clipboard activity on a training chart does not route a scan', () => {
+  const { context, documentListeners, storageReads, windowListeners } =
+    createContentHarness({ location: new URL(TRAINING_URL) });
+  context.initHandsFreeScanner();
+  storageReads
+    .find(({ keys }) => keys.includes('vaxlink_workflow_mode_v1'))
+    .callback({});
+
+  const form = { contains: (node) => node?.form === form };
+  const field = {
+    form,
+    tagName: 'INPUT',
+    type: 'text',
+    value: '',
+    closest: (selector) => (selector.startsWith('input') ? field : null)
+  };
+  context.document.activeElement = field;
+  context.getPanoramaAutofillForm = () => form;
+  const messages = [];
+  const consumed = [];
+  context.chrome.runtime.sendMessage = (message) => messages.push(message);
+  const deliver = (type, details) => {
+    const event = {
+      type,
+      target: field,
+      isTrusted: true,
+      preventDefault: () => consumed.push(type),
+      stopPropagation: () => consumed.push(type),
+      stopImmediatePropagation: () => consumed.push(type),
+      ...details
+    };
+    for (const listeners of [windowListeners, documentListeners])
+      for (const listener of listeners.get(type) || []) listener(event);
+  };
+
+  const barcode = '010001234567890510SAMPLE';
+  for (const key of barcode) {
+    deliver('keydown', { key });
+    field.value += key;
+    deliver('input', { data: key });
+  }
+  for (const key of ['Tab', 'Enter']) deliver('keydown', { key });
+  deliver('paste', { clipboardData: { getData: () => barcode } });
+
+  assert.deepEqual(consumed, []);
+  assert.deepEqual(messages, []);
 });
 
 test('background routes a Single scan to the active training chart', async () => {
