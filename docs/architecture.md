@@ -46,7 +46,11 @@ and owns the live connection and reconnect attempts. `scanner/serial-provider.js
 reads incoming bytes and assembles complete scans. The worker sends those scans
 and connection status back to the hidden host.
 
-This stage reads scanner messages; parsing their vaccine fields happens later.
+`scanner/serial-decoder.js` handles CDC text. `scanner/ssi-transport.js` checks
+SSI packet checksums, joins barcode fragments and sends acknowledgements and
+the three fixed sound commands. The reader owns the serial writer so it can
+acknowledge a scan while a sound command awaits its reply. Parsing vaccine
+fields happens after capture.
 
 ### Panorama integration: `content.js`
 
@@ -233,6 +237,21 @@ what happened on that form. Inventory uses the local catalogue when available an
 barcode while a download is pending. Saved rows keep the lookup result and the
 catalogue version when known. Scanner acknowledgement follows the saved row
 without waiting for Local Activity counts.
+
+The live Zebra DS8178 profile uses SSI packets over USB CDC. The port reader
+acknowledges complete, valid transport packets promptly. The background checks a
+new barcode against the available catalogue and expiry dates independently of
+chart delivery. The worker can send one fixed result sound on the same
+connection. A transport acknowledgement confirms receipt by the port reader,
+and a result sound describes the barcode check. Queue saving and Panorama
+saving are separate steps. The isolated scanner test can request the same three
+sounds directly without sending sample scans to workflows.
+
+The long-range Zebra profile uses USB CDC with a line ending after every
+barcode. It preserves the arrival order and repeated barcodes in the selected
+workflow tray for review, and holds arrivals that could not be added. It leaves
+charts alone and sends no result sounds. Stored scans carry VaxLink’s receipt
+time. Existing USB CDC profiles keep their usual delivery behaviour.
 
 ## Shared helpers
 

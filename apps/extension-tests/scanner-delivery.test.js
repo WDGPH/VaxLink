@@ -4,8 +4,12 @@ import {
   createBackgroundHarness,
   makeTestNvcBundle
 } from './helpers/clinic-sim.js';
+import { LONG_RANGE_PROFILE_ID } from '../extension/scanner/scanner-daemon-shared.js';
 
 const inbox = 'vaxlink_pending_scan_inbox_v1';
+const workflowKey = 'vaxlink_workflow_mode_v1';
+const immunizationTray = 'multiple_inject_queue_v1';
+const inventoryTray = 'inventory_scan_batch_v1';
 const tab = {
   id: 44,
   active: true,
@@ -21,6 +25,12 @@ const row = (rawText) => ({
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
 const capture = (h, rawText) => h.captureScannerScan(row(rawText));
+const captureLongRange = (h, rawText, capturedAt = row(rawText).capturedAt) =>
+  h.captureScannerScan({
+    ...row(rawText),
+    capturedAt,
+    device: { profileId: LONG_RANGE_PROFILE_ID }
+  });
 const options = (extra = {}) => ({
   tabs: [tab],
   storage: { vaxlink_workflow_mode_v1: 'single' },
@@ -29,7 +39,7 @@ const options = (extra = {}) => ({
     contextToken: 'document-1',
     accepted: true,
     success: true,
-    command_handled: true
+    status: 'missing_lot'
   },
   ...extra
 });
@@ -150,6 +160,108 @@ test('a grid receives only the new saved row when automatic grid entry is enable
     assert.equal(writes.length, Number(enabled));
     if (enabled) assert.equal(writes[0].message.recordId, rows[1].id);
   }
+});
+
+test('long-range frames bypass ready Single and Multiple forms and keep repeated scans in receipt order', async () => {
+  for (const kind of ['provider_single', 'multiple_grid']) {
+    const h = harness({
+      tabResponse: {
+        supported: true,
+        contextToken: 'ready-chart',
+        formContext: { kind, ready: true }
+      }
+    });
+    const results = await Promise.all([
+      captureLongRange(h, '10TESTLOT'),
+      captureLongRange(h, '10TESTLOT'),
+      // A clock change must not reorder frames in an upload.
+      captureLongRange(h, '10OTHER', '2026-07-28T11:59:59.000Z')
+    ]);
+    assert.ok(results.every((result) => result.queuedToWorkflow));
+    const rows = h.storageData.get(immunizationTray);
+    assert.deepEqual(
+      Array.from(rows, ({ lot }) => lot),
+      ['TESTLOT', 'TESTLOT', 'OTHER']
+    );
+    assert.equal(new Set(Array.from(rows, ({ id }) => id)).size, 3);
+    assert.equal(rows[2].scanned_at, '2026-07-28T11:59:59.000Z');
+    assert.deepEqual(h.tabMessages, []);
+  }
+});
+
+test('workflow commands select the following frames while earlier tray writes wait', async () => {
+  const save = gate();
+  let blocked = false;
+  const h = harness({
+    tabs: [],
+    delayStorageSet(values, resume) {
+      if (blocked || !(immunizationTray in values)) return false;
+      blocked = true;
+      save.hold(resume);
+      return true;
+    }
+  });
+  const first = captureLongRange(h, '10BEFORE');
+  await save.started;
+  const earlier = captureLongRange(h, '10EARLIER');
+  const inventory = captureLongRange(h, ' VaxLink: INVENTORY ');
+  const middle = captureLongRange(h, '10BETWEEN');
+  const immunization = capture(h, 'VAXLINK:MULTIPLE');
+  const ignored = captureLongRange(h, 'VAXLINK:UNKNOWN');
+  const last = captureLongRange(h, '10AFTER');
+  try {
+    assert.equal((await inventory).workflow, 'inventory');
+    assert.equal((await immunization).workflow, 'immunization');
+    assert.equal((await ignored).commandHandled, true);
+    assert.equal(h.storageData.get(workflowKey), 'immunization');
+  } finally {
+    save.release();
+  }
+  await Promise.all([first, earlier, middle, last]);
+  assert.deepEqual(
+    Array.from(h.storageData.get(immunizationTray), ({ lot }) => lot),
+    ['BEFORE', 'EARLIER', 'AFTER']
+  );
+  assert.deepEqual(
+    Array.from(h.storageData.get(inventoryTray), ({ lot }) => lot),
+    ['BETWEEN']
+  );
+  assert.equal(h.storageData.has(inbox), false);
+});
+
+test('long-range rejections stay visible in held scans and expired stock stays flagged in Inventory', async () => {
+  const h = harness({ tabs: [] });
+  const expiredBarcode = '1720010110EXPIRED';
+  const charts = await captureLongRange(h, expiredBarcode);
+  assert.equal(charts.response?.status, 'expired');
+  assert.equal(h.storageData.has(immunizationTray), false);
+
+  await captureLongRange(h, 'VAXLINK:INVENTORY');
+  const garbage = await captureLongRange(h, 'not a vaccine barcode');
+  const noLot = await captureLongRange(h, '0100123456789012');
+  const inventory = await captureLongRange(h, expiredBarcode);
+  assert.equal(garbage.response?.status, 'parse_error');
+  assert.equal(noLot.response?.status, 'missing_lot');
+  assert.equal(inventory.queuedToWorkflow, true);
+  assert.equal(h.storageData.get(inventoryTray)[0].expiry_flag, 'expired');
+  assert.deepEqual(
+    Array.from(h.storageData.get(inbox), ({ reviewState }) => reviewState),
+    ['expired', 'parse_error', 'missing_lot']
+  );
+});
+
+test('long-range scans keep locked Inventory rows and held Immunization captures distinct', async () => {
+  const h = harness({ idleState: 'locked' });
+  await captureLongRange(h, '10IMMLOT');
+  await captureLongRange(h, 'VAXLINK:INVENTORY');
+  await captureLongRange(h, '10INVLOT');
+  assert.equal(h.storageData.has(immunizationTray), false);
+  const held = h.storageData.get(inbox)[0];
+  const saved = h.storageData.get(inventoryTray)[0];
+  assert.equal(held.pending_workflow, 'immunization');
+  assert.equal(held.captured_while_locked, true);
+  assert.equal(saved.captured_while_locked, true);
+  assert.equal(saved.lock_session_id, held.lock_session_id);
 });
 
 test('held scans are not replayed on startup, unlock, or a drain request', async () => {
@@ -324,7 +436,7 @@ test('discarding a legacy scan removes only one identical row', async () => {
   assert.equal(h.storageData.get(inbox).length, 1);
 });
 
-test('a same-tab chart change during workflow reads cannot select a new context', async () => {
+test('a same-tab chart change during autofill setting reads cannot select a new context', async () => {
   const read = gate();
   let waiting = false;
   const response = {
@@ -339,7 +451,7 @@ test('a same-tab chart change during workflow reads cannot select a new context'
       if (
         waiting ||
         !Array.isArray(keys) ||
-        !keys.includes('vaxlink_workflow_mode_v1')
+        !keys.includes('vaxlink_single_scan_autofill_v1')
       )
         return false;
       waiting = true;

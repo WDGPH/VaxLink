@@ -13,21 +13,40 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       'testScannerBtn',
       'closePairingBtn',
       'pairingStatus',
-      'setupHint'
+      'setupHint',
+      'scannerProfile',
+      'profileControls',
+      'profileHint',
+      'zebraSetup',
+      'liveSetup',
+      'longRangeSetup',
+      'testFeedbackPanel',
+      'feedbackStatus'
     ].map((id) => [
       id,
       {
         dataset: {},
-        addEventListener(_type, listener) {
-          this.click = listener;
+        addEventListener(type, listener) {
+          this[type] = listener;
         }
       }
     ])
   );
+  nodes.scannerProfile.value = '';
+  const feedbackButtons = ['works', 'attention', 'expired'].map((result) => ({
+    dataset: { feedback: result },
+    addEventListener(type, listener) {
+      this[type] = listener;
+    }
+  }));
+  nodes.testFeedbackPanel.querySelectorAll = () => feedbackButtons;
   let portError, releaseCommand, commandStarted, pagehide;
+  let testProfileId = 'zebra-ds8178-usb-cdc';
+  let statusNotice;
   let requestCount = 0,
     closeCount = 0;
   const commands = [];
+  const chooserOptions = [];
   const info = { usbVendorId: 1504, usbProductId: 1 };
   globalThis.document = { getElementById: (id) => nodes[id] };
   globalThis.window = {
@@ -45,7 +64,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       serial: {
         async requestPort(options) {
           requestCount++;
-          assert.deepEqual(options, {});
+          chooserOptions.push(options);
           if (portError) throw portError;
           return { getInfo: () => info };
         },
@@ -62,14 +81,22 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
       }
     },
     runtime: {
-      onMessage: { addListener() {} },
+      onMessage: {
+        addListener(listener) {
+          statusNotice = listener;
+        }
+      },
       sendMessage(message, done) {
         commands.push(message);
         if (message.action === 'scannerDaemon.getStatus') {
           done({
             success: true,
             source: 'live',
-            status: { testing: true, state: 'connected' }
+            status: {
+              testing: true,
+              state: 'connected',
+              profileId: testProfileId
+            }
           });
           return;
         }
@@ -103,6 +130,7 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
     assert.equal(nodes.chooseScannerBtn.disabled, false);
     assert.equal(nodes.pairingStatus.dataset.error, 'false');
     assert.match(nodes.pairingStatus.textContent, /No scanner selected/);
+    assert.deepEqual(chooserOptions[0], {});
 
     portError = undefined;
     for (const failure of ['background', 'transport', null]) {
@@ -143,6 +171,28 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
         );
       } else assert.equal(closeCount, 1);
     }
+
+    for (const [profileId, section] of [
+      ['zebra-ds8178-ssi-live', nodes.liveSetup],
+      ['zebra-ds8178-cdc-long-range', nodes.longRangeSetup]
+    ]) {
+      const started = new Promise((resolve) => {
+        commandStarted = resolve;
+      });
+      nodes.scannerProfile.value = profileId;
+      nodes.scannerProfile.change();
+      assert.equal(nodes.zebraSetup.hidden, false);
+      assert.equal(section.hidden, false);
+      const pending = nodes.chooseScannerBtn.click();
+      await started;
+      assert.deepEqual(chooserOptions.at(-1), {
+        filters: [{ usbVendorId: 1504 }]
+      });
+      assert.equal(commands.at(-1).profileId, profileId);
+      releaseCommand({ success: false, error: 'Connection request failed' });
+      await pending;
+    }
+
     assert.equal(nodes.testScannerBtn.hidden, false);
     const begin = nodes.testScannerBtn.click();
     assert.equal(commands.at(-1).action, 'scannerDaemon.startTest');
@@ -150,6 +200,23 @@ test('pairing needs a click, preserves cancellation, and waits for connection ha
     await begin;
     assert.equal(nodes.closePairingBtn.textContent, 'Finish test');
     assert.match(nodes.pairingStatus.textContent, /Test scans stay out/);
+    assert.equal(nodes.testFeedbackPanel.hidden, true);
+    testProfileId = 'zebra-ds8178-ssi-live';
+    statusNotice({ action: 'scannerDaemon.statusChanged' });
+    await Promise.resolve();
+    assert.equal(nodes.testFeedbackPanel.hidden, false);
+    const sounding = feedbackButtons[1].click();
+    assert.deepEqual(commands.at(-1), {
+      action: 'scannerDaemon.testFeedback',
+      result: 'attention'
+    });
+    assert.ok(feedbackButtons.every((button) => button.disabled));
+    releaseCommand({ success: true });
+    await sounding;
+    assert.match(
+      nodes.feedbackStatus.textContent,
+      /accepted the sound command/
+    );
     pagehide();
     assert.equal(commands.at(-1).action, 'scannerDaemon.endTest');
     releaseCommand({ success: true });

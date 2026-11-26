@@ -1157,6 +1157,9 @@
               <p id="connectionStatus" role="status">
                 Checking scanner connection…
               </p>
+              <p id="longRangeReceiptNote" class="settings-hint" hidden>
+                Long-range scans show when VaxLink received them.
+              </p>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
                   A scan could not be saved or delivered. Check pending scans
@@ -1367,7 +1370,8 @@
             <details id="heldScannerScans" class="tray-history" hidden>
               <summary id="heldScannerScanCount">Held scanner scans</summary>
               <p class="held-instruction">
-                Check the original chart before entering a held scan.
+                Review the barcode before using it. If a scan may have filled a
+                chart, check that chart first.
               </p>
               <ul id="heldScannerScanList"></ul>
             </details>

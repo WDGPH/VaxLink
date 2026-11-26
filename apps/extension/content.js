@@ -352,7 +352,8 @@ function setupMessageListener() {
       useTrayVaccine(
         request.recordId,
         request.contextToken,
-        gridScan ? request.scannerRoute : null
+        gridScan ? request.scannerRoute : null,
+        gridScan && request.scannerResultSound === true
       )
         .then((result) =>
           sendResponse({
@@ -373,6 +374,15 @@ function setupMessageListener() {
       sendResponse({ active: activeTrayReservations.has(request.token) });
       return false;
     }
+    if (request.action === 'showScannerWorkflowCommand') {
+      if (
+        isScannerWorkerSender(sender) &&
+        isHandsFreeSupportedPage() &&
+        ['immunization', 'inventory'].includes(request.mode)
+      )
+        showVaxlinkToast({ _commandMode: request.mode });
+      return false;
+    }
     if (request.action === 'showScannerBarcodeFeedback') {
       if (
         !isScannerWorkerSender(sender) ||
@@ -381,7 +391,12 @@ function setupMessageListener() {
         return false;
       const { status, lot, expiry } = request.feedback || {};
       if (status === 'expired')
-        blockIneligibleChartUse({ lot, expiry, expiry_flag: 'expired' });
+        blockIneligibleChartUse({
+          lot,
+          expiry,
+          expiry_flag: 'expired',
+          _scannerResultSound: request.scannerResultSound === true
+        });
       if (status === 'missing_lot' || status === 'parse_error')
         showVaxlinkToast({ _barcodeFeedback: status });
       return false;
@@ -418,7 +433,8 @@ function setupMessageListener() {
             contextToken: request.contextToken,
             scannerRoute: request.scannerRoute
           },
-          activity
+          activity,
+          request.scannerResultSound === true
         )
       )
         .then((result) => {
@@ -435,8 +451,7 @@ function setupMessageListener() {
             status: result?.status || (result?.success ? 'success' : 'failed'),
             error: result?.error || '',
             chartNeedsReview: result?.chartNeedsReview === true,
-            duplicate_ignored: !!result?.duplicate_ignored,
-            command_handled: !!result?.command_handled
+            duplicate_ignored: !!result?.duplicate_ignored
           });
         })
         .catch((error) =>
@@ -579,7 +594,8 @@ async function handleHandsFreeScan(
   scanValue,
   source,
   scannerDelivery,
-  activity
+  activity,
+  scannerResultSound
 ) {
   const {
     contextToken,
@@ -602,15 +618,6 @@ async function handleHandsFreeScan(
       success: false,
       status: 'cancelled',
       error: 'Autofill stopped: chart lost focus or entry timed out'
-    };
-  }
-
-  if (handleVaxlinkCommand(trimmed)) {
-    return {
-      accepted: true,
-      success: true,
-      status: 'command_handled',
-      command_handled: true
     };
   }
 
@@ -655,7 +662,7 @@ async function handleHandsFreeScan(
       barcode: ''
     });
     console.warn('Hands-free scan ignored (not valid GS1):', error.message);
-    playAudioCue('error');
+    if (!scannerResultSound) playAudioCue('error');
     showVaxlinkToast({ _barcodeFeedback: 'parse_error' });
     logAnalyticsEvent('parse_error', {
       workflow,
@@ -703,6 +710,7 @@ async function handleHandsFreeScan(
   });
   parsed.scanned_at = parsed.scanned_at || scanCapturedAt;
   parsed.barcode_expiry = parsed.expiry || '';
+  parsed._scannerResultSound = scannerResultSound;
 
   try {
     let vaccineInfo = null;
@@ -748,7 +756,7 @@ async function handleHandsFreeScan(
       const lookupExpiryFlag = getExpiryStatus(
         parsed.expiry || parsed.nvc_lot_expiry
       ).flag;
-      if (!vaccineInfo) {
+      if (!vaccineInfo && !scannerResultSound) {
         playAudioCue('error');
       }
       logAnalyticsEvent(vaccineInfo ? 'lookup_success' : 'lookup_error', {
@@ -859,7 +867,7 @@ async function handleHandsFreeScan(
   if (success) {
     showVaxlinkToast(parsed);
   } else if (!pending) {
-    playAudioCue('error');
+    if (!scannerResultSound) playAudioCue('error');
     if (parsed.lookup_error) showVaxlinkToast(parsed);
   }
   vlog('hands-free autofill', autofillResult?.status, { source });
@@ -2550,6 +2558,7 @@ function blockIneligibleChartUse(data) {
     expiry,
     expiry_flag: 'expired',
     _chartUseBlocked: true,
+    _scannerResultSound: data._scannerResultSound,
     reference_only: data.reference_only === true
   });
   return {
@@ -4130,7 +4139,12 @@ function mutateQueueViaBackground(storageKey, operation, payload = {}) {
   });
 }
 
-async function useTrayVaccine(recordId, contextToken, scannerRoute = null) {
+async function useTrayVaccine(
+  recordId,
+  contextToken,
+  scannerRoute = null,
+  scannerResultSound = false
+) {
   if (
     typeof recordId !== 'string' ||
     !recordId.trim() ||
@@ -4154,10 +4168,11 @@ async function useTrayVaccine(recordId, contextToken, scannerRoute = null) {
   )
     throw new Error('The grid changed. The vaccine remains in the tray.');
 
-  const data = beginPanoramaAutofill({}, true, {
-    automatic: !!scannerRoute,
-    startBy: scannerRoute?.startBy ?? null
-  });
+  const data = beginPanoramaAutofill(
+    { _scannerResultSound: scannerResultSound },
+    true,
+    { automatic: !!scannerRoute, startBy: scannerRoute?.startBy ?? null }
+  );
   if (!scannerRoute && context.kind === 'multiple_detail') {
     clearCarryProblem();
     if (!(await releaseGridDetailStep('tray_use')))
@@ -4261,6 +4276,7 @@ async function fillReservedTrayRecord(
       throw new Error(
         'The saved vaccine has no Lot or Trade that Panorama can verify.'
       );
+    data._scannerResultSound = ownerData._scannerResultSound;
     const blocked = blockIneligibleChartUse(data);
     if (blocked) return blocked;
     dose.record = record;
@@ -4495,36 +4511,6 @@ function autoFillPanorama(data) {
       error: e.message || 'Auto-fill failed'
     });
   }
-}
-
-// ---------------------------------------------------------------------------
-// Scanner-triggered mode switch (VAXLINK: command barcodes)
-// ---------------------------------------------------------------------------
-
-function handleVaxlinkCommand(value) {
-  const upper = String(value).trim().toUpperCase();
-  if (!upper.startsWith('VAXLINK:')) return false;
-  const command = upper.slice('VAXLINK:'.length).trim();
-  const modeMap = {
-    SINGLE: 'immunization',
-    MULTIPLE: 'immunization',
-    IMMUNIZATION: 'immunization',
-    INVENTORY: 'inventory'
-  };
-  const newMode = modeMap[command];
-  if (!newMode) {
-    vlog('unknown VAXLINK command', command);
-    return true;
-  }
-  updatePanoramaWorkflowMode(newMode);
-  chrome.storage.local.set({ [WORKFLOW_MODE_KEY]: newMode });
-  logAnalyticsEvent('workflow_mode_set', {
-    workflow: newMode,
-    source: 'scanner_command'
-  });
-  showVaxlinkToast({ _commandMode: newMode });
-  vlog('scanner command mode switch', newMode);
-  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -4969,7 +4955,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     logAnalyticsEvent('expiry_notice_shown', {
       workflow: data._vaxlinkQueueContext?.workflow || activeWorkflowMode
     });
-    playAudioCue('expiry_warning');
+    if (!data._scannerResultSound) playAudioCue('expiry_warning');
     const dismissBtn = toastWarningSlot.querySelector('.vl-toast-dismiss');
     if (dismissBtn)
       dismissBtn.addEventListener('click', () =>

@@ -1,8 +1,13 @@
+import {
+  LIVE_SSI_PROFILE_ID,
+  LONG_RANGE_PROFILE_ID
+} from './scanner-daemon-shared.js';
+
 export const SCANNER_PROFILE_STORAGE_KEY = 'vaxlink_serial_scanner_profile_v1';
 
 export const ZEBRA_USB_VENDOR_ID = 0x05e0;
 
-export const SERIAL_SCANNER_PROFILES = Object.freeze([
+const cdcProfiles = [
   {
     id: 'zebra-ds8178-usb-cdc',
     label: 'Zebra DS8178 / USB CDC',
@@ -51,6 +56,28 @@ export const SERIAL_SCANNER_PROFILES = Object.freeze([
       delimiters: ['\r\n', '\n', '\r'],
       idleFlushMs: 150,
       maxFrameLength: 512
+    }
+  }
+];
+const [zebraCdc] = cdcProfiles;
+
+export const SERIAL_SCANNER_PROFILES = Object.freeze([
+  ...cdcProfiles,
+  {
+    ...zebraCdc,
+    id: LIVE_SSI_PROFILE_ID,
+    label: 'Zebra DS8178 / Live feedback',
+    protocol: 'ssi',
+    decoder: null
+  },
+  {
+    ...zebraCdc,
+    id: LONG_RANGE_PROFILE_ID,
+    label: 'Zebra DS8178 / Long range',
+    decoder: {
+      delimiters: ['\r\n'],
+      requireTerminator: true,
+      maxFrameLength: 8192
     }
   }
 ]);

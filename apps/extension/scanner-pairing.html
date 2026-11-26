@@ -18,6 +18,10 @@
           Arial,
           sans-serif;
       }
+      main {
+        max-width: 600px;
+        margin: auto;
+      }
       h1 {
         margin: 0 0 12px;
         color: #102d41;
@@ -26,12 +30,55 @@
       p {
         margin: 0 0 16px;
       }
-      #pairingStatus[data-error='true'] {
+      [data-error='true'] {
         color: #b42318;
+      }
+      label {
+        display: block;
+        margin-bottom: 4px;
+        font-weight: 600;
+      }
+      select {
+        width: 100%;
+        margin-bottom: 12px;
+        padding: 8px;
+        border: 1px solid #9aabbc;
+        border-radius: 6px;
+        color: inherit;
+        background: #fff;
+        font: inherit;
+      }
+      details {
+        margin-bottom: 16px;
+        padding: 8px 12px;
+        border: 1px solid #d4dce6;
+        border-radius: 8px;
+      }
+      summary {
+        color: #0e6575;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      details p {
+        margin: 8px 0;
+      }
+      details ol {
+        margin: 8px 0;
+        padding-left: 24px;
+      }
+      a {
+        color: #0e6575;
       }
       .actions {
         display: flex;
+        flex-wrap: wrap;
         gap: 10px;
+      }
+      #testFeedbackPanel {
+        margin-bottom: 16px;
+      }
+      #feedbackStatus {
+        margin: 8px 0 0;
       }
       button {
         padding: 10px 16px;
@@ -52,7 +99,7 @@
         opacity: 0.6;
         cursor: default;
       }
-      button:focus-visible {
+      :is(button, select, summary, a):focus-visible {
         outline: 2px solid #0f8b8d;
         outline-offset: 3px;
       }
@@ -61,10 +108,100 @@
   <body>
     <main>
       <h1>Scanner setup</h1>
-      <p id="setupHint">Connect your scanner to capture barcodes in VaxLink.</p>
+      <div id="profileControls">
+        <label for="scannerProfile">Setup type</label>
+        <select id="scannerProfile" aria-describedby="profileHint">
+          <option value="">Standard USB CDC</option>
+          <option value="zebra-ds8178-ssi-live">
+            Zebra DS8178 · Live feedback
+          </option>
+          <option value="zebra-ds8178-cdc-long-range">
+            Zebra DS8178 · Long range
+          </option>
+        </select>
+        <p id="profileHint">
+          Use this for an existing USB CDC setup or a generic scanner. The
+          scanner controls its own beep.
+        </p>
+        <details id="zebraSetup" hidden>
+          <summary>Program your Zebra DS8178</summary>
+          <p>
+            Upload any stored scans, then choose <strong>Disconnect</strong> in
+            VaxLink Settings before programming. Keep the scanner near its
+            powered, paired cradle.
+          </p>
+          <p>
+            <a
+              href="scanner/vaxlink-ds8178-setup-barcodes.pdf"
+              target="_blank"
+              rel="noopener"
+              >Open the printable setup sheet (PDF)</a
+            >. Print at 100% scale and scan one symbol per step.
+          </p>
+          <p>
+            For an optional clean start, scan
+            <strong>Set Factory Defaults</strong> first. This clears custom
+            defaults and settings.
+          </p>
+          <div id="liveSetup" hidden>
+            <ol>
+              <li>Normal (do not batch)</li>
+              <li>Auto-Reconnect Immediately</li>
+              <li>SSI over USB CDC. Wait for the connection to restart.</li>
+              <li>Send Packeted Decode Data</li>
+              <li>Enable ACK/NAK</li>
+              <li>Data As Is</li>
+              <li>Do Not Beep After Good Decode</li>
+            </ol>
+            <p>
+              If your SSI settings were customized, use the Zebra guide to set
+              Multipacket Option 1 (page 9-19) and the 2-second Host Serial
+              Response Timeout (page 9-17).
+            </p>
+            <p>
+              Connect the scanner, reopen setup and choose
+              <strong>Test saved scanner</strong> to test the three sounds.
+            </p>
+          </div>
+          <div id="longRangeSetup" hidden>
+            <ol>
+              <li>USB CDC Host. Wait for the connection to restart.</li>
+              <li>Add Enter Key (Carriage Return/Line Feed)</li>
+              <li>Beep After Good Decode</li>
+              <li>Enable Pair On Contacts</li>
+              <li>Disable Auto-Reconnect</li>
+              <li>Out of Range Batch Mode</li>
+            </ol>
+            <p>
+              Connect with this setup in VaxLink and choose the intended
+              workflow before docking to upload. Review the tray and any held
+              scans after upload.
+            </p>
+          </div>
+        </details>
+      </div>
+      <p id="setupHint" hidden>
+        Closing setup restores the previous capture setting.
+      </p>
       <p id="pairingStatus" role="status" hidden></p>
+      <section id="testFeedbackPanel" aria-label="Test feedback sounds" hidden>
+        <p>
+          Listen for one short high beep, two short low beeps, and three long
+          low beeps.
+        </p>
+        <div class="actions">
+          <button type="button" data-feedback="works">Recognized</button>
+          <button type="button" data-feedback="attention">
+            Needs attention
+          </button>
+          <button type="button" data-feedback="expired">Expired</button>
+        </div>
+        <p id="feedbackStatus" role="status" hidden></p>
+      </section>
       <div class="actions">
-        <button id="chooseScannerBtn" type="button">Connect scanner</button>
+        <button id="chooseScannerBtn" type="button" disabled>
+          Connect scanner
+        </button>
         <button id="testScannerBtn" type="button" hidden>
           Test saved scanner
         </button>

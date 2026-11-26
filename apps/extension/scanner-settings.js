@@ -1,4 +1,6 @@
 import {
+  LIVE_SSI_PROFILE_ID,
+  LONG_RANGE_PROFILE_ID,
   SCANNER_DAEMON_ACTIONS,
   SCANNER_STATUS_STATES,
   normalizeScannerStatusSnapshot,
@@ -20,6 +22,7 @@ export function initializeScannerSettings() {
     'disconnectBtn',
     'forgetScannerBtn',
     'scannerActionNotice',
+    'longRangeReceiptNote',
     'connectionStatus'
   ].forEach((id) => {
     els[id] = document.getElementById(id);
@@ -99,7 +102,12 @@ function applyDaemonStatus(status, source = 'live') {
   const vendor = formatUsbId(usbVendorId);
   const product = formatUsbId(usbProductId);
   const usb = vendor && product ? `[USB ${vendor}:${product}]` : '';
-  const name = usbVendorId === ZEBRA_USB_VENDOR_ID ? 'Zebra' : '';
+  const name =
+    {
+      [LIVE_SSI_PROFILE_ID]: 'Zebra live feedback',
+      [LONG_RANGE_PROFILE_ID]: 'Zebra long range'
+    }[scannerStatusSnapshot.profileId] ||
+    (usbVendorId === ZEBRA_USB_VENDOR_ID ? 'Zebra' : '');
   const description = [name, usb].filter(Boolean).join(' ');
   setStatus(
     els.connectionStatus,
@@ -125,6 +133,10 @@ function applyDaemonStatus(status, source = 'live') {
     state === SCANNER_STATUS_STATES.PERMISSION_LOST ||
     scannerStatusSnapshot.selectionRequired;
   const testing = scannerStatusSnapshot.testing;
+  if (els.longRangeReceiptNote) {
+    els.longRangeReceiptNote.hidden =
+      scannerStatusSnapshot.profileId !== LONG_RANGE_PROFILE_ID;
+  }
   const canStop =
     retryStop ||
     (identityKnown &&

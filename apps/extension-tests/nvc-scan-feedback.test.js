@@ -2,9 +2,177 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
 import {
+  createBackgroundHarness,
   createContentHarness,
-  deliverScannerScanToChart
+  deliverScannerScanToChart,
+  makeTestNvcBundle
 } from './helpers/clinic-sim.js';
+
+const liveProfile = 'zebra-ds8178-ssi-live';
+const scannerHost = {
+  id: 'vaxlink-test',
+  url: 'chrome-extension://vaxlink-test/scanner-daemon.html'
+};
+
+function capture(
+  harness,
+  rawText,
+  profileId = liveProfile,
+  sender = scannerHost
+) {
+  return harness.sendMessage(
+    {
+      action: 'scannerScanCaptured',
+      scan: { rawText, source: 'web-serial', device: { profileId } },
+      feedbackToken: `capture-${rawText}`
+    },
+    sender
+  );
+}
+
+test('live SSI reports recognition, attention and expiry without a chart or a catalogue download', async () => {
+  const bundle = makeTestNvcBundle();
+  const lots = bundle.entry[1].resource.concept;
+  const addLot = (code, extra = {}) => {
+    const { property, ...fields } = extra;
+    lots.push({
+      ...lots[0],
+      code,
+      property: [{ code: 'lotNumber', valueString: code }, ...(property || [])],
+      ...fields
+    });
+  };
+  addLot('NOIDENTITY', { extension: [] });
+  addLot('EXPIREDINCOMPLETE', {
+    extension: [],
+    property: [{ code: 'expiryDate', valueDateTime: '2001-01-01T00:00:00Z' }]
+  });
+  addLot('EXPIREDNVC', {
+    property: [{ code: 'expiryDate', valueDateTime: '2001-01-01T00:00:00Z' }]
+  });
+  addLot('BADDATE', {
+    property: [{ code: 'expiryDate', valueDateTime: '2099-02-30' }]
+  });
+  const cases = [
+    ['10TESTLOT', 'works'],
+    ['10MISSING', 'attention'],
+    ['10NOIDENTITY', 'attention'],
+    ['10BADDATE', 'attention'],
+    ['1799123110EXPIREDNVC', 'expired'],
+    ['1799123110EXPIREDINCOMPLETE', 'expired'],
+    ['1701010110MISSING', 'expired'],
+    ['17991231', 'attention'],
+    ['17010101', 'expired'],
+    ['not a barcode', 'attention']
+  ];
+  for (const mode of ['inventory', 'immunization']) {
+    const feedback = [];
+    const harness = createBackgroundHarness(bundle, {
+      storage: { vaxlink_workflow_mode_v1: mode },
+      runtimeSendMessage(message, reply) {
+        if (message.action === 'scannerDaemon.feedback') feedback.push(message);
+        reply({ success: true });
+      }
+    });
+    for (const [rawText] of cases) {
+      const captureResult = await capture(harness, rawText);
+      if (rawText === 'not a barcode')
+        assert.equal(captureResult.response?.status, 'parse_error');
+    }
+    assert.deepEqual(
+      feedback.map(({ target, feedbackToken, result }) => [
+        target,
+        feedbackToken,
+        result
+      ]),
+      cases.map(([rawText, result]) => [
+        'scannerDaemon',
+        `capture-${rawText}`,
+        result
+      ])
+    );
+    assert.equal(harness.offscreenCreations.length, 0);
+    assert.equal(harness.tabMessages.length, 0);
+  }
+
+  const feedback = [];
+  const offline = createBackgroundHarness(null, {
+    storage: { vaxlink_workflow_mode_v1: 'inventory' },
+    fetch() {
+      assert.fail('Feedback must never wait for a catalogue download');
+    },
+    runtimeSendMessage(message, reply) {
+      if (message.action === 'scannerDaemon.feedback')
+        feedback.push(message.result);
+      reply({ success: true });
+    }
+  });
+  await capture(offline, '10TESTLOT');
+  await capture(offline, 'VAXLINK:INVENTORY');
+  await capture(offline, '10TESTLOT', 'generic-usb-cdc');
+  await capture(offline, '10TESTLOT', 'zebra-ds8178-usb-cdc');
+  await capture(offline, '10TESTLOT', 'zebra-ds8178-cdc-long-range');
+  const rejected = await capture(offline, '10TESTLOT', liveProfile, {
+    ...scannerHost,
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  });
+  assert.equal(rejected.success, false);
+  assert.deepEqual(feedback, ['attention']);
+});
+
+test('live SSI feedback finishes while chart routing is waiting, even if the sound fails', async () => {
+  let releaseChart;
+  let chartStarted;
+  let soundResult;
+  const chartWaiting = new Promise((resolve) => {
+    chartStarted = resolve;
+  });
+  const feedback = new Promise((resolve) => {
+    soundResult = resolve;
+  });
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    tabs: [{ id: 1, active: true }],
+    delayTabMessage(_tabId, message, reply) {
+      if (message.action !== 'getPanoramaIntegration') return false;
+      releaseChart = reply;
+      chartStarted();
+      return true;
+    },
+    runtimeSendMessage(message, reply) {
+      if (message.action === 'scannerDaemon.feedback')
+        soundResult(message.result);
+      reply({ success: false });
+    }
+  });
+  const arrival = capture(harness, '10TESTLOT');
+  await chartWaiting;
+  assert.equal(await feedback, 'works');
+  assert.equal(harness.storageData.has('multiple_inject_queue_v1'), false);
+  releaseChart();
+  const result = await arrival;
+  assert.equal(result.queuedToWorkflow, true);
+  assert.equal(
+    harness.storageData.get('multiple_inject_queue_v1')[0].lot,
+    'TESTLOT'
+  );
+});
+
+test('a fast expiry result cannot sound before the preceding live scan', async () => {
+  const feedback = [];
+  const harness = createBackgroundHarness(makeTestNvcBundle(), {
+    storage: { vaxlink_workflow_mode_v1: 'inventory' },
+    runtimeSendMessage(message, reply) {
+      if (message.action === 'scannerDaemon.feedback')
+        feedback.push(message.result);
+      reply({ success: true });
+    }
+  });
+  await Promise.all([
+    capture(harness, '10TESTLOT'),
+    capture(harness, '1701010110MISSING')
+  ]);
+  assert.deepEqual(feedback, ['works', 'expired']);
+});
 
 test('failed chart fill still shows the NVC failure and retains barcode fields', async () => {
   for (const error of [

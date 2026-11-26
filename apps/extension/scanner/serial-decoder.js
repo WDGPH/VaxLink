@@ -38,8 +38,17 @@ export function createLineFrameDecoder(options = {}) {
       ? options.delimiters
       : ['\r\n', '\n', '\r'];
   const maxFrameLength = Number(options.maxFrameLength || 512);
+  const requireTerminator = options.requireTerminator === true;
+  const delimiterTail =
+    Math.max(...delimiters.map((delimiter) => delimiter.length)) - 1;
   let textBuffer = '';
   let byteBuffer = [];
+  let discarding = false;
+
+  const oversizedFrame = () => ({
+    text: 'Barcode exceeded the scanner capture limit.',
+    rawBytesHex: ''
+  });
 
   const emitFrame = (terminator = '') => {
     const terminatorLength = terminator.length;
@@ -54,6 +63,8 @@ export function createLineFrameDecoder(options = {}) {
     textBuffer = '';
     byteBuffer = [];
     const trimmed = frameText.trim();
+    if (requireTerminator && frameText.length > maxFrameLength)
+      return oversizedFrame();
     if (!trimmed) return null;
     return {
       text: trimmed,
@@ -66,16 +77,32 @@ export function createLineFrameDecoder(options = {}) {
       const frames = [];
       for (const byte of toByteArray(chunk)) {
         textBuffer += byteToText(byte, encoding);
-        byteBuffer.push(byte);
-
         const terminator = findTerminator(textBuffer, delimiters);
+        if (discarding) {
+          textBuffer = terminator
+            ? ''
+            : textBuffer.slice(textBuffer.length - delimiterTail);
+          discarding = !terminator;
+          if (terminator) frames.push(oversizedFrame());
+          continue;
+        }
+        byteBuffer.push(byte);
         if (terminator) {
           const frame = emitFrame(terminator);
           if (frame) frames.push(frame);
           continue;
         }
 
-        if (textBuffer.length > maxFrameLength) {
+        if (
+          requireTerminator &&
+          textBuffer.length > maxFrameLength + delimiterTail
+        ) {
+          // Wait for the delimiter so the queue can hold this unreadable
+          // capture once, without treating any of its tail as another scan.
+          textBuffer = textBuffer.slice(textBuffer.length - delimiterTail);
+          byteBuffer = [];
+          discarding = true;
+        } else if (!requireTerminator && textBuffer.length > maxFrameLength) {
           const frame = emitFrame('');
           if (frame) frames.push(frame);
         }
@@ -84,6 +111,7 @@ export function createLineFrameDecoder(options = {}) {
     },
 
     flush() {
+      if (requireTerminator) return [];
       const frame = emitFrame('');
       return frame ? [frame] : [];
     },
@@ -95,6 +123,7 @@ export function createLineFrameDecoder(options = {}) {
     reset() {
       textBuffer = '';
       byteBuffer = [];
+      discarding = false;
     }
   };
 }
