@@ -1030,6 +1030,14 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       for (const [index, { lot }] of records.entries()) {
         state.step = `${index + 1}-of-3`;
         detailAgent = agents[index];
+        if (index === 1) {
+          selectedLot = 'SAMPLE-0';
+          await context.advanceGridHandoff();
+          assert.equal(fills.length, 1);
+          assert.equal(saved()[1].remaining_doses, 2);
+          assert.equal(selectedLot, 'SAMPLE-0');
+          selectedLot = '';
+        }
         await context.advanceGridHandoff();
         await context.advanceGridHandoff();
         assert.equal(fills.length, index + 1);

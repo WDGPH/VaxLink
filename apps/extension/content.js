@@ -6412,17 +6412,20 @@ function hasGridDetailLotEvidence(evidence) {
 function matchesGridDetail(entry) {
   const detail = readGridDetailIdentity(getPanoramaAutofillForm());
   const sameAgent = panoramaAgentIdentity(detail.agent) === entry.agent;
+  const lotEvidence =
+    entry.requireLotEvidence || entry.orderedRepeat
+      ? readGridDetailLotEvidence(
+          entry.lot,
+          entry.allowEmptyFinalLot && sameAgent
+        )
+      : null;
   return (
     sameGridDate(detail.date, entry.date) &&
     (sameAgent ||
       queueRecordMatchesPanoramaAgentText(entry.dose.record, detail.agent)) &&
+    (!entry.orderedRepeat || lotEvidence !== 'conflicting_selection') &&
     ((!entry.requireLotEvidence && sameAgent) ||
-      hasGridDetailLotEvidence(
-        readGridDetailLotEvidence(
-          entry.lot,
-          entry.allowEmptyFinalLot && sameAgent
-        )
-      ))
+      hasGridDetailLotEvidence(lotEvidence))
   );
 }
 
@@ -6462,13 +6465,28 @@ function identifyGridDetail(handoff, form, step, total) {
     step === total &&
     !alias &&
     handoff.rows.every((other) => other === row || !other.entry);
-  const lotEvidence = requireLotEvidence
-    ? readGridDetailLotEvidence(row.entry.lot, allowEmptyFinalLot)
-    : 'not_required';
+  // A repeated Agent can start with a blank Lot. A conflicting selection
+  // may belong to the other dose, so leave it for staff to check.
+  const orderedRepeat =
+    !!ordered &&
+    handoff.rows.some((other) => other !== row && matchesAgent(other));
+  const lotEvidence =
+    requireLotEvidence || orderedRepeat
+      ? readGridDetailLotEvidence(row.entry.lot, allowEmptyFinalLot)
+      : 'not_required';
   const evidence = { alias, reordered, lotEvidence };
-  if (requireLotEvidence && !hasGridDetailLotEvidence(lotEvidence))
+  if (
+    (orderedRepeat && lotEvidence === 'conflicting_selection') ||
+    (requireLotEvidence && !hasGridDetailLotEvidence(lotEvidence))
+  )
     return { candidate: row, reason: 'detail_lot_unconfirmed', ...evidence };
-  return { row, requireLotEvidence, allowEmptyFinalLot, ...evidence };
+  return {
+    row,
+    requireLotEvidence,
+    orderedRepeat,
+    allowEmptyFinalLot,
+    ...evidence
+  };
 }
 
 function showCarryProblem(message) {
@@ -6614,7 +6632,7 @@ async function advanceGridHandoff() {
   const match = context.ready
     ? identifyGridDetail(handoff, form, step, total)
     : { reason: 'detail_not_ready' };
-  const { row, requireLotEvidence, allowEmptyFinalLot } = match;
+  const { row, requireLotEvidence, orderedRepeat, allowEmptyFinalLot } = match;
   const waitExpired = !row && performance.now() >= handoff.retryUntil;
   if (handoff.trace) {
     const candidate = row || match.candidate;
@@ -6734,6 +6752,7 @@ async function advanceGridHandoff() {
     data._vaxlinkOwner.gridDetail = {
       ...entry,
       requireLotEvidence,
+      orderedRepeat,
       allowEmptyFinalLot
     };
     entry.log('detail_matched', step);
