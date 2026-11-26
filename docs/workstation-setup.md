@@ -32,12 +32,11 @@ Existing USB CDC scanners keep their saved setup. Use the Zebra options only wit
 ### Program the Zebra DS8178
 
 1. Finish uploading any stored scans. Then choose **Disconnect** in **VaxLink → Settings → Scanner** before changing the scanner’s settings. Keep the scanner near its powered, paired cradle.
-2. In **VaxLink → Settings → Scanner → Setup**, choose the Zebra setup you want. Open **Program your Zebra DS8178** and print the setup sheet at 100% scale.
-3. For an optional clean start, scan **Set Factory Defaults** first. This clears custom defaults and settings. Scan the symbols for your chosen setup in order. When you reach the USB host type, wait for the connection to restart before continuing. The browser may ask you to choose the scanner again.
-4. With live feedback, use **Multipacket Option 1** and the **2-second Host Serial Response Timeout**. These are the factory settings. If they were customized, use the guide’s symbols on pages 9-19 and 9-17.
-5. Return to setup, select the matching profile and choose **Connect scanner**. For live feedback, reopen setup and choose **Test saved scanner**. Listen for each of the three sounds. For long range, choose the workflow before docking the scanner to upload, then review the tray and any held scans. Finish any scanner test before uploading stored scans.
+2. In **VaxLink → Settings → Scanner → Setup**, choose the Zebra setup you want. Open **Program your Zebra DS8178** and print the single-scan sheet at 100% scale.
+3. Scan **Live feedback** on page 1 or **Long range** on page 2. Each barcode clears custom defaults and settings, then applies the chosen setup. Wait for the USB port to return. The browser may ask you to choose the scanner again.
+4. Return to setup and choose **Connect scanner**. For live feedback, reopen setup and choose **Test saved scanner**. Listen for each of the three sounds. For long range, choose the workflow before docking the scanner to upload, then review the tray and any held scans. Finish any scanner test before uploading stored scans.
 
-The setup sheet contains individual Zebra programming symbols from the DS8178 Product Reference Guide, MN-002752-18EN Rev A (August 2025). Use one symbol per step. Complete the hardware acceptance checks for the scanner, cradle and workstation before clinical use. [Zebra DS8178 Product Reference Guide](https://www.zebra.com/content/dam/support-dam/en/documentation/unrestricted/guide/product/ds8178-prg-en.pdf)
+The combined barcodes have passed software decoding checks. Use them on a training workstation and complete the [scanner acceptance checks](scanner-acceptance.md#check-the-two-zebra-ds8178-setups) on the intended scanner and cradle before clinical use. [Zebra DS8178 Product Reference Guide](https://www.zebra.com/content/dam/support-dam/en/documentation/unrestricted/guide/product/ds8178-prg-en.pdf)
 
 ## Before clinical use
 
