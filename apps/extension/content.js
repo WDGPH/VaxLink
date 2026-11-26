@@ -4870,7 +4870,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     : '';
 
   const lotReviewMarkup = data._lotNeedsReview
-    ? '<div class="vl-toast-detail">Check the Agent, Lot and Vaccine Details before continuing.</div>'
+    ? '<div class="vl-toast-detail">Check the Agent and Lot on the chart. Review Vaccine Details before continuing.</div>'
     : '';
 
   if (data._fillFeedback) {
