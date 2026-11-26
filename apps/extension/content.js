@@ -993,6 +993,7 @@ function initHandsFreeScanner() {
   for (const type of ['pagehide', 'popstate', 'hashchange']) {
     window.addEventListener(type, () => {
       lockedScanChart = null;
+      if (type === 'popstate' && keepGridCarryForDetailHistory()) return;
       clearGridCarry(type);
       cancelPanoramaAutofill();
       if (type === 'pagehide') chartActivity?.flush();
@@ -2286,6 +2287,46 @@ function getPanoramaDisplayedLot(widget) {
   );
 }
 
+function readAgreedNativeLot(widget) {
+  const field = widget?.select;
+  const selected = panoramaLotSelectOptions(field).find(
+    (option) => field?.value && option.value === field.value
+  );
+  const native = getPanoramaNonemptyLotLabel(selected?.text);
+  return native &&
+    (!widget.label ||
+      getPanoramaNonemptyLotLabel(widget.label.textContent) === native)
+    ? native
+    : '';
+}
+
+function lotMissLeftSelectionAlone(owner, cleanup, lot) {
+  const widget = getPanoramaLotWidget();
+  if (
+    !widget?.select?.isConnected ||
+    isPrimeFacesAjaxBusy() ||
+    owner.lotSelectionWidgetId ||
+    owner.sawMatchingLot
+  )
+    return false;
+  const native =
+    widget.select.value &&
+    getPanoramaNonemptyLotLabel(readPanoramaLotSelection(widget));
+  const visible = getPanoramaNonemptyLotLabel(widget.label?.textContent);
+  if (cleanup === 'empty') return !owner.initialLot && !native && !visible;
+  // A search can touch the form without selecting a product. Keep a dose
+  // available only if the Lot readbacks and the original Agent agree.
+  return (
+    cleanup === 'review' &&
+    !!owner.initialLot &&
+    owner.initialAgreedLot === owner.initialLot &&
+    readAgreedNativeLot(widget) === owner.initialLot &&
+    !panoramaLotLabelMatches(owner.initialLot, lot) &&
+    !owner.filledAgent &&
+    owner.initialAgent === getPanoramaCurrentAgentSelectionText(owner.form)
+  );
+}
+
 function clearPanoramaSelection(field, allowNoPlaceholder = false) {
   const blanks = [...(field?.options || [])].filter(
     (option) => !option.disabled && option.value === ''
@@ -3261,17 +3302,11 @@ function schedulePanoramaLotOrTradeSelection(
         !unreadable &&
         owner.kind === 'multiple_detail' &&
         owner.trayDose?.reserved &&
-        cleanup === 'empty' &&
-        !owner.initialLot &&
-        !owner.lotSelectionWidgetId &&
-        !owner.sawMatchingLot &&
-        getPanoramaLotWidget()?.select?.isConnected
+        lotMissLeftSelectionAlone(owner, cleanup, data.lot)
       ) {
-        // Funding and dropdown interactions can mark a write before any Lot
-        // was selected. This uninterrupted check established an empty detail.
+        owner.lotMissNotice = true;
         void stopTrayDose(owner, true).then((released) => {
           if (
-            released &&
             panoramaAutofillOwner === owner &&
             owner.form === getPanoramaAutofillForm() &&
             owner.step ===
@@ -3280,14 +3315,22 @@ function schedulePanoramaLotOrTradeSelection(
             showVaxlinkToast({
               ...feedback,
               _fillFeedback: reason,
-              _doseKept: true
+              _doseKept: released === true,
+              _doseNeedsReview: released !== true
             });
         });
         return;
       }
+      const doseNeedsReview =
+        !unreadable &&
+        owner.kind === 'multiple_detail' &&
+        owner.trayDose?.reserved &&
+        owner.writeAttempted === true;
+      owner.lotMissNotice = !!doseNeedsReview;
       showVaxlinkToast({
         ...feedback,
-        _fillFeedback: reason
+        _fillFeedback: reason,
+        _doseNeedsReview: doseNeedsReview
       });
       stopUnverified();
     }
@@ -3900,6 +3943,7 @@ function fillPanoramaImmunizationFields(data) {
     if (!Object.hasOwn(owner, 'initialLot')) {
       const widget = getPanoramaLotWidget();
       owner.initialLot = widget ? getPanoramaDisplayedLot(widget) : null;
+      owner.initialAgreedLot = readAgreedNativeLot(widget);
       owner.initialAgent = getPanoramaCurrentAgentSelectionText(owner.form);
     }
     const selectedFunding = getPanoramaFundedRadioValue();
@@ -4335,7 +4379,13 @@ async function fillReservedTrayRecord(
       if (result === 'cleared') {
         confirmedNoProductWrite = true;
         throw new Error(
-          'Panorama selected a different lot. VaxLink cleared it. Check the chart before continuing.'
+          'Panorama selected a different lot. VaxLink cleared the Lot selection. Check Vaccine Details before continuing.'
+        );
+      }
+      if (owner.writeAttempted) {
+        owner.lotMissNotice = true;
+        throw new Error(
+          `${DIFFERENT_GRID_DETAIL_LOT} Choose Check original chart in the VaxLink tray before reusing this dose.`
         );
       }
       throw new Error(DIFFERENT_GRID_DETAIL_LOT);
@@ -4430,7 +4480,7 @@ async function stopTrayDose(
   } finally {
     activeTrayReservations.delete(dose.token);
   }
-  if (!toastWarningSlot?.innerHTML) {
+  if (!owner.lotMissNotice && !toastWarningSlot?.innerHTML) {
     showVaxlinkToast({
       _entryWarning:
         'Check the original chart before using the held tray dose again.'
@@ -4820,7 +4870,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     : '';
 
   const lotReviewMarkup = data._lotNeedsReview
-    ? '<div class="vl-toast-detail">Check the Agent and Lot on the chart. Clear any entry that does not match the scanned vaccine.</div>'
+    ? '<div class="vl-toast-detail">Check the Agent, Lot and Vaccine Details before continuing.</div>'
     : '';
 
   if (data._fillFeedback) {
@@ -4852,13 +4902,14 @@ function showVaxlinkToast(data, durationMs = 4000) {
       ? 'The lot was missing from the National Vaccine Catalogue.'
       : data.lookup_error || '';
     showRoutineToast(
-      `<div class="vl-toast info show" role="status">
+      `<div class="vl-toast info show" role="status"${multipleDetailMiss ? ' data-vl-lot-miss' : ''}>
         <div class="vl-toast-title">${escapeToastHtml(title)}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
         ${lotReviewMarkup}
         ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
-        ${multipleDetailMiss ? '<div class="vl-toast-detail">You may need to delete this entry to complete the other immunizations.</div>' : ''}
-        ${data._doseKept ? '<div class="vl-toast-detail">Dose kept in tray.</div>' : ''}
+        ${multipleDetailMiss ? '<div class="vl-toast-detail">If you are skipping this immunization, choose Delete in Panorama to continue to the next one.</div>' : ''}
+        ${data._doseKept ? '<div class="vl-toast-detail">Dose kept in the tray. Remove it there if you do not need it.</div>' : ''}
+        ${data._doseNeedsReview ? '<div class="vl-toast-detail">Choose Check original chart in the VaxLink tray before reusing this dose.</div>' : ''}
         ${reportMarkup}
       </div>`,
       reportUrl ? 12000 : 9000
@@ -5814,9 +5865,9 @@ function renderHudQueueList(rows, visible) {
         })
         .catch((error) => warnPanoramaEntryBlocked(error.message));
     });
-    item.appendChild(use);
+    if (!globalThis.VaxLinkTrayDoses.trayDoseNeedsReview(row))
+      item.appendChild(use);
 
-    // The worker checks whether another counted dose is available.
     const reservations = row.dose_reservations || [];
     if (reservations.length) {
       const review = document.createElement('button');
@@ -6181,6 +6232,7 @@ function clearGridCarry(reason = 'context_changed') {
   handoff.observer.disconnect();
   clearTimeout(handoff.opening);
   clearTimeout(handoff.retry);
+  clearTimeout(handoff.navigation?.timer);
   for (const row of handoff.rows)
     if (row.entry) void releaseGridAssignment(row.entry, reason);
 }
@@ -6230,6 +6282,10 @@ function startGridHandoff(event) {
     clearGridCarry(`grid_${label}`);
     return;
   }
+  if (label === 'next' || label === 'delete') {
+    markGridDetailNavigation(button, label);
+    return;
+  }
   if (label !== 'enter details') return;
   const trace = chartActivity?.begin('multiple', 'grid');
   const logClick = (result) =>
@@ -6277,12 +6333,13 @@ function startGridHandoff(event) {
   });
   const handoff = {
     rows,
+    deletedRows: [],
     form,
     url: location.href,
     observer,
     trace,
     step: 0,
-    attempted: 0
+    attempted: ''
   };
   gridDetailHandoff = handoff;
   handoff.opening = setTimeout(() => {
@@ -6317,6 +6374,86 @@ function currentGridDetailStep() {
     .split('-')
     .map(Number);
   return { step, total };
+}
+
+function markGridDetailNavigation(button, action) {
+  const handoff = gridDetailHandoff;
+  if (!handoff || location.href !== handoff.url || !isPanoramaChartActive())
+    return;
+  if (handoff.navigation?.sawHistory && !handoff.navigation.resolved) return;
+  const form = getPanoramaAutofillForm();
+  const { step, total } = currentGridDetailStep();
+  const before = `${step}-of-${total}`;
+  if (
+    !form?.contains(button) ||
+    (form !== handoff.form && (!form.id || form.id !== handoff.form.id)) ||
+    getPanoramaFormContext({ checkReadiness: false }).kind !==
+      'multiple_detail' ||
+    !step ||
+    step > total ||
+    (action === 'next' ? step === total : total <= 1)
+  )
+    return;
+  const detail = readGridDetailIdentity(form);
+  const current = total === handoff.rows.length && handoff.rows[step - 1];
+  // A Delete changes the position of later rows only when we can identify
+  // the row that Panorama is about to remove.
+  const deletedRow =
+    action === 'delete' &&
+    current &&
+    current.agent === panoramaAgentIdentity(detail.agent) &&
+    sameGridDate(current.date, detail.date)
+      ? current
+      : null;
+  clearTimeout(handoff.navigation?.timer);
+  const navigation = {
+    before,
+    after:
+      action === 'next'
+        ? `${step + 1}-of-${total}`
+        : `${Math.min(step, total - 1)}-of-${total - 1}`,
+    deletedRow,
+    deleting: action === 'delete',
+    until: performance.now() + 10000
+  };
+  handoff.navigation = navigation;
+  navigation.timer = setTimeout(() => {
+    if (
+      gridDetailHandoff === handoff &&
+      handoff.navigation === navigation &&
+      navigation.sawHistory &&
+      !navigation.resolved
+    )
+      clearGridCarry('detail_navigation_changed');
+  }, 10000);
+}
+
+function keepGridCarryForDetailHistory() {
+  const handoff = gridDetailHandoff;
+  const navigation = handoff?.navigation;
+  if (
+    !navigation ||
+    navigation.sawHistory ||
+    performance.now() >= navigation.until ||
+    location.href !== handoff.url ||
+    !isPanoramaChartActive()
+  )
+    return false;
+  const position = getPanoramaMultiStepIndicatorKey({ visibleOnly: true });
+  if (
+    (navigation.resolved && position !== navigation.after) ||
+    (position &&
+      position !== navigation.before &&
+      position !== navigation.after)
+  )
+    return false;
+  navigation.sawHistory = true;
+  // Some history events arrive after the new form appears. Cancel the old
+  // writer without cancelling the fill that already verified the next step.
+  if (panoramaAutofillOwner?.step === navigation.before)
+    cancelPanoramaAutofill();
+  void advanceGridHandoff();
+  return true;
 }
 
 function readGridDetailIdentity(form) {
@@ -6470,7 +6607,8 @@ function identifyGridDetail(handoff, form, step, total) {
   // may belong to the other dose, so leave it for staff to check.
   const orderedRepeat =
     !!ordered &&
-    handoff.rows.some((other) => other !== row && matchesAgent(other));
+    (handoff.rows.some((other) => other !== row && matchesAgent(other)) ||
+      handoff.deletedRows?.some(matchesAgent));
   const lotEvidence =
     requireLotEvidence || orderedRepeat
       ? readGridDetailLotEvidence(row.entry.lot, allowEmptyFinalLot)
@@ -6504,7 +6642,7 @@ function clearCarryProblem() {
 }
 
 const DIFFERENT_GRID_DETAIL_LOT =
-  'Panorama selected a different lot. Check the lot on the chart before continuing.';
+  'Panorama selected a different lot. Check Vaccine Details. If the scanned lot is unavailable, choose Delete in Panorama to skip this immunization.';
 
 function hasDifferentGridDetailLot(entry) {
   const lot = getPanoramaDisplayedLot(getPanoramaLotWidget());
@@ -6521,6 +6659,7 @@ async function releaseGridDetailStep(trigger, recordId) {
   if (!handoff) return true;
   const { step, total } = currentGridDetailStep();
   if (!(step > 0 && step <= total && total <= handoff.rows.length)) return true;
+  const position = `${step}-of-${total}`;
   clearCarryProblem();
 
   const report = (entry, reservation) => {
@@ -6534,7 +6673,7 @@ async function releaseGridDetailStep(trigger, recordId) {
     return reservation !== 'unconfirmed';
   };
   const latestRelease = handoff.release;
-  if (latestRelease?.step === step) {
+  if (latestRelease?.position === position) {
     // A form action and a tray click can overlap. Wait for the worker to
     // confirm the old reservation stopped before taking a new one.
     if (trigger === 'staff_input') return true;
@@ -6548,8 +6687,8 @@ async function releaseGridDetailStep(trigger, recordId) {
     if (gridDetailHandoff !== handoff) return false;
   }
 
-  const alreadyAttempted = handoff.attempted === step;
-  handoff.attempted = step;
+  const alreadyAttempted = handoff.attempted === position;
+  handoff.attempted = position;
   const match = identifyGridDetail(
     handoff,
     getPanoramaAutofillForm(),
@@ -6576,13 +6715,17 @@ async function releaseGridDetailStep(trigger, recordId) {
         released ? 'released' : 'unconfirmed'
       )
     : Promise.resolve('not_reserved');
-  handoff.release = { step, entry, outcome };
+  handoff.release = { position, entry, outcome };
   return report(entry, await outcome);
 }
 
 async function advanceGridHandoff() {
   const handoff = gridDetailHandoff;
   if (!handoff) return;
+  const navigation = handoff.navigation;
+  const withinNavigation = navigation && performance.now() < navigation.until;
+  if (navigation?.sawHistory && !navigation.resolved && !withinNavigation)
+    return clearGridCarry('detail_navigation_changed');
   const context = getPanoramaFormContext();
   if (!isPanoramaChartActive()) return clearGridCarry('chart_inactive');
   if (handoff.url !== location.href) return clearGridCarry('chart_url_changed');
@@ -6612,24 +6755,41 @@ async function advanceGridHandoff() {
 
   const { step, total } = currentGridDetailStep();
   const form = getPanoramaAutofillForm();
-  const position = step > 0 && step <= total;
-  if (position && total <= 9999 && handoff.position !== `${step}:${total}`) {
-    handoff.position = `${step}:${total}`;
-    chartActivity?.record(handoff.trace, 'detail_position', { step, total });
-  }
-  if (step < handoff.step) return clearGridCarry('detail_step_reversed');
-  if (total > handoff.rows.length)
-    return clearGridCarry('unexpected_step_total');
+  if (!(step > 0 && step <= total)) return;
   if (form !== handoff.form && (!form?.id || form.id !== handoff.form.id))
     return clearGridCarry('detail_form_changed');
-  if (!position) return;
-  if (step !== handoff.step) {
+  const position = `${step}-of-${total}`;
+  const expected = withinNavigation && position === navigation.after;
+  if (withinNavigation && position === navigation.before) return;
+  if (withinNavigation && !expected)
+    return clearGridCarry('detail_navigation_changed');
+  if (step < handoff.step && !(expected && navigation.deleting))
+    return clearGridCarry('detail_step_reversed');
+  if (total > handoff.rows.length)
+    return clearGridCarry('unexpected_step_total');
+  if (expected && context.ready) {
+    navigation.resolved = true;
+    clearTimeout(navigation.timer);
+  }
+  if (expected && navigation.deletedRow) {
+    const skipped = navigation.deletedRow;
+    if (skipped.entry)
+      void releaseGridAssignment(skipped.entry, 'skipped', step);
+    handoff.rows = handoff.rows.filter((row) => row !== skipped);
+    handoff.deletedRows.push(skipped);
+    navigation.deletedRow = null;
+  }
+  if (position !== handoff.position) {
+    handoff.position = position;
+    chartActivity?.record(handoff.trace, 'detail_position', { step, total });
     clearCarryProblem();
+    if (toastRoutineSlot?.querySelector('[data-vl-lot-miss]'))
+      dismissToast(toastRoutineSlot);
     handoff.retryUntil = performance.now() + 10000;
   }
   handoff.step = step;
   clearTimeout(handoff.opening);
-  if (handoff.attempted === step) return;
+  if (handoff.attempted === position) return;
   const match = context.ready
     ? identifyGridDetail(handoff, form, step, total)
     : { reason: 'detail_not_ready' };
@@ -6672,13 +6832,15 @@ async function advanceGridHandoff() {
     }
     if (
       waitExpired &&
-      handoff.reportedStep !== step &&
+      handoff.reportedPosition !== position &&
       match.reason !== 'detail_unassigned' &&
       handoff.rows.some(({ entry }) => entry)
     ) {
-      handoff.reportedStep = step;
+      handoff.reportedPosition = position;
       showCarryProblem(
-        'VaxLink could not confirm a dose for this step. Check the chart and choose a dose from the Immunization tray.'
+        match.lotEvidence === 'conflicting_selection'
+          ? DIFFERENT_GRID_DETAIL_LOT
+          : 'VaxLink could not confirm a dose for this step. Check the chart and choose a dose from the Immunization tray.'
       );
     }
     return;
@@ -6730,13 +6892,13 @@ async function advanceGridHandoff() {
       getPanoramaAutofillForm() !== form ||
       detail.step !== step ||
       detail.total !== total ||
-      handoff.attempted === step ||
+      handoff.attempted === position ||
       identifyGridDetail(handoff, form, step, total).row !== row
     )
       return;
 
     // Unvisited rows may still appear later in a different order.
-    handoff.attempted = step;
+    handoff.attempted = position;
     handled = true;
     clearCarryProblem();
     if (step === total) {
@@ -6772,7 +6934,7 @@ async function advanceGridHandoff() {
     );
   } catch (error) {
     if (gridDetailHandoff === handoff && isPanoramaChartActive())
-      showVaxlinkToast({ _entryWarning: error.message });
+      showCarryProblem(error.message);
   } finally {
     if (handoff.checking === check) handoff.checking = null;
     if (handled && row.entry === entry) {

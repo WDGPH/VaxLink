@@ -100,7 +100,10 @@ Changing the grid row, the Lot or the active route stops automatic carry.
 A brief loss of focus can leave assignments pending while the grid stays
 visible. Enter Details still checks the original rows and active route before
 filling. Staff can choose a dose on the detail step. The grid assignment
-itself does not use a dose.
+itself does not use a dose. A trusted Next or Delete can retain pending
+assignments through Panorama’s same-page history update. VaxLink checks the
+new detail’s position and identity before filling. The skipped scan stays
+in the tray, and a dose that may have changed a chart still needs review.
 
 ### User controls: popup
 

@@ -543,6 +543,48 @@ test('Lot cleanup clears a newly selected wrong entry and preserves a staff sele
   );
 });
 
+test('a failed search can leave a pre-existing nonmatching lot unchanged', () => {
+  const { context, state, select, label, root } = fixture();
+  const field = select('OTHER');
+  field.value = 'lot-option';
+  label.textContent = 'OTHER';
+  state.controls = [root, field];
+  context.getPanoramaCurrentAgentSelectionText = () => 'MMR';
+  const owner = {
+    form: context.getPanoramaAutofillForm(),
+    initialLot: 'OTHER',
+    initialAgreedLot: 'OTHER',
+    initialAgent: 'MMR'
+  };
+  assert.equal(
+    context.lotMissLeftSelectionAlone(owner, 'review', 'TARGET'),
+    true
+  );
+  label.textContent = 'MISMATCH';
+  assert.equal(
+    context.lotMissLeftSelectionAlone(owner, 'review', 'TARGET'),
+    false
+  );
+  label.textContent = '';
+  assert.equal(
+    context.lotMissLeftSelectionAlone(owner, 'review', 'TARGET'),
+    false
+  );
+  label.textContent = 'OTHER';
+  assert.equal(
+    context.lotMissLeftSelectionAlone(owner, 'review', 'OTHER'),
+    false
+  );
+  assert.equal(
+    context.lotMissLeftSelectionAlone(
+      { ...owner, sawMatchingLot: true },
+      'review',
+      'TARGET'
+    ),
+    false
+  );
+});
+
 test('a carried sole Lot is cleared after a refresh unless staff take over', async () => {
   for (const scenario of ['sole', 'takeover', 'ambiguous', 'repeated']) {
     const f = fixture();
@@ -889,18 +931,21 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'shorter_list',
     'ambiguous_agent',
     'ordered_duplicates',
+    'next_then_delete',
+    'browser_history',
+    'history_expired',
     'reordered_rows',
     'manual_use_after_lot_wait',
     'unconfirmed_release'
   ]) {
-    const { context, state, storageListeners } = fixture();
+    const { context, state, storageListeners, windowListeners } = fixture();
     const url = context.location.href;
     const form = context.getPanoramaAutofillForm();
     const tab = { id: 42, url, active: true };
     const agents = [
       'MMR',
       scenario === 'ordered_duplicates' ? 'MMR' : 'HPV',
-      scenario === 'ambiguous_agent' ? 'HPV' : 'HB'
+      ['ambiguous_agent', 'next_then_delete'].includes(scenario) ? 'HPV' : 'HB'
     ];
     const records = agents.map((agent, index) => ({
       id: String(index),
@@ -1108,6 +1153,57 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       scenario
     );
     await context.finalizeDeferredPanoramaAutofill(fills[0]);
+
+    if (
+      ['next_then_delete', 'browser_history', 'history_expired'].includes(
+        scenario
+      )
+    ) {
+      const click = (textContent) =>
+        context.startGridHandoff({
+          isTrusted: true,
+          target: { closest: () => ({ textContent, form }) }
+        });
+      const history = () => windowListeners.get('popstate')[0]();
+      if (scenario !== 'browser_history') click('Next');
+      history();
+      if (scenario === 'history_expired')
+        context.performance = { now: () => Number.MAX_SAFE_INTEGER };
+      state.step = '2-of-3';
+      detailAgent = agents[1];
+      await context.advanceGridHandoff();
+      if (scenario !== 'next_then_delete') {
+        assert.equal(fills.length, 1);
+        await new Promise(setImmediate);
+        assert.ok(saved().every(({ dose_reservations }) => !dose_reservations));
+        continue;
+      }
+      assert.equal(fills[1].lot, 'SAMPLE-1');
+      await context.releaseGridDetailStep('staff_input');
+      click('Delete');
+      // A Delete may leave the old detail on screen until Panorama responds.
+      await context.advanceGridHandoff();
+      assert.equal(fills.length, 2);
+      state.step = '2-of-2';
+      detailAgent = agents[2];
+      selectedLot = 'SAMPLE-1';
+      await context.advanceGridHandoff();
+      assert.equal(
+        fills.length,
+        2,
+        'a deleted dose still makes a conflicting lot unsafe'
+      );
+      selectedLot = '';
+      await context.advanceGridHandoff();
+      history();
+      assert.equal(fills[2].lot, 'SAMPLE-2');
+      await context.finalizeDeferredPanoramaAutofill(fills[2]);
+      assert.deepEqual(
+        saved().map(({ remaining_doses }) => remaining_doses),
+        [1, 2, 1]
+      );
+      continue;
+    }
 
     state.step = scenario === 'skipped_step' ? '3-of-3' : '2-of-2';
     detailAgent = agents[reordered ? 0 : 2];

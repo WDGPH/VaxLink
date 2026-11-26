@@ -9,6 +9,7 @@ export const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 
 const {
   getTrayRemainingDoses,
+  trayDoseNeedsReview,
   getTrayDoseFields,
   canPinTrayDose,
   defaultChartDose
@@ -506,7 +507,9 @@ function buildQueueItemMarkup(row, index, options) {
   const held =
     Array.isArray(row.dose_reservations) && row.dose_reservations.length > 0;
   const useActionMarkup =
-    options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
+    options.showUseAction &&
+    !trayDoseNeedsReview(row) &&
+    !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
       ? `<button class="inventory-use" type="button" data-use-id="${id}" aria-label="Use ${title}, lot ${lot}, for chart">${escapeHtml(options.useButtonLabel)}</button>`
       : '';
   const pinned = row.dose_tracking === 'retained';
@@ -532,7 +535,7 @@ function buildQueueItemMarkup(row, index, options) {
       <div class="inventory-item-actions">
         ${useActionMarkup}
         ${pinMarkup}
-        <button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>
+        ${held ? '' : `<button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>`}
       </div>
       ${row.reference_only ? '<div class="inventory-lot-report">Reference only</div>' : ''}
       ${held ? `<div class="inventory-lot-report">${row.dose_reservations.some((dose) => dose.review) ? 'Check original chart' : 'Reserved on chart'}</div>` : ''}

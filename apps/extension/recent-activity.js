@@ -142,6 +142,7 @@
         'grid_returned',
         'single_form_opened',
         'detail_step_reversed',
+        'detail_navigation_changed',
         'unexpected_step_total',
         'detail_form_changed'
       )

@@ -383,6 +383,12 @@ test('the chart tray can review a reserved dose and use any remaining dose', asy
       )
       .click();
     assert.equal(reviewToken, first);
+    assert.equal(
+      list.children
+        .at(-1)
+        .children.some((control) => control.textContent === 'Use'),
+      remaining_doses === 2
+    );
     const use = controls.find((control) => control.textContent === 'Use');
     assert.ok(use, 'a reservation cannot hide Use');
     use.click();
