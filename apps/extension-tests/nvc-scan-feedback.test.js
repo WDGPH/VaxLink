@@ -291,8 +291,16 @@ test('terminal feedback names the fields or catalogue to review and counts rende
       assert.equal(routine.innerHTML.includes('Panorama training'), training);
       assert.equal(routine.innerHTML.includes('Draft email to PRC'), !training);
       assert.equal(routine.innerHTML.includes('mailto:'), !training);
-      assert.equal(routine.innerHTML.includes('delete this entry'), multiple);
-      assert.equal(routine.innerHTML.includes('Dose kept in tray'), multiple);
+      assert.equal(
+        routine.innerHTML.includes('choose Delete in Panorama'),
+        multiple
+      );
+      assert.equal(
+        routine.innerHTML.includes(
+          'Dose kept in the tray. Remove it there if you do not need it.'
+        ),
+        multiple
+      );
       if (!training) {
         assert.equal(draft().pathname, '');
         assert.equal(
