@@ -63,8 +63,6 @@ let hudInitialized = false;
 let lastHandledScanValue = '';
 let lastHandledScanAt = 0;
 let audioContextRef = null;
-let expiryGuardHost = null;
-let expiryGuardRoot = null;
 let scannerDeliveryContext = null;
 let panoramaContextGeneration = 0;
 let lastHandledScanOwner = null;
@@ -564,18 +562,6 @@ function getLocalStorage(keys) {
         return;
       }
       resolve(result);
-    });
-  });
-}
-
-function setLocalStorage(values) {
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.set(values, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-        return;
-      }
-      resolve();
     });
   });
 }
