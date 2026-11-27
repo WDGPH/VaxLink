@@ -475,6 +475,64 @@ test('export and disable are ordered with a delayed append, then old tickets are
   assert.equal((await worker.append(ticket, [row()])).stale, true);
 });
 
+test('Debug exports the tray and committed removal events at the same write boundary', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const firstScan = '1795816890000-first';
+  const secondScan = '1795816890001-second';
+  const savingFirst = Promise.withResolvers();
+  const formatting = Promise.withResolvers();
+  let holdWrite = true;
+  let holdExport = true;
+  const worker = fixture({
+    storage: { [queue]: [{ id: firstScan }, { id: secondScan }] },
+    delayStorageSet(values, resume) {
+      if (!holdWrite || !Object.hasOwn(values, queue)) return false;
+      savingFirst.resolve(resume);
+      return true;
+    },
+    delayStorageGet(keys, resume) {
+      if (!holdExport || !keys?.includes('vaxlink_auto_resolve_funding_v1'))
+        return false;
+      formatting.resolve(resume);
+      return true;
+    }
+  });
+  const remove = (id) =>
+    worker.manage('mutateQueue', {
+      storageKey: queue,
+      operation: 'remove',
+      payload: { id }
+    });
+  const first = remove(firstScan);
+  const finishFirst = await savingFirst.promise;
+  const exporting = worker.manage('exportRecentActivity');
+  const second = remove(secondScan);
+  const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+  const beganDuringWrite = await Promise.race([formatting.promise, nextTurn()]);
+  holdWrite = false;
+  finishFirst();
+  const finishExport = await formatting.promise;
+  const secondWhileFormatting = await Promise.race([second, nextTurn()]);
+  holdExport = false;
+  finishExport();
+  const exported = await exporting;
+
+  assert.equal(beganDuringWrite, undefined);
+  assert.equal((await first).success, true);
+  assert.equal(secondWhileFormatting?.success, true);
+  const mutations = (output) =>
+    output.rows.filter(({ event }) => event === 'tray_mutation');
+  assert.equal(mutations(exported).length, 1);
+  assert.equal(exported.trayAtExport.rows, 1);
+  const laterExport = await worker.manage('exportRecentActivity');
+  assert.equal(laterExport.trayAtExport.rows, 0);
+  assert.equal(mutations(laterExport).length, 2);
+  assert.equal(
+    exported.trayAtExport.scans[0].scanRef,
+    mutations(laterExport)[1].scanRef
+  );
+});
+
 test('Debug storage can fail without delaying capture, and disabling preserves Local Activity', async () => {
   const appending = Promise.withResolvers();
   const waiting = Promise.withResolvers();

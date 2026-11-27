@@ -567,10 +567,12 @@
     getLocal,
     setLocal,
     getSettingsAtExport = async () => null,
-    getTrayAtExport = async () => null
+    captureTrayForExport = async (enqueueExport) =>
+      enqueueExport(async () => null)
   ) {
     const session = chrome.storage.session;
     let queue = Promise.resolve();
+    let trayCapture = null;
     const empty = () => ({
       token: crypto.randomUUID(),
       nextSource: 1,
@@ -595,8 +597,15 @@
       return result;
     }
 
+    function afterTrayCapture(work) {
+      // Preserve request order across export, preference changes and chart
+      // batches. A tray writer can enqueue its own event during capture.
+      const enqueue = () => serialize(work);
+      return trayCapture ? trayCapture.then(enqueue, enqueue) : enqueue();
+    }
+
     function open() {
-      return serialize(async () => {
+      return afterTrayCapture(async () => {
         if (!(await enabled())) return {};
         const state = (await load()) ?? empty();
         const source = state.nextSource++;
@@ -620,7 +629,7 @@
       )
         return Promise.resolve({ success: false });
 
-      return serialize(async () => {
+      return afterTrayCapture(async () => {
         const state = (await enabled()) ? await load() : null;
         if (token !== state?.token || source >= state.nextSource)
           return { success: false, stale: true };
@@ -664,7 +673,7 @@
     }
 
     function manage(action, nextEnabled) {
-      return serialize(async () => {
+      const manageRequest = async (getTrayAtExport) => {
         const wasEnabled = await enabled();
         if (action === 'setRecentActivity' && nextEnabled !== wasEnabled) {
           if (nextEnabled) await save(empty());
@@ -693,7 +702,20 @@
               rows: state?.rows ?? []
             }
           : status;
+      };
+      if (action !== 'exportRecentActivity')
+        return afterTrayCapture(manageRequest);
+
+      let exporting;
+      const capturing = captureTrayForExport((getTrayAtExport) => {
+        exporting = serialize(() => manageRequest(getTrayAtExport));
       });
+      trayCapture = capturing;
+      return capturing
+        .finally(() => {
+          if (trayCapture === capturing) trayCapture = null;
+        })
+        .then(() => exporting);
     }
 
     return { open, append, recordWorker, manage };

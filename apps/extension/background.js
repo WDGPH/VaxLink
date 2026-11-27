@@ -13,7 +13,7 @@ const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
   getStorage,
   setStorage,
   getDebugSettingsAtExport,
-  getDebugTrayAtExport
+  captureDebugTrayForExport
 );
 
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
@@ -5178,11 +5178,27 @@ function canChangeQueue(sender) {
   );
 }
 
-async function getDebugTrayAtExport(reference) {
-  const saved = await getStorage([
-    MULTIPLE_INJECT_QUEUE_KEY,
-    SKIPPED_DOSE_HISTORY_KEY
-  ]);
+function captureDebugTrayForExport(enqueueExport) {
+  const capture = scannerQueueWriteQueue
+    .catch(() => {})
+    .then(async () => {
+      const saved = await getStorage([
+        MULTIPLE_INJECT_QUEUE_KEY,
+        SKIPPED_DOSE_HISTORY_KEY
+      ]).catch(() => null);
+      const observedAt = Date.now();
+      // Join the Debug writer before a later tray change can enqueue its event.
+      // The tray writer can continue once the storage snapshot has been read.
+      enqueueExport((reference) =>
+        formatDebugTray(saved, observedAt, reference)
+      );
+    });
+  scannerQueueWriteQueue = capture;
+  return capture;
+}
+
+async function formatDebugTray(saved, observedAt, reference) {
+  if (!saved) return null;
   const rows = Array.isArray(saved[MULTIPLE_INJECT_QUEUE_KEY])
     ? saved[MULTIPLE_INJECT_QUEUE_KEY]
     : [];
@@ -5190,7 +5206,7 @@ async function getDebugTrayAtExport(reference) {
     ? saved[SKIPPED_DOSE_HISTORY_KEY]
     : [];
   return {
-    observedAt: Date.now(),
+    observedAt,
     ...globalThis.VaxLinkRecentActivity.trayBalance(rows),
     scans: await Promise.all(
       rows.slice(0, 250).map(async (row) => ({
