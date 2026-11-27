@@ -2929,6 +2929,11 @@ function isPanoramaAutofillCurrent(data) {
         ) === owner.detailAgent)) &&
     (!owner.automatic || isPanoramaChartActive()) &&
     (!owner.trayDose || document.visibilityState === 'visible') &&
+    (!owner.lockedResumeGridTarget ||
+      isLockedResumeGridTargetCurrent(
+        owner.lockedResumeGridTarget,
+        owner.gridAssignment
+      )) &&
     (!owner.gridAssignment ||
       isGridAssignmentCurrent(owner.gridAssignment, owner.form)) &&
     (owner.writeAttempted ||
@@ -5240,6 +5245,9 @@ let lockedScanChart = null;
 let resumeOffer = null;
 let resumeRead = 0;
 let resumeRunning = false;
+let automaticResumeSessionId;
+let declinedResume;
+let scannerLockedForResume = false;
 let lastResumeProbe;
 let lastResumeCapacity;
 let failedGridCarry = null;
@@ -5667,6 +5675,11 @@ function initHud() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
+    if (SCANNER_LOCK_SESSION_KEY in changes) {
+      scannerLockedForResume =
+        changes[SCANNER_LOCK_SESSION_KEY].newValue?.state === 'locked';
+      if (scannerLockedForResume && resumeRunning) cancelPanoramaAutofill();
+    }
     if (
       MULTIPLE_INJECT_QUEUE_KEY in changes ||
       SCANNER_LOCK_SESSION_KEY in changes ||
@@ -5798,6 +5811,57 @@ function lockedScanCapacity(chart) {
     : 1;
 }
 
+function getLockedResumeGridTarget() {
+  const [row] = availablePanoramaGridRows();
+  if (!row?.isConnected) return null;
+  const index = row.getAttribute('data-ri');
+  const { agentField, dateField, dateText } =
+    getPanoramaMultipleGridRowState(index);
+  if (
+    !agentField?.isConnected ||
+    !dateField?.isConnected ||
+    !row.contains(agentField) ||
+    !row.contains(dateField) ||
+    panoramaDateTimeHasValue(dateText) ||
+    [
+      ...row.querySelectorAll('input[id*="dateIn"][id$="dateInput_input"]')
+    ].some(({ value }) => panoramaDateTimeHasValue(value))
+  )
+    return null;
+  return {
+    row,
+    index,
+    key: row.getAttribute('data-rk'),
+    agentField,
+    dateField
+  };
+}
+
+function isLockedResumeGridTargetCurrent(expected, assignment) {
+  if (assignment) {
+    // Agent selection can run Panorama code before the date write.
+    const { row, index, key, agentField, dateField } = expected;
+    return (
+      assignment.row === row &&
+      assignment.index === index &&
+      assignment.key === key &&
+      getPanoramaMultipleGridRows().includes(row) &&
+      row.contains(agentField) &&
+      row.contains(dateField) &&
+      getPanoramaMultipleGridAgentField(index) === agentField &&
+      getPanoramaMultipleGridDate1Field(index) === dateField
+    );
+  }
+  const current = getLockedResumeGridTarget();
+  return (
+    current?.row === expected.row &&
+    current.index === expected.index &&
+    current.key === expected.key &&
+    current.agentField === expected.agentField &&
+    current.dateField === expected.dateField
+  );
+}
+
 function readLockedScanOffer(chart, capacity = lockedScanCapacity(chart)) {
   return chrome.runtime.sendMessage({
     action: 'getLockedScanResume',
@@ -5805,6 +5869,15 @@ function readLockedScanOffer(chart, capacity = lockedScanCapacity(chart)) {
     kind: chart.kind,
     capacity
   });
+}
+
+function recordDeclinedLockedResume(sessionId, reason) {
+  if (!declinedResume || declinedResume.sessionId !== sessionId)
+    declinedResume = { sessionId, reasons: new Set() };
+  if (declinedResume.reasons.has(reason)) return;
+  declinedResume.reasons.add(reason);
+  const trace = chartActivity?.begin('multiple', 'grid');
+  chartActivity?.record(trace, 'locked_resume_declined', { reason });
 }
 
 function updateLockedScanResume(refresh = false) {
@@ -5819,17 +5892,34 @@ function updateLockedScanResume(refresh = false) {
   const read = ++resumeRead;
   resumeOffer = null;
   hudResumeButton.hidden = true;
-  if (!chart) return;
+  if (!chart || scannerLockedForResume) return;
+  const generation = panoramaContextGeneration;
+  const grid = chart.kind === 'multiple_grid';
+  const gridTarget = grid ? getLockedResumeGridTarget() : null;
   void readLockedScanOffer(chart, capacity)
     .then((offer) => {
-      if (
-        !offer?.success ||
-        !offer.count ||
-        read !== resumeRead ||
-        !isPanoramaChartActive() ||
-        getLockedScanChart() !== chart
-      )
+      if (!offer?.success || !offer.count || read !== resumeRead) return;
+      const sameChart =
+        isPanoramaChartActive() && getLockedScanChart() === chart;
+      const current = sameChart && generation === panoramaContextGeneration;
+      if (grid) {
+        if (automaticResumeSessionId === offer.sessionId) return;
+        let reason = '';
+        if (!sameChart) reason = 'chart_changed';
+        else if (
+          !panoramaAutofillOwner?.cancelled &&
+          panoramaAutofillOwner?.trayDose
+        )
+          reason = 'tray_in_progress';
+        else if (!current) reason = 'chart_changed';
+        else if (!gridTarget || !isLockedResumeGridTargetCurrent(gridTarget))
+          reason = 'row_changed';
+        if (reason) return recordDeclinedLockedResume(offer.sessionId, reason);
+        resumeOffer = { ...offer, chart, gridTarget };
+        void resumeLockedScans('automatic');
         return;
+      }
+      if (!current) return;
       resumeOffer = { ...offer, chart };
       hudResumeButton.textContent = `Resume ${offer.count} scan${offer.count === 1 ? '' : 's'}`;
       hudResumeButton.hidden = false;
@@ -5837,15 +5927,23 @@ function updateLockedScanResume(refresh = false) {
     .catch(() => {});
 }
 
-async function resumeLockedScans() {
+async function resumeLockedScans(trigger = 'manual') {
   if (resumeRunning || !resumeOffer) return;
   const { chart, sessionId, count } = resumeOffer;
+  const automatic = trigger === 'automatic';
+  let { gridTarget } = resumeOffer;
+  if (automatic !== (chart.kind === 'multiple_grid')) return;
   let generation = panoramaContextGeneration;
   const current = () =>
     generation === panoramaContextGeneration &&
+    !scannerLockedForResume &&
     isPanoramaChartActive() &&
     getLockedScanChart() === chart;
   if (!current()) return updateLockedScanResume(true);
+  // Claim the session before waiting for its first dose. A focus, storage or
+  // DOM update must not restart an attempt after staff take over.
+  if (automatic) automaticResumeSessionId = sessionId;
+  resumeRunning = true;
   const trace = chartActivity?.begin(
     chart.kind === 'multiple_grid' ? 'multiple' : 'single',
     chart.kind === 'multiple_grid' ? 'grid' : 'detail'
@@ -5854,19 +5952,18 @@ async function resumeLockedScans() {
   let filled = 0;
   let stopReason = 'chart_changed';
   let waitingDose;
-  resumeRunning = true;
+  let route;
   hudResumeButton.disabled = true;
   hudResumeStatus.hidden = true;
+  chartActivity?.record(trace, 'locked_resume', {
+    result: 'started',
+    count: 0,
+    trigger
+  });
   logAnalyticsEvent('locked_batch_resumed', { workflow: 'immunization' });
   try {
     while (filled < count && current() && offer?.sessionId === sessionId) {
-      if (
-        chart.kind === 'multiple_grid' &&
-        !availablePanoramaGridRows().length
-      ) {
-        stopReason = 'no_grid_rows';
-        break;
-      }
+      if (automatic && !isLockedResumeGridTargetCurrent(gridTarget)) break;
       // Claim the token before the worker can expose the reserved tray row.
       waitingDose = {
         recordId: offer.captureId,
@@ -5886,16 +5983,27 @@ async function resumeLockedScans() {
         stopReason = moved?.reason || 'resume_unavailable';
         break;
       }
-      if (!current()) {
+      if (
+        !current() ||
+        moved.recordId !== waitingDose.recordId ||
+        moved.token !== waitingDose.token ||
+        !moved.scannerRoute ||
+        (route &&
+          (moved.scannerRoute.epoch !== route.epoch ||
+            moved.scannerRoute.generation !== route.generation)) ||
+        (automatic && !isLockedResumeGridTargetCurrent(gridTarget))
+      ) {
         await releaseUnusedTrayDose(waitingDose);
         break;
       }
+      route = moved.scannerRoute;
       const data = beginPanoramaAutofill({}, true, {
         automatic: true,
-        startBy: moved.scannerRoute.startBy
+        startBy: route.startBy
       });
       generation = panoramaContextGeneration;
-      data._vaxlinkOwner.scannerRoute = moved.scannerRoute;
+      data._vaxlinkOwner.scannerRoute = route;
+      data._vaxlinkOwner.lockedResumeGridTarget = gridTarget;
       const dose = waitingDose;
       waitingDose = null;
       const result = await fillReservedTrayRecord(
@@ -5914,7 +6022,16 @@ async function resumeLockedScans() {
         break;
       }
       filled += 1;
-      if (filled < count && current()) offer = await readLockedScanOffer(chart);
+      if (filled < count && current()) {
+        if (automatic) {
+          gridTarget = getLockedResumeGridTarget();
+          if (!gridTarget) {
+            stopReason = 'no_grid_rows';
+            break;
+          }
+        }
+        offer = await readLockedScanOffer(chart);
+      }
     }
   } catch (error) {
     stopReason = 'error';
@@ -5926,7 +6043,8 @@ async function resumeLockedScans() {
     const complete = filled === count;
     chartActivity?.record(trace, 'locked_resume', {
       result: complete ? 'assigned' : stopReason,
-      count: filled
+      count: filled,
+      trigger
     });
     if (!complete) {
       logAnalyticsEvent('locked_batch_interrupted', {
@@ -6236,7 +6354,9 @@ function fillPanoramaMultipleGridDate1(rowIndex, data) {
   return fillPanoramaMaskedTextInput(
     dateField,
     administered.date,
-    undefined,
+    data._vaxlinkOwner?.lockedResumeGridTarget
+      ? () => isPanoramaAutofillCurrent(data)
+      : undefined,
     true
   );
 }
@@ -6248,6 +6368,11 @@ function fillPanoramaMultipleGridRow(rowIndex, data) {
     markPanoramaAutofillStarted(data);
   const agentChanged =
     !rowState.agentText && fillPanoramaMultipleGridAgent(rowIndex, data);
+  if (
+    data._vaxlinkOwner?.lockedResumeGridTarget &&
+    !isPanoramaAutofillCurrent(data)
+  )
+    return false;
   const current = getPanoramaMultipleGridRowState(rowIndex);
   const candidates = getPanoramaAgentCandidates(data);
   const agentMatches =
