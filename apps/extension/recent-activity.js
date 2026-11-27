@@ -175,6 +175,8 @@
         'detail_timeout',
         'manual_use',
         'skipped',
+        'reservation_released',
+        'release_unconfirmed',
         'detail_identity_unmatched',
         'detail_fields_loading',
         'detail_agent_unmatched',
@@ -219,7 +221,17 @@
     },
     multiple_form_action: {
       action: choices('reset', 'delete', 'next'),
-      result: choices('selected', 'step_changed', 'step_unconfirmed'),
+      result: choices(
+        'selected',
+        'marker_armed',
+        'marker_declined',
+        'anchor_popstate',
+        'anchor_hashchange',
+        'same_url_popstate',
+        'history_rejected',
+        'step_changed',
+        'step_unconfirmed'
+      ),
       step: integer(0, 100000),
       total: integer(0, 100000)
     },

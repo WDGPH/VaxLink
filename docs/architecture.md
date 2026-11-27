@@ -103,13 +103,15 @@ Changing the grid row, the Lot or the active route stops automatic carry.
 A brief loss of focus can leave assignments pending while the grid stays
 visible. Enter Details still checks the original rows and active route before
 filling. Staff can choose a dose on the detail step. The grid assignment
-itself does not use a dose. A trusted Next or Delete can retain pending
-assignments through Panorama’s same-page history update. VaxLink checks the
-new detail’s position and identity before filling. The skipped scan stays
-in the tray. After a confirmed Delete, VaxLink can offer to remove a known
-unused single-use dose. The worker checks the lot, dose tracking and
-reservations when staff select Remove from tray. A dose that may have
-changed a chart still needs review.
+itself does not use a dose. Selecting Next or Delete stops the outgoing fill.
+Next can move a chart with no URL fragment to `#topPageAnchor` while replacing
+its detail table. VaxLink uses Chrome’s navigation event to identify that
+fragment move on the original active form. It keeps the pending assignments,
+then checks the expected position, fresh controls, dose identity and worker
+route before filling the next detail.
+After a confirmed Delete, an identifiable unused single-use scan can be
+archived and restored through Recent Scans. The worker checks the exact scan
+and its release token. A dose that may have changed a chart still needs review.
 
 ### User controls: popup
 
@@ -199,8 +201,10 @@ observations are summarized. Detail readbacks record the funding radio, the nati
 and visible Reason selections, time completeness, and which controls or Lot options
 changed between samples. Grid handoff events record the Enter Details click,
 the visible step and total, the matching row when known, the Lot evidence,
-and what released the assignment. A tray choice and other staff interaction
-have separate events. Debug records HUD and popup **Use** selections and
+and why VaxLink stopped carrying an assignment. Next and Delete record whether
+VaxLink expected the transition and how it handled the history event. A counted
+assignment records whether the worker confirmed its release. A tray choice and
+other staff interaction have separate events. Debug records HUD and popup **Use** selections and
 outcomes, lock and unlock, and why the worker offers or declines a batch.
 The two scheduled late checks record their outcomes if
 the page is still running. A completed request has a source label when the page

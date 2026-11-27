@@ -11,7 +11,7 @@ const id =
   'recordImmsForm:immsDetailssection_LotInfo:lotNumberSelect:selectOneMenu';
 const shown = () => ({ width: 100, height: 20 });
 
-function fixture() {
+function fixture(browserWindow) {
   const state = {
     controls: [],
     funding: [],
@@ -37,6 +37,7 @@ function fixture() {
   }
   const { context, windowListeners, documentListeners, storageListeners } =
     createContentHarness({
+      window: browserWindow,
       MouseEvent: FormEvent,
       Event: FormEvent,
       getComputedStyle: () => ({ visibility: 'visible' })
@@ -1207,6 +1208,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'browser_history',
     'history_expired',
     'resolved_navigation_late',
+    'anchor_before_detail',
+    'anchor_after_writer',
+    'anchor_without_witness',
+    'back_after_anchor',
     'reordered_rows',
     'reordered_same_count',
     'reordered_same_count_repeats',
@@ -1215,6 +1220,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'manual_use_after_lot_wait',
     'unconfirmed_release'
   ]) {
+    const backAfterAnchor = scenario === 'back_after_anchor';
+    const silentAnchor = scenario === 'anchor_without_witness';
+    const anchor = scenario.startsWith('anchor_') || backAfterAnchor;
+    const navigationListeners = [];
     const {
       context,
       state,
@@ -1223,7 +1232,16 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       storageListeners,
       windowListeners,
       documentListeners
-    } = fixture();
+    } = fixture(
+      anchor && {
+        navigation: {
+          addEventListener(type, listener) {
+            assert.equal(type, 'navigate');
+            navigationListeners.push(listener);
+          }
+        }
+      }
+    );
     const url = context.location.href;
     const form = context.getPanoramaAutofillForm();
     const tab = { id: 42, url, active: true };
@@ -1282,17 +1300,27 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       url,
       tab
     };
+    const newReservations = [];
+    let blockedRoutes = 0;
     let release;
     let routeGate;
     context.chrome.runtime.sendMessage = (message, reply) => {
       if (
+        anchor &&
+        message.operation === 'reserve_dose' &&
+        !message.payload.requireReservation
+      )
+        newReservations.push(message.payload.id);
+      if (
         routeGate &&
         message.action === 'checkScannerChart' &&
         message.scannerRoute
-      )
+      ) {
+        blockedRoutes++;
         return routeGate.promise.then(() =>
           worker.sendMessage(message, sender)
         );
+      }
       const result =
         release && message.operation === 'stop_dose'
           ? release.promise.then(() =>
@@ -1326,11 +1354,38 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     let retry;
     let navigationTimeout;
     let detailReady = true;
+    let observeHandoff;
     const fills = [];
     const scanOrderNotices = [];
     const skippedNotices = [];
     const realFill = context.autoFillPanorama;
     const realLotWidget = context.getPanoramaLotWidget;
+    let detailSelect;
+    const replaceDetailSelect = () => {
+      if (detailSelect) {
+        detailSelect.isConnected = false;
+        detailSelect.form = null;
+      }
+      detailSelect = {
+        form,
+        tagName: 'SELECT',
+        isConnected: true,
+        get value() {
+          return selectedLot ? 'chosen' : '';
+        },
+        get selectedIndex() {
+          return selectedLot ? 2 : -1;
+        },
+        get options() {
+          return [
+            { text: offeredLot, value: 'pf' },
+            { text: `N-${offeredLot}`, value: 'npf' },
+            ...(selectedLot ? [{ text: selectedLot, value: 'chosen' }] : [])
+          ];
+        }
+      };
+    };
+    replaceDetailSelect();
     Object.assign(context, {
       getPanoramaFormContext: () => ({ kind, ready: detailReady }),
       getPanoramaMultipleGridRows: () => visibleRows,
@@ -1349,17 +1404,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       }),
       getPanoramaLotWidget: () => ({
         label: { textContent: selectedLot },
-        select: {
-          tagName: 'SELECT',
-          isConnected: true,
-          value: selectedLot ? 'chosen' : '',
-          selectedIndex: selectedLot ? 2 : -1,
-          options: [
-            { text: offeredLot, value: 'pf' },
-            { text: `N-${offeredLot}`, value: 'npf' },
-            ...(selectedLot ? [{ text: selectedLot, value: 'chosen' }] : [])
-          ]
-        }
+        select: detailSelect
       }),
       autoFillPanorama(data) {
         fills.push(data);
@@ -1378,12 +1423,15 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       },
       clearTimeout() {},
       MutationObserver: class {
+        constructor(callback) {
+          observeHandoff = callback;
+        }
         observe() {}
         disconnect() {}
       }
     });
 
-    if (manualUse || deleteFirst || scenario === 'reset_grid') {
+    if (manualUse || deleteFirst || anchor || scenario === 'reset_grid') {
       const changes = { vaxlink_recent_activity_enabled: { newValue: true } };
       for (const listener of storageListeners) listener(changes, 'local');
       await new Promise(setImmediate);
@@ -1602,18 +1650,14 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       continue;
     }
     if (deleteFirst) {
-      const click = (textContent) =>
-        context.startGridHandoff({
-          isTrusted: true,
-          target: { closest: () => ({ textContent, form }) }
-        });
       if (!repeatAfterDelete)
         await context.releaseGridDetailStep('staff_input');
-      click('Delete');
+      assert.equal(clickAction('Delete'), true);
       assert.equal(skippedNotices.length, 0);
       windowListeners.get('popstate')[0]();
       state.step = '1-of-2';
       detailAgent = agents[2];
+      replaceDetailSelect();
       if (repeatedDelete) selectedLot = 'SAMPLE-2';
       if (repeatAfterDelete) {
         detailReady = false;
@@ -1638,8 +1682,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         assert.ok(saved().some(({ id }) => id === '0'));
         assert.equal(fills[0]?.lot, 'SAMPLE-1');
         await context.finalizeDeferredPanoramaAutofill(fills[0]);
-        click('Next');
+        assert.equal(clickAction('Next'), true);
         state.step = '2-of-2';
+        replaceDetailSelect();
         await context.advanceGridHandoff();
         assert.equal(fills[1]?.lot, 'SAMPLE-2');
         await context.finalizeDeferredPanoramaAutofill(fills[1]);
@@ -1672,7 +1717,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         );
         assert.deepEqual(
           rows
-            .filter(({ action }) => action === 'delete')
+            .filter(
+              ({ action, result }) =>
+                action === 'delete' &&
+                ['selected', 'step_changed'].includes(result)
+            )
             .map(({ result, total }) => [result, total]),
           [
             ['selected', 3],
@@ -1690,8 +1739,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       if (repeatedDelete) {
         assert.equal(fills.length, 0);
         assert.equal(saved()[0].dose_reservations, undefined);
-        click('Delete');
+        assert.equal(clickAction('Delete'), true);
         state.step = '1-of-1';
+        replaceDetailSelect();
         selectedLot = '';
         await context.advanceGridHandoff();
         assert.equal(fills.length, 0);
@@ -1708,9 +1758,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         ['SAMPLE-2']
       );
       await context.finalizeDeferredPanoramaAutofill(fills[0]);
-      click('Next');
+      assert.equal(clickAction('Next'), true);
       state.step = '2-of-2';
       detailAgent = agents[1];
+      replaceDetailSelect();
 
       // Panorama returned an enabled, blank Lot select containing other lots.
       // The grid can match this detail without proving the dose can be filled.
@@ -1909,7 +1960,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       assert.equal(fills.length, 0, 'the Lot changed during the route check');
 
       for (const [index, recordIndex] of [1, 0, 2].entries()) {
-        if (index) assert.equal(clickAction('Next'), true);
+        if (index) {
+          assert.equal(clickAction('Next'), true);
+          replaceDetailSelect();
+        }
         state.step = `${index + 1}-of-3`;
         detailAgent = agents[recordIndex];
         offeredLot = records[recordIndex].lot;
@@ -1999,6 +2053,162 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     );
     await context.finalizeDeferredPanoramaAutofill(fills[0]);
 
+    if (anchor) {
+      const settled = () => new Promise(setImmediate);
+      const reservations = () =>
+        saved()
+          .slice(1)
+          .map((row) => row.dose_reservations?.[0]?.token);
+      const held = reservations();
+      assert.ok(held.every(Boolean));
+      const outgoing = detailSelect;
+      const event = (type, urls) => {
+        for (const listener of windowListeners.get(type))
+          listener({ type, isTrusted: true, ...urls });
+      };
+      const navigate = (
+        destinationUrl,
+        navigationType = 'push',
+        hashChange = true
+      ) => {
+        for (const listener of navigationListeners)
+          listener({
+            isTrusted: true,
+            hashChange,
+            navigationType,
+            destination: { sameDocument: true, url: destinationUrl }
+          });
+        context.location.href = destinationUrl;
+      };
+      const anchorUrl = new URL('#topPageAnchor', url).href;
+      const anchorEvents = () => {
+        event('popstate');
+        event('hashchange', { oldURL: url, newURL: context.location.href });
+      };
+      const installIncoming = () => {
+        offeredLot = records[1].lot;
+        replaceDetailSelect();
+        observeHandoff();
+      };
+
+      assert.equal(clickAction('', 'Bottom_btnApplyAddNext'), true);
+      state.step = '2-of-3';
+      detailAgent = agents[1];
+      observeHandoff();
+      await settled();
+      assert.equal(fills.length, 1, 'the outgoing Lot still belongs to step 1');
+      assert.equal(outgoing.isConnected, true);
+      assert.equal(form.contains(outgoing), true);
+
+      if (scenario === 'anchor_before_detail') {
+        navigate(anchorUrl);
+        anchorEvents();
+        await settled();
+        assert.deepEqual(reservations(), held, 'wait for the replacement Lot');
+        assert.equal(fills.length, 1);
+      }
+      if (backAfterAnchor) {
+        routeGate = Promise.withResolvers();
+      }
+      if (backAfterAnchor || silentAnchor) {
+        navigate(anchorUrl, 'push', !silentAnchor);
+      }
+      installIncoming();
+      await settled();
+      if (silentAnchor) {
+        assert.equal(
+          fills.length,
+          1,
+          'a silent URL change cannot authorize a fill'
+        );
+        event('popstate');
+        await settled();
+        assert.equal(
+          fills.length,
+          1,
+          'history without a native anchor witness cannot authorize a fill'
+        );
+        assert.deepEqual(reservations(), [undefined, undefined]);
+        assert.deepEqual(
+          newReservations,
+          records.map(({ id }) => id)
+        );
+        continue;
+      }
+      if (scenario !== 'anchor_before_detail') {
+        if (scenario === 'anchor_after_writer') {
+          assert.equal(fills[1]?.lot, records[1].lot);
+          navigate(anchorUrl);
+        }
+        anchorEvents();
+        await settled();
+      }
+
+      if (backAfterAnchor) {
+        assert.equal(blockedRoutes, 1);
+        assert.deepEqual(reservations(), held);
+        const oldURL = context.location.href;
+        navigate(url, 'traverse');
+        event('popstate');
+        event('hashchange', { oldURL, newURL: url });
+        await settled();
+        assert.deepEqual(reservations(), [undefined, undefined]);
+        routeGate.resolve();
+        routeGate = null;
+        await settled();
+        assert.equal(fills.length, 1, 'Back revokes the pending route reply');
+        assert.deepEqual(reservations(), [undefined, undefined]);
+      } else {
+        assert.deepEqual(
+          fills.map(({ lot }) => lot),
+          [records[0].lot, records[1].lot]
+        );
+        assert.deepEqual(reservations(), held);
+        assert.equal(
+          context.isPanoramaAutofillCurrent(fills[1]),
+          true,
+          scenario
+        );
+        await context.finalizeDeferredPanoramaAutofill(fills[1]);
+        assert.deepEqual(reservations(), [undefined, held[1]], scenario);
+      }
+      assert.equal(outgoing.isConnected, false);
+      assert.deepEqual(
+        saved().map(({ remaining_doses }) => remaining_doses),
+        backAfterAnchor ? [1, 2, 2] : [1, 1, 2]
+      );
+      assert.deepEqual(
+        newReservations,
+        records.map(({ id }) => id)
+      );
+      vm.runInContext('chartActivity.flush()', context);
+      const { rows } = await worker.sendMessage(
+        { action: 'exportRecentActivity' },
+        popup
+      );
+      const results = rows
+        .filter(({ action }) => action === 'next')
+        .map(({ result }) => result);
+      assert.deepEqual(
+        results.filter((result) => result.startsWith('anchor_')),
+        ['anchor_popstate', 'anchor_hashchange']
+      );
+      assert.equal(
+        results.filter((result) => result === 'step_changed').length,
+        1
+      );
+      assert.equal(results.includes('marker_armed'), true);
+      assert.equal(results.includes('history_rejected'), backAfterAnchor);
+      assert.equal(
+        rows.filter(
+          ({ event, result }) =>
+            event === 'grid_handoff' && result === 'reservation_released'
+        ).length,
+        backAfterAnchor ? 2 : 0
+      );
+      continue;
+    }
+
     if (
       [
         'next_then_delete',
@@ -2008,26 +2218,15 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         'resolved_navigation_late'
       ].includes(scenario)
     ) {
-      const click = (textContent, id) => {
-        const button = {
-          id: `recordImmsForm:immsDetails_dataTable:immsDetails_Factory:${id}`,
-          textContent,
-          form
-        };
-        const target = { closest: () => button };
-        for (const type of ['pointerdown', 'click']) {
-          for (const listener of documentListeners.get(type))
-            listener({ type, isTrusted: true, target });
-        }
-      };
       const history = () => windowListeners.get('popstate')[0]();
       if (scenario !== 'browser_history')
-        click('Next', 'Bottom_btnApplyAddNext');
+        assert.equal(clickAction('', 'Bottom_btnApplyAddNext'), true);
       history();
       if (scenario === 'history_expired')
         context.performance = { now: () => Number.MAX_SAFE_INTEGER };
       state.step = '2-of-3';
       detailAgent = agents[1];
+      replaceDetailSelect();
       if (scenario === 'slow_next') {
         let now = performance.now();
         context.performance = { now: () => now };
@@ -2036,7 +2235,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         const pendingFill = context.advanceGridHandoff();
         await new Promise(setImmediate);
         const pending = saved()[1].dose_reservations[0].token;
-        click('Next', 'Bottom_btnApplyAddNext');
+        assert.equal(clickAction('', 'Bottom_btnApplyAddNext'), true);
         // The route reply arrives while Panorama still shows the form we submitted.
         routeGate = null;
         pendingRoute.resolve();
@@ -2085,12 +2284,13 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         continue;
       }
       assert.equal(fills[1].lot, 'SAMPLE-1');
-      click('Delete', '_btnRemoveNext');
+      assert.equal(clickAction('', '_btnRemoveNext'), true);
       // A Delete may leave the old detail on screen until Panorama responds.
       await context.advanceGridHandoff();
       assert.equal(fills.length, 2);
       state.step = '2-of-2';
       detailAgent = agents[2];
+      replaceDetailSelect();
       selectedLot = 'SAMPLE-1';
       await context.advanceGridHandoff();
       assert.equal(

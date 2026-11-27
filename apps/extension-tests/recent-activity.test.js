@@ -186,15 +186,24 @@ test('Debug keeps readiness reasons alongside a scan-order decision and staff ac
     step: 1,
     total: 2
   };
-  const reply = await worker.append(ticket, [
+  const batch = [
     ...blocked,
     decision,
     { ...decision, scanOrder: true },
-    action
-  ]);
+    action,
+    { ...action, result: 'marker_declined' },
+    {
+      ...detail,
+      event: 'grid_handoff',
+      row: 2,
+      step: 1,
+      result: 'release_unconfirmed'
+    }
+  ];
+  const reply = await worker.append(ticket, batch);
   assert.equal(reply.success, true);
   const exported = await worker.manage('exportRecentActivity');
-  assert.equal(exported.retained, 5);
+  assert.equal(exported.retained, batch.length);
   assert.equal(exported.rows[3].scanOrder, true);
   assert.equal(exported.rows[4].result, 'step_changed');
 });

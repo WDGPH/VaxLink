@@ -184,6 +184,7 @@ const gridAssignments = new Map();
 let repeatedGridConfirmation = null;
 let updateRepeatedGridNotice;
 let gridDetailHandoff = null;
+let pausedGridDetailChart = null;
 
 let trayUseContext = null;
 let trayUseContextGeneration = 0;
@@ -992,12 +993,20 @@ function initHandsFreeScanner() {
     );
   }
   document.addEventListener('click', startGridHandoff, true);
+  window.navigation?.addEventListener('navigate', observeGridDetailAnchor);
   for (const type of ['pagehide', 'popstate', 'hashchange']) {
-    window.addEventListener(type, () => {
+    window.addEventListener(type, (event) => {
       lockedScanChart = null;
-      if (type === 'popstate' && keepGridCarryForDetailHistory()) return;
-      clearGridCarry(type);
-      cancelPanoramaAutofill();
+      const handoff = gridDetailHandoff;
+      if (type !== 'pagehide' && handoff?.navigation) {
+        if (keepGridCarryForDetailHistory(handoff, type, event)) return;
+        handoff.navigation.report('history_rejected');
+        cancelPanoramaAutofill();
+        failGridDetailNavigation(handoff, type);
+      } else {
+        clearGridCarry(type);
+        cancelPanoramaAutofill();
+      }
       if (type === 'pagehide') chartActivity?.flush();
     });
   }
@@ -6581,14 +6590,31 @@ function rememberGridAssignment(assignment, dose, record, source) {
   return true;
 }
 
-function releaseGridAssignment(entry, reason = 'context_changed', step = 0) {
+async function releaseGridAssignment(
+  entry,
+  reason = 'context_changed',
+  step = 0
+) {
   entry.log(reason, step);
-  return stopTrayDose(entry.dose.owner, true, entry.dose);
+  const reserved = entry.dose.reserved;
+  const released = await stopTrayDose(entry.dose.owner, true, entry.dose);
+  if (reserved)
+    entry.log(released ? 'reservation_released' : 'release_unconfirmed', step);
+  return released;
 }
 
 function clearGridCarry(reason = 'context_changed') {
   if (reason !== 'row_missing') repeatedGridConfirmation = null;
-  clearCarryProblem();
+  // The second event of a rejected fragment traversal can arrive after the
+  // first event stopped carry. Leave its notice on that same chart.
+  if (
+    (reason !== 'popstate' && reason !== 'hashchange') ||
+    !pausedGridDetailChart ||
+    pausedGridDetailChart.url !== location.href ||
+    pausedGridDetailChart.form !== getPanoramaAutofillForm() ||
+    !isPanoramaChartActive()
+  )
+    clearCarryProblem();
   toastSkippedDoseSlot?.replaceChildren();
   failedGridCarry = null;
   for (const entry of gridAssignments.values())
@@ -6604,6 +6630,28 @@ function clearGridCarry(reason = 'context_changed') {
   clearTimeout(handoff.navigation?.timer);
   for (const row of handoff.rows)
     if (row.entry) void releaseGridAssignment(row.entry, reason);
+}
+
+function failGridDetailNavigation(handoff, reason) {
+  const navigation = handoff.navigation;
+  const owner = navigation?.incomingOwner;
+  const sameChart =
+    navigation &&
+    [handoff.url, navigation.url, navigation.anchorUrl].includes(
+      location.href
+    ) &&
+    getPanoramaAutofillForm() === navigation.form &&
+    isPanoramaChartActive();
+  if (navigation && !navigation.resolved) navigation.report('step_unconfirmed');
+  clearGridCarry(reason);
+  if (owner && owner === panoramaAutofillOwner && !owner.cancelled)
+    cancelPanoramaAutofill();
+  if (sameChart) {
+    showCarryProblem(
+      'VaxLink could not confirm the next immunization. Check the open chart and the Immunization tray.'
+    );
+    pausedGridDetailChart = { form: navigation.form, url: location.href };
+  }
 }
 
 function visiblePopulatedGridRows() {
@@ -7209,13 +7257,13 @@ function markGridDetailNavigation(button, action) {
     location.href !== handoff.url ||
     (pending &&
       !pending.resolved &&
-      (pending.sawHistory || pending.before !== before)) ||
+      (pending.history || pending.before !== before)) ||
     (pending?.resolved &&
       (pending.after !== before || pending.confirmedForm !== form)) ||
     (form !== handoff.form && (!form.id || form.id !== handoff.form.id)) ||
     (action === 'next' ? step === total : total <= 1)
   )
-    return;
+    return report('marker_declined');
   const detail = readGridDetailIdentity(form);
   const owner = panoramaAutofillOwner;
   const matches = handoff.rows.filter(
@@ -7236,9 +7284,15 @@ function markGridDetailNavigation(button, action) {
       (matches.includes(ordered) &&
         (matches.length === 1 || (step === 1 && !handoff.deletedRows.length)) &&
         ordered));
-  clearTimeout(handoff.navigation?.timer);
+  clearTimeout(pending?.timer);
   const navigation = {
+    document,
     form,
+    url: handoff.url,
+    anchorUrl:
+      action === 'next' && !handoff.url.includes('#')
+        ? `${handoff.url}#topPageAnchor`
+        : null,
     surface: gridDetailLotSurface(form),
     before,
     after:
@@ -7259,6 +7313,7 @@ function markGridDetailNavigation(button, action) {
     until: performance.now() + 10000
   };
   handoff.navigation = navigation;
+  report('marker_armed');
   // A route check for the outgoing step can still be in flight.
   handoff.checking = null;
   // Once staff submit the detail, no further writes should reach the outgoing
@@ -7272,11 +7327,11 @@ function markGridDetailNavigation(button, action) {
     if (
       gridDetailHandoff === handoff &&
       handoff.navigation === navigation &&
-      !navigation.resolved
-    ) {
-      report('step_unconfirmed');
-      clearGridCarry('detail_navigation_changed');
-    }
+      (!navigation.resolved ||
+        location.href !== handoff.url ||
+        navigation.history === 'anchor_popstate')
+    )
+      failGridDetailNavigation(handoff, 'detail_navigation_changed');
   }, 10000);
 }
 
@@ -7285,35 +7340,119 @@ function gridDetailLotSurface(form) {
   return widget?.select || widget?.root;
 }
 
-function keepGridCarryForDetailHistory() {
-  const handoff = gridDetailHandoff;
-  const navigation = handoff?.navigation;
+function matchesGridDetailNavigation(navigation, form, position) {
+  return navigation.resolved
+    ? form === navigation.confirmedForm && position === navigation.after
+    : !position ||
+        position === navigation.before ||
+        position === navigation.after;
+}
+
+function canFollowGridDetailAnchor(navigation, form, position) {
+  return (
+    navigation?.anchorPush &&
+    navigation.anchorUrl === location.href &&
+    navigation.document === document &&
+    performance.now() < navigation.until &&
+    navigation.history !== 'same_url_popstate' &&
+    navigation.form.isConnected &&
+    form === navigation.form &&
+    matchesGridDetailNavigation(navigation, form, position) &&
+    isPanoramaChartActive()
+  );
+}
+
+function checkGridDetailChartUrl(handoff, form, position) {
+  const navigation = handoff.navigation;
+  if (handoff.url === location.href)
+    return navigation?.history !== 'anchor_popstate';
+  // Keep the existing reservations while native history confirms the move.
+  if (!canFollowGridDetailAnchor(navigation, form, position))
+    failGridDetailNavigation(handoff, 'chart_url_changed');
+  return false;
+}
+
+function observeGridDetailAnchor(event) {
+  const navigation = gridDetailHandoff?.navigation;
+  if (!navigation?.anchorUrl || !event.isTrusted) return;
+  // A fragment assignment is a same-document push. History traversal and
+  // pushState do not establish the fragment move expected from Panorama.
+  navigation.anchorPush =
+    !event.userInitiated &&
+    event.hashChange &&
+    event.navigationType === 'push' &&
+    event.destination.sameDocument &&
+    location.href === navigation.url &&
+    event.destination.url === navigation.anchorUrl;
+}
+
+function adoptGridDetailAnchor(handoff, form, position) {
+  const navigation = handoff.navigation;
+  handoff.url = navigation.anchorUrl;
+
+  // The new detail can start filling before Panorama sets the fragment.
+  // Carry its URL forward only for the writer confirmed by this Next.
+  const owner = navigation.incomingOwner;
   if (
-    !navigation ||
-    navigation.sawHistory ||
-    performance.now() >= navigation.until ||
-    location.href !== handoff.url ||
-    !isPanoramaChartActive()
+    owner &&
+    owner === panoramaAutofillOwner &&
+    !owner.cancelled &&
+    owner.form === form &&
+    owner.step === position &&
+    owner.url === navigation.url
   )
+    owner.url = handoff.url;
+}
+
+function keepGridCarryForDetailHistory(handoff, type, event) {
+  const navigation = handoff.navigation;
+  if (performance.now() >= navigation.until || !isPanoramaChartActive())
     return false;
+  const form = getPanoramaAutofillForm();
   const position = getPanoramaMultiStepIndicatorKey({ visibleOnly: true });
   if (
+    !matchesGridDetailNavigation(navigation, form, position) ||
     (navigation.resolved &&
-      (position !== navigation.after ||
-        getPanoramaAutofillForm() !== navigation.confirmedForm ||
-        getPanoramaFormContext({ checkReadiness: false }).kind !==
-          'multiple_detail')) ||
-    (position &&
-      position !== navigation.before &&
-      position !== navigation.after)
+      getPanoramaFormContext({ checkReadiness: false }).kind !==
+        'multiple_detail')
   )
     return false;
-  navigation.sawHistory = true;
-  // Some history events arrive after the new form appears. Cancel the old
-  // writer without cancelling the fill that already verified the next step.
-  if (panoramaAutofillOwner?.step === navigation.before)
+
+  if (location.href === navigation.anchorUrl) {
+    // Chromium emits popstate first. Only its matching hashchange can
+    // follow it. A later traversal must go through ordinary cancellation.
+    if (
+      !event?.isTrusted ||
+      !canFollowGridDetailAnchor(navigation, form, position)
+    )
+      return false;
+    if (type === 'popstate' && !navigation.history) {
+      navigation.history = 'anchor_popstate';
+      adoptGridDetailAnchor(handoff, form, position);
+    } else if (
+      type === 'hashchange' &&
+      navigation.history === 'anchor_popstate' &&
+      event.oldURL === navigation.url &&
+      event.newURL === navigation.anchorUrl
+    ) {
+      navigation.history = 'anchor_hashchange';
+      if (navigation.resolved) clearTimeout(navigation.timer);
+    } else return false;
+  } else {
+    if (
+      type !== 'popstate' ||
+      navigation.history ||
+      location.href !== navigation.url ||
+      handoff.url !== navigation.url
+    )
+      return false;
+    navigation.history = 'same_url_popstate';
+  }
+  const owner = panoramaAutofillOwner;
+  if (owner?.step === navigation.before && !owner.cancelled)
     cancelPanoramaAutofill();
-  void advanceGridHandoff();
+  navigation.report(navigation.history);
+  if (navigation.history !== 'anchor_popstate') void advanceGridHandoff();
   return true;
 }
 
@@ -7580,6 +7719,7 @@ function showCarryProblem(message, clearLot) {
 }
 
 function clearCarryProblem() {
+  pausedGridDetailChart = null;
   if (toastCarrySlot) toastCarrySlot.innerHTML = '';
 }
 
@@ -7760,16 +7900,27 @@ async function advanceGridHandoff() {
   const handoff = gridDetailHandoff;
   if (!handoff || handoff.clearingLot) return;
   const navigation = handoff.navigation;
-  const withinNavigation = navigation && performance.now() < navigation.until;
-  if (navigation && !navigation.resolved && !withinNavigation)
-    return clearGridCarry('detail_navigation_changed');
-  const context = getPanoramaFormContext();
   if (!isPanoramaChartActive()) return clearGridCarry('chart_inactive');
-  if (handoff.url !== location.href) return clearGridCarry('chart_url_changed');
+  const form = getPanoramaAutofillForm();
+  const { step, total } = currentGridDetailStep();
+  const position = step ? `${step}-of-${total}` : '';
+  if (!checkGridDetailChartUrl(handoff, form, position)) return;
+  if (
+    navigation &&
+    !navigation.resolved &&
+    performance.now() >= navigation.until
+  )
+    return failGridDetailNavigation(handoff, 'detail_navigation_changed');
+  if (
+    navigation?.anchorUrl === handoff.url &&
+    (!navigation.form.isConnected || form !== navigation.form)
+  )
+    return failGridDetailNavigation(handoff, 'detail_form_changed');
+  const context = getPanoramaFormContext();
   if (context.kind === 'multiple_grid' && handoff.step)
-    return clearGridCarry('grid_returned');
+    return failGridDetailNavigation(handoff, 'grid_returned');
   if (['provider_single', 'non_provider_single'].includes(context.kind))
-    return clearGridCarry('single_form_opened');
+    return failGridDetailNavigation(handoff, 'single_form_opened');
   if (context.kind === 'multiple_grid') {
     // Panorama can remove grid rows while building the detail form. Any
     // remaining rows must still appear in their original order.
@@ -7791,40 +7942,33 @@ async function advanceGridHandoff() {
   if (context.kind !== 'multiple_detail') return;
   repeatedGridConfirmation = null;
 
-  const { step, total } = currentGridDetailStep();
-  const form = getPanoramaAutofillForm();
   if (!(step > 0 && step <= total)) return;
   if (form !== handoff.form && (!form?.id || form.id !== handoff.form.id))
-    return clearGridCarry('detail_form_changed');
-  const position = `${step}-of-${total}`;
+    return failGridDetailNavigation(handoff, 'detail_form_changed');
   const expected = navigation && position === navigation.after;
+  if (navigation && !matchesGridDetailNavigation(navigation, form, position))
+    return failGridDetailNavigation(handoff, 'detail_navigation_changed');
   // An unchanged step does not tell us whether Panorama rejected the
   // submission or is still processing it. Keep writes off that step.
-  if (navigation && !navigation.resolved && position === navigation.before)
-    return;
-  if (
-    navigation &&
-    (!expected || (navigation.resolved && form !== navigation.confirmedForm))
-  )
-    return clearGridCarry('detail_navigation_changed');
+  if (navigation && !expected) return;
   if (step < handoff.step && !(expected && navigation.deleting))
-    return clearGridCarry('detail_step_reversed');
+    return failGridDetailNavigation(handoff, 'detail_step_reversed');
   if (total > handoff.rows.length)
-    return clearGridCarry('unexpected_step_total');
+    return failGridDetailNavigation(handoff, 'unexpected_step_total');
   if (expected && !navigation.resolved) {
     const surface = gridDetailLotSurface(form);
     // PrimeFaces can retain the outer form. A new counter alone could
     // leave the previous immunization's Lot control on screen.
     if (
       !context.ready ||
-      isPrimeFacesAjaxBusy() ||
       (form === navigation.form &&
         (!surface || !navigation.surface || surface === navigation.surface))
     )
       return;
     navigation.resolved = true;
     navigation.confirmedForm = form;
-    clearTimeout(navigation.timer);
+    if (!navigation.anchorUrl || navigation.history === 'anchor_hashchange')
+      clearTimeout(navigation.timer);
     navigation.report('step_changed', { step, total });
   }
   if (expected && context.ready && navigation.deletedRow) {
@@ -7972,12 +8116,21 @@ async function advanceGridHandoff() {
     const active =
       route && (await checkPanoramaScannerRoute({ scannerRoute: route }));
     if (gridDetailHandoff !== handoff || handoff.checking !== check) return;
+    const currentForm = getPanoramaAutofillForm();
+    const currentPosition = getPanoramaMultiStepIndicatorKey({
+      visibleOnly: true
+    });
     if (!active) {
       clearGridCarry('route_changed');
-      if (isPanoramaChartActive()) {
+      if (
+        isPanoramaChartActive() &&
+        handoff.url === location.href &&
+        currentForm === form &&
+        currentPosition === position
+      ) {
         failedGridCarry = {
           form,
-          step: getPanoramaMultiStepIndicatorKey({ visibleOnly: true }),
+          step: position,
           recordId: entry.dose.recordId
         };
         showCarryProblem(
@@ -7986,17 +8139,15 @@ async function advanceGridHandoff() {
       }
       return;
     }
+    if (!checkGridDetailChartUrl(handoff, currentForm, currentPosition)) return;
     const current = getPanoramaFormContext();
-    const detail = currentGridDetailStep();
     if (
       row.entry !== entry ||
       current.kind !== 'multiple_detail' ||
       !current.ready ||
       !isPanoramaChartActive() ||
-      location.href !== handoff.url ||
-      getPanoramaAutofillForm() !== form ||
-      detail.step !== step ||
-      detail.total !== total ||
+      currentForm !== form ||
+      currentPosition !== position ||
       handoff.attempted === position
     )
       return;
@@ -8032,6 +8183,7 @@ async function advanceGridHandoff() {
     const data = beginPanoramaAutofill({}, true, { automatic: true });
     if (!isPanoramaAutofillCurrent(data)) return;
     data._vaxlinkOwner.scannerRoute = route;
+    if (navigation) navigation.incomingOwner = data._vaxlinkOwner;
     data._vaxlinkOwner.gridDetail = {
       ...entry,
       beforeDeleteReorder: confirmed.beforeDeleteReorder,
