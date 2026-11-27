@@ -92,7 +92,7 @@ Counts describe recorded operations. One scan can contribute to several counts. 
 
 **Download** saves a JSON file with those events, the number retained and overwritten, the extension name, versions and build fingerprint, and the workflow and autofill choices at download time. Up to 3,000 events and 1 MiB are kept in the session, with older events discarded as space is needed. Turning Debug off clears that session’s details. Ordinary browser console warnings can still contain error or field details, including a date value after a conversion error. Review console captures as well as downloaded files before sharing.
 
-The lock and tray action events use fixed action and result names, with counts for resume offers and fills. They contain no tray record IDs or chart field values. The Immunization tray's **Recent Scans** keeps up to 20 unused single-use scans removed after Delete in local storage. Restoring one returns the original tray entry and removes it from this history. The Debug export excludes this recovery history.
+The lock and tray action events use fixed action and result names, with counts for resume offers and fills. They contain no tray record IDs or chart field values. The Immunization tray's **Recent Scans** keeps up to 20 unused single-use scans removed from Multiple Immunizations in local storage. Restoring one returns the original tray entry and removes it from this history. The Debug export excludes this recovery history.
 
 ### Choosing settings for pilot and production
 

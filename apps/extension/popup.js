@@ -751,7 +751,7 @@ function renderRecentChartLots(history, skippedHistory) {
         const expiry =
           row.inventory_expiry || row.barcode_expiry || row.nvc_lot_expiry;
         const details = document.createElement('div');
-        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}${restore ? ' · Removed after Delete' : ''}`;
+        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}${restore ? ' · Removed from tray' : ''}`;
         label.append(title, details);
         const add = document.createElement('button');
         add.type = 'button';

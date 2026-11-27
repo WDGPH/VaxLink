@@ -208,6 +208,7 @@
       result: choices(
         'accepted',
         'repeat_agents_confirmed',
+        'repeat_agents_dismissed',
         'repeat_agents_review',
         'no_assignments',
         'button_outside_form',

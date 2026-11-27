@@ -182,6 +182,7 @@ function logAnalyticsEvent(eventType, payload = {}) {
 
 const gridAssignments = new Map();
 let repeatedGridConfirmation = null;
+let updateRepeatedGridNotice;
 let gridDetailHandoff = null;
 
 let trayUseContext = null;
@@ -2328,7 +2329,11 @@ function lotMissLeftSelectionAlone(owner, cleanup, lot) {
   );
 }
 
-function clearPanoramaSelection(field, allowNoPlaceholder = false) {
+function clearPanoramaSelection(
+  field,
+  allowNoPlaceholder = false,
+  canWrite = () => true
+) {
   const blanks = [...(field?.options || [])].filter(
     (option) => !option.disabled && option.value === ''
   );
@@ -2336,7 +2341,8 @@ function clearPanoramaSelection(field, allowNoPlaceholder = false) {
     blanks.length > 1 ||
     (!blanks.length && !allowNoPlaceholder) ||
     !canFillPanoramaControl(field) ||
-    !field.value
+    !field.value ||
+    !canWrite()
   )
     return;
   assertPanoramaAutofillWrite();
@@ -2344,9 +2350,11 @@ function clearPanoramaSelection(field, allowNoPlaceholder = false) {
   else field.selectedIndex = -1;
   field.dispatchEvent(new Event('input', { bubbles: true }));
   assertPanoramaAutofillWrite();
+  if (!canWrite()) return false;
   if (field.isConnected)
     field.dispatchEvent(new Event('change', { bubbles: true }));
   assertPanoramaAutofillWrite();
+  if (!canWrite()) return false;
   if (field.isConnected && !field.value && field.id?.endsWith('_input')) {
     const label = document.getElementById(
       field.id.replace(/_input$/, '_label')
@@ -4508,7 +4516,8 @@ async function releaseUnusedTrayDose({ recordId, token }) {
 async function stopTrayDose(
   owner,
   confirmedNoProductWrite = false,
-  dose = owner?.trayDose
+  dose = owner?.trayDose,
+  requireReleaseProof = false
 ) {
   if (
     !dose?.reserved ||
@@ -4534,7 +4543,9 @@ async function stopTrayDose(
       return reply.rows?.some(
         (row) =>
           row.id === dose.recordId &&
-          !row.dose_reservations?.some((saved) => saved.token === dose.token)
+          !row.dose_reservations?.some((saved) => saved.token === dose.token) &&
+          (!requireReleaseProof ||
+            row.unused_dose_release?.token === dose.token)
       );
   } catch (error) {
     console.warn('VaxLink could not confirm the tray stop:', error);
@@ -6447,6 +6458,25 @@ function isGridAssignmentCurrent(assignment, form) {
   );
 }
 
+function readGridRemovalControls(row, index) {
+  const { agentField, agentLabel, dateField } =
+    getPanoramaMultipleGridRowState(index);
+  if (
+    !agentField?.isConnected ||
+    !agentLabel?.isConnected ||
+    !dateField?.isConnected ||
+    !row.contains(agentField) ||
+    !row.contains(agentLabel)
+  )
+    return null;
+  const dates = [
+    ...row.querySelectorAll('input[id*="dateIn"][id$="dateInput_input"]')
+  ];
+  return dates.includes(dateField)
+    ? { agentField, agentLabel, dateField, dates }
+    : null;
+}
+
 function assignTrayVaccineToGrid(data) {
   const candidates = getPanoramaAgentCandidates(data);
   if (!candidates.length) return null;
@@ -6456,6 +6486,11 @@ function assignTrayVaccineToGrid(data) {
   const index = row.getAttribute('data-ri');
   const key = row.getAttribute('data-rk');
   const assignment = { row, index, key };
+  const before = readGridRemovalControls(row, index);
+  const wasBlank =
+    before &&
+    !before.agentField.value &&
+    before.dates.every(({ value }) => !panoramaDateTimeHasValue(value));
   owner.gridAssignment = assignment;
   fillPanoramaMultipleGridRow(index, data);
   if (!isPanoramaAutofillCurrent(data)) return null;
@@ -6466,6 +6501,15 @@ function assignTrayVaccineToGrid(data) {
     return null;
   assignment.agent = panoramaAgentIdentity(agentText);
   assignment.date = dateText;
+  if (wasBlank) {
+    const controls = readGridRemovalControls(row, index);
+    if (sameGridRemovalControls(controls, before))
+      assignment.removal = {
+        ...controls,
+        value: controls.agentField.value,
+        label: controls.agentLabel.textContent
+      };
+  }
   return assignment;
 }
 
@@ -6504,7 +6548,10 @@ function rememberGridAssignment(assignment, dose, record, source) {
       })
     : readGridAssignmentRoute();
   const prior = gridAssignments.get(assignment.index);
-  if (prior) void releaseGridAssignment(prior, 'superseded');
+  if (prior) {
+    gridAssignments.delete(assignment.index);
+    void releaseGridAssignment(prior, 'superseded');
+  }
   const entry = {
     ...assignment,
     trace,
@@ -6522,11 +6569,14 @@ function rememberGridAssignment(assignment, dose, record, source) {
   // reservation separate from the grid owner as the form changes to details.
   owner.trayDose = null;
   void route.then((active) => {
-    if (!active && gridAssignments.get(entry.index) === entry) {
+    if (gridAssignments.get(entry.index) !== entry) return;
+    if (active) entry.activeRoute = active;
+    else {
       gridAssignments.delete(entry.index);
       repeatedGridConfirmation = null;
       void releaseGridAssignment(entry, 'route_changed');
     }
+    updateRepeatedGridNotice?.();
   });
   return true;
 }
@@ -6544,6 +6594,7 @@ function clearGridCarry(reason = 'context_changed') {
   for (const entry of gridAssignments.values())
     void releaseGridAssignment(entry, reason);
   gridAssignments.clear();
+  updateRepeatedGridNotice?.();
   const handoff = gridDetailHandoff;
   if (!handoff) return;
   gridDetailHandoff = null;
@@ -6580,48 +6631,355 @@ function gridHasRepeatedAgents(rows) {
   return new Set(rows.map(({ agent }) => agent)).size < rows.length;
 }
 
-function matchesGridConfirmation(confirmation, form, rows) {
+function snapshotGridConfirmation(form, rows) {
+  return {
+    form,
+    url: location.href,
+    rows,
+    gridRows: getPanoramaMultipleGridRows()
+      .filter(isVisible)
+      .map((row) => ({
+        row,
+        index: row.getAttribute('data-ri'),
+        key: row.getAttribute('data-rk')
+      })),
+    dates: [
+      ...document.querySelectorAll(
+        'tbody[id*="historicalfactoryTable:dataTable_data"] input[id*="dateIn"][id$="dateInput_input"]'
+      )
+    ].map((field) => ({ field, value: field.value })),
+    assignments: [...gridAssignments.values()]
+  };
+}
+
+function matchesGridConfirmation(confirmation, current) {
   return (
-    confirmation?.form === form &&
-    confirmation.url === location.href &&
-    rows.length === confirmation.rows.length &&
-    rows.every((row, index) =>
+    confirmation &&
+    current &&
+    confirmation.form === current.form &&
+    confirmation.url === current.url &&
+    current.rows.length === confirmation.rows.length &&
+    current.gridRows.length === confirmation.gridRows.length &&
+    current.gridRows.every((row, i) =>
+      sameGridAssignment(row, confirmation.gridRows[i])
+    ) &&
+    current.dates.length === confirmation.dates.length &&
+    current.dates.every(
+      ({ field, value }, i) =>
+        field === confirmation.dates[i].field &&
+        value === confirmation.dates[i].value
+    ) &&
+    current.assignments.length === confirmation.assignments.length &&
+    current.assignments.every(
+      (entry, i) => entry === confirmation.assignments[i]
+    ) &&
+    current.rows.every((row, index) =>
       sameGridAssignment(row, confirmation.rows[index])
     )
   );
 }
 
+function isRepeatedGridCurrent(form, url) {
+  return (
+    isPanoramaChartActive() &&
+    location.href === url &&
+    form === getPanoramaAutofillForm() &&
+    getPanoramaFormContext({ checkReadiness: false }).kind === 'multiple_grid'
+  );
+}
+
+function sameGridRemovalControls(current, original) {
+  return (
+    current?.agentField === original.agentField &&
+    current.agentLabel === original.agentLabel &&
+    current.dateField === original.dateField &&
+    current.dates.length === original.dates.length &&
+    current.dates.every((date, index) => date === original.dates[index])
+  );
+}
+
+function otherGridDatesAreBlank({ dates, dateField }) {
+  return dates.every(
+    (date) => date === dateField || !panoramaDateTimeHasValue(date.value)
+  );
+}
+
+function unchangedGridRemovalControls(entry) {
+  const original = entry.removal;
+  const current = readGridRemovalControls(entry.row, entry.index);
+  return (
+    sameGridRemovalControls(current, original) &&
+    current.agentField.value === original.value &&
+    current.agentLabel.textContent === original.label &&
+    current.dateField.value.trim() === entry.date &&
+    otherGridDatesAreBlank(current)
+  );
+}
+
+function matchingRepeatedGridAssignment(form, rows) {
+  if (
+    !form ||
+    activeWorkflowMode !== 'immunization' ||
+    panoramaEntryBlockReason()
+  )
+    return null;
+  return [...gridAssignments.values()].findLast((entry) => {
+    const record = entry.dose.record;
+    if (
+      !entry.activeRoute ||
+      !entry.removal ||
+      entry.form !== form ||
+      entry.url !== location.href ||
+      !isGridAssignmentCurrent(entry, form) ||
+      !entry.dose.reserved ||
+      !activeTrayReservations.has(entry.dose.token) ||
+      record?.id !== entry.dose.recordId ||
+      record.dose_tracking !== 'single_use' ||
+      (record.remaining_doses != null && record.remaining_doses !== 1) ||
+      (record.total_doses != null && record.total_doses !== 1) ||
+      typeof record.lot !== 'string' ||
+      !record.lot.trim()
+    )
+      return false;
+    const position = rows.findIndex((row) => sameGridAssignment(row, entry));
+    const field = entry.removal.agentField;
+    return (
+      position > 0 &&
+      rows
+        .slice(0, position)
+        .some(
+          ({ agent, index }) =>
+            agent === entry.agent &&
+            gridAssignments.get(index)?.dose.recordId !== record.id
+        ) &&
+      unchangedGridRemovalControls(entry) &&
+      canFillPanoramaControl(field) &&
+      !field.matches?.(':disabled') &&
+      [...field.options].filter(
+        (option) => !option.disabled && option.value === ''
+      ).length === 1
+    );
+  });
+}
+
+function clearAssignedGridDate(field, current) {
+  if (!current(false)) return;
+  assertPanoramaAutofillWrite();
+  field.focus();
+  if (!current(false)) return;
+  assertPanoramaAutofillWrite();
+  field.value = '';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  if (!current(true)) return;
+  assertPanoramaAutofillWrite();
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  if (current(true)) field.blur();
+}
+
+async function removeRepeatedGridAssignment(entry) {
+  const { activeRoute: route, dose, form, index, row } = entry;
+  const number = Number(index) + 1;
+  const currentChart = () =>
+    activeWorkflowMode === 'immunization' &&
+    !panoramaEntryBlockReason() &&
+    isRepeatedGridCurrent(form, entry.url);
+  const currentRow = () =>
+    currentChart() &&
+    gridAssignments.get(index) === entry &&
+    isGridAssignmentCurrent(entry, form) &&
+    getPanoramaMultipleGridRows().includes(row) &&
+    isVisible(row);
+  const blankAgent = () => {
+    const controls = readGridRemovalControls(row, index);
+    return sameGridRemovalControls(controls, entry.removal) &&
+      controls.agentField.value === '' &&
+      controls.agentField.options[controls.agentField.selectedIndex]?.value ===
+        '' &&
+      controls.agentLabel.textContent.trim() ===
+        getFieldFilledText(controls.agentField) &&
+      otherGridDatesAreBlank(controls)
+      ? controls
+      : null;
+  };
+  const cleared = () => {
+    const controls = blankAgent();
+    return controls && !panoramaDateTimeHasValue(controls.dateField.value);
+  };
+  let data;
+  let archiveStarted = false;
+  try {
+    if (
+      !(await checkPanoramaScannerRoute({ scannerRoute: route })) ||
+      !currentRow() ||
+      isPrimeFacesAjaxBusy() ||
+      matchingRepeatedGridAssignment(form, visiblePopulatedGridRows()) !== entry
+    )
+      return;
+
+    data = beginPanoramaAutofill({}, true, { automatic: true });
+    data._vaxlinkOwner.gridAssignment = entry;
+    const { agentField, agentLabel, dateField } = entry.removal;
+    const sameAgentControls = () => {
+      const current = readGridRemovalControls(row, index);
+      return (
+        currentRow() &&
+        sameGridRemovalControls(current, entry.removal) &&
+        document.getElementById(agentField.id.replace(/_input$/, '_label')) ===
+          agentLabel
+      );
+    };
+    if (
+      !runPanoramaAutofill(data, () =>
+        clearPanoramaSelection(agentField, false, sameAgentControls)
+      )
+    )
+      return;
+
+    // Give Panorama time to clear the dates. If it leaves the original Date 1
+    // intact, the row action can clear that field once after checking it again.
+    const dateCurrent = (expectBlank) =>
+      currentRow() &&
+      isPanoramaAutofillCurrent(data) &&
+      !isPrimeFacesAjaxBusy() &&
+      blankAgent() &&
+      canFillPanoramaControl(dateField) &&
+      !dateField.readOnly &&
+      (expectBlank
+        ? !panoramaDateTimeHasValue(dateField.value)
+        : dateField.value.trim() === entry.date);
+    let blank = false;
+    let clearedDate = false;
+    for (let attempt = 0; attempt < 16; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 125));
+      if (!currentRow() || !isPanoramaAutofillCurrent(data)) return;
+      const empty = !isPrimeFacesAjaxBusy() && cleared();
+      if (empty && blank) break;
+      blank = empty;
+      if (attempt === 15) return;
+      if (attempt >= 5 && !blank && !clearedDate && dateCurrent(false)) {
+        clearedDate = true;
+        runPanoramaAutofill(data, () =>
+          clearAssignedGridDate(dateField, dateCurrent)
+        );
+      }
+    }
+    entry.log('skipped');
+    if (
+      !(await stopTrayDose(dose.owner, true, dose, true)) ||
+      !(await checkPanoramaScannerRoute({ scannerRoute: route })) ||
+      !currentRow() ||
+      !isPanoramaAutofillCurrent(data) ||
+      isPrimeFacesAjaxBusy() ||
+      !cleared()
+    )
+      return;
+    archiveStarted = true;
+    await handleUnusedSkippedDose(dose.record, true, dose.token);
+  } catch (_) {
+    // A Panorama change handler can replace the form during the write.
+  } finally {
+    if (
+      data?._vaxlinkOwner.writeAttempted &&
+      gridAssignments.get(index) === entry
+    ) {
+      gridAssignments.delete(index);
+      if (!dose.stopping) void releaseGridAssignment(entry, 'row_changed');
+    }
+    entry.removing = false;
+    updateRepeatedGridNotice?.();
+    if (!archiveStarted && currentChart())
+      showVaxlinkToast({
+        _entryWarning: `Check the Agent and dates on row ${number} before continuing. Check the Immunization tray and Recent Scans for this scan.`
+      });
+  }
+}
+
 function watchRepeatedGridAgents() {
   if (!document.body) return;
+  let shownEntry;
+  let shownSnapshot;
   const update = () => {
     const inGrid =
       isPanoramaMultipleImmunizationGridPage({ visibleOnly: true }) &&
       getPanoramaFormContext({ checkReadiness: false }).kind ===
         'multiple_grid';
+    const form = inGrid ? getPanoramaAutofillForm() : null;
     const rows = inGrid ? visiblePopulatedGridRows() : [];
+    const snapshot = gridHasRepeatedAgents(rows)
+      ? snapshotGridConfirmation(form, rows)
+      : null;
     if (
       repeatedGridConfirmation &&
-      !matchesGridConfirmation(
-        repeatedGridConfirmation,
-        getPanoramaAutofillForm(),
-        rows
-      )
+      !matchesGridConfirmation(repeatedGridConfirmation, snapshot)
     )
       repeatedGridConfirmation = null;
     if (
-      !gridHasRepeatedAgents(rows) ||
+      repeatedGridConfirmation ||
+      !snapshot ||
       panoramaEntryBlockReason() === MULTIPLE_INSTALLATIONS_WARNING
     ) {
       toastRepeatedAgentSlot?.replaceChildren();
+      shownEntry = undefined;
+      shownSnapshot = undefined;
       return;
     }
     ensureToastHost();
-    if (!toastRepeatedAgentSlot.firstElementChild)
-      toastRepeatedAgentSlot.innerHTML = `<div class="vl-toast info show" role="status">
+    const target = [...gridAssignments.values()].some(
+      ({ removing }) => removing
+    )
+      ? null
+      : matchingRepeatedGridAssignment(form, rows);
+    if (
+      toastRepeatedAgentSlot.firstElementChild &&
+      target === shownEntry &&
+      matchesGridConfirmation(shownSnapshot, snapshot)
+    )
+      return;
+    shownEntry = target;
+    shownSnapshot = snapshot;
+    const button = target
+      ? `<button class="vl-toast-action" type="button" data-remove-repeated-grid>Remove row ${Number(target.index) + 1} · Lot ${escapeToastHtml(target.lot)}</button>`
+      : '';
+    toastRepeatedAgentSlot.innerHTML = `<div class="vl-toast info persistent show" role="status">
         <div class="vl-toast-title">Repeated Agent</div>
         <div class="vl-toast-detail">Check the rows with the same Agent before entering details.</div>
+        <div class="vl-toast-actions">
+          ${button}
+          <button class="vl-toast-action secondary" type="button" data-dismiss-repeated-grid>Dismiss</button>
+        </div>
       </div>`;
+    toastRepeatedAgentSlot
+      .querySelector('[data-dismiss-repeated-grid]')
+      .addEventListener('click', (event) => {
+        if (
+          !event.isTrusted ||
+          shownSnapshot !== snapshot ||
+          !isRepeatedGridCurrent(form, snapshot.url) ||
+          !matchesGridConfirmation(
+            snapshot,
+            snapshotGridConfirmation(form, visiblePopulatedGridRows())
+          )
+        )
+          return;
+        repeatedGridConfirmation = snapshot;
+        const trace = chartActivity?.begin('multiple', 'grid');
+        chartActivity?.record(trace, 'grid_click', {
+          result: 'repeat_agents_dismissed'
+        });
+        update();
+      });
+    if (target)
+      toastRepeatedAgentSlot
+        .querySelector('[data-remove-repeated-grid]')
+        .addEventListener('click', (event) => {
+          if (!event.isTrusted || shownSnapshot !== snapshot || target.removing)
+            return;
+          target.removing = true;
+          update();
+          void removeRepeatedGridAssignment(target);
+        });
   };
+  updateRepeatedGridNotice = update;
   for (const type of ['input', 'change'])
     document.addEventListener(type, update, true);
   new MutationObserver(update).observe(document.body, {
@@ -6629,7 +6987,14 @@ function watchRepeatedGridAgents() {
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['class', 'style', 'value', CHART_INSTALLATIONS_ATTRIBUTE]
+    attributeFilter: [
+      'class',
+      'style',
+      'value',
+      'data-ri',
+      'data-rk',
+      CHART_INSTALLATIONS_ATTRIBUTE
+    ]
   });
   update();
 }
@@ -6712,27 +7077,29 @@ function startGridHandoff(event) {
   )
     return logClick('grid_not_open');
   const rows = visiblePopulatedGridRows();
-  if (
-    gridHasRepeatedAgents(rows) &&
-    !matchesGridConfirmation(repeatedGridConfirmation, form, rows)
-  ) {
-    const snapshot = { url: location.href, form, rows };
-    repeatedGridConfirmation = null;
-    const confirmed = window.confirm(
-      'Continue with repeated agents? Choose Cancel to review rows.'
-    );
-    const current = visiblePopulatedGridRows();
-    if (
-      !confirmed ||
-      !isPanoramaChartActive() ||
-      !matchesGridConfirmation(snapshot, getPanoramaAutofillForm(), current)
-    ) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      return logClick('repeat_agents_review');
+  if (gridHasRepeatedAgents(rows)) {
+    const snapshot = snapshotGridConfirmation(form, rows);
+    if (!matchesGridConfirmation(repeatedGridConfirmation, snapshot)) {
+      repeatedGridConfirmation = null;
+      const confirmed = window.confirm(
+        'Continue with repeated agents? Choose Cancel to review rows.'
+      );
+      const current = visiblePopulatedGridRows();
+      if (
+        !confirmed ||
+        !isPanoramaChartActive() ||
+        !matchesGridConfirmation(
+          snapshot,
+          snapshotGridConfirmation(getPanoramaAutofillForm(), current)
+        )
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return logClick('repeat_agents_review');
+      }
+      repeatedGridConfirmation = snapshot;
+      logClick('repeat_agents_confirmed');
     }
-    repeatedGridConfirmation = snapshot;
-    logClick('repeat_agents_confirmed');
   }
   if (!gridAssignments.size) return logClick('no_assignments');
   clearCarryProblem();

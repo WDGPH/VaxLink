@@ -86,8 +86,7 @@ yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can 
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
-If an Agent appears on multiple rows, a VaxLink notification stays visible while you review the grid.
-Check that you intend to enter each dose before confirming **Enter Details**.
+If an Agent appears on multiple rows, VaxLink shows a notification. When it offers to remove a row, check the row number and Lot before selecting the button. VaxLink clears that row and moves the unused scan to **Recent Scans** once it verifies the row is empty. Use **Restore** to bring the scan back to the tray. If you intend to enter all the rows, choose **Dismiss** to acknowledge the warning and continue to **Enter Details**. VaxLink shows **Using scan order** in Details when it carries repeat scans in that order.
 
 Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the
 exact single-use scan was unused, it removes that scan from the tray. Choose

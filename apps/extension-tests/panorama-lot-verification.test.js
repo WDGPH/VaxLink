@@ -1061,10 +1061,20 @@ test('Enter Details carries only the exact grid row and foreground route', async
 test('manual repeated Agents warn and guard both native Enter Details buttons', () => {
   const { context, documentListeners } = fixture();
   const form = context.getPanoramaAutofillForm();
+  let dismiss;
   const warning = {
     innerHTML: '',
     get firstElementChild() {
       return this.innerHTML || null;
+    },
+    querySelector(selector) {
+      assert.equal(selector, '[data-dismiss-repeated-grid]');
+      return {
+        addEventListener(type, callback) {
+          assert.equal(type, 'click');
+          dismiss = callback;
+        }
+      };
     },
     replaceChildren() {
       this.innerHTML = '';
@@ -1072,9 +1082,12 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
   };
   const agents = ['MMR', 'MMR'];
   const dates = ['2026/11/24', '2026/11/25'];
+  const extraDate = { value: '' };
   let inGrid = true;
   let update;
   context.document.body = {};
+  context.document.querySelectorAll = (selector) =>
+    selector.includes('dataTable_data') ? [extraDate] : [];
   context.document.createElement = () =>
     assert.fail('the warning uses the VaxLink notification area');
   Object.assign(context, {
@@ -1113,8 +1126,10 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
   };
   context.watchRepeatedGridAgents();
   const notice = warning.innerHTML;
-  assert.match(notice, /class="vl-toast info show" role="status"/);
+  assert.match(notice, /class="vl-toast info persistent show" role="status"/);
   assert.match(notice, /same Agent/);
+  assert.match(notice, />Dismiss</);
+  assert.doesNotMatch(notice, /Remove row/);
   let confirmations = 0;
   context.window.confirm = (message) => {
     confirmations++;
@@ -1146,6 +1161,18 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
     false,
     'changing a date needs a new confirmation'
   );
+  dismiss({ isTrusted: false });
+  assert.equal(warning.innerHTML, notice);
+  dismiss({ isTrusted: true });
+  assert.equal(warning.innerHTML, '');
+  context.window.confirm = () => assert.fail('Dismiss acknowledged this grid');
+  assert.equal(enter('_btnNextPage'), true);
+  assert.equal(enter('Bottom_btnNextPage'), true);
+  extraDate.value = '2026/11/29';
+  update();
+  assert.equal(warning.innerHTML, notice);
+  context.window.confirm = () => false;
+  assert.equal(enter('Bottom_btnNextPage'), false);
   inGrid = false;
   update();
   assert.equal(warning.innerHTML, '');
