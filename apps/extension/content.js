@@ -3400,11 +3400,7 @@ function schedulePanoramaLotOrTradeSelection(
         lotMissLeftSelectionAlone(owner, cleanup, data.lot)
       ) {
         owner.lotMissNotice = true;
-        owner.unusedDoseDate = readGridDetailIdentity(owner.form).date;
-        owner.unusedDose = stopTrayDose(owner, true).then((released) => {
-          chartActivity?.record(trace, 'lot_tray_release', {
-            result: released === true ? 'released' : 'unconfirmed'
-          });
+        void releaseDetailDoseForDelete(owner, trace).then((released) => {
           if (
             panoramaAutofillOwner === owner &&
             owner.form === getPanoramaAutofillForm() &&
@@ -3417,7 +3413,6 @@ function schedulePanoramaLotOrTradeSelection(
               _doseKept: released === true,
               _doseNeedsReview: released !== true
             });
-          return released === true ? owner.trayDose.record : null;
         });
         return;
       }
@@ -4467,6 +4462,8 @@ async function fillReservedTrayRecord(
       owner.lotMissNotice = true;
       if (result === 'cleared') {
         confirmedNoProductWrite = true;
+        if (dose.reserved && matchesClearedGridDetailIdentity(owner))
+          await releaseDetailDoseForDelete(owner, owner.activity);
         throw new Error(
           'Panorama selected a different lot. VaxLink cleared the Lot selection. Check Vaccine Details before continuing.'
         );
@@ -4532,6 +4529,26 @@ async function releaseUnusedTrayDose({ recordId, token }) {
   } finally {
     activeTrayReservations.delete(token);
   }
+}
+
+function releaseDetailDoseForDelete(owner, trace) {
+  const dose = owner.trayDose;
+  owner.unusedDoseDate = readGridDetailIdentity(owner.form).date;
+  const release = stopTrayDose(
+    owner,
+    true,
+    dose,
+    dose.record?.dose_tracking === 'single_use'
+  ).then((released) => {
+    chartActivity?.record(trace, 'lot_tray_release', {
+      result: released === true ? 'released' : 'unconfirmed'
+    });
+    return released;
+  });
+  owner.unusedDose = release.then((released) =>
+    released === true ? dose.record : null
+  );
+  return release;
 }
 
 async function stopTrayDose(
@@ -7519,10 +7536,7 @@ function markGridDetailNavigation(button, action) {
     owner.step === before &&
     owner.detailAgent === agent;
   const matchesIdentity = (row) =>
-    sameGridDate(row.date, detail.date) &&
-    (row.agent === agent ||
-      (row.record &&
-        queueRecordMatchesPanoramaAgentText(row.record, detail.agent)));
+    matchesGridDetailIdentity(row, detail, agent);
   const matches = handoff.rows.filter(matchesIdentity);
   const ordered = total === handoff.rows.length && handoff.rows[step - 1];
   const owned =
@@ -7816,6 +7830,31 @@ function sameGridDate(left, right) {
   const canonical = (value) =>
     value?.replace(/^(\d{4})-(\d{2})-(\d{2})$/, '$1/$2/$3');
   return !!left && canonical(left) === canonical(right);
+}
+
+function matchesGridDetailIdentity(row, detail, agent) {
+  return (
+    sameGridDate(row.date, detail.date) &&
+    (row.agent === agent ||
+      (row.record &&
+        queueRecordMatchesPanoramaAgentText(row.record, detail.agent)))
+  );
+}
+
+function matchesClearedGridDetailIdentity(owner) {
+  const handoff = gridDetailHandoff;
+  if (!handoff || handoff.url !== owner.url) return false;
+  const detail = readGridDetailIdentity(owner.form);
+  const matchesIdentity = (row) =>
+    matchesGridDetailIdentity(row, detail, owner.detailAgent);
+  const matches = handoff.rows.filter(matchesIdentity);
+  // The cleared Lot no longer distinguishes repeats on the same date.
+  return (
+    matches.length === 1 &&
+    matches[0].index === owner.gridDetail.index &&
+    matches[0].agent === owner.detailAgent &&
+    !handoff.deletedRows.some(matchesIdentity)
+  );
 }
 
 // Carrying a dose to an aliased or reordered step needs exact Lot evidence.

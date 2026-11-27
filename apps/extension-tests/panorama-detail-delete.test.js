@@ -16,6 +16,10 @@ test('confirmed Delete archives only the exact unused scan', async () => {
   for (const outcome of [
     'reordered',
     'reordered notice',
+    'ordered wrong default',
+    'ordered wrong default with repeated identity',
+    'ordered wrong default without release proof',
+    'ordered wrong default with changed route',
     'overview',
     'notice',
     'untrusted notice',
@@ -25,6 +29,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     'stale date'
   ]) {
     const { context } = createContentHarness();
+    const ordered = outcome.startsWith('ordered wrong default');
     const tab = { id: 42, url: context.location.href, active: true };
     const sender = {
       id: 'vaxlink-test',
@@ -36,6 +41,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     const records = ['outgoing', 'keep'].map((id) => ({
       id,
       lot,
+      generic_name: 'MMR',
       dose_tracking: 'single_use',
       remaining_doses: 1
     }));
@@ -58,7 +64,15 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       await worker.sendMessage({ action: 'checkScannerChart' }, sender)
     ).scannerRoute;
     context.chrome.runtime.sendMessage = (message, reply) => {
-      const result = worker.sendMessage(message, sender);
+      const result = worker.sendMessage(message, sender).then((reply) =>
+        outcome.endsWith('without release proof') &&
+        message.operation === 'stop_dose'
+          ? {
+              ...reply,
+              rows: reply.rows.map(({ unused_dose_release, ...row }) => row)
+            }
+          : reply
+      );
       if (reply) void result.then(reply);
       return result;
     };
@@ -85,7 +99,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
         node === button || (outcome !== 'wrong form' && node === overview)
     };
     button.form = form;
-    const nonterminal = outcome.startsWith('reordered');
+    const nonterminal = ordered || outcome.startsWith('reordered');
     const initialStep =
       outcome === 'one detail' ? '1-of-1' : nonterminal ? '2-of-3' : '2-of-2';
     let position = initialStep;
@@ -159,7 +173,36 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     `,
       context
     );
-    if (nonterminal) {
+    if (ordered) {
+      rows.splice(0, 0, { index: '2', agent: 'hb', date });
+      outgoing.record = records[0];
+      if (outcome.endsWith('with repeated identity')) kept.agent = 'mmr';
+      owner.scannerRoute = route;
+      owner.gridDetail = { ...outgoing, dose, lot };
+      select = {
+        tagName: 'SELECT',
+        value: 'wrong',
+        selectedIndex: 0,
+        options: [{ text: 'WRONG', value: 'wrong' }]
+      };
+      // Exercise the reservation handoff after cleanup confirms a blank Lot.
+      context.cleanUpPanoramaLotMiss = () => {
+        select.value = '';
+        return 'cleared';
+      };
+      await assert.rejects(
+        context.fillReservedTrayRecord(
+          dose.recordId,
+          { _vaxlinkOwner: owner },
+          'grid-carry',
+          'multiple_detail',
+          dose
+        ),
+        /VaxLink cleared the Lot selection/
+      );
+      assert.equal(select.value, '');
+      assert.ok(!worker.storageData.get(tray)[0].dose_reservations);
+    } else if (nonterminal) {
       rows.push({ index: '2', agent: 'hb', date });
       outgoing.entry = { dose, lot, route, log() {} };
       if (outcome === 'reordered notice') {
@@ -199,7 +242,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
         assert.equal(handoff.navigation?.deleting, true);
       };
       if (outcome === 'notice') {
-        const findNotice = missSlot.querySelector;
+        const findNotice = missSlot.querySelector.bind(missSlot);
         missSlot.querySelector = (selector) =>
           selector === '[data-delete-detail]'
             ? noticeButton
@@ -249,13 +292,25 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     );
     oldTable.isConnected = false;
     assert.equal(missVisible, true);
-    select = {};
     position = nonterminal ? '2-of-2' : '';
+    if (ordered) {
+      await context.advanceGridHandoff();
+      assert.equal(handoff.navigation.resolved, undefined, 'counter alone');
+      assert.equal(worker.storageData.has(recent), false, 'counter alone');
+      if (outcome.endsWith('with changed route'))
+        context.checkPanoramaScannerRoute = async () => false;
+    }
+    select = {};
     await context.advanceGridHandoff();
     await new Promise(setImmediate);
     assert.equal(missVisible, outcome === 'wrong form', outcome);
 
-    const removed = outcome !== 'wrong form' && outcome !== 'stale date';
+    const removed =
+      outcome !== 'wrong form' &&
+      outcome !== 'stale date' &&
+      !outcome.endsWith('with repeated identity') &&
+      !outcome.endsWith('without release proof') &&
+      !outcome.endsWith('with changed route');
     assert.deepEqual(
       Array.from(worker.storageData.get(tray), ({ id }) => id),
       removed ? ['keep'] : ['outgoing', 'keep'],
