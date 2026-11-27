@@ -27,14 +27,15 @@ With **Standard USB CDC**, the scanner controls its own beep.
 | Inventory                                             | Open **Inventory** and check the tray. The same destination applies while the workstation is awake and locked.                    |
 | Immunization with a ready single form                 | With automatic entry on, check the fields in the visible chart. Review the agent, lot and other fields before saving in Panorama. |
 | Immunization with a ready Multiple Immunizations grid | Check the Immunization tray and the grid row. The tray keeps the dose for the detail step.                                        |
-| Immunization while locked                             | Check the Immunization tray. On the original chart, choose **Resume scans** when offered.                                         |
+| Immunization while locked                             | After unlock, check the original Multiple grid and the Immunization tray.                                                         |
 
 With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Scans to review** for the next step. Check the original chart before using a scan that may have filled fields.
 
-For Multiple Immunizations, **Resume scans** places eligible doses in the
-available grid rows. Select **Enter Details**, then **Next** as you check each
-dose. A ready Single Immunization form can resume one eligible scan. If
-Resume is unavailable or stops, check the chart and tray before trying again.
+After unlock, VaxLink fills available rows on the original Multiple
+Immunizations grid if it can confirm the chart and form are still ready. Select
+**Enter Details**, then **Next** as you check each dose. If a scan stays in the
+tray, open the correct chart and choose **Use**. On a ready Single Immunization
+form, choose **Resume scans** when offered for one eligible scan.
 
 On a single form, a scan may stay pending while Panorama updates. If VaxLink
 cannot confirm the fields, follow the message and check the original chart
@@ -44,9 +45,9 @@ If Panorama selects a different lot while entering multiple immunizations,
 compare it with the scanned lot. **Clear Lot and retry** clears that selection
 and tries the same dose again. Check Vaccine Details. Choose **Delete** in
 Panorama if you intend to skip an unavailable immunization. VaxLink can still
-carry the next dose when the Agent, date and lot verify the assignment. Remove
-the skipped scan from the tray if you no longer need it, or use **Check original
-chart** if shown.
+carry the next dose when the Agent, date and lot verify the assignment. Use
+**Check original chart** if VaxLink needs you to verify whether it wrote to the
+form.
 
 The Inventory tray shows captured lots and recent scans.
 
@@ -85,10 +86,13 @@ yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can 
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
-Choose **Delete** in Panorama to skip a detail. When VaxLink can confirm an
-unused dose stayed in the tray, it shows the lot and offers **Remove from tray**
-for a single-use dose. You can keep the dose and continue. Reset keeps the
-scans in the tray.
+If an Agent appears on multiple rows, VaxLink shows a warning on the grid.
+Check that you intend to enter each dose before confirming **Enter Details**.
+
+Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the
+exact single-use scan was unused, it removes that scan from the tray. Choose
+**Undo** on the chart or **Restore** in the Immunization tray's **Recent Scans**
+to get it back. If VaxLink needs staff to check the dose, it stays in the tray.
 
 The chart tray also has a **Use** button beside each available vaccine.
 

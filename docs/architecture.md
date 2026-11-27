@@ -200,7 +200,9 @@ and visible Reason selections, time completeness, and which controls or Lot opti
 changed between samples. Grid handoff events record the Enter Details click,
 the visible step and total, the matching row when known, the Lot evidence,
 and what released the assignment. A tray choice and other staff interaction
-have separate events. The two scheduled late checks record their outcomes if
+have separate events. Debug records HUD and popup **Use** selections and
+outcomes, lock and unlock, and why the worker offers or declines a batch.
+The two scheduled late checks record their outcomes if
 the page is still running. A completed request has a source label when the page
 exposes its JSF callback and the source belongs to the observed form. Otherwise
 the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
@@ -239,6 +241,10 @@ when a write is uncertain or the original document is confirmed inactive.
 An uninterrupted Multiple detail Lot miss can release a counted dose after
 confirming an empty Lot and no prior target selection. A verified fill updates
 the tray count. Panorama save confirmation is separate.
+After a confirmed Delete, an exact unused single-use scan can move out of the
+tray and into the list of removed scans in one local storage update. Undo and
+Recent Scans restore the same scan once. Other reservations stay available
+for later details on the same chart.
 Debug records the numbered grid row, whether it carried into Enter Details,
 and the matching detail step or the reason the assignment was released.
 It records when scan order was used to match repeats. It also records staff
@@ -413,16 +419,14 @@ Panorama.
 
 While the workstation is locked, valid captures go straight to the selected
 workflow tray. Repeated physical scans are kept. Captures retain their
-original lock session even if a write finishes after unlock. Unlocking
-leaves the chart untouched.
-
-On the original chart, **Resume scans** reserves doses already in the
-Immunization tray, in capture order. The worker checks the original
-foreground document and form before offering or claiming a dose. Choosing
-a dose in the tray also removes it from the Resume list. A Single
-Immunization form needs a lock session with exactly one capture. Long-range
-arrivals stay in the tray for deliberate selection. Rejected captures and
-scans with uncertain delivery stay available under **Scans to review**.
+original lock session even if a write finishes after unlock. The original
+Multiple grid can fill automatically after unlock. The worker checks the
+foreground document and form before offering or reserving each eligible dose
+in capture order. A Single Immunization form still offers **Resume scans**
+for a lock session with exactly one capture. Choosing **Use** removes that
+dose from the resume list. Long-range arrivals stay in the tray for deliberate
+selection. Rejected captures and scans with uncertain delivery stay available
+under **Scans to review**.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan
