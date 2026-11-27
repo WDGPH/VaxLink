@@ -5298,6 +5298,14 @@ function dismissToast(slot) {
   }, 300);
 }
 
+function clearPreviousDetailLotNotice() {
+  const notice = toastRoutineSlot?.querySelector('[data-vl-lot-miss]');
+  if (!notice) return;
+  clearTimeout(toastDismissTimer);
+  toastDismissTimer = null;
+  notice.remove();
+}
+
 function escapeToastHtml(text) {
   const d = document.createElement('span');
   d.textContent = text;
@@ -8132,6 +8140,7 @@ async function advanceGridHandoff() {
   const overview =
     !navigation?.resolved && confirmedGridDeleteOverview(navigation, position);
   if (overview) {
+    clearPreviousDetailLotNotice();
     navigation.report('overview_returned', { step: 0, total: 0 });
     confirmGridDetailDelete(handoff, navigation, 0, overview);
     return clearGridCarry('detail_finished');
@@ -8207,8 +8216,7 @@ async function advanceGridHandoff() {
     handoff.position = position;
     chartActivity?.record(handoff.trace, 'detail_position', { step, total });
     clearCarryProblem();
-    if (toastRoutineSlot?.querySelector('[data-vl-lot-miss]'))
-      dismissToast(toastRoutineSlot);
+    clearPreviousDetailLotNotice();
     handoff.retryUntil = performance.now() + 10000;
   }
   handoff.step = step;

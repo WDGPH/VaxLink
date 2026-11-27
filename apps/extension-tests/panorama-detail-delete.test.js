@@ -129,10 +129,22 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       step: 1,
       observer: { disconnect() {} }
     };
-    Object.assign(context, { handoff, token });
+    let missVisible = true;
+    const missSlot = {
+      querySelector: (selector) =>
+        missVisible && selector === '[data-vl-lot-miss]'
+          ? {
+              remove() {
+                missVisible = false;
+              }
+            }
+          : null
+    };
+    Object.assign(context, { handoff, token, missSlot });
     vm.runInContext(
       `
       gridDetailHandoff = handoff;
+      toastRoutineSlot = missSlot;
       activeTrayReservations.add(token);
       toastSkippedDoseSlot = { replaceChildren(child) { this.firstElementChild = child; } };
     `,
@@ -158,10 +170,12 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       'wait for a confirmed transition'
     );
     oldTable.isConnected = false;
+    assert.equal(missVisible, true);
     select = {};
     position = nonterminal ? '2-of-2' : '';
     await context.advanceGridHandoff();
     await new Promise(setImmediate);
+    assert.equal(missVisible, outcome === 'wrong form', outcome);
 
     const removed = outcome !== 'wrong form' && outcome !== 'stale date';
     assert.deepEqual(
