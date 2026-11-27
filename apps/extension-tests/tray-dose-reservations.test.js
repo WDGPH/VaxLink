@@ -9,6 +9,7 @@ import {
 } from './helpers/clinic-sim.js';
 
 const key = 'multiple_inject_queue_v1';
+const skippedHistoryKey = 'vaxlink_skipped_dose_history_v1';
 const chartUrl =
   'https://panorama.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
 const popup = {
@@ -29,7 +30,7 @@ function chart(tabId, documentId = `document-${tabId}`) {
 function tray(rows, options = {}) {
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
     ...options,
-    storage: { [key]: rows }
+    storage: { [key]: rows, ...options.storage }
   });
   return {
     change(sender, operation, id, token, details) {
@@ -45,6 +46,9 @@ function tray(rows, options = {}) {
     },
     get(id) {
       return harness.storageData.get(key).find((row) => row.id === id);
+    },
+    skippedHistory() {
+      return harness.storageData.get(skippedHistoryKey);
     }
   };
 }
@@ -302,6 +306,144 @@ test('recent lots preserve legacy expiry and lookup confirmation for named vacci
   assert.equal(record.nvc_catalogue_version, 'test-version');
 });
 
+test('a skipped scan is restored once by ID even with another scan of the same Lot', async () => {
+  const removed = {
+    id: 'skipped',
+    name: 'Sample vaccine',
+    lot: 'SAMPLE',
+    barcode_expiry: '2099-01-01',
+    dose_tracking: 'single_use',
+    remaining_doses: 1,
+    total_doses: 1
+  };
+  const other = { ...removed, id: 'other' };
+  let failWrite = true;
+  const { change, get, skippedHistory } = tray(
+    [
+      {
+        ...removed,
+        locked_resume_order: 1,
+        lock_session_id: 'original-session',
+        lock_session_tab_id: 33,
+        captured_while_locked: true
+      },
+      other
+    ],
+    {
+      failStorageSet: (values) => failWrite && skippedHistoryKey in values
+    }
+  );
+  const release = async () => {
+    const token = randomUUID();
+    assert.equal(
+      (await change(chart(1), 'reserve_dose', removed.id, token)).success,
+      true
+    );
+    assert.equal(
+      (
+        await change(chart(1), 'stop_dose', removed.id, token, {
+          written: false
+        })
+      ).success,
+      true
+    );
+    return token;
+  };
+  const remove = (sender, releaseToken) =>
+    change(sender, 'remove_skipped_dose', removed.id, undefined, {
+      expectedSingleUseLot: removed.lot,
+      releaseToken
+    });
+  const restore = (sender) =>
+    change(sender, 'restore_skipped_dose', removed.id);
+  const oldRelease = await release();
+  const currentRelease = await release();
+  assert.equal((await remove(popup, currentRelease)).success, false);
+  assert.equal(
+    (await remove(chart(1, 'replacement'), currentRelease)).success,
+    false
+  );
+  assert.equal((await remove(chart(1), currentRelease)).success, false);
+  assert.equal(get(removed.id).captured_while_locked, true);
+  assert.equal(skippedHistory(), undefined);
+
+  failWrite = false;
+  assert.equal((await remove(chart(1), oldRelease)).success, false);
+  assert.equal((await remove(chart(1), currentRelease)).success, true);
+  assert.equal(get(removed.id), undefined);
+  assert.equal(get(other.id).lot, other.lot);
+  assert.deepEqual({ ...skippedHistory()[0] }, removed);
+
+  failWrite = true;
+  assert.equal((await restore(popup)).success, false);
+  assert.equal(get(removed.id), undefined);
+  assert.equal(skippedHistory().length, 1);
+  failWrite = false;
+  const restored = await Promise.all([restore(popup), restore(chart(1))]);
+  assert.equal(restored.filter(({ success }) => success).length, 1);
+  assert.deepEqual({ ...get(removed.id) }, removed);
+  assert.deepEqual({ ...get(other.id) }, other);
+  assert.equal(skippedHistory().length, 0);
+});
+
+test('skipped scan removal keeps ambiguous, changed, handled, and non-single rows', async () => {
+  const token = randomUUID();
+  const dose = {
+    id: 'scan',
+    lot: 'SAMPLE',
+    dose_tracking: 'single_use',
+    unused_dose_release: { token, tabId: 1, documentId: 'document-1' }
+  };
+  for (const rows of [
+    [dose, { ...dose }],
+    [{ ...dose, lot: 'CHANGED' }],
+    [{ ...dose, dose_tracking: 'retained' }],
+    [{ ...dose, remaining_doses: 2 }],
+    [{ ...dose, total_doses: 2 }],
+    [{ ...dose, unused_dose_release: undefined }],
+    [{ ...dose, reference_only: true }],
+    [{ ...dose, dose_reservations: [{ token: randomUUID(), review: true }] }]
+  ]) {
+    const { change, get, skippedHistory } = tray(rows);
+    assert.equal(
+      (
+        await change(chart(1), 'remove_skipped_dose', dose.id, undefined, {
+          expectedSingleUseLot: dose.lot,
+          releaseToken: token
+        })
+      ).success,
+      false
+    );
+    assert.equal(get(dose.id).lot, rows[0].lot);
+    assert.equal(skippedHistory(), undefined);
+  }
+});
+
+test('a restored scan whose Lot has expired stays blocked from chart entry', async () => {
+  const expired = {
+    id: 'expired',
+    lot: 'SAMPLE',
+    dose_tracking: 'single_use',
+    barcode_expiry: '2000-01-01'
+  };
+  const { change, get } = tray([], {
+    storage: { [skippedHistoryKey]: [expired] }
+  });
+  assert.equal(
+    (await change(popup, 'restore_skipped_dose', expired.id)).success,
+    true
+  );
+  assert.deepEqual({ ...get(expired.id) }, expired);
+  const attempt = await change(
+    chart(1),
+    'reserve_dose',
+    expired.id,
+    randomUUID()
+  );
+  assert.equal(attempt.success, false);
+  assert.match(attempt.error, /expired/);
+});
+
 test('the chart tray can review a reserved dose and use any remaining dose', async () => {
   function node() {
     return {
@@ -391,7 +533,7 @@ test('the chart tray can review a reserved dose and use any remaining dose', asy
     );
     const use = controls.find((control) => control.textContent === 'Use');
     assert.ok(use, 'a reservation cannot hide Use');
-    use.click();
+    use.click({ isTrusted: true });
     if (remaining_doses === 2) {
       assert.equal((await pending).status, 'pending');
       assert.equal(writes, 1);

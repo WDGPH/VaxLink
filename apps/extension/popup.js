@@ -80,6 +80,7 @@ const selectedHeldScans = new Set();
 let heldScanRefresh = 0;
 let heldScanActionBusy = false;
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
+const SKIPPED_DOSE_HISTORY_KEY = 'vaxlink_skipped_dose_history_v1';
 
 const {
   WORKFLOW_MODE_KEY,
@@ -712,27 +713,36 @@ async function runHeldScannerAction(operation, scans, confirm = false) {
 }
 
 async function loadRecentChartLots() {
-  try {
-    const stored = await chrome.storage.session.get(RECENT_CHART_LOTS_KEY);
-    renderRecentChartLots(stored[RECENT_CHART_LOTS_KEY]);
-  } catch (_) {
-    renderRecentChartLots([]);
-  }
+  const [recent, skipped] = await Promise.allSettled([
+    chrome.storage.session?.get(RECENT_CHART_LOTS_KEY),
+    getLocalStorage([SKIPPED_DOSE_HISTORY_KEY])
+  ]);
+  renderRecentChartLots(
+    recent.value?.[RECENT_CHART_LOTS_KEY],
+    skipped.value?.[SKIPPED_DOSE_HISTORY_KEY]
+  );
 }
 
-function renderRecentChartLots(history) {
+function renderRecentChartLots(history, skippedHistory) {
   const recent = Array.isArray(history) ? history : [];
+  const skipped = Array.isArray(skippedHistory) ? skippedHistory : [];
   for (const mode of ['immunization', 'inventory']) {
     const list = document.getElementById(`${mode}RecentChartLots`);
     if (!list) continue;
-    if (!recent.length) {
+    const rows = [
+      ...(mode === 'immunization'
+        ? skipped.map((row) => ({ row, restore: true }))
+        : []),
+      ...recent.map((row) => ({ row, restore: false }))
+    ];
+    if (!rows.length) {
       const empty = document.createElement('li');
       empty.textContent = 'No recent scans.';
       list.replaceChildren(empty);
       continue;
     }
     list.replaceChildren(
-      ...recent.map((row) => {
+      ...rows.map(({ row, restore }) => {
         const item = document.createElement('li');
         const label = document.createElement('div');
         const name = row.tradename || row.generic_name || row.name;
@@ -741,17 +751,45 @@ function renderRecentChartLots(history) {
         const expiry =
           row.inventory_expiry || row.barcode_expiry || row.nvc_lot_expiry;
         const details = document.createElement('div');
-        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}`;
+        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}${restore ? ' · Removed after Delete' : ''}`;
         label.append(title, details);
         const add = document.createElement('button');
         add.type = 'button';
-        add.textContent = 'Add again';
-        add.setAttribute('aria-label', `Add ${name}, lot ${row.lot} again`);
-        add.addEventListener('click', () => void addRecentChartLot(row, mode));
+        add.textContent = restore ? 'Restore' : 'Add again';
+        add.setAttribute(
+          'aria-label',
+          restore
+            ? `Restore ${name}, lot ${row.lot}`
+            : `Add ${name}, lot ${row.lot} again`
+        );
+        add.addEventListener('click', () => {
+          if (restore) void restoreSkippedDose(row, add);
+          else void addRecentChartLot(row, mode);
+        });
         item.append(label, add);
         return item;
       })
     );
+  }
+}
+
+async function restoreSkippedDose(row, button) {
+  button.disabled = true;
+  try {
+    const response = await sendRuntimeMessage({
+      action: 'mutateQueue',
+      operation: 'restore_skipped_dose',
+      storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+      payload: { id: row.id }
+    });
+    if (!response?.success)
+      throw new Error(response?.error || 'Could not restore this scan.');
+    writeOutput('Scan restored to the Immunization tray.', 'success');
+  } catch (error) {
+    writeOutput(escapeHtml(error.message), 'error');
+  } finally {
+    button.disabled = false;
+    void loadRecentChartLots();
   }
 }
 
@@ -805,8 +843,11 @@ async function addRecentChartLot(row, mode) {
 }
 
 function handlePopupStorageChanged(changes, area) {
-  if (area === 'session' && RECENT_CHART_LOTS_KEY in changes)
-    renderRecentChartLots(changes[RECENT_CHART_LOTS_KEY]?.newValue);
+  if (
+    (area === 'session' && RECENT_CHART_LOTS_KEY in changes) ||
+    (area === 'local' && SKIPPED_DOSE_HISTORY_KEY in changes)
+  )
+    void loadRecentChartLots();
   if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
     void loadAutofillSettings();
   if (area === 'local' && HELD_SCANS_KEY in changes)

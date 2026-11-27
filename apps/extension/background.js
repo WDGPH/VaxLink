@@ -16,6 +16,7 @@ const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
 );
 
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
+const SKIPPED_DOSE_HISTORY_KEY = 'vaxlink_skipped_dose_history_v1';
 
 const {
   getTrayRemainingDoses,
@@ -737,6 +738,7 @@ function doseReservations(row) {
 
 function withDoseReservations(row, reservations) {
   const updated = { ...row };
+  delete updated.unused_dose_release;
   if (reservations.length) updated.dose_reservations = reservations;
   else delete updated.dose_reservations;
   return updated;
@@ -862,6 +864,96 @@ async function rememberVerifiedChartLot(data) {
   });
 }
 
+async function changeSkippedDose(storageKey, operation, payload, chart) {
+  const removing = operation === 'remove_skipped_dose';
+  const action = removing ? 'remove' : 'restore';
+  const report = (result) =>
+    recordScannerLockActivity('skipped_dose', { action, result });
+  if (
+    storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+    typeof payload.id !== 'string' ||
+    !payload.id.trim() ||
+    Object.keys(payload).length !== (removing ? 3 : 1) ||
+    (removing &&
+      (typeof chart?.documentId !== 'string' ||
+        !chart.documentId ||
+        typeof payload.releaseToken !== 'string' ||
+        !/^[a-f0-9-]{36}$/.test(payload.releaseToken) ||
+        typeof payload.expectedSingleUseLot !== 'string' ||
+        !payload.expectedSingleUseLot.trim()))
+  )
+    throw new Error('Choose a scan from the Immunization tray.');
+
+  let stored;
+  try {
+    stored = await getStorage([storageKey, SKIPPED_DOSE_HISTORY_KEY]);
+  } catch (error) {
+    report('error');
+    throw error;
+  }
+  const rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+  const history = Array.isArray(stored[SKIPPED_DOSE_HISTORY_KEY])
+    ? stored[SKIPPED_DOSE_HISTORY_KEY]
+    : [];
+  const matchId = (row) => row?.id === payload.id;
+  const matches = rows.filter(matchId);
+  const saved = history.filter(matchId);
+  let record;
+  let nextRows;
+  let nextHistory;
+  if (removing) {
+    const [current] = matches;
+    if (
+      matches.length !== 1 ||
+      saved.length ||
+      current.dose_tracking !== 'single_use' ||
+      (current.remaining_doses != null && current.remaining_doses !== 1) ||
+      (current.total_doses != null && current.total_doses !== 1) ||
+      current.lot !== payload.expectedSingleUseLot ||
+      current.unused_dose_release?.token !== payload.releaseToken ||
+      current.unused_dose_release?.documentId !== chart.documentId ||
+      current.unused_dose_release?.tabId !== chart.tab.id ||
+      doseReservations(current).length ||
+      globalThis.VaxLinkExpiryDate.blocksChartUse(current)
+    ) {
+      report('kept');
+      throw new Error('The scan changed. Check the Immunization tray.');
+    }
+    record = withDoseReservations(current, []);
+    // A restored scan needs a new deliberate tray Use.
+    for (const field of [
+      'captured_while_locked',
+      'lock_session_id',
+      'lock_session_locked_at',
+      'lock_session_tab_id',
+      'lock_session_window_id',
+      'locked_resume_order'
+    ])
+      delete record[field];
+    nextRows = rows.filter((row) => row !== current);
+    nextHistory = [record, ...history].slice(0, 20);
+  } else {
+    if (matches.length || saved.length !== 1) {
+      report('unavailable');
+      throw new Error('This scan is no longer available to restore.');
+    }
+    record = withDoseReservations(saved[0], []);
+    nextRows = [...rows, record];
+    nextHistory = history.filter((row) => row !== saved[0]);
+  }
+  try {
+    await setStorage({
+      [storageKey]: nextRows,
+      [SKIPPED_DOSE_HISTORY_KEY]: nextHistory
+    });
+  } catch (error) {
+    report('error');
+    throw error;
+  }
+  report(removing ? 'removed' : 'restored');
+  return { rows: nextRows, record };
+}
+
 // All queue changes share the scanner append writer so a read-modify-write
 // cannot overwrite a scan received while another context is editing a row.
 function mutateQueue(
@@ -883,6 +975,8 @@ function mutateQueue(
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
         throw new Error('Invalid queue payload');
       }
+      if (['remove_skipped_dose', 'restore_skipped_dose'].includes(operation))
+        return changeSkippedDose(storageKey, operation, payload, chart);
       if (
         operation === 'add' &&
         (!Array.isArray(payload.records) ||
@@ -894,7 +988,8 @@ function mutateQueue(
               typeof row.id !== 'string' ||
               !row.id.trim() ||
               'locked_resume_order' in row ||
-              'dose_reservations' in row
+              'dose_reservations' in row ||
+              'unused_dose_release' in row
           ))
       ) {
         throw new Error('Queue add requires an array of records with IDs');
@@ -919,7 +1014,8 @@ function mutateQueue(
           typeof payload.patch !== 'object' ||
           Array.isArray(payload.patch) ||
           ('id' in payload.patch && payload.patch.id !== payload.id) ||
-          'dose_reservations' in payload.patch)
+          'dose_reservations' in payload.patch ||
+          'unused_dose_release' in payload.patch)
       ) {
         throw new Error(
           'Queue update requires a patch that preserves the record ID'
@@ -989,6 +1085,7 @@ function mutateQueue(
         const transferred = moving.map((row) => {
           const moved = { ...row, id: crypto.randomUUID() };
           delete moved.locked_resume_order;
+          delete moved.unused_dose_release;
           if (!toImmunization) return moved;
           if (typeof row.lot !== 'string' || !row.lot.trim())
             throw new Error(
@@ -1122,6 +1219,16 @@ function mutateQueue(
               : reservations.filter((dose) => dose !== reservation);
           rows = rows.slice();
           rows[index] = withDoseReservations(current, saved);
+          if (
+            operation === 'stop_dose' &&
+            payload.written === false &&
+            current.dose_tracking === 'single_use' &&
+            !saved.length
+          ) {
+            // Delete may use only the release from its original document.
+            const { token, tabId, documentId } = reservation;
+            rows[index].unused_dose_release = { token, tabId, documentId };
+          }
           await setStorage({ [storageKey]: rows });
           return { rows };
         }
@@ -1196,7 +1303,9 @@ function mutateQueue(
         )
           throw new Error('The tray changed. Try the move again.');
         rows = rows.slice();
-        const [moved] = rows.splice(index, 1);
+        const [original] = rows.splice(index, 1);
+        const moved = { ...original };
+        delete moved.unused_dose_release;
         rows.splice(
           target - Number(index < target) + Number(payload.after),
           0,
@@ -1207,6 +1316,7 @@ function mutateQueue(
           if (row?.id !== payload.id) return row;
           record = { ...row, ...payload.patch };
           delete record.locked_resume_order;
+          delete record.unused_dose_release;
           if (row.reference_only === true) record.reference_only = true;
           return record;
         });
@@ -1250,6 +1360,7 @@ function mutateQueue(
         }
         record = { ...current, ...changes };
         delete record.locked_resume_order;
+        delete record.unused_dose_release;
         rows = rows.map((row) => (row === current ? record : row));
       } else if (operation === 'consume' || consumeReviewed) {
         if (index >= 0) {
@@ -5448,6 +5559,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       typeof record !== 'object' ||
       Array.isArray(record) ||
       'dose_reservations' in record ||
+      'unused_dose_release' in record ||
       typeof record.id !== 'string' ||
       !record.id.trim()
     ) {
