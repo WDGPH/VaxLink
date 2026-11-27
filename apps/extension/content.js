@@ -4683,10 +4683,9 @@ function autoFillPanorama(data) {
 
 let toastHost = null;
 let toastRoot = null;
-// Two stacked slots so a persistent expired warning and routine feedback
-// (queued / duplicate / mode switch) can coexist instead of clobbering each
-// other (issue #28): warning on top, routine toasts below it.
+// Keep persistent warnings visible while routine feedback comes and goes.
 let toastWarningSlot = null;
+let toastRepeatedAgentSlot = null;
 let toastCarrySlot = null;
 let toastRoutineSlot = null;
 let toastSkippedDoseSlot = null;
@@ -4780,6 +4779,8 @@ function ensureToastHost() {
   toastRoot = document.createElement('div');
   toastRoot.className = 'vl-toast-stack';
   toastWarningSlot = document.createElement('div');
+  toastRepeatedAgentSlot = document.createElement('div');
+  toastRepeatedAgentSlot.className = 'vl-carry-slot';
   toastCarrySlot = document.createElement('div');
   toastCarrySlot.className = 'vl-carry-slot';
   toastRoutineSlot = document.createElement('div');
@@ -4788,6 +4789,7 @@ function ensureToastHost() {
   toastInventorySlot = document.createElement('div');
   toastRoot.appendChild(toastInventorySlot);
   toastRoot.appendChild(toastWarningSlot);
+  toastRoot.appendChild(toastRepeatedAgentSlot);
   toastRoot.appendChild(toastCarrySlot);
   toastRoot.appendChild(toastSkippedDoseSlot);
   toastRoot.appendChild(toastRoutineSlot);
@@ -6589,21 +6591,9 @@ function matchesGridConfirmation(confirmation, form, rows) {
 
 function watchRepeatedGridAgents() {
   if (!document.body) return;
-  const warning = document.createElement('div');
-  warning.id = 'vaxlink-repeated-grid-agents';
-  warning.setAttribute('role', 'status');
-  warning.style.cssText =
-    'background:#fff4da;color:#522d00;border:1px solid #a85d00;padding:8px 12px;margin:8px 0';
-  warning.textContent =
-    'Multiple rows use the same Agent. Check the rows before entering details.';
   const update = () => {
-    const body = document.querySelector(
-      'tbody[id*="historicalfactoryTable:dataTable_data"]'
-    );
-    const table = body?.closest('table');
     const inGrid =
-      table &&
-      isVisible(table) &&
+      isPanoramaMultipleImmunizationGridPage({ visibleOnly: true }) &&
       getPanoramaFormContext({ checkReadiness: false }).kind ===
         'multiple_grid';
     const rows = inGrid ? visiblePopulatedGridRows() : [];
@@ -6616,12 +6606,19 @@ function watchRepeatedGridAgents() {
       )
     )
       repeatedGridConfirmation = null;
-    if (!gridHasRepeatedAgents(rows)) warning.remove();
-    else if (
-      table.previousElementSibling !== warning &&
-      (warning.isConnected || !document.getElementById(warning.id))
-    )
-      table.before(warning);
+    if (
+      !gridHasRepeatedAgents(rows) ||
+      panoramaEntryBlockReason() === MULTIPLE_INSTALLATIONS_WARNING
+    ) {
+      toastRepeatedAgentSlot?.replaceChildren();
+      return;
+    }
+    ensureToastHost();
+    if (!toastRepeatedAgentSlot.firstElementChild)
+      toastRepeatedAgentSlot.innerHTML = `<div class="vl-toast info show" role="status">
+        <div class="vl-toast-title">Repeated Agent</div>
+        <div class="vl-toast-detail">Check the rows with the same Agent before entering details.</div>
+      </div>`;
   };
   for (const type of ['input', 'change'])
     document.addEventListener(type, update, true);
@@ -6630,7 +6627,7 @@ function watchRepeatedGridAgents() {
     childList: true,
     characterData: true,
     attributes: true,
-    attributeFilter: ['class', 'style', 'value']
+    attributeFilter: ['class', 'style', 'value', CHART_INSTALLATIONS_ATTRIBUTE]
   });
   update();
 }

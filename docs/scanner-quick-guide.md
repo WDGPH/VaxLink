@@ -86,7 +86,7 @@ yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can 
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
-If an Agent appears on multiple rows, VaxLink shows a warning on the grid.
+If an Agent appears on multiple rows, a VaxLink notification stays visible while you review the grid.
 Check that you intend to enter each dose before confirming **Enter Details**.
 
 Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the

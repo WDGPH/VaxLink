@@ -998,27 +998,25 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
   const { context, documentListeners } = fixture();
   const form = context.getPanoramaAutofillForm();
   const warning = {
-    style: {},
-    setAttribute(name, value) {
-      this[name] = value;
+    innerHTML: '',
+    get firstElementChild() {
+      return this.innerHTML || null;
     },
-    remove() {
-      table.previousElementSibling = null;
+    replaceChildren() {
+      this.innerHTML = '';
     }
-  };
-  const table = {
-    before(node) {
-      this.previousElementSibling = node;
-    },
-    getBoundingClientRect: shown
   };
   const agents = ['MMR', 'MMR'];
   const dates = ['2026/11/24', '2026/11/25'];
+  let inGrid = true;
   let update;
   context.document.body = {};
-  context.document.createElement = () => warning;
-  context.document.querySelector = () => ({ closest: () => table });
+  context.document.createElement = () =>
+    assert.fail('the warning uses the VaxLink notification area');
   Object.assign(context, {
+    repeatedAgentNotice: warning,
+    ensureToastHost: () => {},
+    isPanoramaMultipleImmunizationGridPage: () => inGrid,
     getPanoramaFormContext: () => ({ kind: 'multiple_grid' }),
     getPanoramaMultipleGridRows: () => rows,
     getPanoramaMultipleGridRowState: (index) => ({
@@ -1032,6 +1030,7 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
       observe() {}
     }
   });
+  vm.runInContext('toastRepeatedAgentSlot = repeatedAgentNotice', context);
   const rows = agents.map((_, index) => ({
     getAttribute: () => String(index),
     getBoundingClientRect: shown
@@ -1049,9 +1048,9 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
     return !blocked;
   };
   context.watchRepeatedGridAgents();
-  assert.equal(table.previousElementSibling, warning);
-  assert.equal(warning.role, 'status');
-  assert.match(warning.textContent, /same Agent/);
+  const notice = warning.innerHTML;
+  assert.match(notice, /class="vl-toast info show" role="status"/);
+  assert.match(notice, /same Agent/);
   let confirmations = 0;
   context.window.confirm = (message) => {
     confirmations++;
@@ -1059,7 +1058,7 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
     return false;
   };
   assert.equal(enter('_btnNextPage'), false);
-  assert.equal(table.previousElementSibling, warning);
+  assert.equal(warning.innerHTML, notice);
   assert.equal(confirmations, 1);
   context.window.confirm = () => {
     dates[1] = '2026/11/26';
@@ -1083,9 +1082,15 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
     false,
     'changing a date needs a new confirmation'
   );
+  inGrid = false;
+  update();
+  assert.equal(warning.innerHTML, '');
+  inGrid = true;
+  update();
+  assert.equal(warning.innerHTML, notice);
   agents[1] = 'HPV';
   update();
-  assert.equal(table.previousElementSibling, null);
+  assert.equal(warning.innerHTML, '');
   context.window.confirm = () => assert.fail('a unique grid needs no prompt');
   assert.equal(enter('_btnNextPage'), true);
 });
