@@ -221,10 +221,12 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   const { context } = createContentHarness();
   const routine = { innerHTML: '' };
   const warning = { innerHTML: '', querySelector: () => null };
+  const carry = { innerHTML: '', querySelector: () => null };
   const events = [];
   Object.assign(context, {
     routine,
     warning,
+    carry,
     ensureToastHost() {},
     escapeToastHtml: (text) => text,
     setTimeout: () => 0,
@@ -233,7 +235,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     logAnalyticsEvent: (event) => events.push(event)
   });
   vm.runInContext(
-    'toastRoutineSlot = routine; toastWarningSlot = warning;',
+    'toastRoutineSlot = routine; toastWarningSlot = warning; toastCarrySlot = carry;',
     context
   );
   context.showVaxlinkToast({
@@ -258,11 +260,9 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     /missing from the National Vaccine Catalogue/
   );
   assert.doesNotMatch(routine.innerHTML, /Resolution Coordinator/);
-  const draft = () =>
+  const draft = (slot = routine) =>
     new URL(
-      routine.innerHTML
-        .match(/href="(mailto:[^"]+)"/)[1]
-        .replaceAll('&amp;', '&')
+      slot.innerHTML.match(/href="(mailto:[^"]+)"/)[1].replaceAll('&amp;', '&')
     );
   assert.equal(draft().pathname, 'NVC-CNV@phac-aspc.gc.ca');
   const catalogueMatch = {
@@ -276,6 +276,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
       ? 'trpanoramadhir.prod.ehealthontario.ca'
       : 'panorama.prod.ehealthontario.ca';
     for (const multiple of [true, false]) {
+      const slot = multiple ? carry : routine;
       context.showVaxlinkToast({
         ...catalogueMatch,
         _vaxlinkOwner: {
@@ -285,27 +286,27 @@ test('terminal feedback names the fields or catalogue to review and counts rende
         _doseKept: multiple
       });
       assert.match(
-        routine.innerHTML,
+        slot.innerHTML,
         /vl-toast-title">Lot not found in (Panorama training|either funding category)/
       );
-      assert.equal(routine.innerHTML.includes('Panorama training'), training);
+      assert.equal(slot.innerHTML.includes('Panorama training'), training);
       assert.equal(
-        routine.innerHTML.includes('Draft email to Panorama support'),
+        slot.innerHTML.includes('Draft email to Panorama support'),
         !training
       );
-      assert.equal(routine.innerHTML.includes('mailto:'), !training);
+      assert.equal(slot.innerHTML.includes('mailto:'), !training);
       assert.equal(
-        routine.innerHTML.includes('choose Delete in Panorama'),
+        slot.innerHTML.includes('choose Delete in Panorama'),
         multiple
       );
       assert.equal(
-        routine.innerHTML.includes('Dose is still in the Immunization tray.'),
+        slot.innerHTML.includes('Dose is still in the Immunization tray.'),
         multiple
       );
       if (!training) {
-        assert.equal(draft().pathname, '');
+        assert.equal(draft(slot).pathname, '');
         assert.equal(
-          draft().searchParams.get('cc'),
+          draft(slot).searchParams.get('cc'),
           'innovation@wdgpublichealth.ca'
         );
       }

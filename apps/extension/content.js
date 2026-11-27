@@ -5009,63 +5009,69 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._entryWarning) {
     const slot = data._carrySupport ? toastCarrySlot : toastWarningSlot;
-    slot.innerHTML = `<div class="vl-toast ${data._carrySupport ? 'info' : 'expired'} persistent show" role="alert">
+    const render = ({ clearLot, retryLot, deleteDetail } = {}) => {
+      slot.innerHTML = `<div class="vl-toast ${data._carrySupport ? 'info' : 'expired'} persistent show" role="alert" data-vl-notice="${data._detailLotProblem ? 'detail_lot' : data._carrySupport ? 'carry_warning' : 'entry_warning'}"${data._detailLotProblem ? ' data-vl-lot-miss' : ''}>
       <div class="vl-toast-detail">${escapeToastHtml(data._entryWarning)}</div>
-      ${data._clearCarryLot ? `<button class="vl-toast-dismiss" type="button" data-clear-carry-lot>${data._retryCarryLot ? 'Clear Lot and retry' : 'Clear Lot'}</button>` : ''}
-      ${data._deleteDetail ? detailDeleteButton : ''}
+      ${clearLot ? `<button class="vl-toast-dismiss" type="button" data-clear-carry-lot>${retryLot ? 'Clear Lot and retry' : 'Clear Lot'}</button>` : ''}
+      ${deleteDetail ? detailDeleteButton : ''}
       ${data._carrySupport ? '<button class="vl-toast-dismiss" type="button" data-carry-support>Report an autofill issue</button>' : ''}
       ${data._detailLotProblem ? '' : '<button class="vl-toast-dismiss" type="button" data-dismiss-warning>Dismiss</button>'}
     </div>`;
-    attachDetailDelete(slot, data._deleteDetail);
-    slot
-      .querySelector('[data-dismiss-warning]')
-      ?.addEventListener('click', () => {
-        if (data._carrySupport) clearCarryProblem();
-        else dismissToast(slot);
-      });
-    slot
-      .querySelector('[data-clear-carry-lot]')
-      ?.addEventListener('click', async (event) => {
-        const button = event.currentTarget;
-        if (!event.isTrusted || !slot.contains(button) || button.disabled)
-          return;
-        button.disabled = true;
-        const deletion = slot.querySelector('[data-delete-detail]:enabled');
-        if (deletion) deletion.disabled = true;
-        try {
-          const cleared = await data._clearCarryLot();
-          if (cleared || !slot.contains(button)) return;
-        } catch (_) {
-          if (!slot.contains(button)) return;
-        }
-        button.textContent = 'Check the Lot in Panorama';
-        if (deletion && slot.contains(deletion)) deletion.disabled = false;
-      });
-    slot
-      .querySelector('[data-carry-support]')
-      ?.addEventListener('click', async (event) => {
-        if (!event.isTrusted) return;
-        const button = event.currentTarget;
-        button.disabled = true;
-        try {
-          const reply = await chrome.runtime.sendMessage({
-            action: 'openCarrySupport'
-          });
-          if (!reply?.success) throw new Error('Could not open support');
-          button.textContent = 'Autofill help opened in a new tab';
-        } catch (_) {
-          button.textContent = 'Open Troubleshooting in VaxLink Settings';
-          button.disabled = false;
-        }
-      });
+      attachDetailDelete(slot, deleteDetail);
+      slot
+        .querySelector('[data-dismiss-warning]')
+        ?.addEventListener('click', () => {
+          if (data._carrySupport) clearCarryProblem();
+          else dismissToast(slot);
+        });
+      slot
+        .querySelector('[data-clear-carry-lot]')
+        ?.addEventListener('click', async (event) => {
+          const button = event.currentTarget;
+          if (!event.isTrusted || !slot.contains(button) || button.disabled)
+            return;
+          button.disabled = true;
+          const deletion = slot.querySelector('[data-delete-detail]:enabled');
+          if (deletion) deletion.disabled = true;
+          try {
+            const cleared = await clearLot();
+            if (cleared || !slot.contains(button)) return;
+          } catch (_) {
+            if (!slot.contains(button)) return;
+          }
+          button.textContent = 'Check the Lot in Panorama';
+          if (deletion && slot.contains(deletion)) deletion.disabled = false;
+        });
+      slot
+        .querySelector('[data-carry-support]')
+        ?.addEventListener('click', async (event) => {
+          if (!event.isTrusted) return;
+          const button = event.currentTarget;
+          button.disabled = true;
+          try {
+            const reply = await chrome.runtime.sendMessage({
+              action: 'openCarrySupport'
+            });
+            if (!reply?.success) throw new Error('Could not open support');
+            button.textContent = 'Autofill help opened in a new tab';
+          } catch (_) {
+            button.textContent = 'Open Troubleshooting in VaxLink Settings';
+            button.disabled = false;
+          }
+        });
+    };
+    if (data._detailLotProblem) {
+      showDetailLotNotice(render, data._detailLotActions);
+    } else {
+      if (data._carrySupport) clearPreviousDetailLotNotice();
+      render();
+    }
     return;
   }
 
   // Routine toasts share one slot and one auto-dismiss timer; the persistent
   // expired warning lives in its own slot above and is never replaced by them.
   const showRoutineToast = (html, ms, options = {}) => {
-    detailLotNoticeObserver?.disconnect();
-    detailLotNoticeObserver = null;
     if (toastDismissTimer) {
       clearTimeout(toastDismissTimer);
       toastDismissTimer = null;
@@ -5082,7 +5088,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? 'Checking vaccine details…'
         : 'Looking for the lot in Panorama…';
     showRoutineToast(
-      `<div class="vl-toast info show" role="status" data-vl-fill-progress>
+      `<div class="vl-toast info show" role="status" data-vl-fill-progress data-vl-notice="fill_progress">
         <div class="vl-toast-title">${message}</div>
       </div>`,
       durationMs,
@@ -5097,7 +5103,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? 'This barcode has no lot number'
         : 'This barcode could not be read';
     showRoutineToast(
-      `<div class="vl-toast info show">
+      `<div class="vl-toast info show" data-vl-notice="barcode_feedback">
         <div class="vl-toast-title">${title}</div>
         <div class="vl-toast-detail">Scan the 2D code on the vaccine label with the lot number.</div>
       </div>`,
@@ -5108,7 +5114,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._gridAdded) {
     showRoutineToast(
-      '<div class="vl-toast info show" data-grid-added><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">Select Enter Details to continue.</div></div>',
+      '<div class="vl-toast info show" data-grid-added data-vl-notice="grid_added"><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">Select Enter Details to continue.</div></div>',
       durationMs
     );
     return;
@@ -5123,7 +5129,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? 'Switched from VaxLink HUD'
         : 'Switched via scanner command';
     showRoutineToast(
-      `<div class="vl-toast info show">
+      `<div class="vl-toast info show" data-vl-notice="mode_changed">
       <div class="vl-toast-title">Mode: ${modeLabels[data._commandMode] || data._commandMode}</div>
       <div class="vl-toast-detail">${sourceDetail}</div>
     </div>`,
@@ -5175,48 +5181,33 @@ function showVaxlinkToast(data, durationMs = 4000) {
     }
     const multipleDetailMiss =
       panoramaMiss && data._vaxlinkOwner?.kind === 'multiple_detail';
-    const deleteDetail =
-      multipleDetailMiss &&
-      createDetailLotDelete({ owner: data._vaxlinkOwner });
     const catalogueStatus = catalogueMiss
       ? 'The lot was missing from the National Vaccine Catalogue.'
       : catalogueMatched && trainingMiss
         ? 'This lot is listed in the vaccine catalogue.'
         : '';
-    showRoutineToast(
-      `<div class="vl-toast info ${multipleDetailMiss ? 'persistent ' : ''}show" role="status"${multipleDetailMiss ? ' data-vl-lot-miss' : ''}>
+    const markup = (deleteDetail) =>
+      `<div class="vl-toast info ${multipleDetailMiss ? 'persistent ' : ''}show" role="status" data-vl-notice="${multipleDetailMiss ? 'detail_lot' : 'autofill_review'}"${multipleDetailMiss ? ' data-vl-lot-miss' : ''}>
         <div class="vl-toast-title">${escapeToastHtml(title)}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
-        ${multipleDetailMiss ? `<div class="vl-toast-detail">${deleteDetail ? 'Choose Delete to skip this immunization.' : 'To skip this dose and continue, choose Delete in Panorama.'}</div>` : ''}
+        ${multipleDetailMiss && !deleteDetail ? '<div class="vl-toast-detail">To skip this dose and continue, choose Delete in Panorama.</div>' : ''}
         ${data._doseKept ? '<div class="vl-toast-detail">Dose is still in the Immunization tray.</div>' : ''}
         ${data._doseNeedsReview ? '<div class="vl-toast-detail">Before reusing this dose, choose Check original chart in the Immunization tray.</div>' : ''}
         ${panoramaMiss && data._lotCleanup === 'cleared' ? '<div class="vl-toast-detail">VaxLink cleared the Lot. Check Vaccine Details.</div>' : lotReviewMarkup}
         ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
         ${deleteDetail ? detailDeleteButton : ''}${reportMarkup}
-      </div>`,
-      reportUrl ? 12000 : 9000,
-      { persistent: multipleDetailMiss }
-    );
-    attachDetailDelete(toastRoutineSlot, deleteDetail);
-    if (
-      multipleDetailMiss &&
-      !gridDetailHandoff &&
-      data._vaxlinkOwner.form?.isConnected
-    ) {
-      const { form, step, url } = data._vaxlinkOwner;
-      detailLotNoticeObserver = new MutationObserver(() => {
-        if (
-          location.href !== url ||
-          form !== getPanoramaAutofillForm() ||
-          step !== getPanoramaMultiStepIndicatorKey({ visibleOnly: true })
-        )
-          clearPreviousDetailLotNotice();
-      });
-      detailLotNoticeObserver.observe(document.body, {
-        subtree: true,
-        childList: true,
-        characterData: true
-      });
+      </div>`;
+    if (multipleDetailMiss) {
+      const owner = data._vaxlinkOwner;
+      showDetailLotNotice(
+        ({ deleteDetail }) => {
+          toastCarrySlot.innerHTML = markup(deleteDetail);
+          attachDetailDelete(toastCarrySlot, deleteDetail);
+        },
+        { owner, deleteDetail: createDetailLotDelete({ owner }) }
+      );
+    } else {
+      showRoutineToast(markup(), reportUrl ? 12000 : 9000);
     }
     return;
   }
@@ -5248,7 +5239,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
       )
       .join('');
     showRoutineToast(
-      `<div class="vl-toast info persistent show">
+      `<div class="vl-toast info persistent show" data-vl-notice="funding">
         <div class="vl-toast-title">${title}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
         ${lotReviewMarkup}
@@ -5431,20 +5422,69 @@ function attachDetailDelete(slot, action) {
 
 function dismissToast(slot) {
   const el = slot && slot.querySelector('.vl-toast');
-  if (el) el.classList.remove('show');
+  if (!el) return;
+  el.classList.remove('show');
   setTimeout(() => {
-    if (slot) slot.innerHTML = '';
+    if (slot.querySelector('.vl-toast') === el) el.remove();
   }, 300);
 }
 
 function clearPreviousDetailLotNotice() {
   detailLotNoticeObserver?.disconnect();
   detailLotNoticeObserver = null;
-  const notice = toastRoutineSlot?.querySelector('[data-vl-lot-miss]');
-  if (!notice) return;
-  clearTimeout(toastDismissTimer);
-  toastDismissTimer = null;
-  notice.remove();
+  if (toastCarrySlot?.querySelector('[data-vl-lot-miss]'))
+    toastCarrySlot.replaceChildren();
+}
+
+function showDetailLotNotice(
+  render,
+  { owner, row, clearLot, retryLot, deleteDetail, deleteAllowed } = {}
+) {
+  clearPreviousDetailLotNotice();
+  render({ clearLot, retryLot, deleteDetail });
+  if (!document.body || typeof MutationObserver !== 'function') return;
+  const detail = readDetailLotNoticeContext();
+  if (!detail) return;
+  const entry = row?.entry;
+  let bound = detail.controls;
+  detailLotNoticeObserver = new MutationObserver(() => {
+    if (!sameDetailLotNoticePosition(detail)) {
+      clearPreviousDetailLotNotice();
+      return;
+    }
+    if (!(owner || row)) return;
+    const current = readDetailLotNoticeControls(detail.form);
+    // Rebind only when Panorama replaces equivalent controls on this detail.
+    if (
+      current.value !== detail.controls.value ||
+      current.lot !== detail.controls.lot ||
+      (row && row.entry !== entry) ||
+      !sameDetailLotNoticeContext(detail, owner)
+    ) {
+      if (bound) {
+        bound = null;
+        render({});
+      }
+      return;
+    }
+    if (bound && sameDetailLotNoticeControls(current, bound)) return;
+    const selection = clearLot && getClearableGridLot(detail.form);
+    bound = current;
+    render({
+      clearLot: selection && (() => clearLot(selection)),
+      retryLot: allowsGridDetailLotRetry(selection, entry?.lot),
+      deleteDetail:
+        (owner || deleteAllowed) &&
+        createDetailLotDelete({ owner, row }, { ...detail, controls: current })
+    });
+  });
+  detailLotNoticeObserver.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+    attributeFilter: ['disabled']
+  });
 }
 
 function escapeToastHtml(text) {
@@ -6457,7 +6497,7 @@ function showDoseReview(row, token) {
   ensureToastHost();
   const product = row.tradename || row.generic_name || row.name || 'Vaccine';
   const description = [product, row.lot].filter(Boolean).join(' · ');
-  toastWarningSlot.innerHTML = `<div class="vl-toast expired persistent show" role="alert">
+  toastWarningSlot.innerHTML = `<div class="vl-toast expired persistent show" role="alert" data-vl-notice="dose_review">
     <div class="vl-toast-title">${escapeToastHtml(description)}</div>
     <div class="vl-toast-detail">Check whether the original immunization record includes this vaccine and lot. If it does, remove one dose from the tray.</div>
     <div class="vl-toast-actions">
@@ -8133,7 +8173,7 @@ function identifyGridDetail(handoff, form, step, total) {
 function showCarryProblem(
   message,
   clearLot,
-  { deleteDetail, retryLot, lotProblem } = {}
+  { deleteDetail, retryLot, lotProblem, owner, row, deleteAllowed } = {}
 ) {
   if (toastRoutineSlot?.querySelector('[data-grid-added]')) {
     clearTimeout(toastDismissTimer);
@@ -8143,15 +8183,21 @@ function showCarryProblem(
   showVaxlinkToast({
     _entryWarning: message,
     _carrySupport: true,
-    _clearCarryLot: clearLot,
-    _retryCarryLot: retryLot,
-    _deleteDetail: deleteDetail,
-    _detailLotProblem: lotProblem
+    _detailLotProblem: lotProblem,
+    _detailLotActions: {
+      clearLot,
+      retryLot,
+      deleteDetail,
+      owner,
+      row,
+      deleteAllowed
+    }
   });
 }
 
 function clearCarryProblem() {
   pausedGridDetailChart = null;
+  clearPreviousDetailLotNotice();
   if (toastCarrySlot) toastCarrySlot.innerHTML = '';
 }
 
@@ -8178,33 +8224,93 @@ function getNativeDetailDelete(form) {
     );
 }
 
-function createDetailLotDelete({ owner, row } = {}) {
-  const handoff = gridDetailHandoff;
-  const navigation = handoff?.navigation;
+function readDetailLotNoticeContext() {
   const form = getPanoramaAutofillForm();
   const { step, total } = currentGridDetailStep();
-  if (!form?.isConnected || !step || step > total || (!owner && !row?.entry))
-    return;
-  const position = `${step}-of-${total}`;
-  const button = getNativeDetailDelete(form);
-  const surface = gridDetailLotSurface(form);
-  const lot = getPanoramaDisplayedLot(getPanoramaLotWidget(form));
+  if (!form?.isConnected || !step || step > total) return;
   const { agent, date } = readGridDetailIdentity(form);
+  return {
+    form,
+    step,
+    total,
+    position: `${step}-of-${total}`,
+    url: location.href,
+    generation: panoramaContextGeneration,
+    handoff: gridDetailHandoff,
+    navigation: gridDetailHandoff?.navigation,
+    agent,
+    date,
+    controls: readDetailLotNoticeControls(form)
+  };
+}
+
+function readDetailLotNoticeControls(form) {
+  const widget = getPanoramaLotWidget(form);
+  return {
+    button: getNativeDetailDelete(form),
+    surface: widget?.select || widget?.root,
+    label: widget?.label,
+    value: widget?.select?.value,
+    lot: getPanoramaDisplayedLot(widget)
+  };
+}
+
+function sameDetailLotNoticeControls(left, right) {
+  return (
+    left.button === right.button &&
+    left.surface === right.surface &&
+    left.label === right.label &&
+    left.value === right.value &&
+    left.lot === right.lot
+  );
+}
+
+function sameDetailLotNoticePosition({ form, position, url }) {
+  return (
+    location.href === url &&
+    getPanoramaAutofillForm() === form &&
+    getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) === position
+  );
+}
+
+function sameDetailLotNoticeContext(detail, owner) {
+  const { form, handoff, navigation, generation, agent, date } = detail;
+  if (
+    panoramaContextGeneration !== generation ||
+    panoramaEntryBlockReason() ||
+    !isPanoramaChartActive() ||
+    gridDetailHandoff !== handoff ||
+    handoff?.navigation !== navigation ||
+    handoff?.clearingLot ||
+    (navigation && !navigation.resolved) ||
+    (owner && panoramaAutofillOwner !== owner)
+  )
+    return false;
+  const current = readGridDetailIdentity(form);
+  return current.agent === agent && sameGridDate(current.date, date);
+}
+
+function createDetailLotDelete(
+  { owner, row } = {},
+  detail = readDetailLotNoticeContext()
+) {
   const entry = row?.entry;
+  if (!detail || (!owner && !entry)) return;
+  const { form, step, total, position, agent, date, url, handoff, controls } =
+    detail;
+  const { button } = controls;
   if (
     !button ||
-    !surface ||
+    !controls.surface ||
     !agent ||
     !date ||
     (owner &&
       (owner.form !== form ||
         owner.step !== position ||
-        owner.url !== location.href ||
+        owner.url !== url ||
         owner.detailAgent !== panoramaAgentIdentity(agent)))
   )
     return;
-  const url = location.href;
-  const generation = panoramaContextGeneration;
   const trace =
     owner?.activity ??
     entry?.trace ??
@@ -8213,27 +8319,13 @@ function createDetailLotDelete({ owner, row } = {}) {
   const current = () => {
     const context = getPanoramaFormContext();
     if (
-      panoramaContextGeneration !== generation ||
-      panoramaEntryBlockReason() ||
-      !isPanoramaChartActive() ||
-      location.href !== url ||
-      getPanoramaAutofillForm() !== form ||
-      getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) !== position ||
+      !sameDetailLotNoticePosition(detail) ||
+      !sameDetailLotNoticeContext(detail, owner) ||
       context.kind !== 'multiple_detail' ||
       !context.ready ||
       isPrimeFacesAjaxBusy() ||
-      gridDetailLotSurface(form) !== surface ||
-      getPanoramaDisplayedLot(getPanoramaLotWidget(form)) !== lot ||
-      getNativeDetailDelete(form) !== button ||
-      gridDetailHandoff !== handoff ||
-      handoff?.navigation !== navigation ||
-      handoff?.clearingLot ||
-      (navigation && !navigation.resolved) ||
-      (owner && panoramaAutofillOwner !== owner)
+      !sameDetailLotNoticeControls(controls, readDetailLotNoticeControls(form))
     )
-      return false;
-    const detail = readGridDetailIdentity(form);
-    if (detail.agent !== agent || !sameGridDate(detail.date, date))
       return false;
     if (!entry) return true;
     const match = identifyGridDetail(handoff, form, step, total);
@@ -8305,6 +8397,18 @@ function getClearableGridLot(form) {
     return null;
   const text = readAgreedNativeLot(widget);
   return text ? { field, label: widget.label, value: field.value, text } : null;
+}
+
+function allowsGridDetailLotRetry(selection, lot) {
+  return (
+    selection &&
+    panoramaLotSelectOptions(selection.field).some(
+      (option) =>
+        !option.disabled &&
+        !option.matches?.(':disabled') &&
+        panoramaLotLabelMatches(option.text, lot)
+    )
+  );
 }
 
 function getGridDefaultLotOption(field) {
@@ -8468,6 +8572,8 @@ async function clearGridDetailLot(
       null,
       {
         lotProblem: true,
+        row,
+        deleteAllowed: afterMatch.uniqueExactIdentity,
         deleteDetail:
           afterMatch.uniqueExactIdentity && createDetailLotDelete({ row })
       }
@@ -8669,7 +8775,6 @@ async function advanceGridHandoff() {
     handoff.defaultLot = null;
     chartActivity?.record(handoff.trace, 'detail_position', { step, total });
     clearCarryProblem();
-    clearPreviousDetailLotNotice();
     handoff.retryUntil = performance.now() + 10000;
   }
   handoff.step = step;
@@ -8787,19 +8892,12 @@ async function advanceGridHandoff() {
     const deleteDetail =
       match.uniqueExactIdentity &&
       createDetailLotDelete({ row: match.candidate });
-    const retryLot =
-      selection &&
-      panoramaLotSelectOptions(selection.field).some(
-        (option) =>
-          !option.disabled &&
-          !option.matches?.(':disabled') &&
-          panoramaLotLabelMatches(option.text, expectedLot)
-      );
+    const retryLot = allowsGridDetailLotRetry(selection, expectedLot);
     const clearLot =
       selection &&
       expectedLot &&
       !panoramaLotLabelMatches(selected, expectedLot)
-        ? async () => {
+        ? async (currentSelection = selection) => {
             const trace = match.candidate.entry?.trace ?? handoff.trace;
             const report = (result) =>
               chartActivity?.record(trace, 'detail_notice_action', {
@@ -8816,7 +8914,7 @@ async function advanceGridHandoff() {
               match.candidate,
               step,
               total,
-              selection,
+              currentSelection,
               undefined,
               () => {
                 submitted = true;
@@ -8845,7 +8943,13 @@ async function advanceGridHandoff() {
               ? 'The scanned Lot is unavailable in the current list. Choose Delete in Panorama to skip this immunization.'
               : 'Autofill paused for this dose. Check the Agent and date, then choose the matching dose from the Immunization tray.',
         clearLot,
-        { lotProblem, deleteDetail, retryLot }
+        {
+          lotProblem,
+          deleteDetail,
+          retryLot,
+          row: match.candidate,
+          deleteAllowed: match.uniqueExactIdentity
+        }
       );
     }
     return;
@@ -8977,6 +9081,7 @@ async function advanceGridHandoff() {
         owner?.form === form && owner.step === position && owner.lotMissNotice;
       showCarryProblem(error.message, null, {
         lotProblem,
+        owner: lotProblem ? owner : undefined,
         deleteDetail: lotProblem && createDetailLotDelete({ owner })
       });
     }

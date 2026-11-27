@@ -152,22 +152,23 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       step: 1,
       observer: { disconnect() {} }
     };
-    let missVisible = true;
     const missSlot = {
-      querySelector: (selector) =>
-        missVisible && selector === '[data-vl-lot-miss]'
-          ? {
-              remove() {
-                missVisible = false;
-              }
-            }
-          : null
+      innerHTML: '<div data-vl-lot-miss></div>',
+      replaceChildren() {
+        this.innerHTML = '';
+      },
+      querySelector(selector) {
+        return selector === '[data-vl-lot-miss]' &&
+          this.innerHTML.includes('data-vl-lot-miss')
+          ? {}
+          : null;
+      }
     };
     Object.assign(context, { handoff, token, missSlot });
     vm.runInContext(
       `
       gridDetailHandoff = handoff;
-      toastRoutineSlot = missSlot;
+      toastCarrySlot = missSlot;
       activeTrayReservations.add(token);
       toastSkippedDoseSlot = { replaceChildren(child) { this.firstElementChild = child; } };
     `,
@@ -291,7 +292,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       'wait for a confirmed transition'
     );
     oldTable.isConnected = false;
-    assert.equal(missVisible, true);
+    assert.ok(missSlot.querySelector('[data-vl-lot-miss]'), outcome);
     position = nonterminal ? '2-of-2' : '';
     if (ordered) {
       await context.advanceGridHandoff();
@@ -303,7 +304,11 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     select = {};
     await context.advanceGridHandoff();
     await new Promise(setImmediate);
-    assert.equal(missVisible, outcome === 'wrong form', outcome);
+    assert.equal(
+      !!missSlot.querySelector('[data-vl-lot-miss]'),
+      outcome === 'wrong form',
+      outcome
+    );
 
     const removed =
       outcome !== 'wrong form' &&
