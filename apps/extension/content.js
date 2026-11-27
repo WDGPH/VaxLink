@@ -4927,7 +4927,12 @@ async function handleUnusedSkippedDose(
       'remove_skipped_dose',
       { id, expectedSingleUseLot: lot, releaseToken }
     );
-    show('Unused scan removed from tray', '', true);
+    if (!quiet)
+      show(
+        'Unused scan removed from tray',
+        `Lot ${escapeToastHtml(lot)}`,
+        true
+      );
     notice
       ?.querySelector('button')
       ?.addEventListener('click', async (event) => {
@@ -4994,6 +4999,8 @@ function showVaxlinkToast(data, durationMs = 4000) {
         if (!event.isTrusted || !slot.contains(button) || button.disabled)
           return;
         button.disabled = true;
+        const deletion = slot.querySelector('[data-delete-detail]:enabled');
+        if (deletion) deletion.disabled = true;
         try {
           const cleared = await data._clearCarryLot();
           if (cleared || !slot.contains(button)) return;
@@ -5001,6 +5008,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
           if (!slot.contains(button)) return;
         }
         button.textContent = 'Check the Lot in Panorama';
+        if (deletion && slot.contains(deletion)) deletion.disabled = false;
       });
     slot
       .querySelector('[data-carry-support]')
@@ -5368,9 +5376,13 @@ function attachDetailDelete(slot, action) {
       const button = event.currentTarget;
       if (!event.isTrusted || !slot.contains(button) || button.disabled) return;
       button.disabled = true;
+      const correction = slot.querySelector('[data-clear-carry-lot]:enabled');
+      if (correction) correction.disabled = true;
       const submitted = await action().catch(() => false);
       if (slot.contains(button))
         button.textContent = submitted ? 'Deleting…' : 'Use Delete in Panorama';
+      if (!submitted && correction && slot.contains(correction))
+        correction.disabled = false;
     });
 }
 
@@ -8288,54 +8300,62 @@ async function clearGridDetailLot(
   defaultLot,
   onClear
 ) {
+  if (handoff.clearingLot) return false;
   const navigation = handoff.navigation;
   const generation = panoramaContextGeneration;
   const entry = row.entry;
-  const route = await entry?.route;
-  if (!route || !(await checkPanoramaScannerRoute({ scannerRoute: route })))
-    return false;
   const position = `${step}-of-${total}`;
-  const current = getPanoramaFormContext();
-  if (
-    gridDetailHandoff !== handoff ||
-    handoff.clearingLot ||
-    handoff.navigation !== navigation ||
-    panoramaContextGeneration !== generation ||
-    row.entry !== entry ||
-    handoff.attempted === position ||
-    !isPanoramaChartActive() ||
-    location.href !== handoff.url ||
-    getPanoramaAutofillForm() !== form ||
-    getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) !== position ||
-    current.kind !== 'multiple_detail' ||
-    !current.ready ||
-    isPrimeFacesAjaxBusy()
-  )
-    return false;
-  const match = identifyGridDetail(handoff, form, step, total);
-  const currentLot = getClearableGridLot(form);
-  if (
-    match.candidate !== row ||
-    !canClearGridDetailConflict(match) ||
-    (defaultLot &&
-      (!match.uniqueExactIdentity ||
-        (navigation && !navigation.resolved) ||
-        !isGridDefaultLotCurrent(defaultLot, currentLot?.field, row) ||
-        !isGridLotLabelVisible(currentLot.label))) ||
-    currentLot?.field !== selection.field ||
-    currentLot.label !== selection.label ||
-    currentLot.value !== selection.value ||
-    currentLot.text !== selection.text ||
-    panoramaLotLabelMatches(selection.text, entry.lot)
-  )
-    return false;
-
-  // Panorama updates the dependent fields. The ordinary carry checks still
-  // govern any fill after this one selection is cleared.
-  const data = beginPanoramaAutofill({}, true, { automatic: true });
-  if (navigation?.resolved) navigation.incomingOwner = data._vaxlinkOwner;
   handoff.clearingLot = true;
+  if (defaultLot) {
+    clearCarryProblem();
+    handoff.reportedPosition = null;
+  }
   try {
+    const route = await entry?.route;
+    if (!route || !(await checkPanoramaScannerRoute({ scannerRoute: route })))
+      return false;
+    const current = getPanoramaFormContext();
+    if (
+      gridDetailHandoff !== handoff ||
+      handoff.navigation !== navigation ||
+      panoramaContextGeneration !== generation ||
+      row.entry !== entry ||
+      handoff.attempted === position ||
+      !isPanoramaChartActive() ||
+      location.href !== handoff.url ||
+      getPanoramaAutofillForm() !== form ||
+      getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) !== position ||
+      current.kind !== 'multiple_detail' ||
+      !current.ready ||
+      isPrimeFacesAjaxBusy()
+    )
+      return false;
+    const match = identifyGridDetail(handoff, form, step, total);
+    const currentLot = getClearableGridLot(form);
+    if (
+      match.candidate !== row ||
+      !canClearGridDetailConflict(match) ||
+      (defaultLot &&
+        (!match.uniqueExactIdentity ||
+          (navigation && !navigation.resolved) ||
+          !isGridDefaultLotCurrent(defaultLot, currentLot?.field, row) ||
+          !isGridLotLabelVisible(currentLot.label))) ||
+      currentLot?.field !== selection.field ||
+      currentLot.label !== selection.label ||
+      currentLot.value !== selection.value ||
+      currentLot.text !== selection.text ||
+      panoramaLotLabelMatches(selection.text, entry.lot)
+    )
+      return false;
+
+    // Panorama updates the dependent fields. The ordinary carry checks still
+    // govern any fill after this one selection is cleared.
+    if (!defaultLot) {
+      clearCarryProblem();
+      handoff.reportedPosition = null;
+    }
+    const data = beginPanoramaAutofill({}, true, { automatic: true });
+    if (navigation?.resolved) navigation.incomingOwner = data._vaxlinkOwner;
     if (
       !runPanoramaAutofill(data, () =>
         clearPanoramaSelection(
@@ -8675,7 +8695,16 @@ async function advanceGridHandoff() {
         !isGridDefaultLotCurrent(defaultLot, field, match.candidate))
     )
       handoff.defaultLot = null;
-    if (handoff.defaultLot && isGridLotLabelVisible(selection?.label)) {
+    // The server default may need another read before its visible label
+    // agrees. Don't bind notice actions to controls that are about to change.
+    if (!handoff.retry && !waitExpired) {
+      handoff.retry = setTimeout(() => {
+        handoff.retry = null;
+        if (gridDetailHandoff === handoff) void advanceGridHandoff();
+      }, 500);
+    }
+    if (handoff.defaultLot) {
+      if (!isGridLotLabelVisible(selection?.label)) return;
       handoff.defaultLot = null;
       const trace = match.candidate.entry.trace ?? handoff.trace;
       const cleared = await clearGridDetailLot(
@@ -8692,13 +8721,6 @@ async function advanceGridHandoff() {
       });
       if (!cleared && gridDetailHandoff === handoff) void advanceGridHandoff();
       return;
-    }
-    // A widget can set its input value without generating a DOM mutation.
-    if (!handoff.retry && !waitExpired) {
-      handoff.retry = setTimeout(() => {
-        handoff.retry = null;
-        if (gridDetailHandoff === handoff) void advanceGridHandoff();
-      }, 500);
     }
     const selected = selection?.text;
     const lotProblem = match.reason === 'detail_lot_unconfirmed';
@@ -8742,6 +8764,8 @@ async function advanceGridHandoff() {
               }
             );
             if (!submitted) report('unavailable');
+            if (!cleared && gridDetailHandoff === handoff)
+              void advanceGridHandoff();
             return cleared;
           }
         : null;

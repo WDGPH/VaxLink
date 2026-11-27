@@ -780,11 +780,22 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
   ]) {
     const { context, state, select, label, root } = fixture();
     const form = context.getPanoramaAutofillForm();
+    const deleteButton = {
+      id: 'form:Bottom_btnRemoveNext',
+      form,
+      isConnected: true,
+      matches: () => false,
+      getBoundingClientRect: shown
+    };
+    const queryForm = form.querySelectorAll;
+    form.querySelectorAll = (selector) =>
+      selector.includes('btnRemoveNext') ? [deleteButton] : queryForm(selector);
     const outgoing = select('PREVIOUS', 'lot-option');
     const field = select('WRONG', 'lot-option');
     const writes = [];
     const notices = [];
     const corrections = [];
+    const deletes = [];
     const waits = [];
     const routeCheck = Promise.withResolvers();
     let routeChecks = 0;
@@ -858,9 +869,10 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
         if (delay === 700) waits.push(callback);
       },
       clearTimeout() {},
-      showCarryProblem(message, clearLot, { retryLot } = {}) {
+      showCarryProblem(message, clearLot, { deleteDetail, retryLot } = {}) {
         notices.push(message);
         if (clearLot) corrections.push({ retryLot });
+        if (deleteDetail) deletes.push(deleteDetail);
       }
     });
     vm.runInContext('gridDetailHandoff = testHandoff', context);
@@ -869,6 +881,7 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
       await context.advanceGridHandoff();
       assert.equal(routeChecks, 0);
       assert.deepEqual(writes, [], 'wait for the visible label to agree');
+      assert.equal(deletes.length, 0, 'no Delete tied to the changing Lot');
       if (scenario === 'option replaced while waiting')
         field.options[1] = { ...field.options[1] };
       if (scenario === 'first detail with takeover')
@@ -877,6 +890,10 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
     }
     const advance = context.advanceGridHandoff();
     await new Promise(setImmediate);
+    if (shouldClear) {
+      await context.advanceGridHandoff();
+      assert.equal(deletes.length, 0, 'wait for the clear route');
+    }
     if (scenario === 'staff takeover') context.cancelPanoramaAutofill();
     if (scenario === 'Lot replaced')
       state.controls = [root, select('WRONG', 'lot-option')];
@@ -889,6 +906,8 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
       ]);
       assert.equal(label.textContent, 'Select');
       assert.equal(notices.length, 0, 'wait for Panorama to settle');
+      await context.advanceGridHandoff();
+      assert.equal(deletes.length, 0, 'blank readback alone is not settled');
       if (scenario === 'restored default') {
         field.value = 'lot-option';
         label.textContent = 'WRONG';
@@ -896,9 +915,10 @@ test('Entering or advancing Details clears a server-default wrong Lot only on a 
       waits.shift()();
     }
     await advance;
-    if (shouldClear && scenario !== 'restored default')
+    if (shouldClear && scenario !== 'restored default') {
       assert.match(notices[0], /cleared the preselected Lot/);
-    else {
+      assert.equal(deletes.length, 1, 'offer Delete for the settled step');
+    } else {
       if (!shouldClear) assert.deepEqual(writes, [], scenario);
       assert.equal(field.value, 'lot-option', scenario);
       assert.ok(notices.every((notice) => !notice.includes('cleared')));
