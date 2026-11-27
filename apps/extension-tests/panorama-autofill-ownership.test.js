@@ -146,6 +146,22 @@ function interaction(
     });
 }
 
+test('a Lot selected while scan-order carry waits stops the fill', async () => {
+  const f = fixture();
+  const feedback = [];
+  const data = f.beginPanoramaAutofill({ lot: 'SAMPLE-1' });
+  data._vaxlinkOwner.gridDetail = { scanOrder: true };
+  f.context.showCarryProblem = (message) => feedback.push(message);
+  f.schedulePanoramaLotOrTradeSelection(data);
+  f.context.readGridDetailLotEvidence = () => 'conflicting_selection';
+
+  await f.runTimer();
+
+  assert.equal(f.state.fills, 0);
+  assert.equal(f.state.timers.length, 0);
+  assert.match(feedback[0], /Panorama selected a different lot/);
+});
+
 test('newer fills and changed clinical context invalidate the previous owner', () => {
   for (const change of [
     (f) => f.beginPanoramaAutofill({}),

@@ -157,7 +157,7 @@ test('the last reordered assignment can enter an empty detail after reservation 
   assert.equal(context.matchesGridDetail({ ...entry, ...match }), false);
 });
 
-test('Delete stops order from deciding between doses with the same Agent and date', () => {
+test('scan order can distinguish repeats after Delete when the detail count agrees', () => {
   const { context, state, root, select } = fixture();
   const date = '2026/11/24';
   context.getPanoramaCurrentAgentSelectionText = () => 'MMR';
@@ -174,20 +174,28 @@ test('Delete stops order from deciding between doses with the same Agent and dat
   state.controls = [root, field];
   const form = context.getPanoramaAutofillForm();
 
-  assert.equal(context.identifyGridDetail({ rows }, form, 1, 2).row, rows[0]);
-
   const afterDelete = { rows, deletedRows: [{ agent: 'hb', date }] };
+  const first = context.identifyGridDetail(afterDelete, form, 1, 2);
+  assert.equal(first.row, rows[0]);
+  assert.equal(first.scanOrder, true);
+
+  field.value = 'other-lot';
   assert.equal(
     context.identifyGridDetail(afterDelete, form, 1, 2).reason,
+    'detail_lot_unconfirmed',
+    'the selected Lot conflicts with scan order'
+  );
+  field.value = '';
+  assert.equal(
+    context.identifyGridDetail(afterDelete, form, 1, 1).reason,
     'duplicate_agent',
-    'Both lots are available, so the option list cannot identify the dose'
+    'a missing row makes the remaining order uncertain'
   );
 
   rows[1].date = '2026/11/25';
-  assert.equal(
-    context.identifyGridDetail(afterDelete, form, 1, 2).row,
-    rows[0]
-  );
+  const distinct = context.identifyGridDetail(afterDelete, form, 1, 2);
+  assert.equal(distinct.row, rows[0]);
+  assert.equal(distinct.scanOrder, false);
 });
 
 test('grid carry uses exact enabled Lot evidence on the current widget', () => {
@@ -995,6 +1003,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'ordered_duplicates',
     'next_then_delete',
     'slow_next',
+    'repeat_after_delete',
     'second_delete_with_repeats',
     'reordered_after_delete',
     'reordered_after_delete_missing_lot',
@@ -1017,17 +1026,21 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     const form = context.getPanoramaAutofillForm();
     const tab = { id: 42, url, active: true };
     const repeatedDelete = scenario === 'second_delete_with_repeats';
+    const repeatAfterDelete = scenario === 'repeat_after_delete';
     const deleteFirst =
-      repeatedDelete || scenario.startsWith('reordered_after_delete');
-    const agents = repeatedDelete
-      ? ['HB', 'MMR', 'MMR']
-      : [
-          'MMR',
-          scenario === 'ordered_duplicates' || deleteFirst ? 'MMR' : 'HPV',
-          ['ambiguous_agent', 'next_then_delete'].includes(scenario)
-            ? 'HPV'
-            : 'HB'
-        ];
+      repeatedDelete ||
+      repeatAfterDelete ||
+      scenario.startsWith('reordered_after_delete');
+    const agents =
+      repeatedDelete || repeatAfterDelete
+        ? ['HB', 'MMR', 'MMR']
+        : [
+            'MMR',
+            scenario === 'ordered_duplicates' || deleteFirst ? 'MMR' : 'HPV',
+            ['ambiguous_agent', 'next_then_delete'].includes(scenario)
+              ? 'HPV'
+              : 'HB'
+          ];
     const records = agents.map((agent, index) => ({
       id: String(index),
       lot: `SAMPLE-${index}`,
@@ -1090,6 +1103,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     let navigationTimeout;
     let detailReady = true;
     const fills = [];
+    const scanOrderNotices = [];
     const realFill = context.autoFillPanorama;
     const realLotWidget = context.getPanoramaLotWidget;
     Object.assign(context, {
@@ -1126,7 +1140,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         fills.push(data);
         return { status: 'pending' };
       },
-      showVaxlinkToast() {},
+      showVaxlinkToast(data) {
+        if (data._carryScanOrder) scanOrderNotices.push(state.step);
+      },
       setTimeout(callback, delay) {
         if (delay === 500) retry = callback;
         if (delay === 10000) navigationTimeout = callback;
@@ -1189,12 +1205,29 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       windowListeners.get('popstate')[0]();
       state.step = '1-of-2';
       detailAgent = agents[2];
+      if (repeatedDelete) selectedLot = 'SAMPLE-2';
       await context.advanceGridHandoff();
+      if (repeatAfterDelete) {
+        assert.equal(fills[0]?.lot, 'SAMPLE-1');
+        await context.finalizeDeferredPanoramaAutofill(fills[0]);
+        click('Next');
+        state.step = '2-of-2';
+        await context.advanceGridHandoff();
+        assert.equal(fills[1]?.lot, 'SAMPLE-2');
+        await context.finalizeDeferredPanoramaAutofill(fills[1]);
+        assert.deepEqual(scanOrderNotices, ['1-of-2', '2-of-2']);
+        assert.deepEqual(
+          saved().map((dose) => dose.remaining_doses),
+          [2, 1, 1]
+        );
+        continue;
+      }
       if (repeatedDelete) {
         assert.equal(fills.length, 0);
         assert.equal(saved()[0].dose_reservations, undefined);
         click('Delete');
         state.step = '1-of-1';
+        selectedLot = '';
         await context.advanceGridHandoff();
         assert.equal(fills.length, 0);
         for (const dose of saved().slice(1)) {
@@ -1393,6 +1426,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         saved().map(({ remaining_doses }) => remaining_doses),
         [1, 1, 1]
       );
+      assert.deepEqual(scanOrderNotices, ['1-of-3', '2-of-3']);
       continue;
     }
     if (reordered) {
