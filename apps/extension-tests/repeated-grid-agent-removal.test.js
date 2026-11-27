@@ -14,13 +14,20 @@ async function grid(scenario) {
   const { context } = createContentHarness();
   const url = context.location.href;
   const tab = { id: 42, url, active: true };
-  const agents = { first: 'MMR', second: 'MMR', third: 'HPV' };
+  const multi = ['three choices', 'interrupted'].includes(scenario);
+  const agents = {
+    first: 'MMR',
+    second: 'MMR',
+    third: 'HPV',
+    ...(multi && { fourth: 'MMR', fifth: 'HPV', manual: 'MMR' })
+  };
   const ids = Object.keys(agents);
+  const scanned = ids.filter((id) => id !== 'manual');
   const secondLot = scenario === 'same lot' ? 'LOT-first' : 'LOT-second';
   const worker = createBackgroundHarness(makeTestNvcBundle(), {
     tabs: [tab],
     storage: {
-      [tray]: ids.map((id) => ({
+      [tray]: scanned.map((id) => ({
         id,
         lot: id === 'second' ? secondLot : `LOT-${id}`,
         generic_name: agents[id],
@@ -91,7 +98,7 @@ async function grid(scenario) {
     contains: (node) =>
       rows.includes(node) || rows.some((row) => row.contains(node))
   };
-  let click;
+  const keep = new Map();
   const notice = {
     innerHTML: '',
     get firstElementChild() {
@@ -100,7 +107,8 @@ async function grid(scenario) {
     querySelector: (selector) => ({
       addEventListener(type, callback) {
         assert.equal(type, 'click');
-        if (selector === '[data-remove-repeated-grid]') click = callback;
+        const index = selector.match(/data-keep-repeated-grid="(\d+)"/)?.[1];
+        if (index !== undefined) keep.set(Number(index), callback);
       }
     }),
     replaceChildren() {
@@ -129,6 +137,16 @@ async function grid(scenario) {
     if (message.operation) requests.push(message.operation);
     const send = async () => {
       const result = await worker.sendMessage(message, sender);
+      if (
+        message.action === 'checkScannerChart' &&
+        scenario === 'worker outdated'
+      )
+        return { ...result, skippedDoseArchiveVersion: undefined };
+      if (
+        message.operation === 'remove_skipped_dose' &&
+        scenario === 'interrupted'
+      )
+        rows[3].extra.value = '2026/11/26';
       if (message.operation === 'stop_dose') {
         if (scenario === 'takeover') context.cancelPanoramaAutofill();
         if (scenario === 'missing proof')
@@ -194,19 +212,26 @@ async function grid(scenario) {
     context
   );
   context.watchRepeatedGridAgents();
-  for (const id of ids) {
+  for (const id of scanned) {
     const result = await context.useTrayVaccine(
       id,
       context.getScannerDeliveryContext('multiple_grid', true)
     );
     assert.equal(result.status, 'grid_added');
   }
+  if (multi) {
+    context.fillPanoramaMultipleGridAgent(5);
+    context.fillPanoramaMultipleGridDate1(5);
+    vm.runInContext('updateRepeatedGridNotice()', context);
+  }
   await settle();
-  assert.ok(notice.innerHTML.includes(`Remove row 2 · Lot ${secondLot}`));
+  assert.ok(notice.innerHTML.includes('Keep row 1 · Lot LOT-first'));
+  assert.ok(notice.innerHTML.includes(`Keep row 2 · Lot ${secondLot}`));
+  const click = (event, index = 0) => keep.get(index)(event);
   return { worker, requests, warnings, dateEvents, rows, click, settle };
 }
 
-test('the repeated Agent action clears only the latest row and archives its exact scan', async () => {
+test('the repeated Agent action keeps the selected row and archives the other exact scan', async () => {
   for (const scenario of ['native clear', 'Date1 fallback', 'same lot']) {
     const { worker, requests, dateEvents, rows, click, settle } =
       await grid(scenario);
@@ -248,6 +273,44 @@ test('the repeated Agent action clears only the latest row and archives its exac
   }
 });
 
+test('choosing the middle scan clears only its eligible group and stops after an interruption', async () => {
+  for (const scenario of ['three choices', 'interrupted']) {
+    const { worker, requests, rows, click, settle } = await grid(scenario);
+    click({ isTrusted: true }, 1);
+    await settle();
+    assert.deepEqual(
+      rows.map(({ field }) => field.value),
+      ['', '1', '1', scenario === 'interrupted' ? '1' : '', '1', '1']
+    );
+    assert.deepEqual(
+      rows.map(({ date }) => date.value),
+      [
+        '',
+        '2026/11/21',
+        '2026/11/22',
+        scenario === 'interrupted' ? '2026/11/23' : '',
+        '2026/11/24',
+        '2026/11/25'
+      ]
+    );
+    const saved = Array.from(worker.storageData.get(tray), ({ id }) => id);
+    assert.deepEqual(
+      saved,
+      scenario === 'interrupted'
+        ? ['second', 'third', 'fourth', 'fifth']
+        : ['second', 'third', 'fifth']
+    );
+    assert.deepEqual(
+      Array.from(worker.storageData.get(recent), ({ id }) => id),
+      scenario === 'interrupted' ? ['first'] : ['fourth', 'first']
+    );
+    assert.equal(
+      requests.filter((request) => request === 'remove_skipped_dose').length,
+      scenario === 'interrupted' ? 1 : 2
+    );
+  }
+});
+
 test('the action keeps the scan when a control changes or release cannot be verified', async () => {
   for (const scenario of [
     'new label',
@@ -281,4 +344,32 @@ test('the action keeps the scan when a control changes or release cannot be veri
     if (['new label', 'date changed', 'extra date'].includes(scenario))
       assert.deepEqual(dateEvents, [], scenario);
   }
+});
+
+test('a worker without archive support leaves both the grid and scans intact', async () => {
+  const { worker, requests, warnings, rows, click, settle } =
+    await grid('worker outdated');
+  click({ isTrusted: true }, 1);
+  await settle();
+  assert.equal(rows[0].field.value, '1');
+  assert.equal(rows[0].date.value, '2026/11/20');
+  assert.equal(worker.storageData.get(tray).length, 3);
+  assert.deepEqual(requests, ['reserve_dose', 'reserve_dose', 'reserve_dose']);
+  assert.match(warnings.at(-1), /Reload VaxLink/);
+});
+
+test('an unavailable route check does not diagnose a stale worker', async () => {
+  const { context } = createContentHarness();
+  const warnings = [];
+  context.showVaxlinkToast = ({ _entryWarning }) =>
+    warnings.push(_entryWarning);
+  context.chrome.runtime.sendMessage = async () => {
+    throw new Error('The worker did not respond');
+  };
+
+  assert.equal(
+    await context.ensureSkippedDoseWorkerSupport({}, () => true),
+    false
+  );
+  assert.match(warnings[0], /could not confirm the active Panorama chart/);
 });

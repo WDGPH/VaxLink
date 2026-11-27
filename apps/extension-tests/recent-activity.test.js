@@ -102,6 +102,78 @@ test('Debug records the destination of locked captures without identifiers', asy
   );
 });
 
+test('workflow Debug links the kept scan to the saved tray without exporting identifiers', async () => {
+  const kept = '1795816890000-kept01';
+  const removed = '1795816890001-drop02';
+  const worker = fixture({
+    storage: {
+      multiple_inject_queue_v1: [
+        {
+          id: kept,
+          lot: 'PRIVATE-LOT',
+          dose_tracking: 'single_use',
+          dose_reservations: [{ token: 'PRIVATE-TOKEN', review: true }]
+        }
+      ],
+      vaxlink_skipped_dose_history_v1: [{ id: removed, lot: 'PRIVATE-LOT' }]
+    }
+  });
+  const ticket = await worker.open();
+  const base = { operation: 1, ms: 0, mode: 'multiple', stage: 'grid' };
+  const archived = {
+    ...base,
+    event: 'skipped_dose',
+    action: 'remove',
+    result: 'removed',
+    scanKey: removed
+  };
+  const timeline = [
+    {
+      ...base,
+      event: 'grid_handoff',
+      row: 1,
+      step: 0,
+      result: 'assigned',
+      scanKey: kept
+    },
+    {
+      ...base,
+      event: 'grid_keep_choice',
+      row: 1,
+      alternatives: 1,
+      result: 'selected'
+    },
+    archived,
+    { ...base, event: 'hud_render', rows: 1, displayed: 1, removing: 0 },
+    {
+      ...base,
+      event: 'detail_notice_action',
+      action: 'delete',
+      result: 'submitted',
+      step: 1,
+      total: 2
+    }
+  ];
+  assert.equal((await worker.append(ticket, timeline)).success, true);
+  assert.equal(
+    (await worker.append(ticket, [{ ...archived, scanKey: 'patient-name' }]))
+      .success,
+    false
+  );
+  const log = await worker.manage('exportRecentActivity');
+  assert.equal(log.trayAtExport.rows, 1);
+  assert.equal(log.trayAtExport.review, 1);
+  assert.match(log.rows[0].scanRef, /^[0-9a-f]{16}$/);
+  assert.equal(log.trayAtExport.scans[0].scanRef, log.rows[0].scanRef);
+  assert.equal(log.trayAtExport.recentlyRemoved[0], log.rows[2].scanRef);
+  assert.notEqual(log.rows[0].scanRef, log.rows[2].scanRef);
+  assert(log.rows.every((row) => Number.isSafeInteger(row.receivedAt)));
+  assert.doesNotMatch(
+    JSON.stringify(log),
+    /kept01|drop02|PRIVATE-LOT|PRIVATE-TOKEN|patient-name/
+  );
+});
+
 test('Debug accepts bounded Resume and tray actions through their supported senders', async () => {
   const worker = fixture();
   const ticket = await worker.open();

@@ -13,6 +13,7 @@
       values.includes(value);
   const integer = (min, max) => (value) =>
     Number.isSafeInteger(value) && value >= min && value <= max;
+  const count = integer(0, 100000);
   const outcome = choices('match', 'mismatch', 'not_requested', 'not_checked');
   const deferredFieldNames = ['date', 'time', 'reason', 'consent'];
   const deferredOutcome = choices(
@@ -67,6 +68,42 @@
     'error'
   );
   const details = {
+    grid_keep_choice: {
+      row: integer(1, 100000),
+      alternatives: integer(1, 100000),
+      result: choices('selected', 'completed', 'interrupted')
+    },
+    detail_notice_action: {
+      action: choices('retry', 'delete'),
+      result: choices('selected', 'unavailable', 'submitted'),
+      step: count,
+      total: count
+    },
+    tray_storage: {
+      rows: count,
+      reservations: count,
+      review: count
+    },
+    hud_render: {
+      rows: count,
+      displayed: count,
+      removing: count
+    },
+    detail_validation: {
+      step: integer(1, 100000),
+      total: integer(1, 100000),
+      field: choices(
+        'site',
+        'lot',
+        'agent',
+        'date',
+        'time',
+        'route',
+        'consent',
+        'reason',
+        'other'
+      )
+    },
     scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
     lock_observed: {},
     lock_released: {},
@@ -388,6 +425,13 @@
     )
       return false;
     const fields = { ...common, ...details[row.event] };
+    if (Object.hasOwn(row, 'observedAt'))
+      fields.observedAt = integer(1, Number.MAX_SAFE_INTEGER);
+    if (
+      ['grid_handoff', 'skipped_dose'].includes(row.event) &&
+      Object.hasOwn(row, 'scanKey')
+    )
+      fields.scanKey = validScanKey;
     if (row.event === 'lock_observed' && Object.hasOwn(row, 'witness'))
       fields.witness = choices(
         'matched',
@@ -469,10 +513,41 @@
     };
   }
 
+  function validScanKey(id) {
+    return (
+      typeof id === 'string' &&
+      /^(?:\d{13}-[a-z0-9]{1,8}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i.test(
+        id
+      )
+    );
+  }
+
+  function trayBalance(rows) {
+    const balance = { rows: rows.length, reservations: 0, review: 0 };
+    for (const row of rows) {
+      const doses = Array.isArray(row?.dose_reservations)
+        ? row.dose_reservations
+        : [];
+      balance.reservations += doses.length;
+      balance.review += doses.filter((dose) => dose?.review === true).length;
+    }
+    return balance;
+  }
+
+  async function scanRef(token, id) {
+    if (!token || !validScanKey(id)) return null;
+    const bytes = new TextEncoder().encode(token + ':' + id);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return Array.from(digest.subarray(0, 8), (v) =>
+      v.toString(16).padStart(2, '0')
+    ).join('');
+  }
+
   function createRecorder(
     getLocal,
     setLocal,
-    getSettingsAtExport = async () => null
+    getSettingsAtExport = async () => null,
+    getTrayAtExport = async () => null
   ) {
     const session = chrome.storage.session;
     let queue = Promise.resolve();
@@ -529,10 +604,15 @@
         const state = (await enabled()) ? await load() : null;
         if (token !== state?.token || source >= state.nextSource)
           return { success: false, stale: true };
-        const appended = rows.map((row) => ({
-          ...row,
-          operation: source * operationRange + row.operation
-        }));
+        const receivedAt = Date.now();
+        const appended = await Promise.all(
+          rows.map(async ({ scanKey, ...row }) => ({
+            ...row,
+            receivedAt,
+            operation: source * operationRange + row.operation,
+            ...(scanKey && { scanRef: await scanRef(token, scanKey) })
+          }))
+        );
         state.rows.push(...appended);
         const excess = Math.max(0, state.rows.length - maxRows);
         state.rows.splice(0, excess);
@@ -569,9 +649,12 @@
         return action === 'exportRecentActivity'
           ? {
               ...status,
-              format: 3,
+              format: 4,
               build: buildDetails(),
               settingsAtExport: await getSettingsAtExport().catch(() => null),
+              trayAtExport: await getTrayAtExport((id) =>
+                scanRef(state?.token, id)
+              ).catch(() => null),
               rows: state?.rows ?? []
             }
           : status;
@@ -691,6 +774,7 @@
         if (pending.length === maxBatch) pending.shift();
         pending.push({
           event,
+          observedAt: Date.now(),
           operation: trace.operation,
           ms: Math.max(0, Math.round(performance.now() - trace.started)),
           mode: trace.mode,
@@ -705,6 +789,8 @@
   }
 
   globalThis.VaxLinkRecentActivity = {
+    validScanKey,
+    trayBalance,
     preferenceKey,
     sessionKey,
     scannedBarcode,

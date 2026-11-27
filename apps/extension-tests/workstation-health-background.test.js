@@ -48,6 +48,7 @@ test('cold health inspection reads an old catalogue without reconnecting or refr
     tabId: tab.id
   });
   assert.equal(result.success, true);
+  assert.equal(result.skippedDoseArchiveVersion, 1);
   assert.equal(result.chart.state, 'ready');
   assert.equal(result.nvc.state, 'degraded');
   assert.equal(result.scanner.state, 'unknown');

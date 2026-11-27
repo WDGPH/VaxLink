@@ -12,7 +12,8 @@ importScripts('recent-activity.js');
 const recentActivity = globalThis.VaxLinkRecentActivity.createRecorder(
   getStorage,
   setStorage,
-  getDebugSettingsAtExport
+  getDebugSettingsAtExport,
+  getDebugTrayAtExport
 );
 
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
@@ -286,8 +287,16 @@ function initQueueBadge() {
   );
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
-    if (MULTIPLE_INJECT_QUEUE_KEY in changes)
-      updateQueueBadge(changes[MULTIPLE_INJECT_QUEUE_KEY].newValue);
+    if (MULTIPLE_INJECT_QUEUE_KEY in changes) {
+      const rows = changes[MULTIPLE_INJECT_QUEUE_KEY].newValue;
+      updateQueueBadge(rows);
+      void recordScannerLockActivity(
+        'tray_storage',
+        globalThis.VaxLinkRecentActivity.trayBalance(
+          Array.isArray(rows) ? rows : []
+        )
+      );
+    }
   });
 }
 
@@ -868,7 +877,13 @@ async function changeSkippedDose(storageKey, operation, payload, chart) {
   const removing = operation === 'remove_skipped_dose';
   const action = removing ? 'remove' : 'restore';
   const report = (result) =>
-    recordScannerLockActivity('skipped_dose', { action, result });
+    recordScannerLockActivity('skipped_dose', {
+      action,
+      result,
+      ...(globalThis.VaxLinkRecentActivity.validScanKey(payload.id) && {
+        scanKey: payload.id
+      })
+    });
   if (
     storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
     typeof payload.id !== 'string' ||
@@ -4985,6 +5000,7 @@ const workstationBuildAtLoad = (() => {
 async function getWorkstationHealth(tabId) {
   const result = {
     success: true,
+    skippedDoseArchiveVersion: 1,
     scanner: { state: 'unknown', captureSource: 'unknown', lastCaptureAt: '' },
     nvc: { state: 'unknown' },
     chart: { state: 'unknown' }
@@ -5106,6 +5122,35 @@ function canChangeQueue(sender) {
   );
 }
 
+async function getDebugTrayAtExport(reference) {
+  const saved = await getStorage([
+    MULTIPLE_INJECT_QUEUE_KEY,
+    SKIPPED_DOSE_HISTORY_KEY
+  ]);
+  const rows = Array.isArray(saved[MULTIPLE_INJECT_QUEUE_KEY])
+    ? saved[MULTIPLE_INJECT_QUEUE_KEY]
+    : [];
+  const removed = Array.isArray(saved[SKIPPED_DOSE_HISTORY_KEY])
+    ? saved[SKIPPED_DOSE_HISTORY_KEY]
+    : [];
+  return {
+    observedAt: Date.now(),
+    ...globalThis.VaxLinkRecentActivity.trayBalance(rows),
+    scans: await Promise.all(
+      rows.slice(0, 250).map(async (row) => ({
+        scanRef: await reference(row?.id),
+        remaining: getTrayRemainingDoses(row),
+        reservations: doseReservations(row).length,
+        review: doseReservations(row).some((dose) => dose?.review === true),
+        unusedRelease: !!row?.unused_dose_release?.token
+      }))
+    ),
+    recentlyRemoved: await Promise.all(
+      removed.slice(0, 20).map((row) => reference(row?.id))
+    )
+  };
+}
+
 async function getDebugSettingsAtExport() {
   const legacyDateTime = 'vaxlink_administered_datetime_autofill_v1';
   const legacyReasonConsent = 'vaxlink_reason_consent_autofill_v1';
@@ -5159,6 +5204,7 @@ function recordScannerLockActivity(
   mode = 'multiple',
   stage = 'none'
 ) {
+  const observedAt = Date.now();
   return recentActivity
     .open()
     .then((ticket) =>
@@ -5169,6 +5215,7 @@ function recordScannerLockActivity(
               mode,
               stage,
               ms: 0,
+              observedAt,
               event,
               ...fields
             }
@@ -5604,7 +5651,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
               })
             )
           : getActiveScannerChartRoute(sender.tab.id, request.scannerRoute);
-      check.then(sendResponse, () => sendResponse({ success: false }));
+      check.then(
+        (result) => sendResponse({ ...result, skippedDoseArchiveVersion: 1 }),
+        () => sendResponse({ success: false, skippedDoseArchiveVersion: 1 })
+      );
     }
     return true;
   }

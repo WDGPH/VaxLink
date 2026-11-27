@@ -761,9 +761,11 @@ test('a carried sole Lot is cleared after a refresh unless staff take over', asy
   }
 });
 
-test('Next clears a server-default wrong Lot on only a unique exact reordered detail', async () => {
+test('Entering or advancing Details clears a server-default wrong Lot only on a unique exact reordered detail', async () => {
   for (const scenario of [
     'default',
+    'first detail',
+    'first detail with takeover',
     'delayed label',
     'option replaced while waiting',
     'restored default',
@@ -782,14 +784,17 @@ test('Next clears a server-default wrong Lot on only a unique exact reordered de
     const field = select('WRONG', 'lot-option');
     const writes = [];
     const notices = [];
+    const corrections = [];
     const waits = [];
     const routeCheck = Promise.withResolvers();
     let routeChecks = 0;
-    const delayed = ['delayed label', 'option replaced while waiting'].includes(
-      scenario
-    );
+    const first = scenario.startsWith('first detail');
+    const delayed =
+      first ||
+      ['delayed label', 'option replaced while waiting'].includes(scenario);
     const shouldClear = [
       'default',
+      'first detail',
       'delayed label',
       'restored default'
     ].includes(scenario);
@@ -808,30 +813,37 @@ test('Next clears a server-default wrong Lot on only a unique exact reordered de
     root.getAttribute = () => null;
     root.classList = { contains: () => false };
     state.controls = [root, field];
-    state.step = '2-of-3';
+    state.step = first ? '1-of-3' : '2-of-3';
     const date = '2026/11/24';
     const entry = { lot: 'INTENDED', date, route: {} };
     const row = { agent: 'mmr', date, entry };
     const handoff = {
       form,
       url: context.location.href,
-      step: 1,
-      position: '1-of-3',
+      step: first ? 0 : 1,
+      position: first ? '' : '1-of-3',
       rows: [
         row,
         { agent: 'hpv', date },
         { agent: scenario === 'duplicate identity' ? 'mmr' : 'hb', date }
       ],
       deletedRows: [],
-      navigation: {
-        form,
-        before: '1-of-3',
-        after: '2-of-3',
-        surface: scenario === 'counter only' ? field : outgoing,
-        until: Infinity,
-        report() {}
-      }
+      initialDetail: first && {
+        surface: outgoing,
+        generation: vm.runInContext('panoramaContextGeneration', context)
+      },
+      navigation: first
+        ? null
+        : {
+            form,
+            before: '1-of-3',
+            after: '2-of-3',
+            surface: scenario === 'counter only' ? field : outgoing,
+            until: Infinity,
+            report() {}
+          }
     };
+    if (first) handoff.rows = [handoff.rows[1], row, handoff.rows[2]];
     Object.assign(context, {
       testHandoff: handoff,
       getPanoramaFormContext: () => ({ kind: 'multiple_detail', ready: true }),
@@ -846,8 +858,9 @@ test('Next clears a server-default wrong Lot on only a unique exact reordered de
         if (delay === 700) waits.push(callback);
       },
       clearTimeout() {},
-      showCarryProblem(message) {
+      showCarryProblem(message, clearLot, { retryLot } = {}) {
         notices.push(message);
+        if (clearLot) corrections.push({ retryLot });
       }
     });
     vm.runInContext('gridDetailHandoff = testHandoff', context);
@@ -858,6 +871,8 @@ test('Next clears a server-default wrong Lot on only a unique exact reordered de
       assert.deepEqual(writes, [], 'wait for the visible label to agree');
       if (scenario === 'option replaced while waiting')
         field.options[1] = { ...field.options[1] };
+      if (scenario === 'first detail with takeover')
+        context.cancelPanoramaAutofill();
       label.textContent = 'WRONG';
     }
     const advance = context.advanceGridHandoff();
@@ -891,6 +906,10 @@ test('Next clears a server-default wrong Lot on only a unique exact reordered de
     assert.equal(outgoing.value, 'lot-option', scenario);
     assert.equal(row.entry, entry, 'keep the pending dose for Delete');
     assert.equal(handoff.attempted, undefined, 'no dose fill ran');
+    if (scenario === 'target available' || scenario === 'client choice')
+      assert.deepEqual(corrections, [
+        { retryLot: scenario === 'target available' }
+      ]);
   }
 });
 
@@ -1262,7 +1281,7 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
   const notice = warning.innerHTML;
   assert.match(notice, /class="vl-toast info persistent show" role="status"/);
   assert.match(notice, /same Agent/);
-  assert.match(notice, />Dismiss</);
+  assert.match(notice, />Keep all rows</);
   assert.doesNotMatch(notice, /Remove row/);
   let confirmations = 0;
   context.window.confirm = (message) => {
@@ -1299,7 +1318,8 @@ test('manual repeated Agents warn and guard both native Enter Details buttons', 
   assert.equal(warning.innerHTML, notice);
   dismiss({ isTrusted: true });
   assert.equal(warning.innerHTML, '');
-  context.window.confirm = () => assert.fail('Dismiss acknowledged this grid');
+  context.window.confirm = () =>
+    assert.fail('Keep all rows acknowledged this grid');
   assert.equal(enter('_btnNextPage'), true);
   assert.equal(enter('Bottom_btnNextPage'), true);
   extraDate.value = '2026/11/29';

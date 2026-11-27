@@ -118,9 +118,13 @@ Delete can open the next detail or return from the last detail to the
 immunization overview. VaxLink checks the replacement view before archiving
 the identifiable unused single-use scan. The worker checks the exact scan
 and its release token. Undo and Recent Scans can restore it. A dose that may
-have changed a chart still needs review. When staff remove a duplicate grid
-row from its notification, the HUD marks that scan as being removed while
-VaxLink checks the cleared grid row and waits for the worker’s tray update.
+have changed a chart still needs review. The repeated-Agent notice lists eligible
+scans by row and Lot. Staff choose a keeper or keep all rows. Before clearing a
+row, VaxLink checks that the worker supports archiving skipped scans. Each
+other listed scan must have its grid clear and tray archive confirmed before
+the next removal starts. The HUD marks pending removals. For an unavailable
+Lot, a notification Delete uses Panorama’s own button after checking the same
+detail and active route.
 
 ### User controls: popup
 
@@ -219,6 +223,16 @@ The two scheduled late checks record their outcomes if
 the page is still running. A completed request has a source label when the page
 exposes its JSF callback and the source belongs to the observed form. Otherwise
 the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
+
+The Debug download includes a tray snapshot and the recent-removal list at
+export. A session-specific scan reference links grid assignments and archive
+results to the saved scans. Legacy rows without a recognized scan ID have a
+null reference. The snapshot gives the full tray count and details for up to
+250 rows. The timeline records storage counts, rendered HUD counts, repeat-row
+choices, missing-Lot button actions and field categories that Panorama marks
+invalid. New events carry a worker receipt time and, when recorded at the
+source, an observation time. Field values, reservation tokens and patient
+identifiers are excluded from these additions.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with

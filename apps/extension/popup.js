@@ -1207,7 +1207,7 @@ function setupRecentActivityControls() {
   function render(message) {
     if (!busy) toggle.checked = snapshot?.enabled === true;
     toggle.disabled = busy || !snapshot;
-    exportButton.disabled = busy || !snapshot?.retained;
+    exportButton.disabled = busy || !snapshot?.enabled;
     emailButton.disabled = exportButton.disabled;
     const retained = snapshot?.retained ?? 0;
     status.textContent = snapshot
@@ -1245,14 +1245,29 @@ function setupRecentActivityControls() {
       if (!result?.success) throw new Error();
       snapshot = result;
       if (action === 'exportRecentActivity') {
-        const { format, build, settingsAtExport, retained, overwritten, rows } =
-          result;
-        if (!retained) {
+        const {
+          format,
+          build,
+          settingsAtExport,
+          trayAtExport,
+          retained,
+          overwritten,
+          rows
+        } = result;
+        if (!retained && !trayAtExport) {
           message = 'There are no troubleshooting details to share.';
           return;
         }
         const log = JSON.stringify(
-          { format, build, settingsAtExport, retained, overwritten, rows },
+          {
+            format,
+            build,
+            settingsAtExport,
+            trayAtExport,
+            retained,
+            overwritten,
+            rows
+          },
           null,
           2
         );

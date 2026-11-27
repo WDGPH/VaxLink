@@ -15,7 +15,11 @@ const date = '2026/11/27';
 test('confirmed Delete archives only the exact unused scan', async () => {
   for (const outcome of [
     'reordered',
+    'reordered notice',
     'overview',
+    'notice',
+    'untrusted notice',
+    'stale notice',
     'one detail',
     'wrong form',
     'stale date'
@@ -69,15 +73,19 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     };
     const button = {
       id: 'form:_btnRemoveNext',
+      isConnected: true,
+      matches: () => false,
       closest: (selector) =>
         selector.includes('immsDetails_dataTable') ? oldTable : button
     };
     const form = {
       isConnected: true,
+      querySelectorAll: () => [button],
       contains: (node) =>
         node === button || (outcome !== 'wrong form' && node === overview)
     };
-    const nonterminal = outcome === 'reordered';
+    button.form = form;
+    const nonterminal = outcome.startsWith('reordered');
     const initialStep =
       outcome === 'one detail' ? '1-of-1' : nonterminal ? '2-of-3' : '2-of-2';
     let position = initialStep;
@@ -97,6 +105,7 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       }),
       getPanoramaLotWidget: () => ({ select }),
       isVisible: () => true,
+      getComputedStyle: () => ({ visibility: 'visible' }),
       setTimeout: () => 1,
       clearTimeout() {},
       ensureToastHost() {}
@@ -153,6 +162,12 @@ test('confirmed Delete archives only the exact unused scan', async () => {
     if (nonterminal) {
       rows.push({ index: '2', agent: 'hb', date });
       outgoing.entry = { dose, lot, route, log() {} };
+      if (outcome === 'reordered notice') {
+        select = {
+          value: 'wrong',
+          options: [{ text: 'WRONG', value: 'wrong' }]
+        };
+      }
     } else {
       owner.trayDose = dose;
       owner.unusedDoseDate = outcome === 'stale date' ? '2026/11/26' : date;
@@ -162,7 +177,70 @@ test('confirmed Delete archives only the exact unused scan', async () => {
       assert.equal((await owner.unusedDose)?.id, 'outgoing');
     }
 
-    context.startGridHandoff({ isTrusted: true, target: button });
+    if (outcome.includes('notice')) {
+      const routeCheck = Promise.withResolvers();
+      let clicks = 0;
+      let listener;
+      const deleteAction = context.createDetailLotDelete(
+        nonterminal ? { row: outgoing } : { owner }
+      );
+      const noticeButton = {
+        addEventListener(_type, callback) {
+          listener = callback;
+        }
+      };
+      const checkRoute = context.checkPanoramaScannerRoute;
+      context.checkPanoramaScannerRoute = async (delivery) => {
+        await routeCheck.promise;
+        return checkRoute(delivery);
+      };
+      button.click = () => {
+        clicks += 1;
+        assert.equal(handoff.navigation?.deleting, true);
+      };
+      if (outcome === 'notice') {
+        const findNotice = missSlot.querySelector;
+        missSlot.querySelector = (selector) =>
+          selector === '[data-delete-detail]'
+            ? noticeButton
+            : findNotice(selector);
+        missSlot.contains = (node) => node === noticeButton;
+        context.VaxLinkNvcLotReport = {
+          hasCatalogueMatch: () => false,
+          makeDraft: () => ''
+        };
+        context.showVaxlinkToast({
+          _vaxlinkOwner: owner,
+          _fillFeedback: 'lot_not_matched'
+        });
+        assert.match(missSlot.innerHTML, /vl-toast info persistent show/);
+        assert.match(missSlot.innerHTML, /data-delete-detail>Delete</);
+        assert.doesNotMatch(missSlot.innerHTML, /Dismiss/);
+      } else {
+        context.attachDetailDelete(
+          {
+            querySelector: () => noticeButton,
+            contains: (node) => node === noticeButton
+          },
+          deleteAction
+        );
+      }
+      const pending = listener({
+        currentTarget: noticeButton,
+        isTrusted: outcome !== 'untrusted notice'
+      });
+      await new Promise(setImmediate);
+      assert.equal(clicks, 0, 'wait for route verification');
+      if (outcome === 'stale notice') select = {};
+      routeCheck.resolve();
+      await pending;
+      if (outcome === 'untrusted notice' || outcome === 'stale notice') {
+        assert.equal(clicks, 0, outcome);
+        assert.equal(worker.storageData.has(recent), false, outcome);
+        continue;
+      }
+      assert.equal(clicks, 1, outcome);
+    } else context.startGridHandoff({ isTrusted: true, target: button });
     await context.advanceGridHandoff();
     assert.equal(
       worker.storageData.has(recent),

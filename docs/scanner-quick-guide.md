@@ -42,9 +42,11 @@ cannot confirm the fields, follow the message and check the original chart
 before trying again. Review and save the record in Panorama.
 
 If Panorama selects a different lot while entering multiple immunizations,
-compare it with the scanned lot. **Clear Lot and retry** clears that selection
-and tries the same dose again. Check Vaccine Details. Choose **Delete** in
-Panorama if you intend to skip an unavailable immunization. VaxLink can still
+compare it with the scanned lot. When Panorama offers the scanned Lot,
+**Clear Lot and retry** clears the conflicting selection and tries the same
+dose again. When the scanned Lot is missing, choose **Delete** in the notice
+to skip that immunization using Panorama’s Delete action. If the notice directs
+you to Panorama, use the form’s **Delete** button. VaxLink can still
 carry the next dose when the Agent, date and lot verify the assignment. Use
 **Check original chart** if VaxLink needs you to verify whether it wrote to the
 form.
@@ -86,7 +88,7 @@ yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can 
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
-If an Agent appears on multiple rows, VaxLink shows a notification. When it offers to remove a row, check the row number and Lot before selecting the button. VaxLink clears that row and moves the unused scan to **Recent Scans** once it verifies the row is empty. Use **Restore** to bring the scan back to the tray. If you intend to enter all the rows, choose **Dismiss** to acknowledge the warning and continue to **Enter Details**. VaxLink shows **Using scan order** in Details when it carries repeat scans in that order.
+If the same Agent appears more than once, choose the **Keep row** button for the row and Lot you intend to enter. VaxLink keeps that row and its date. It clears the other listed scans for that Agent, shows **Removing…** in the tray, and moves each confirmed removal to **Recent Scans**. Use **Restore** there to recover a scan. For intentional repeats, choose **Keep all rows** and continue to **Enter Details**. VaxLink shows **Using scan order** when it carries repeat scans in that order.
 
 Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the
 exact single-use scan was unused, it removes that scan from the tray. Choose
@@ -110,7 +112,10 @@ A reserved dose shows **Reserved on chart** in the popup and **In progress** on 
 ## Download troubleshooting details
 
 In **Settings → Troubleshooting**, choose **Download details** before closing the browser
-or turning collection off. The file may include a scanned vaccine barcode.
+or turning collection off. For a Multiple Immunizations issue, leave the tray
+as you found it until you download the file. It includes the saved tray at
+download, recent removals, HUD counts and which grid row you chose to keep.
+The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
 
