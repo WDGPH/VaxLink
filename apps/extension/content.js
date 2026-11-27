@@ -5970,19 +5970,42 @@ function renderHudQueueList(rows, visible) {
     use.textContent = 'Use';
     use.setAttribute('aria-label', `Use ${label.textContent}`);
     use.disabled = globalThis.VaxLinkExpiryDate.blocksChartUse(row);
-    use.addEventListener('click', () => {
+    use.addEventListener('click', (event) => {
       const context = getPanoramaFormContext();
+      const trace = event.isTrusted
+        ? chartActivity?.begin(
+            'multiple',
+            context.kind === 'multiple_grid'
+              ? 'grid'
+              : context.ready
+                ? 'detail'
+                : 'none'
+          )
+        : null;
+      const record = (result) =>
+        chartActivity?.record(trace, 'tray_use', { source: 'hud', result });
+      record('selected');
       const token = getScannerDeliveryContext(context.kind, true);
       void useTrayVaccine(row.id, token)
         .then((result) => {
-          if (result.status === 'grid_added')
+          if (result.status === 'grid_added') {
+            record('grid_added');
             showVaxlinkToast({ _gridAdded: true });
-          else if (!isAutofillPending(result) && !isAutofillSuccess(result))
+          } else if (isAutofillPending(result)) {
+            record('pending');
+          } else if (isAutofillSuccess(result)) {
+            record('applied');
+          } else {
+            record('blocked');
             warnPanoramaEntryBlocked(
               result.error || 'Check the chart before trying again.'
             );
+          }
         })
-        .catch((error) => warnPanoramaEntryBlocked(error.message));
+        .catch((error) => {
+          record('error');
+          warnPanoramaEntryBlocked(error.message);
+        });
     });
     if (!globalThis.VaxLinkTrayDoses.trayDoseNeedsReview(row))
       item.appendChild(use);

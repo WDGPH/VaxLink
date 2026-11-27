@@ -1662,10 +1662,18 @@ async function addPendingScansToInventory() {
 
 let trayUseInFlight = false;
 
+function recordPopupTrayUse(result) {
+  void sendRuntimeMessage({ action: 'recordPopupTrayUse', result }).catch(
+    () => {}
+  );
+}
+
 async function handleUseMultipleInjectRecord(record) {
   if (trayUseInFlight || activeMode !== 'immunization') return;
   if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) return;
   trayUseInFlight = true;
+  let outcome = 'blocked';
+  recordPopupTrayUse('selected');
   try {
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -1688,6 +1696,7 @@ async function handleUseMultipleInjectRecord(record) {
         'Open a supported Panorama form that is ready for entry.'
       );
     }
+    outcome = 'error';
     const result = await chrome.tabs.sendMessage(
       tab.id,
       {
@@ -1697,11 +1706,13 @@ async function handleUseMultipleInjectRecord(record) {
       },
       { frameId: 0 }
     );
+    outcome = 'blocked';
     if (result?.status === 'expired') return;
     if (!result?.success && !result?.pending)
       throw new Error(result?.error || 'Check the chart before trying again.');
 
     if (result.status === 'grid_added') {
+      outcome = 'grid_added';
       writeOutput(
         result.carryToDetails
           ? 'Added to the grid. Check that Enter Details opens the matching step.'
@@ -1710,6 +1721,7 @@ async function handleUseMultipleInjectRecord(record) {
       );
       return;
     }
+    outcome = result.pending ? 'pending' : 'applied';
     const message =
       result.reason === 'funding_choice_required'
         ? 'Choose the funding category in Panorama to continue.'
@@ -1720,6 +1732,7 @@ async function handleUseMultipleInjectRecord(record) {
   } catch (error) {
     writeOutput(escapeHtml(error.message), 'error');
   } finally {
+    recordPopupTrayUse(outcome);
     trayUseInFlight = false;
   }
 }

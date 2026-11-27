@@ -108,6 +108,7 @@ const LOCK_FOCUS_GRACE_MS = 5000;
 let scannerResumeWitness;
 let scannerForegroundChanges = 0;
 let interruptedScannerLockId;
+let lockedResumeActivity;
 let lastScannerIdleState = null;
 let iconInitPromise = null;
 const {
@@ -1451,7 +1452,7 @@ function saveScannerResumeWitness(witness, blurredAt) {
 
 async function ensureLockedScannerSession(existing, witness) {
   if (isLockedScannerSession(existing)) return existing;
-  const target = await witness;
+  const { target, result } = (await witness) ?? { result: 'not_checked' };
   const activeTab = target
     ? { id: target.tabId, windowId: target.windowId }
     : (await queryTabs({ active: true, currentWindow: true })).find(
@@ -1466,7 +1467,7 @@ async function ensureLockedScannerSession(existing, witness) {
     [SCANNER_LOCK_STATE_KEY]: 'locked',
     [SCANNER_LOCK_SESSION_KEY]: session
   });
-  recordScannerLockActivity('lock_observed', {});
+  recordScannerLockActivity('lock_observed', { witness: result });
   return session;
 }
 
@@ -1476,9 +1477,11 @@ function updateScannerLockState(state, witness) {
     if (normalized === 'locked')
       return ensureLockedScannerSession(existing, witness);
     const values = { [SCANNER_LOCK_STATE_KEY]: normalized };
-    if (isLockedScannerSession(existing))
+    const unlocked = isLockedScannerSession(existing);
+    if (unlocked)
       values[SCANNER_LOCK_SESSION_KEY] = closeLockedScannerSession(existing);
     await setStorage(values);
+    if (unlocked) recordScannerLockActivity('lock_released', {});
   });
 }
 
@@ -1527,19 +1530,20 @@ function initializeScannerLockMonitoring() {
           getFocusedScannerTab({ allowUnfocused: true })
         ])
           .then(async ([target, tab]) => {
+            if (!target) return { result: 'missing' };
+            if (tab?.id !== target.tabId || tab.windowId !== target.windowId)
+              return { result: 'foreground_changed' };
             const sinceBlur = lockedAt - target?.blurredAt;
             if (
-              !target ||
-              tab?.id !== target.tabId ||
-              tab.windowId !== target.windowId ||
-              (!tab.windowFocused &&
-                !(sinceBlur >= 0 && sinceBlur <= LOCK_FOCUS_GRACE_MS)) ||
-              !(await matchesLockedScanAnchor(target))
+              !tab.windowFocused &&
+              !(sinceBlur >= 0 && sinceBlur <= LOCK_FOCUS_GRACE_MS)
             )
-              return null;
-            return target;
+              return { result: 'focus_lost' };
+            if (!(await matchesLockedScanAnchor(target)))
+              return { result: 'anchor_unavailable' };
+            return { target, result: 'matched' };
           })
-          .catch(() => null);
+          .catch(() => ({ result: 'anchor_unavailable' }));
         forgetForeground();
         invalidateScannerChartRoute();
       }
@@ -2054,18 +2058,23 @@ function lockedScanEnabled(target, settings) {
   );
 }
 
-function eligibleLockedScans(target, session, rows) {
+function lockedScanSessionBlock(target, session) {
+  if (session?.state !== 'active' || !session.unlockedAt) return 'lock_active';
+  if (session.interrupted || session.id === interruptedScannerLockId)
+    return 'interrupted';
+  if (!session.resumeTarget) return 'no_lock_witness';
   if (
-    session?.state !== 'active' ||
-    !session.unlockedAt ||
-    session.interrupted ||
-    session.id === interruptedScannerLockId ||
-    (target.kind !== 'multiple_grid' && session.resumeCaptureCount !== 1) ||
     !Object.keys(target).every(
-      (key) => target[key] === session.resumeTarget?.[key]
+      (key) => target[key] === session.resumeTarget[key]
     )
   )
-    return [];
+    return 'chart_mismatch';
+  if (target.kind !== 'multiple_grid' && session.resumeCaptureCount !== 1)
+    return 'single_batch';
+  return null;
+}
+
+function eligibleLockedScans(session, rows) {
   return (Array.isArray(rows) ? rows : [])
     .filter(
       (row) =>
@@ -2083,6 +2092,24 @@ function eligibleLockedScans(target, session, rows) {
         !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
     )
     .sort((a, b) => a.locked_resume_order - b.locked_resume_order);
+}
+
+function recordResumeDecision(sessionId, target, event, result, fields = {}) {
+  if (!sessionId) return;
+  if (lockedResumeActivity?.sessionId !== sessionId)
+    lockedResumeActivity = { sessionId, seen: new Set() };
+  const grid = target.kind === 'multiple_grid';
+  const key = `${target.kind}:${event}:${result}`;
+  // The chart probes on focus and form changes, and between dose claims.
+  // Keep the first observation for each outcome in this lock session.
+  if (lockedResumeActivity.seen.has(key)) return;
+  lockedResumeActivity.seen.add(key);
+  recordScannerLockActivity(
+    event,
+    { result, ...fields },
+    grid ? 'multiple' : 'single',
+    grid ? 'grid' : 'detail'
+  );
 }
 
 async function waitForLockedScannerWrites() {
@@ -2110,27 +2137,38 @@ async function getLockedScanResume(target, capacity) {
       ...LOCKED_SCAN_SETTINGS
     ])
   ]);
-  if (
-    !route.success ||
-    !anchor ||
-    foreground !== scannerForegroundChanges ||
-    !lockedScanEnabled(target, settings)
-  )
-    return empty;
-  await saveScannerResumeWitness(target);
   const session = settings[SCANNER_LOCK_SESSION_KEY];
+  const report = (result, eligible = 0, count = 0) => {
+    recordResumeDecision(session?.id, target, 'locked_resume_offer', result, {
+      eligible: Math.min(eligible, 250),
+      count: Math.min(count, 250)
+    });
+    return empty;
+  };
+  if (foreground !== scannerForegroundChanges)
+    return report('foreground_changed');
+  if (!route.success) return report('route_unavailable');
+  if (!anchor) return report('anchor_unavailable');
+  if (!lockedScanEnabled(target, settings)) return report('autofill_disabled');
+  await saveScannerResumeWitness(target);
+  if (foreground !== scannerForegroundChanges)
+    return report('foreground_changed');
+  if (!session) return empty;
+  const blocked = lockedScanSessionBlock(target, session);
+  if (blocked) return report(blocked);
   const eligible = eligibleLockedScans(
-    target,
     session,
     settings[MULTIPLE_INJECT_QUEUE_KEY]
   );
-  if (!capacity || !eligible.length || foreground !== scannerForegroundChanges)
-    return empty;
+  if (!eligible.length) return report('no_eligible_scans');
+  if (!capacity) return report('no_grid_rows', eligible.length);
+  const count = Math.min(eligible.length, capacity);
+  report('available', eligible.length, count);
   return {
     success: true,
     sessionId: session.id,
     captureId: eligible[0].id,
-    count: Math.min(eligible.length, capacity)
+    count
   };
 }
 
@@ -2147,7 +2185,16 @@ async function resumeLockedScan(target, { sessionId, captureId, token }) {
     undefined,
     target.windowId
   );
-  if (!route.success) return unavailable;
+  if (!route.success) {
+    if (lockedResumeActivity?.sessionId === sessionId)
+      recordResumeDecision(
+        sessionId,
+        target,
+        'locked_resume_claim',
+        'route_unavailable'
+      );
+    return unavailable;
+  }
 
   // Resume and ordinary Use reserve the same existing tray dose. Holding the
   // tray writer here prevents either action from claiming it twice.
@@ -2165,33 +2212,54 @@ async function resumeLockedScan(target, { sessionId, captureId, token }) {
           matchesLockedScanAnchor(target, true),
           getStorage([MULTIPLE_INJECT_QUEUE_KEY, ...LOCKED_SCAN_SETTINGS])
         ]);
-        const tray = stored[MULTIPLE_INJECT_QUEUE_KEY] || [];
-        const next = eligibleLockedScans(target, session, tray)[0];
+        const report = (result) => {
+          recordResumeDecision(
+            session?.id,
+            target,
+            'locked_resume_claim',
+            result
+          );
+          return unavailable;
+        };
+        if (!active.success || snapshot !== scannerChartRoute)
+          return report('route_unavailable');
+        if (!anchor) return report('anchor_unavailable');
         if (
-          !active.success ||
-          !anchor ||
-          snapshot !== scannerChartRoute ||
           captures !== lockedScannerCaptureWrites ||
           uploads !== longRangeScanWrites ||
           statuses !== scannerStatusWriteQueue ||
           workflows !== scannerWorkflowReceipts ||
-          lastScannerIdleState === 'locked' ||
-          !lockedScanEnabled(target, stored) ||
-          session?.id !== sessionId ||
+          session?.id !== sessionId
+        )
+          return report('capture_changed');
+        if (lastScannerIdleState === 'locked') return report('lock_active');
+        if (!lockedScanEnabled(target, stored))
+          return report('autofill_disabled');
+        const blocked = lockedScanSessionBlock(target, session);
+        if (blocked) return report(blocked);
+        const tray = stored[MULTIPLE_INJECT_QUEUE_KEY] || [];
+        const next = eligibleLockedScans(session, tray)[0];
+        if (
           next?.id !== captureId ||
           tray.filter((row) => row?.id === captureId).length !== 1
         )
-          return unavailable;
+          return report('scan_unavailable');
 
         const reserved = withDoseReservations(next, [
           { token, tabId: target.tabId, documentId: target.documentId }
         ]);
         delete reserved.locked_resume_order;
-        await setStorage({
-          [MULTIPLE_INJECT_QUEUE_KEY]: tray.map((row) =>
-            row === next ? reserved : row
-          )
-        });
+        try {
+          await setStorage({
+            [MULTIPLE_INJECT_QUEUE_KEY]: tray.map((row) =>
+              row === next ? reserved : row
+            )
+          });
+        } catch (error) {
+          report('save_failed');
+          throw error;
+        }
+        report('reserved');
         return {
           success: true,
           recordId: captureId,
@@ -4970,10 +5038,16 @@ const traceMessageFields = {
   appendRecentActivity: ['token', 'source', 'rows'],
   getRecentActivity: [],
   setRecentActivity: ['enabled'],
-  exportRecentActivity: []
+  exportRecentActivity: [],
+  recordPopupTrayUse: ['result']
 };
 
-function recordScannerLockActivity(event, fields) {
+function recordScannerLockActivity(
+  event,
+  fields,
+  mode = 'multiple',
+  stage = 'none'
+) {
   return recentActivity
     .open()
     .then((ticket) =>
@@ -4981,8 +5055,8 @@ function recordScannerLockActivity(event, fields) {
         ? recentActivity.append(ticket.token, ticket.source, [
             {
               operation: 1,
-              mode: 'multiple',
-              stage: 'none',
+              mode,
+              stage,
               ms: 0,
               event,
               ...fields
@@ -5007,7 +5081,10 @@ function handleRecentActivityMessage(request, sender, sendResponse) {
         sender.url !== `${popupUrl}#carry-support`) ||
     Object.keys(request).length !== fields.length + 1 ||
     !fields.every((key) => Object.hasOwn(request, key)) ||
-    (action === 'setRecentActivity' && typeof request.enabled !== 'boolean')
+    (action === 'setRecentActivity' && typeof request.enabled !== 'boolean') ||
+    (action === 'recordPopupTrayUse' &&
+      (sender.url !== popupUrl ||
+        !globalThis.VaxLinkRecentActivity.trayUseResult(request.result)))
   ) {
     sendResponse({ success: false });
     return false;
@@ -5017,6 +5094,11 @@ function handleRecentActivityMessage(request, sender, sendResponse) {
   if (action === 'openRecentActivity') result = recentActivity.open();
   else if (action === 'appendRecentActivity') {
     result = recentActivity.append(request.token, request.source, request.rows);
+  } else if (action === 'recordPopupTrayUse') {
+    result = recordScannerLockActivity('tray_use', {
+      source: 'popup',
+      result: request.result
+    });
   } else result = recentActivity.manage(action, request.enabled);
 
   result.then(

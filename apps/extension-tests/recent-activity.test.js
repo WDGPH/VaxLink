@@ -102,6 +102,54 @@ test('Debug records the destination of locked captures without identifiers', asy
   );
 });
 
+test('Debug accepts bounded Resume and tray actions through their supported senders', async () => {
+  const worker = fixture();
+  const ticket = await worker.open();
+  const base = { operation: 1, ms: 0, mode: 'multiple', stage: 'grid' };
+  const resume = {
+    ...base,
+    event: 'locked_resume',
+    trigger: 'automatic',
+    result: 'started',
+    count: 2
+  };
+  const use = { ...base, event: 'tray_use', source: 'hud', result: 'selected' };
+  assert.equal((await worker.append(ticket, [resume, use])).success, true);
+  assert.equal(
+    (await worker.append(ticket, [{ ...resume, trigger: 'unknown' }])).success,
+    false
+  );
+  for (const [payload, sender] of [
+    [{ result: 'selected' }, chart],
+    [{ result: 'selected' }, { ...popup, url: `${popup.url}#carry-support` }],
+    [{ result: 'unknown' }, popup],
+    [{ result: 'selected', recordId: 'FIXTURE' }, popup]
+  ]) {
+    assert.equal(
+      (await worker.manage('recordPopupTrayUse', payload, sender)).success,
+      false
+    );
+  }
+  assert.equal(
+    (await worker.manage('recordPopupTrayUse', { result: 'blocked' })).success,
+    true
+  );
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.deepEqual(
+    Array.from(rows, ({ event, result, source, stage }) => [
+      event,
+      result,
+      source,
+      stage
+    ]),
+    [
+      ['locked_resume', 'started', undefined, 'grid'],
+      ['tray_use', 'selected', 'hud', 'grid'],
+      ['tray_use', 'blocked', 'popup', 'none']
+    ]
+  );
+});
+
 test('Debug keeps readiness reasons alongside a scan-order decision and staff action', async () => {
   const worker = fixture();
   const ticket = await worker.open();

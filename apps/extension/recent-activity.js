@@ -58,12 +58,59 @@
     control: choices('select', 'panel', 'missing'),
     site: choices('training', 'production')
   };
+  const trayUseResult = choices(
+    'selected',
+    'grid_added',
+    'pending',
+    'applied',
+    'blocked',
+    'error'
+  );
   const details = {
     scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
     lock_observed: {},
+    lock_released: {},
     locked_capture: { result: choices('held', 'tray', 'save_failed') },
+    locked_resume_offer: {
+      result: choices(
+        'available',
+        'lock_active',
+        'no_lock_witness',
+        'interrupted',
+        'chart_mismatch',
+        'foreground_changed',
+        'route_unavailable',
+        'anchor_unavailable',
+        'autofill_disabled',
+        'single_batch',
+        'no_grid_rows',
+        'no_eligible_scans'
+      ),
+      count: integer(0, 250),
+      eligible: integer(0, 250)
+    },
+    locked_resume_claim: {
+      result: choices(
+        'reserved',
+        'route_unavailable',
+        'anchor_unavailable',
+        'capture_changed',
+        'lock_active',
+        'no_lock_witness',
+        'interrupted',
+        'chart_mismatch',
+        'autofill_disabled',
+        'single_batch',
+        'scan_unavailable',
+        'save_failed'
+      )
+    },
+    locked_resume_declined: {
+      reason: choices('chart_changed', 'row_changed', 'tray_in_progress')
+    },
     locked_resume: {
       result: choices(
+        'started',
         'assigned',
         'chart_changed',
         'no_grid_rows',
@@ -76,6 +123,11 @@
         'error'
       ),
       count: integer(0, 250)
+    },
+    tray_use: { source: choices('hud', 'popup'), result: trayUseResult },
+    skipped_dose: {
+      action: choices('remove', 'restore'),
+      result: choices('removed', 'restored', 'kept', 'unavailable', 'error')
     },
     barcode: {
       result: choices('parsed', 'malformed', 'missing_lot'),
@@ -155,6 +207,8 @@
     grid_click: {
       result: choices(
         'accepted',
+        'repeat_agents_confirmed',
+        'repeat_agents_review',
         'no_assignments',
         'button_outside_form',
         'chart_inactive',
@@ -319,6 +373,17 @@
     )
       return false;
     const fields = { ...common, ...details[row.event] };
+    if (row.event === 'lock_observed' && Object.hasOwn(row, 'witness'))
+      fields.witness = choices(
+        'matched',
+        'missing',
+        'not_checked',
+        'foreground_changed',
+        'focus_lost',
+        'anchor_unavailable'
+      );
+    if (row.event === 'locked_resume' && Object.hasOwn(row, 'trigger'))
+      fields.trigger = choices('automatic', 'manual');
     if (row.event === 'grid_detail_decision' && Object.hasOwn(row, 'scanOrder'))
       fields.scanOrder = choices(true, false);
     if (row.event === 'scan' && Object.hasOwn(row, 'routing')) {
@@ -630,6 +695,7 @@
     scannedBarcode,
     lookupResult,
     catalogueVersion,
+    trayUseResult,
     createRecorder,
     createChartRecorder
   };

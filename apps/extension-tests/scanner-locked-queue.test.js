@@ -512,6 +512,67 @@ test('a captured barcode without a lot remains available for review', async () =
   assert.equal(worker.storageData.has(MULTIPLE_KEY), false);
 });
 
+test('Debug explains the latest lock and deduplicates repeated offer and claim probes', async () => {
+  const popup = {
+    id: 'vaxlink-test',
+    url: 'chrome-extension://vaxlink-test/popup.html'
+  };
+  for (const witness of ['missing', 'matched']) {
+    const { worker, capture, offer, claim } = resumeFixture();
+    if (witness === 'matched') await offer();
+    worker.setIdleState('locked');
+    await capture();
+    await capture({ rawText: '0100123456789012' });
+    worker.setIdleState('active');
+    const result = await offer();
+    await offer();
+    const matched = witness === 'matched';
+    assert.equal(result.count, matched ? 1 : 0);
+    if (matched) {
+      assert.equal((await claim(result)).success, true);
+      assert.equal((await claim(result)).success, false);
+      await offer();
+      await offer();
+    }
+    await new Promise(setImmediate);
+    const { rows } = await worker.sendMessage(
+      { action: 'exportRecentActivity' },
+      popup
+    );
+    assert.equal(
+      rows.find(({ event }) => event === 'lock_observed').witness,
+      witness
+    );
+    assert.equal(
+      rows.filter(({ event }) => event === 'lock_released').length,
+      1
+    );
+    assert.deepEqual(
+      Array.from(
+        rows.filter(({ event }) => event === 'locked_resume_offer'),
+        ({ result, eligible, count }) => [result, eligible, count]
+      ),
+      matched
+        ? [
+            ['available', 1, 1],
+            ['no_eligible_scans', 0, 0]
+          ]
+        : [['no_lock_witness', 0, 0]]
+    );
+    assert.deepEqual(
+      Array.from(
+        rows.filter(({ event }) => event === 'locked_resume_claim'),
+        ({ result }) => result
+      ),
+      matched ? ['reserved', 'scan_unavailable'] : []
+    );
+    assert.doesNotMatch(
+      JSON.stringify(rows),
+      /captureId|sessionId|documentId|LOCKLOT1/
+    );
+  }
+});
+
 test('no Resume is offered without pre-lock evidence, after a form change, or after interruption', async () => {
   for (const scenario of [
     'no_witness',
