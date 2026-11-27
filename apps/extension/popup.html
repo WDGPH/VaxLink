@@ -768,8 +768,9 @@
         align-items: center;
       }
 
-      #recentActivitySettings .settings-controls {
-        flex-shrink: 0;
+      #recentActivitySettings .settings-overview {
+        flex-wrap: wrap;
+        gap: 8px;
       }
 
       #connectionStatus,
@@ -1162,8 +1163,8 @@
               </p>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
-                  A scan could not be saved or delivered. Check pending scans
-                  and the chart before rescanning.
+                  VaxLink couldn’t confirm a scan. Check the chart and Scans to
+                  review before scanning again.
                 </p>
                 <div class="actions">
                   <button
@@ -1193,7 +1194,7 @@
               </label>
               <label class="settings-check" for="gridDetailAutofillToggle">
                 <input id="gridDetailAutofillToggle" type="checkbox" />
-                Carry a grid dose into Enter Details
+                Autofill vaccine details after Enter Details
               </label>
               <label class="settings-check" for="autoResolveFundingToggle">
                 <input id="autoResolveFundingToggle" type="checkbox" />
@@ -1227,7 +1228,7 @@
               <div class="settings-overview">
                 <div class="settings-summary">
                   <h3 id="recentActivitySettingsTitle" tabindex="-1">
-                    Debug mode
+                    Troubleshooting
                   </h3>
                   <label class="settings-check" for="recentActivityToggle">
                     <input
@@ -1236,7 +1237,7 @@
                       aria-describedby="recentActivityHint"
                       disabled
                     />
-                    <span>Collect troubleshooting details</span>
+                    <span>Record troubleshooting details</span>
                   </label>
                 </div>
                 <div class="settings-controls">
@@ -1246,10 +1247,10 @@
                     aria-label="Download troubleshooting details"
                     disabled
                   >
-                    Download
+                    Download details
                   </button>
                   <button id="emailRecentActivityBtn" type="button" disabled>
-                    Email support
+                    Draft support email
                   </button>
                 </div>
               </div>
@@ -1354,7 +1355,7 @@
             </section>
             <p id="scannerConnectionNote" role="status" hidden></p>
             <details id="heldScannerScans" class="tray-history" hidden>
-              <summary id="heldScannerScanCount">Scanner issues</summary>
+              <summary id="heldScannerScanCount">Scans to review</summary>
               <p class="held-instruction">
                 These scans need attention. If a scan may have filled a chart,
                 check that chart before using it again.

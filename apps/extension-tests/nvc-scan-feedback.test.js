@@ -252,7 +252,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     lookup_error_category: 'not_found'
   });
   assert.match(routine.innerHTML, /Lot not found in Panorama training/);
-  assert.match(routine.innerHTML, /Check the Agent and Lot on the chart/);
+  assert.match(routine.innerHTML, /Check the Agent and Lot in Vaccine Details/);
   assert.match(
     routine.innerHTML,
     /missing from the National Vaccine Catalogue/
@@ -286,19 +286,20 @@ test('terminal feedback names the fields or catalogue to review and counts rende
       });
       assert.match(
         routine.innerHTML,
-        /vl-toast-title">Lot found in NVC\. No match in Panorama lookup\./
+        /vl-toast-title">Lot not found in (Panorama training|either funding category)/
       );
       assert.equal(routine.innerHTML.includes('Panorama training'), training);
-      assert.equal(routine.innerHTML.includes('Draft email to PRC'), !training);
+      assert.equal(
+        routine.innerHTML.includes('Draft email to Panorama support'),
+        !training
+      );
       assert.equal(routine.innerHTML.includes('mailto:'), !training);
       assert.equal(
         routine.innerHTML.includes('choose Delete in Panorama'),
         multiple
       );
       assert.equal(
-        routine.innerHTML.includes(
-          'Dose kept in the tray. Remove it there if you do not need it.'
-        ),
+        routine.innerHTML.includes('Dose is still in the Immunization tray.'),
         multiple
       );
       if (!training) {

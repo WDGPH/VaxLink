@@ -30,7 +30,7 @@ grid and detail step, Inventory, and how held scans appear after unlock.
 
 [Staff scanner guide](scanner-quick-guide.md) · [Workstation setup](workstation-setup.md)
 
-In Settings, **Debug mode** keeps troubleshooting details for the current
+In Settings, **Troubleshooting** keeps details for the current
 browser session. It starts on in packaged Alpha and off in production and
 development unless you save a different choice. Turning it off clears the
 details. Local Activity counts are separate.

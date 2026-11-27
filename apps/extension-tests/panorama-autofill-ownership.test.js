@@ -787,7 +787,7 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
     f.runTimer();
   assert.match(slot.innerHTML, /Try the other funding category/);
   assert.deepEqual(cleanupModes, [false]);
-  assert.match(slot.innerHTML, /Check the Agent and Lot on the chart/);
+  assert.match(slot.innerHTML, /Check the Agent and Lot in Vaccine Details/);
   assert.equal(rescueStartedAt, 3000, 'panel rescue starts after two seconds');
   assert.equal(
     f.state.now - rescueStartedAt,

@@ -3366,7 +3366,7 @@ function schedulePanoramaLotOrTradeSelection(
         lotMissLeftSelectionAlone(owner, cleanup, data.lot)
       ) {
         owner.lotMissNotice = true;
-        void stopTrayDose(owner, true).then((released) => {
+        owner.unusedDose = stopTrayDose(owner, true).then((released) => {
           chartActivity?.record(trace, 'lot_tray_release', {
             result: released === true ? 'released' : 'unconfirmed'
           });
@@ -3382,6 +3382,7 @@ function schedulePanoramaLotOrTradeSelection(
               _doseKept: released === true,
               _doseNeedsReview: released !== true
             });
+          return released === true ? owner.trayDose.record : null;
         });
         return;
       }
@@ -4682,6 +4683,7 @@ let toastRoot = null;
 let toastWarningSlot = null;
 let toastCarrySlot = null;
 let toastRoutineSlot = null;
+let toastSkippedDoseSlot = null;
 let toastInventorySlot = null;
 let toastDismissTimer = null;
 
@@ -4775,10 +4777,13 @@ function ensureToastHost() {
   toastCarrySlot = document.createElement('div');
   toastCarrySlot.className = 'vl-carry-slot';
   toastRoutineSlot = document.createElement('div');
+  toastSkippedDoseSlot = document.createElement('div');
+  toastSkippedDoseSlot.className = 'vl-carry-slot';
   toastInventorySlot = document.createElement('div');
   toastRoot.appendChild(toastInventorySlot);
   toastRoot.appendChild(toastWarningSlot);
   toastRoot.appendChild(toastCarrySlot);
+  toastRoot.appendChild(toastSkippedDoseSlot);
   toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
@@ -4805,8 +4810,42 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._carryScanOrder) {
     toastCarrySlot.innerHTML = `<div class="vl-toast info show" role="status">
       <div class="vl-toast-title">Using scan order</div>
-      <div class="vl-toast-detail">These rows have the same Agent and date. Check the lot before continuing.</div>
+      <div class="vl-toast-detail">Same Agent and date. Check the lot before you continue.</div>
     </div>`;
+    return;
+  }
+
+  if (data._skippedDose) {
+    const { id, lot, dose_tracking: tracking } = data._skippedDose;
+    const slot = toastSkippedDoseSlot;
+    const removable = tracking === 'single_use' && lot;
+    slot.innerHTML = `<div class="vl-toast info persistent show" role="status">
+      <div class="vl-toast-title">Dose kept in the Immunization tray</div>
+      <div class="vl-toast-detail">${lot ? `Lot ${escapeToastHtml(lot)}` : ''}${!removable ? ' Review the tray if you need to adjust the count.' : ''}</div>
+      ${removable ? '<button class="vl-toast-dismiss" type="button" data-remove-skipped-dose>Remove from tray</button>' : ''}
+    </div>`;
+    const notice = slot.firstElementChild;
+    setTimeout(() => {
+      if (notice === slot.firstElementChild) dismissToast(slot);
+    }, 10000);
+    slot
+      .querySelector('[data-remove-skipped-dose]')
+      ?.addEventListener('click', async (event) => {
+        if (!event.isTrusted || !isPanoramaChartActive()) return;
+        event.currentTarget.disabled = true;
+        try {
+          await mutateQueueViaBackground(MULTIPLE_INJECT_QUEUE_KEY, 'remove', {
+            id,
+            expectedSingleUseLot: lot
+          });
+          if (notice === slot.firstElementChild)
+            notice.textContent = 'Dose removed from the Immunization tray.';
+        } catch (_) {
+          if (notice === slot.firstElementChild)
+            notice.textContent =
+              'Couldn’t remove the dose. Check the Immunization tray.';
+        }
+      });
     return;
   }
 
@@ -4815,7 +4854,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     slot.innerHTML = `<div class="vl-toast ${data._carrySupport ? 'info' : 'expired'} persistent show" role="alert">
       <div class="vl-toast-detail">${escapeToastHtml(data._entryWarning)}</div>
       ${data._clearCarryLot ? '<button class="vl-toast-dismiss" type="button" data-clear-carry-lot>Clear Lot and retry</button>' : ''}
-      ${data._carrySupport ? '<button class="vl-toast-dismiss" type="button" data-carry-support>Report carry problem</button>' : ''}
+      ${data._carrySupport ? '<button class="vl-toast-dismiss" type="button" data-carry-support>Report an autofill issue</button>' : ''}
       <button class="vl-toast-dismiss" type="button">Dismiss</button>
     </div>`;
     slot
@@ -4855,9 +4894,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
             action: 'openCarrySupport'
           });
           if (!reply?.success) throw new Error('Could not open support');
-          button.textContent = 'Support opened in a new tab';
+          button.textContent = 'Autofill help opened in a new tab';
         } catch (_) {
-          button.textContent = 'Open Debug mode in VaxLink Settings';
+          button.textContent = 'Open Troubleshooting in VaxLink Settings';
           button.disabled = false;
         }
       });
@@ -4880,7 +4919,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._fillProgress) {
     const message =
       data._fillProgress === 'checking_details'
-        ? 'Checking the remaining fields in Panorama…'
+        ? 'Checking vaccine details…'
         : 'Looking for the lot in Panorama…';
     showRoutineToast(
       `<div class="vl-toast info show" role="status" data-vl-fill-progress>
@@ -4900,7 +4939,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     showRoutineToast(
       `<div class="vl-toast info show">
         <div class="vl-toast-title">${title}</div>
-        <div class="vl-toast-detail">Scan the 2D barcode with the lot number on the package, vial, or prefilled syringe.</div>
+        <div class="vl-toast-detail">Scan the 2D code on the vaccine label with the lot number.</div>
       </div>`,
       durationMs
     );
@@ -4909,7 +4948,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._gridAdded) {
     showRoutineToast(
-      '<div class="vl-toast info show" data-grid-added><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">The vaccine stays in the tray for Enter Details.</div></div>',
+      '<div class="vl-toast info show" data-grid-added><div class="vl-toast-title">Added to the grid</div><div class="vl-toast-detail">Select Enter Details to continue.</div></div>',
       durationMs
     );
     return;
@@ -4949,29 +4988,24 @@ function showVaxlinkToast(data, durationMs = 4000) {
           bothFundingCategories: data._fillFeedback === 'funding_exhausted'
         });
   const reportMarkup = reportUrl
-    ? `<a class="vl-toast-action vl-toast-report" href="${escapeToastHtml(reportUrl)}">${catalogueMatched ? 'Draft email to PRC' : 'Email lot report'}</a>`
+    ? `<a class="vl-toast-action vl-toast-report" href="${escapeToastHtml(reportUrl)}">${catalogueMatched ? 'Draft email to Panorama support' : 'Draft catalogue report'}</a>`
     : '';
 
   const lotReviewMarkup = data._lotNeedsReview
-    ? '<div class="vl-toast-detail">Check the Agent and Lot on the chart. Review Vaccine Details before continuing.</div>'
+    ? '<div class="vl-toast-detail">Check the Agent and Lot in Vaccine Details.</div>'
     : '';
 
   if (data._fillFeedback) {
     const catalogueMiss = data.lookup_error_category === 'not_found';
     let title = 'Autofill needs review';
     let detail = 'Check the Agent and Lot in Panorama.';
-    if (catalogueMatched) {
-      title = 'Lot found in NVC. No match in Panorama lookup.';
-      detail = trainingMiss
-        ? 'This can happen in Panorama training because its lot list may be incomplete.'
-        : 'Email your Panorama Resolution Coordinator (PRC) about the missing lot.';
-    } else if (panoramaMiss) {
+    if (panoramaMiss) {
       title = trainingMiss
         ? 'Lot not found in Panorama training'
         : 'Lot not found in Panorama';
       detail = trainingMiss
-        ? 'The training lot list may be incomplete or out of date.'
-        : 'Verify the lot and funding in Panorama. If the lot is still missing, contact your Panorama Resolution Coordinator (PRC).';
+        ? 'The training lot list may be incomplete.'
+        : 'Check the lot and funding in Panorama.';
       if (data._fillFeedback === 'funding_exhausted' && !trainingMiss)
         title = 'Lot not found in either funding category';
     } else if (data._fillFeedback === 'deadline_details') {
@@ -4983,18 +5017,18 @@ function showVaxlinkToast(data, durationMs = 4000) {
       panoramaMiss && data._vaxlinkOwner?.kind === 'multiple_detail';
     const catalogueStatus = catalogueMiss
       ? 'The lot was missing from the National Vaccine Catalogue.'
-      : data.lookup_error || '';
+      : catalogueMatched && trainingMiss
+        ? 'This lot is listed in the vaccine catalogue.'
+        : '';
     showRoutineToast(
       `<div class="vl-toast info show" role="status"${multipleDetailMiss ? ' data-vl-lot-miss' : ''}>
         <div class="vl-toast-title">${escapeToastHtml(title)}</div>
         <div class="vl-toast-detail">${escapeToastHtml(detail)}</div>
-        ${lotReviewMarkup}
-        ${panoramaMiss && data._lotCleanup === 'empty' ? '<div class="vl-toast-detail">The Lot field was already blank.</div>' : ''}
-        ${panoramaMiss && data._lotCleanup === 'cleared' ? '<div class="vl-toast-detail">VaxLink cleared its selection. Check Vaccine Details before continuing.</div>' : ''}
+        ${multipleDetailMiss ? '<div class="vl-toast-detail">To skip this dose and continue, choose Delete in Panorama.</div>' : ''}
+        ${data._doseKept ? '<div class="vl-toast-detail">Dose is still in the Immunization tray.</div>' : ''}
+        ${data._doseNeedsReview ? '<div class="vl-toast-detail">Before reusing this dose, choose Check original chart in the Immunization tray.</div>' : ''}
+        ${panoramaMiss && data._lotCleanup === 'cleared' ? '<div class="vl-toast-detail">VaxLink cleared the Lot. Check Vaccine Details.</div>' : lotReviewMarkup}
         ${catalogueStatus ? `<div class="vl-toast-detail">${escapeToastHtml(catalogueStatus)}</div>` : ''}
-        ${multipleDetailMiss ? '<div class="vl-toast-detail">If you are skipping this immunization, choose Delete in Panorama to continue to the next one.</div>' : ''}
-        ${data._doseKept ? '<div class="vl-toast-detail">Dose kept in the tray. Remove it there if you do not need it.</div>' : ''}
-        ${data._doseNeedsReview ? '<div class="vl-toast-detail">Choose Check original chart in the VaxLink tray before reusing this dose.</div>' : ''}
         ${reportMarkup}
       </div>`,
       reportUrl ? 12000 : 9000
@@ -5018,7 +5052,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
         : 'Choose vaccine funding';
     const detail =
       reason === 'both'
-        ? 'Panorama lists this lot under both funding categories. Choose one to continue.'
+        ? 'Panorama lists this lot under both funding categories.'
         : reason === 'other'
           ? `VaxLink could not verify this lot as ${getPanoramaFundingLabel(data._fundedRadioChoice)}.`
           : 'Choose the funding category to check in Panorama.';
@@ -6307,6 +6341,7 @@ function releaseGridAssignment(entry, reason = 'context_changed', step = 0) {
 
 function clearGridCarry(reason = 'context_changed') {
   clearCarryProblem();
+  toastSkippedDoseSlot?.replaceChildren();
   failedGridCarry = null;
   for (const entry of gridAssignments.values())
     void releaseGridAssignment(entry, reason);
@@ -6367,16 +6402,40 @@ function getPanoramaMultipleAction(button) {
     case 'Bottom_btnRemoveNext':
       return 'delete';
   }
-  return normalizeLabelText(button.textContent || button.value || button.title);
+  const label = normalizeLabelText(
+    button.textContent || button.value || button.title
+  );
+  return label === 'reset form' ? 'reset' : label;
 }
 
 function startGridHandoff(event) {
   if (!event.isTrusted) return;
   const button = event.target?.closest?.(
-    'button, a, input[type="submit"], input[type="button"], [role="button"]'
+    'button, a, input[type="submit"], input[type="button"], input[type="reset"], [role="button"]'
   );
   if (!button) return;
   const label = getPanoramaMultipleAction(button);
+  if (label === 'reset') {
+    const form = getPanoramaAutofillForm();
+    if (!form?.contains(button) || !isPanoramaChartActive()) return;
+    const { kind } = getPanoramaFormContext({ checkReadiness: false });
+    if (kind !== 'multiple_grid' && kind !== 'multiple_detail') return;
+    const inDetails = kind === 'multiple_detail';
+    const trace = chartActivity?.begin(
+      'multiple',
+      inDetails ? 'detail' : 'grid'
+    );
+    const { step, total } = inDetails
+      ? currentGridDetailStep()
+      : { step: 0, total: 0 };
+    chartActivity?.record(trace, 'multiple_form_action', {
+      action: 'reset',
+      result: 'selected',
+      step,
+      total
+    });
+    cancelPanoramaAutofill();
+  }
   if (['cancel', 'close', 'reset'].includes(label)) {
     clearGridCarry(`grid_${label}`);
     return;
@@ -6476,23 +6535,36 @@ function currentGridDetailStep() {
 }
 
 function markGridDetailNavigation(button, action) {
-  const handoff = gridDetailHandoff;
-  if (!handoff || location.href !== handoff.url || !isPanoramaChartActive())
-    return;
-  if (handoff.navigation?.sawHistory && !handoff.navigation.resolved) return;
   const form = getPanoramaAutofillForm();
   const { step, total } = currentGridDetailStep();
-  const before = `${step}-of-${total}`;
   if (
     !form?.contains(button) ||
-    (form !== handoff.form && (!form.id || form.id !== handoff.form.id)) ||
+    !isPanoramaChartActive() ||
     getPanoramaFormContext({ checkReadiness: false }).kind !==
       'multiple_detail' ||
     !step ||
-    step > total ||
+    step > total
+  )
+    return;
+  const trace = chartActivity?.begin('multiple', 'detail');
+  const report = (result, position = { step, total }) =>
+    chartActivity?.record(trace, 'multiple_form_action', {
+      action,
+      result,
+      ...position
+    });
+  report('selected');
+
+  const handoff = gridDetailHandoff;
+  if (
+    !handoff ||
+    location.href !== handoff.url ||
+    (handoff.navigation?.sawHistory && !handoff.navigation.resolved) ||
+    (form !== handoff.form && (!form.id || form.id !== handoff.form.id)) ||
     (action === 'next' ? step === total : total <= 1)
   )
     return;
+  const before = `${step}-of-${total}`;
   const detail = readGridDetailIdentity(form);
   const current = total === handoff.rows.length && handoff.rows[step - 1];
   const match =
@@ -6510,6 +6582,14 @@ function markGridDetailNavigation(button, action) {
     match?.reason !== 'duplicate_agent'
       ? current
       : null;
+  const owner = panoramaAutofillOwner;
+  const unusedDose =
+    deletedRow &&
+    owner?.form === form &&
+    owner.step === before &&
+    owner.gridDetail?.index === deletedRow.index
+      ? owner.unusedDose
+      : null;
   clearTimeout(handoff.navigation?.timer);
   const navigation = {
     before,
@@ -6519,6 +6599,8 @@ function markGridDetailNavigation(button, action) {
         : `${Math.min(step, total - 1)}-of-${total - 1}`,
     deletedRow,
     deleting: action === 'delete',
+    unusedDose,
+    report,
     until: performance.now() + 10000
   };
   handoff.navigation = navigation;
@@ -6535,10 +6617,11 @@ function markGridDetailNavigation(button, action) {
     if (
       gridDetailHandoff === handoff &&
       handoff.navigation === navigation &&
-      navigation.sawHistory &&
       !navigation.resolved
-    )
-      clearGridCarry('detail_navigation_changed');
+    ) {
+      report('step_unconfirmed');
+      if (navigation.sawHistory) clearGridCarry('detail_navigation_changed');
+    }
   }, 10000);
 }
 
@@ -7006,14 +7089,32 @@ async function advanceGridHandoff() {
     return clearGridCarry('detail_step_reversed');
   if (total > handoff.rows.length)
     return clearGridCarry('unexpected_step_total');
-  if (expected && context.ready) {
+  if (expected && context.ready && !navigation.resolved) {
     navigation.resolved = true;
     clearTimeout(navigation.timer);
+    navigation.report('step_changed', { step, total });
   }
   if (expected && context.ready && navigation.deletedRow) {
     const skipped = navigation.deletedRow;
-    if (skipped.entry)
-      void releaseGridAssignment(skipped.entry, 'skipped', step);
+    const entry = skipped.entry;
+    const unusedDose = entry
+      ? releaseGridAssignment(entry, 'skipped', step).then((released) =>
+          released === true ? entry.dose.record : null
+        )
+      : navigation.unusedDose;
+    // Keep autofill moving while the worker confirms the skipped dose stayed.
+    void unusedDose?.then((record) => {
+      if (
+        record &&
+        gridDetailHandoff === handoff &&
+        handoff.navigation === navigation &&
+        location.href === handoff.url &&
+        getPanoramaMultiStepIndicatorKey({ visibleOnly: true }) ===
+          navigation.after &&
+        isPanoramaChartActive()
+      )
+        showVaxlinkToast({ _skippedDose: record });
+    });
     handoff.rows = handoff.rows.filter((row) => row !== skipped);
     handoff.deletedRows.push(skipped);
     navigation.deletedRow = null;
@@ -7045,6 +7146,7 @@ async function advanceGridHandoff() {
       waitExpired,
       alias: match.alias ?? false,
       reordered: match.reordered ?? false,
+      scanOrder: match.scanOrder ?? false,
       lotEvidence: match.lotEvidence || 'not_checked',
       funding:
         funding === 'SHOW_ALL' || isExplicitPanoramaFundingValue(funding)
@@ -7103,7 +7205,7 @@ async function advanceGridHandoff() {
           ? `Panorama shows ${selected}. The scan needs lot ${expectedLot}. Clear the selected Lot to retry, or choose Delete in Panorama to skip this immunization.`
           : conflict
             ? DIFFERENT_GRID_DETAIL_LOT
-            : 'VaxLink could not confirm a dose for this step. Check the chart and choose a dose from the Immunization tray.',
+            : 'Autofill paused for this dose. Check the Agent and date, then choose the matching dose from the Immunization tray.',
         clearLot
       );
     }

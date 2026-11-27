@@ -1003,6 +1003,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'ordered_duplicates',
     'next_then_delete',
     'slow_next',
+    'reset_grid',
     'repeat_after_delete',
     'second_delete_with_repeats',
     'reordered_after_delete',
@@ -1045,7 +1046,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       id: String(index),
       lot: `SAMPLE-${index}`,
       generic_name: agent,
-      remaining_doses: 2
+      ...(repeatAfterDelete && index === 0
+        ? { dose_tracking: 'single_use' }
+        : { remaining_doses: 2 })
     }));
     const worker = createBackgroundHarness(makeTestNvcBundle(), {
       tabs: [tab],
@@ -1104,6 +1107,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     let detailReady = true;
     const fills = [];
     const scanOrderNotices = [];
+    const skippedNotices = [];
     const realFill = context.autoFillPanorama;
     const realLotWidget = context.getPanoramaLotWidget;
     Object.assign(context, {
@@ -1142,6 +1146,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       },
       showVaxlinkToast(data) {
         if (data._carryScanOrder) scanOrderNotices.push(state.step);
+        if (data._skippedDose) skippedNotices.push(data._skippedDose);
       },
       setTimeout(callback, delay) {
         if (delay === 500) retry = callback;
@@ -1155,7 +1160,7 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       }
     });
 
-    if (manualUse || deleteFirst) {
+    if (manualUse || deleteFirst || scenario === 'reset_grid') {
       const changes = { vaxlink_recent_activity_enabled: { newValue: true } };
       for (const listener of storageListeners) listener(changes, 'local');
       await new Promise(setImmediate);
@@ -1184,6 +1189,37 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         /ready for entry/
       );
     }
+    const popup = {
+      id: 'vaxlink-test',
+      url: 'chrome-extension://vaxlink-test/popup.html'
+    };
+    if (scenario === 'reset_grid') {
+      const reset = (isTrusted, ownerForm) =>
+        context.startGridHandoff({
+          isTrusted,
+          target: { closest: () => ({ value: 'Reset', form: ownerForm }) }
+        });
+      reset(false, form);
+      reset(true, {});
+      assert.ok(saved().every((row) => row.dose_reservations?.length === 1));
+      reset(true, form);
+      await new Promise(setImmediate);
+      assert.ok(saved().every((row) => !row.dose_reservations));
+      assert.equal(saved().length, 3);
+      assert.equal(fills.length, 0);
+      vm.runInContext('chartActivity.flush()', context);
+      const { rows } = await worker.sendMessage(
+        { action: 'exportRecentActivity' },
+        popup
+      );
+      const actions = rows.filter(
+        ({ event }) => event === 'multiple_form_action'
+      );
+      assert.equal(actions.length, 1);
+      assert.equal(actions[0].action, 'reset');
+      assert.equal(actions[0].result, 'selected');
+      continue;
+    }
     context.startGridHandoff({
       isTrusted: true,
       target: { closest: () => ({ textContent: 'Enter Details', form }) }
@@ -1200,14 +1236,35 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
           isTrusted: true,
           target: { closest: () => ({ textContent, form }) }
         });
-      await context.releaseGridDetailStep('staff_input');
+      if (!repeatAfterDelete)
+        await context.releaseGridDetailStep('staff_input');
       click('Delete');
+      assert.equal(skippedNotices.length, 0);
       windowListeners.get('popstate')[0]();
       state.step = '1-of-2';
       detailAgent = agents[2];
       if (repeatedDelete) selectedLot = 'SAMPLE-2';
+      if (repeatAfterDelete) {
+        detailReady = false;
+        await context.advanceGridHandoff();
+        assert.equal(skippedNotices.length, 0);
+        await assert.rejects(
+          context.mutateQueueViaBackground(storageKey, 'remove', {
+            id: '0',
+            expectedSingleUseLot: 'SAMPLE-0'
+          }),
+          /original chart/
+        );
+        detailReady = true;
+      }
       await context.advanceGridHandoff();
       if (repeatAfterDelete) {
+        await new Promise(setImmediate);
+        assert.deepEqual(
+          skippedNotices.map(({ id }) => id),
+          ['0']
+        );
+        assert.ok(saved().some(({ id }) => id === '0'));
         assert.equal(fills[0]?.lot, 'SAMPLE-1');
         await context.finalizeDeferredPanoramaAutofill(fills[0]);
         click('Next');
@@ -1216,9 +1273,46 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         assert.equal(fills[1]?.lot, 'SAMPLE-2');
         await context.finalizeDeferredPanoramaAutofill(fills[1]);
         assert.deepEqual(scanOrderNotices, ['1-of-2', '2-of-2']);
+        const remove = (lot) =>
+          context.mutateQueueViaBackground(storageKey, 'remove', {
+            id: '0',
+            expectedSingleUseLot: lot
+          });
+        await assert.rejects(remove('DIFFERENT'), /dose changed/);
+        await assert.rejects(
+          context.mutateQueueViaBackground(storageKey, 'remove', {
+            id: '1',
+            expectedSingleUseLot: 'SAMPLE-1'
+          }),
+          /dose changed/
+        );
+        await remove('SAMPLE-0');
         assert.deepEqual(
-          saved().map((dose) => dose.remaining_doses),
-          [2, 1, 1]
+          saved().map((dose) => [dose.id, dose.remaining_doses]),
+          [
+            ['1', 1],
+            ['2', 1]
+          ]
+        );
+        vm.runInContext('chartActivity.flush()', context);
+        const { rows } = await worker.sendMessage(
+          { action: 'exportRecentActivity' },
+          popup
+        );
+        assert.deepEqual(
+          rows
+            .filter(({ action }) => action === 'delete')
+            .map(({ result, total }) => [result, total]),
+          [
+            ['selected', 3],
+            ['step_changed', 2]
+          ]
+        );
+        assert.ok(
+          rows.some(
+            ({ event, scanOrder }) =>
+              event === 'grid_detail_decision' && scanOrder
+          )
         );
         continue;
       }

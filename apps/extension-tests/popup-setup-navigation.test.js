@@ -178,7 +178,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     );
     assert.match(
       nodes.analyticsSummary.innerHTML,
-      /Forms filled<\/th><td>5<\/td><td>5<\/td>/
+      /Autofills verified<\/th><td>5<\/td><td>5<\/td>/
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);

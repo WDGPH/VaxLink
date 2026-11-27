@@ -1167,6 +1167,16 @@ function mutateQueue(
       } else if (operation === 'clear') {
         rows = [];
       } else if (operation === 'remove') {
+        if (
+          Object.hasOwn(payload, 'expectedSingleUseLot') &&
+          (storageKey !== MULTIPLE_INJECT_QUEUE_KEY ||
+            typeof payload.expectedSingleUseLot !== 'string' ||
+            !payload.expectedSingleUseLot.trim() ||
+            current?.dose_tracking !== 'single_use' ||
+            current.lot !== payload.expectedSingleUseLot ||
+            rows.findLastIndex((row) => row?.id === payload.id) !== index)
+        )
+          throw new Error('The dose changed. Check the Immunization tray.');
         rows = rows.filter((row) => row?.id !== payload.id);
       } else if (operation === 'reorder') {
         if (

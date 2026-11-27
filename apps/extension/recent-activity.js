@@ -162,6 +162,12 @@
         'no_matching_rows'
       )
     },
+    multiple_form_action: {
+      action: choices('reset', 'delete', 'next'),
+      result: choices('selected', 'step_changed', 'step_unconfirmed'),
+      step: integer(0, 100000),
+      total: integer(0, 100000)
+    },
     grid_detail_decision: {
       row: integer(0, 100000),
       step: integer(1, 100000),
@@ -287,6 +293,8 @@
       'conflicting_titles',
       'unrecognized_title',
       'controls_unavailable',
+      'agent_control_unavailable',
+      'date_control_unavailable',
       'panorama_busy',
       'no_grid_rows',
       'already_has_vaccine'
@@ -311,6 +319,8 @@
     )
       return false;
     const fields = { ...common, ...details[row.event] };
+    if (row.event === 'grid_detail_decision' && Object.hasOwn(row, 'scanOrder'))
+      fields.scanOrder = choices(true, false);
     if (row.event === 'scan' && Object.hasOwn(row, 'routing')) {
       fields.routing = (routing) =>
         routing &&

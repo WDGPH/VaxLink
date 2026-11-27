@@ -29,7 +29,7 @@ With **Standard USB CDC**, the scanner controls its own beep.
 | Immunization with a ready Multiple Immunizations grid | Check the Immunization tray and the grid row. The tray keeps the dose for the detail step.                                        |
 | Immunization while locked                             | Check the Immunization tray. On the original chart, choose **Resume scans** when offered.                                         |
 
-With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Scanner issues** for the next step. Check the original chart before using a scan that may have filled fields.
+With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Scans to review** for the next step. Check the original chart before using a scan that may have filled fields.
 
 For Multiple Immunizations, **Resume scans** places eligible doses in the
 available grid rows. Select **Enter Details**, then **Next** as you check each
@@ -60,7 +60,7 @@ If the unit label is hard to scan and your clinic allows a carton scan, keep the
 
 ## The scanner beeped but nothing appeared
 
-1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Scanner issues** if a capture needs attention.
+1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Scans to review** if a capture needs attention.
 2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard scan** once you have accounted for that capture.
 3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
 4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
@@ -80,9 +80,14 @@ When a lot appears in both funding categories, staff choose the category. A matc
 
 Choose **Use** for the vaccine you want. In the Multiple Immunizations grid,
 VaxLink fills one row and keeps the dose in the tray. Select **Enter Details**
-yourself. With **Carry a grid dose into Enter Details** on, VaxLink can bring
+yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can bring
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
+
+Choose **Delete** in Panorama to skip a detail. When VaxLink can confirm an
+unused dose stayed in the tray, it shows the lot and offers **Remove from tray**
+for a single-use dose. You can keep the dose and continue. Reset keeps the
+scans in the tray.
 
 The chart tray also has a **Use** button beside each available vaccine.
 
@@ -100,17 +105,16 @@ A reserved dose shows **Reserved on chart** in the popup and **In progress** on 
 
 ## Download troubleshooting details
 
-In **Settings → Debug mode**, choose **Download** before closing the browser
+In **Settings → Troubleshooting**, choose **Download details** before closing the browser
 or turning collection off. The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
 
-Choose **Email support** to download the current Debug log and open a message
+Choose **Draft support email** to download the current Debug log and open a message
 to `innovation@wdgpublichealth.ca`. Review the JSON file and attach it from
 Downloads before sending. Select **Open email again** if the mail app stays
-closed. When a dose cannot carry into Enter Details, **Report carry problem**
-opens Debug mode in another tab. Choose **Email support** there for a message
-about the carry problem.
+closed. **Report an autofill issue** opens Troubleshooting in another tab.
+Choose **Draft support email** there for a message about the issue.
 
 For support, start with the software version, scanner model, training or production environment, package type, printed lot, catalogue status and exact message. Use a sample record for screenshots. Review any barcode, email recipients and Debug download before sharing through an approved private channel. [Privacy assessment guide](privacy-assessment.md)
 

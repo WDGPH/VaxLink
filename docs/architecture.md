@@ -79,7 +79,7 @@ integration verifies the product, stops when chart ownership changes, and
 consumes a confirmed tray dose.
 
 A verified grid assignment keeps its exact saved dose, row, Agent, date and
-foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
+foreground route. **Autofill vaccine details after Enter Details** lets VaxLink use
 that assignment when the matching detail step opens. When Panorama first opens
 the full list of details, the grid positions keep the scans in order, even
 when two scans have the same Agent and date. A manually filled grid row keeps
@@ -106,7 +106,10 @@ filling. Staff can choose a dose on the detail step. The grid assignment
 itself does not use a dose. A trusted Next or Delete can retain pending
 assignments through Panorama’s same-page history update. VaxLink checks the
 new detail’s position and identity before filling. The skipped scan stays
-in the tray, and a dose that may have changed a chart still needs review.
+in the tray. After a confirmed Delete, VaxLink can offer to remove a known
+unused single-use dose. The worker checks the lot, dose tracking and
+reservations when staff select Remove from tray. A dose that may have
+changed a chart still needs review.
 
 ### User controls: popup
 
@@ -119,7 +122,7 @@ access to the page in the current tab.
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
-Settings includes Scanner, Autofill, National Vaccine Catalogue, and Debug mode.
+Settings includes Scanner, Autofill, National Vaccine Catalogue, and Troubleshooting.
 `scanner-settings.js` provides connection controls directly within the Scanner
 section. It shows the saved device and gets current connection status from the
 reader. When the reader does not reply, Settings shows the last known capture
@@ -184,7 +187,7 @@ activity and starts downloads. The background worker saves the daily totals and
 prepares the summaries and JSON export. The totals describe extension activity,
 and staff verify and save clinical records in Panorama.
 
-Debug mode keeps a separate session history for troubleshooting. Packaged
+Troubleshooting keeps a separate session history. Packaged
 Alpha starts with Debug on. Production and development start with Debug off.
 A saved preference overrides the starting value. Staff can download the
 retained history in Settings.
@@ -238,6 +241,10 @@ confirming an empty Lot and no prior target selection. A verified fill updates
 the tray count. Panorama save confirmation is separate.
 Debug records the numbered grid row, whether it carried into Enter Details,
 and the matching detail step or the reason the assignment was released.
+It records when scan order was used to match repeats. It also records staff
+selecting Reset, Next or Delete in Multiple Immunizations. For a tracked
+Next or Delete, it can record the observed step change or an unconfirmed
+transition.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background saves it to a tray or retains it in the
@@ -412,7 +419,7 @@ foreground document and form before offering or claiming a dose. Choosing
 a dose in the tray also removes it from the Resume list. A Single
 Immunization form needs a lock session with exactly one capture. Long-range
 arrivals stay in the tray for deliberate selection. Rejected captures and
-scans with uncertain delivery stay available under **Scanner issues**.
+scans with uncertain delivery stay available under **Scans to review**.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan

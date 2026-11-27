@@ -102,6 +102,55 @@ test('Debug records the destination of locked captures without identifiers', asy
   );
 });
 
+test('Debug keeps readiness reasons alongside a scan-order decision and staff action', async () => {
+  const worker = fixture();
+  const ticket = await worker.open();
+  const routing = {
+    workflow: 'immunization',
+    form: 'multiple_grid',
+    chartReady: true,
+    formReady: false,
+    singleAutofill: true,
+    gridAutofill: true
+  };
+  const blocked = ['agent_control_unavailable', 'date_control_unavailable'].map(
+    (formBlockedBy) => ({ ...row(), routing: { ...routing, formBlockedBy } })
+  );
+  const detail = { operation: 2, ms: 0, mode: 'multiple', stage: 'detail' };
+  const decision = {
+    ...detail,
+    event: 'grid_detail_decision',
+    row: 2,
+    step: 1,
+    total: 2,
+    reason: 'candidate_ready',
+    waitExpired: false,
+    alias: false,
+    reordered: false,
+    lotEvidence: 'native_option',
+    funding: ''
+  };
+  const action = {
+    ...detail,
+    event: 'multiple_form_action',
+    action: 'delete',
+    result: 'step_changed',
+    step: 1,
+    total: 2
+  };
+  const reply = await worker.append(ticket, [
+    ...blocked,
+    decision,
+    { ...decision, scanOrder: true },
+    action
+  ]);
+  assert.equal(reply.success, true);
+  const exported = await worker.manage('exportRecentActivity');
+  assert.equal(exported.retained, 5);
+  assert.equal(exported.rows[3].scanOrder, true);
+  assert.equal(exported.rows[4].result, 'step_changed');
+});
+
 test('a carry report opens Debug in the background and only the extension page can export', async () => {
   const opened = [];
   const worker = fixture({ createTab: async (tab) => opened.push(tab) });

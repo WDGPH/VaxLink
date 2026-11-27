@@ -478,7 +478,7 @@ async function renderHeldScannerScans() {
     if (!result?.success) return;
     host.hidden = !result.scans.length;
     document.getElementById('heldScannerScanCount').textContent =
-      `Scanner issues (${result.scans.length})`;
+      `Scans to review (${result.scans.length})`;
     list.replaceChildren();
     for (const scan of result.scans) {
       const row = document.createElement('li');
@@ -771,7 +771,7 @@ function applyPopupPanel(panel) {
   const panelTitle = document.getElementById('panelTitle');
   const closeButton = document.getElementById('closePanelBtn');
   const title = carrySupportPage
-    ? 'Report carry problem'
+    ? 'Report an autofill issue'
     : panel === 'settings'
       ? 'Settings'
       : 'Local Activity';
@@ -930,16 +930,16 @@ function renderAnalyticsSummary(summary) {
       'One funding category matched': share(funding.single),
       'Both funding categories matched': share(funding.both),
       'No funding category matched': funding.unmatched || 0,
-      'Forms filled': day.autofill?.success || 0,
+      'Autofills verified': day.autofill?.success || 0,
       'Inventory exports': day.exports?.inventoryCount || 0,
       'Expiry notices shown': day.expiry?.noticesShown ?? '—',
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
-      'Tray to chart': day.queues?.multipleUsed || 0,
-      'Detail carries attempted': day.chartResume?.chart_carry_attempt || 0,
-      'Detail carries verified': day.chartResume?.chart_carry_completed || 0,
-      'Manual uses after a stopped carry':
+      'Doses used from tray': day.queues?.multipleUsed || 0,
+      'Grid autofills attempted': day.chartResume?.chart_carry_attempt || 0,
+      'Grid autofills verified': day.chartResume?.chart_carry_completed || 0,
+      'Used from tray after a chart check failed':
         day.chartResume?.chart_carry_manual_use || 0,
       'Locked batches resumed': day.chartResume?.locked_batch_resumed || 0,
       'Batch resumes interrupted':
@@ -959,11 +959,11 @@ function renderAnalyticsSummary(summary) {
     [
       'Charting',
       [
-        'Forms filled',
-        'Tray to chart',
-        'Detail carries attempted',
-        'Detail carries verified',
-        'Manual uses after a stopped carry',
+        'Autofills verified',
+        'Doses used from tray',
+        'Grid autofills attempted',
+        'Grid autofills verified',
+        'Used from tray after a chart check failed',
         'Locked batches resumed',
         'Batch resumes interrupted'
       ]
@@ -1026,11 +1026,11 @@ function setupRecentActivityControls() {
   const emailLink = document.getElementById('openSupportEmailLink');
   const filename = 'vaxlink-debug-details.json';
   const subject = carrySupportPage
-    ? 'VaxLink could not carry a dose into Enter Details'
+    ? 'VaxLink autofill issue'
     : 'VaxLink troubleshooting details';
   const body = [
     carrySupportPage
-      ? 'VaxLink could not carry a saved dose into Enter Details.'
+      ? 'VaxLink did not fill the expected vaccine details.'
       : 'I need help with VaxLink.',
     '',
     'I downloaded the Debug log from VaxLink Settings.',
@@ -1058,9 +1058,11 @@ function setupRecentActivityControls() {
       (overwritten
         ? `${overwritten.toLocaleString()} older ${overwritten === 1 ? 'event was' : 'events were'} removed to make room.`
         : carrySupportPage && !retained
-          ? 'Collect troubleshooting details, then try the carry again.'
+          ? snapshot?.enabled
+            ? 'Recording is on. Reproduce the issue on a training chart.'
+            : 'Turn on troubleshooting before reproducing the issue on a training chart.'
           : carrySupportPage
-            ? 'Email support opens your mail app and downloads the Debug log for you to attach.'
+            ? 'Review the downloaded details, then attach them to the email draft.'
             : '');
   }
 
