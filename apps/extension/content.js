@@ -5304,8 +5304,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
     return;
   }
 
-  const label =
-    data.tradename || data.generic_name || data.name || data.lot || 'Vaccine';
+  const label = data.tradename || data.generic_name || data.name || 'Vaccine';
   const lot = data.lot || '';
   const flag =
     data.expiry_flag ||

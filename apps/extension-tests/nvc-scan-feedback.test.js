@@ -340,4 +340,11 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   assert.match(routine.innerHTML, /Catalogue unavailable/);
   context.showVaxlinkToast({ ...carried, expiry_flag: 'expiring_soon' });
   assert.match(routine.innerHTML, /vl-toast expiring/);
+  for (const duplicate of [true, false]) {
+    context.showVaxlinkToast({
+      lot: 'SAMPLE-LOT',
+      _duplicateIgnored: duplicate
+    });
+    assert.equal(routine.innerHTML.match(/SAMPLE-LOT/g)?.length, 1);
+  }
 });
