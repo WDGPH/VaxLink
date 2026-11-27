@@ -89,6 +89,11 @@ expected Agent and date agree. For rows with the same Agent and date, a notice
 asks staff to check the Lot. If the count differs and multiple rows match,
 staff choose the dose from the tray.
 A detail outside its expected position also needs evidence of the scanned Lot.
+On a newly opened detail, Panorama can preselect the only Lot it offers.
+When that Lot conflicts with the scan, VaxLink can clear it if exactly one
+grid row matches the Agent and date and the native selection and visible
+label agree on Panorama’s default. Clearing the field leaves the scanned
+dose pending. A different choice made by staff stops automatic correction.
 An exact available Lot can open the funding prompt when the field is blank.
 The same Lot check applies when a catalogue Agent alias connects the grid and
 detail labels.
@@ -109,9 +114,13 @@ its detail table. VaxLink uses Chrome’s navigation event to identify that
 fragment move on the original active form. It keeps the pending assignments,
 then checks the expected position, fresh controls, dose identity and worker
 route before filling the next detail.
-After a confirmed Delete, an identifiable unused single-use scan can be
-archived and restored through Recent Scans. The worker checks the exact scan
-and its release token. A dose that may have changed a chart still needs review.
+Delete can open the next detail or return from the last detail to the
+immunization overview. VaxLink checks the replacement view before archiving
+the identifiable unused single-use scan. The worker checks the exact scan
+and its release token. Undo and Recent Scans can restore it. A dose that may
+have changed a chart still needs review. When staff remove a duplicate grid
+row from its notification, the HUD marks that scan as being removed while
+VaxLink checks the cleared grid row and waits for the worker’s tray update.
 
 ### User controls: popup
 

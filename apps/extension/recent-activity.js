@@ -199,6 +199,7 @@
         'chart_url_changed',
         'grid_form_changed',
         'grid_returned',
+        'detail_finished',
         'single_form_opened',
         'detail_step_reversed',
         'detail_navigation_changed',
@@ -230,6 +231,7 @@
         'same_url_popstate',
         'history_rejected',
         'step_changed',
+        'overview_returned',
         'step_unconfirmed'
       ),
       step: integer(0, 100000),

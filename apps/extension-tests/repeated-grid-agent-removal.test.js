@@ -16,12 +16,13 @@ async function grid(scenario) {
   const tab = { id: 42, url, active: true };
   const agents = { first: 'MMR', second: 'MMR', third: 'HPV' };
   const ids = Object.keys(agents);
+  const secondLot = scenario === 'same lot' ? 'LOT-first' : 'LOT-second';
   const worker = createBackgroundHarness(makeTestNvcBundle(), {
     tabs: [tab],
     storage: {
       [tray]: ids.map((id) => ({
         id,
-        lot: `LOT-${id}`,
+        lot: id === 'second' ? secondLot : `LOT-${id}`,
         generic_name: agents[id],
         dose_tracking: 'single_use',
         remaining_doses: 1
@@ -201,12 +202,12 @@ async function grid(scenario) {
     assert.equal(result.status, 'grid_added');
   }
   await settle();
-  assert.match(notice.innerHTML, /Remove row 2 · Lot LOT-second/);
+  assert.ok(notice.innerHTML.includes(`Remove row 2 · Lot ${secondLot}`));
   return { worker, requests, warnings, dateEvents, rows, click, settle };
 }
 
 test('the repeated Agent action clears only the latest row and archives its exact scan', async () => {
-  for (const scenario of ['native clear', 'Date1 fallback']) {
+  for (const scenario of ['native clear', 'Date1 fallback', 'same lot']) {
     const { worker, requests, dateEvents, rows, click, settle } =
       await grid(scenario);
     click({ isTrusted: false });

@@ -1019,6 +1019,9 @@ test('a counted detail miss releases a blank Lot only before a possible product 
     Object.assign(f.context, {
       getPanoramaFormContext: () => ({ kind: 'multiple_detail', ready: true }),
       getPanoramaCurrentAgentSelectionText: () => 'Training',
+      getPanoramaAdministeredDateTimeFields: () => ({
+        dateField: { value: '2026/11/24' }
+      }),
       getPanoramaLotWidget: () => ({ select }),
       hasPanoramaLotSelection: () => false,
       tryFillPanoramaLotOrTrade: () => false,

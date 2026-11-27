@@ -761,6 +761,139 @@ test('a carried sole Lot is cleared after a refresh unless staff take over', asy
   }
 });
 
+test('Next clears a server-default wrong Lot on only a unique exact reordered detail', async () => {
+  for (const scenario of [
+    'default',
+    'delayed label',
+    'option replaced while waiting',
+    'restored default',
+    'counter only',
+    'client choice',
+    'visible mismatch',
+    'duplicate identity',
+    'target available',
+    'staff takeover',
+    'Lot replaced',
+    'route changed'
+  ]) {
+    const { context, state, select, label, root } = fixture();
+    const form = context.getPanoramaAutofillForm();
+    const outgoing = select('PREVIOUS', 'lot-option');
+    const field = select('WRONG', 'lot-option');
+    const writes = [];
+    const notices = [];
+    const waits = [];
+    const routeCheck = Promise.withResolvers();
+    let routeChecks = 0;
+    const delayed = ['delayed label', 'option replaced while waiting'].includes(
+      scenario
+    );
+    const shouldClear = [
+      'default',
+      'delayed label',
+      'restored default'
+    ].includes(scenario);
+    field.options[1].defaultSelected = scenario !== 'client choice';
+    if (scenario === 'target available')
+      field.options.push({ text: 'INTENDED', value: 'correct' });
+    field.dispatchEvent = (event) => writes.push([event.type, field.value]);
+    label.textContent = delayed
+      ? 'Select'
+      : scenario === 'visible mismatch'
+        ? 'ANOTHER'
+        : 'WRONG';
+    label.isConnected = true;
+    label.getBoundingClientRect = shown;
+    root.getBoundingClientRect = shown;
+    root.getAttribute = () => null;
+    root.classList = { contains: () => false };
+    state.controls = [root, field];
+    state.step = '2-of-3';
+    const date = '2026/11/24';
+    const entry = { lot: 'INTENDED', date, route: {} };
+    const row = { agent: 'mmr', date, entry };
+    const handoff = {
+      form,
+      url: context.location.href,
+      step: 1,
+      position: '1-of-3',
+      rows: [
+        row,
+        { agent: 'hpv', date },
+        { agent: scenario === 'duplicate identity' ? 'mmr' : 'hb', date }
+      ],
+      deletedRows: [],
+      navigation: {
+        form,
+        before: '1-of-3',
+        after: '2-of-3',
+        surface: scenario === 'counter only' ? field : outgoing,
+        until: Infinity,
+        report() {}
+      }
+    };
+    Object.assign(context, {
+      testHandoff: handoff,
+      getPanoramaFormContext: () => ({ kind: 'multiple_detail', ready: true }),
+      getPanoramaCurrentAgentSelectionText: () => 'MMR',
+      getPanoramaAdministeredDateTimeFields: () => ({
+        dateField: { value: date }
+      }),
+      checkPanoramaScannerRoute() {
+        return ++routeChecks === 1 ? routeCheck.promise : true;
+      },
+      setTimeout(callback, delay) {
+        if (delay === 700) waits.push(callback);
+      },
+      clearTimeout() {},
+      showCarryProblem(message) {
+        notices.push(message);
+      }
+    });
+    vm.runInContext('gridDetailHandoff = testHandoff', context);
+
+    if (delayed) {
+      await context.advanceGridHandoff();
+      assert.equal(routeChecks, 0);
+      assert.deepEqual(writes, [], 'wait for the visible label to agree');
+      if (scenario === 'option replaced while waiting')
+        field.options[1] = { ...field.options[1] };
+      label.textContent = 'WRONG';
+    }
+    const advance = context.advanceGridHandoff();
+    await new Promise(setImmediate);
+    if (scenario === 'staff takeover') context.cancelPanoramaAutofill();
+    if (scenario === 'Lot replaced')
+      state.controls = [root, select('WRONG', 'lot-option')];
+    routeCheck.resolve(scenario !== 'route changed');
+    await new Promise(setImmediate);
+    if (shouldClear) {
+      assert.deepEqual(writes, [
+        ['input', ''],
+        ['change', '']
+      ]);
+      assert.equal(label.textContent, 'Select');
+      assert.equal(notices.length, 0, 'wait for Panorama to settle');
+      if (scenario === 'restored default') {
+        field.value = 'lot-option';
+        label.textContent = 'WRONG';
+      }
+      waits.shift()();
+    }
+    await advance;
+    if (shouldClear && scenario !== 'restored default')
+      assert.match(notices[0], /cleared the preselected Lot/);
+    else {
+      if (!shouldClear) assert.deepEqual(writes, [], scenario);
+      assert.equal(field.value, 'lot-option', scenario);
+      assert.ok(notices.every((notice) => !notice.includes('cleared')));
+    }
+    assert.equal(outgoing.value, 'lot-option', scenario);
+    assert.equal(row.entry, entry, 'keep the pending dose for Delete');
+    assert.equal(handoff.attempted, undefined, 'no dose fill ran');
+  }
+});
+
 test('explicit grid Use assigns only the chosen dose and leaves it for Details', async () => {
   const storageKey = 'multiple_inject_queue_v1';
   for (const [tracking, remaining, replace] of [
