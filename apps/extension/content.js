@@ -3011,7 +3011,12 @@ function handlePanoramaAutofillUserInteraction(event) {
       gridDetailHandoff &&
       getPanoramaFormContext().kind === 'multiple_detail'
     ) {
-      void releaseGridDetailStep('staff_input');
+      const action =
+        form.contains(control) && getPanoramaMultipleAction(control);
+      // Next can fail validation and keep this detail open. Leave its pending
+      // assignment in place until Panorama changes the step.
+      if (action !== 'next' && action !== 'delete')
+        void releaseGridDetailStep('staff_input');
     }
     beginPanoramaAutofill({}, false);
     cancelPanoramaAutofill();
@@ -6328,15 +6333,29 @@ function sameGridAssignment(left, right) {
   );
 }
 
+function getPanoramaMultipleAction(button) {
+  const id = button.id?.split(':').at(-1);
+  switch (id) {
+    case '_btnNextPage':
+    case 'Bottom_btnNextPage':
+      return 'enter details';
+    case '_btnApplyAddNext':
+    case 'Bottom_btnApplyAddNext':
+      return 'next';
+    case '_btnRemoveNext':
+    case 'Bottom_btnRemoveNext':
+      return 'delete';
+  }
+  return normalizeLabelText(button.textContent || button.value || button.title);
+}
+
 function startGridHandoff(event) {
   if (!event.isTrusted) return;
   const button = event.target?.closest?.(
     'button, a, input[type="submit"], input[type="button"], [role="button"]'
   );
   if (!button) return;
-  const label = normalizeLabelText(
-    button.textContent || button.value || button.title
-  );
+  const label = getPanoramaMultipleAction(button);
   if (['cancel', 'close', 'reset'].includes(label)) {
     clearGridCarry(`grid_${label}`);
     return;
@@ -6455,13 +6474,16 @@ function markGridDetailNavigation(button, action) {
     return;
   const detail = readGridDetailIdentity(form);
   const current = total === handoff.rows.length && handoff.rows[step - 1];
-  // A Delete changes the position of later rows only when we can identify
-  // the row that Panorama is about to remove.
+  // A second Delete can open on a reordered row. Keep both assignments
+  // when Agent and date cannot tell us which row Panorama is removing.
   const deletedRow =
     action === 'delete' &&
     current &&
     current.agent === panoramaAgentIdentity(detail.agent) &&
-    sameGridDate(current.date, detail.date)
+    sameGridDate(current.date, detail.date) &&
+    (!handoff.deletedRows.length ||
+      identifyGridDetail(handoff, form, step, total).reason !==
+        'duplicate_agent')
       ? current
       : null;
   clearTimeout(handoff.navigation?.timer);
@@ -6476,6 +6498,15 @@ function markGridDetailNavigation(button, action) {
     until: performance.now() + 10000
   };
   handoff.navigation = navigation;
+  // A route check for the outgoing step can still be in flight.
+  handoff.checking = null;
+  // Once staff submit the detail, no further writes should reach the outgoing
+  // form. The grid keeps its other reservations for the next step.
+  if (
+    panoramaAutofillOwner?.step === before &&
+    !panoramaAutofillOwner.cancelled
+  )
+    cancelPanoramaAutofill();
   navigation.timer = setTimeout(() => {
     if (
       gridDetailHandoff === handoff &&
@@ -6638,25 +6669,25 @@ function identifyGridDetail(handoff, form, step, total) {
     row.agent === agent ||
     (row.record &&
       queueRecordMatchesPanoramaAgentText(row.record, detail.agent));
-  // Panorama can reorder the remaining details after Delete. Fall back only
-  // when the ordered row disagrees and another original row can be verified.
+  const matchesIdentity = (row) =>
+    matchesAgent(row) && sameGridDate(detail.date, row.date);
+  // Delete can reorder the remaining details. Two rows with the same Agent
+  // and date can swap without changing those fields, so do not trust order.
   const useOrder =
     ordered &&
     (!handoff.deletedRows?.length ||
-      (matchesAgent(ordered) && sameGridDate(detail.date, ordered.date)));
+      (matchesIdentity(ordered) &&
+        !handoff.rows.some((row) => row !== ordered && matchesIdentity(row))));
   const candidates = (useOrder ? [ordered] : handoff.rows).filter(matchesAgent);
   if (
     !useOrder &&
     handoff.navigation?.deleting &&
-    handoff.deletedRows?.some(
-      (row) => matchesAgent(row) && sameGridDate(detail.date, row.date)
-    )
+    handoff.deletedRows?.some(matchesIdentity)
   )
     return { reason: 'duplicate_agent' };
   if (!candidates.length)
     return { candidate: ordered, reason: 'detail_agent_unmatched' };
-  // A shorter list may have skipped a row. A repeated Agent then needs a
-  // unique date match across every original row, including earlier steps.
+  // When order is uncertain, include earlier rows when checking for repeats.
   const dated = candidates.filter((row) => sameGridDate(detail.date, row.date));
   if (dated.length > 1) return { reason: 'duplicate_agent' };
   const row = dated[0] || ordered;
@@ -6937,7 +6968,10 @@ async function advanceGridHandoff() {
     return clearGridCarry('detail_form_changed');
   const position = `${step}-of-${total}`;
   const expected = withinNavigation && position === navigation.after;
-  if (withinNavigation && position === navigation.before) return;
+  // An unchanged step does not tell us whether Panorama rejected the
+  // submission or is still processing it. Keep writes off that step.
+  if (navigation && !navigation.resolved && position === navigation.before)
+    return;
   if (withinNavigation && !expected)
     return clearGridCarry('detail_navigation_changed');
   if (step < handoff.step && !(expected && navigation.deleting))
@@ -6948,7 +6982,7 @@ async function advanceGridHandoff() {
     navigation.resolved = true;
     clearTimeout(navigation.timer);
   }
-  if (expected && navigation.deletedRow) {
+  if (expected && context.ready && navigation.deletedRow) {
     const skipped = navigation.deletedRow;
     if (skipped.entry)
       void releaseGridAssignment(skipped.entry, 'skipped', step);

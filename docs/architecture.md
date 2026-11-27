@@ -80,11 +80,12 @@ consumes a confirmed tray dose.
 
 A verified grid assignment keeps its exact saved dose, row, Agent, date and
 foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
-that assignment when the matching detail step opens. With the full list of
-details, the grid positions keep the scans in order, even when two scans have
-the same Agent and date. A manually filled grid row keeps its place. VaxLink
-checks the Agent, date and any selected Lot before filling. If Panorama opens
-fewer details, VaxLink looks for one matching original row by Agent and date.
+that assignment when the matching detail step opens. When Panorama first opens
+the full list of details, the grid positions keep the scans in order, even
+when two scans have the same Agent and date. A manually filled grid row keeps
+its place. VaxLink checks the Agent, date and any selected Lot before filling.
+After Delete or if Panorama opens fewer details, VaxLink needs a unique row by
+Agent and date. Staff choose the dose when those fields match multiple rows.
 A detail outside its expected position also needs evidence of the scanned Lot.
 An exact available Lot can open the funding prompt when the field is blank.
 The same Lot check applies when a catalogue Agent alias connects the grid and
