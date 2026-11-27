@@ -68,6 +68,25 @@
     'error'
   );
   const details = {
+    tray_mutation: {
+      action: choices('archive', 'restore', 'consume', 'remove', 'clear'),
+      source: choices(
+        'grid',
+        'detail',
+        'verified_fill',
+        'chart_review',
+        'hud',
+        'popup',
+        'chart'
+      ),
+      result: choices(
+        'archived',
+        'restored',
+        'decremented',
+        'removed',
+        'cleared'
+      )
+    },
     grid_keep_choice: {
       row: integer(1, 100000),
       alternatives: integer(1, 100000),
@@ -411,13 +430,14 @@
     gridAutofill: choices(true, false)
   };
 
-  function validEvent(row) {
+  function validEvent(row, worker = false) {
     if (
       !row ||
       typeof row.event !== 'string' ||
       !Object.hasOwn(details, row.event)
     )
       return false;
+    if (row.event === 'tray_mutation' && !worker) return false;
     if (
       row.event === 'barcode' &&
       row.result === 'malformed' &&
@@ -428,7 +448,7 @@
     if (Object.hasOwn(row, 'observedAt'))
       fields.observedAt = integer(1, Number.MAX_SAFE_INTEGER);
     if (
-      ['grid_handoff', 'skipped_dose'].includes(row.event) &&
+      ['grid_handoff', 'skipped_dose', 'tray_mutation'].includes(row.event) &&
       Object.hasOwn(row, 'scanKey')
     )
       fields.scanKey = validScanKey;
@@ -596,7 +616,7 @@
         !Array.isArray(rows) ||
         rows.length === 0 ||
         rows.length > maxBatch ||
-        !rows.every(validEvent)
+        !rows.every((row) => validEvent(row))
       )
         return Promise.resolve({ success: false });
 
@@ -604,27 +624,42 @@
         const state = (await enabled()) ? await load() : null;
         if (token !== state?.token || source >= state.nextSource)
           return { success: false, stale: true };
-        const receivedAt = Date.now();
-        const appended = await Promise.all(
-          rows.map(async ({ scanKey, ...row }) => ({
-            ...row,
-            receivedAt,
-            operation: source * operationRange + row.operation,
-            ...(scanKey && { scanRef: await scanRef(token, scanKey) })
-          }))
-        );
-        state.rows.push(...appended);
-        const excess = Math.max(0, state.rows.length - maxRows);
-        state.rows.splice(0, excess);
-        state.overwritten += excess;
-        while (
-          new TextEncoder().encode(JSON.stringify(state)).length > maxBytes
-        ) {
-          state.rows.shift();
-          state.overwritten += 1;
-        }
-        await save(state);
-        return { success: true };
+        return appendRows(state, source, rows);
+      });
+    }
+
+    async function appendRows(state, source, rows) {
+      const receivedAt = Date.now();
+      const appended = await Promise.all(
+        rows.map(async ({ scanKey, ...row }) => ({
+          ...row,
+          receivedAt,
+          operation: source * operationRange + row.operation,
+          ...(scanKey && { scanRef: await scanRef(state.token, scanKey) })
+        }))
+      );
+      state.rows.push(...appended);
+      const excess = Math.max(0, state.rows.length - maxRows);
+      state.rows.splice(0, excess);
+      state.overwritten += excess;
+      while (
+        new TextEncoder().encode(JSON.stringify(state)).length > maxBytes
+      ) {
+        state.rows.shift();
+        state.overwritten += 1;
+      }
+      await save(state);
+      return { success: true };
+    }
+
+    function recordWorker(row) {
+      if (!validEvent(row, true)) return Promise.resolve({ success: false });
+      // Queue the committed change in one step so a subsequent export or
+      // disable cannot run between assigning its operation and recording it.
+      return serialize(async () => {
+        if (!(await enabled())) return { success: false };
+        const state = (await load()) ?? empty();
+        return appendRows(state, state.nextSource++, [row]);
       });
     }
 
@@ -661,7 +696,7 @@
       });
     }
 
-    return { open, append, manage };
+    return { open, append, recordWorker, manage };
   }
 
   function createChartRecorder() {

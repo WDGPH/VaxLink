@@ -4260,10 +4260,21 @@ function isAutofillPending(result) {
   return !!result && result.status === 'pending';
 }
 
-function mutateQueueViaBackground(storageKey, operation, payload = {}) {
+function mutateQueueViaBackground(
+  storageKey,
+  operation,
+  payload = {},
+  archiveSource
+) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
-      { action: 'mutateQueue', storageKey, operation, payload },
+      {
+        action: 'mutateQueue',
+        storageKey,
+        operation,
+        payload,
+        ...(archiveSource && { archiveSource })
+      },
       (response) => {
         if (chrome.runtime.lastError || !response?.success) {
           reject(
@@ -4868,7 +4879,7 @@ async function handleUnusedSkippedDose(
   canRemove,
   releaseToken,
   overviewCurrent,
-  { quiet = false, scannerRoute } = {}
+  { quiet = false, scannerRoute, archiveSource } = {}
 ) {
   const url = location.href;
   const form = getPanoramaAutofillForm();
@@ -4928,7 +4939,8 @@ async function handleUnusedSkippedDose(
     await mutateQueueViaBackground(
       MULTIPLE_INJECT_QUEUE_KEY,
       'remove_skipped_dose',
-      { id, expectedSingleUseLot: lot, releaseToken }
+      { id, expectedSingleUseLot: lot, releaseToken },
+      archiveSource
     );
     if (!quiet)
       show(
@@ -7105,7 +7117,7 @@ async function removeRepeatedGridAssignment(
       true,
       dose.token,
       undefined,
-      { quiet }
+      { quiet, archiveSource: 'grid' }
     );
   } catch (_) {
     // A Panorama change handler can replace the form during the write.
@@ -7694,7 +7706,7 @@ function confirmGridDetailDelete(handoff, navigation, step, overview) {
         navigation.canRemove,
         navigation.unusedDoseToken ?? entry?.dose.token,
         overviewCurrent,
-        { scannerRoute: route }
+        { scannerRoute: route, archiveSource: 'detail' }
       );
   });
 }

@@ -873,7 +873,30 @@ async function rememberVerifiedChartLot(data) {
   });
 }
 
-async function changeSkippedDose(storageKey, operation, payload, chart) {
+function recordTrayMutation(storageKey, action, source, result, id) {
+  void recentActivity
+    .recordWorker({
+      event: 'tray_mutation',
+      operation: 1,
+      observedAt: Date.now(),
+      ms: 0,
+      mode: storageKey === INVENTORY_BATCH_KEY ? 'inventory' : 'multiple',
+      stage: source === 'grid' || source === 'detail' ? source : 'none',
+      action,
+      source,
+      result,
+      ...(globalThis.VaxLinkRecentActivity.validScanKey(id) && { scanKey: id })
+    })
+    .catch(() => {});
+}
+
+async function changeSkippedDose(
+  storageKey,
+  operation,
+  payload,
+  chart,
+  source
+) {
   const removing = operation === 'remove_skipped_dose';
   const action = removing ? 'remove' : 'restore';
   const report = (result) =>
@@ -965,7 +988,13 @@ async function changeSkippedDose(storageKey, operation, payload, chart) {
     report('error');
     throw error;
   }
-  report(removing ? 'removed' : 'restored');
+  recordTrayMutation(
+    storageKey,
+    removing ? 'archive' : 'restore',
+    source,
+    removing ? 'archived' : 'restored',
+    record.id
+  );
   return { rows: nextRows, record };
 }
 
@@ -977,7 +1006,8 @@ function mutateQueue(
   payload = {},
   popup = false,
   chart = null,
-  inactiveDose = null
+  inactiveDose = null,
+  archiveSource
 ) {
   const result = scannerQueueWriteQueue
     .catch(() => undefined)
@@ -991,7 +1021,13 @@ function mutateQueue(
         throw new Error('Invalid queue payload');
       }
       if (['remove_skipped_dose', 'restore_skipped_dose'].includes(operation))
-        return changeSkippedDose(storageKey, operation, payload, chart);
+        return changeSkippedDose(
+          storageKey,
+          operation,
+          payload,
+          chart,
+          popup ? 'popup' : (archiveSource ?? 'chart')
+        );
       if (
         operation === 'add' &&
         (!Array.isArray(payload.records) ||
@@ -1038,6 +1074,7 @@ function mutateQueue(
       }
       const stored = await getStorage([storageKey]);
       let rows = Array.isArray(stored[storageKey]) ? stored[storageKey] : [];
+      const originalCount = rows.length;
       if (operation === 'add_from_history') {
         if (
           typeof payload.id !== 'string' ||
@@ -1403,6 +1440,25 @@ function mutateQueue(
         throw new Error('Invalid queue operation');
       }
       await setStorage({ [storageKey]: rows });
+      const source = popup ? 'popup' : 'hud';
+      if (operation === 'clear' && originalCount)
+        recordTrayMutation(storageKey, 'clear', source, 'cleared');
+      else if (operation === 'remove' && current)
+        recordTrayMutation(storageKey, 'remove', source, 'removed', current.id);
+      else if (consumed && record !== consumed)
+        recordTrayMutation(
+          storageKey,
+          'consume',
+          consumeReviewed
+            ? 'chart_review'
+            : ownsReservation
+              ? 'verified_fill'
+              : popup
+                ? 'popup'
+                : 'chart',
+          record ? 'decremented' : 'removed',
+          consumed.id
+        );
       if (operation === 'consume' && ownsReservation && consumed && !record)
         await rememberVerifiedChartLot(consumed).catch(() => {});
       return { rows, record, consumed };
@@ -5554,6 +5610,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.action === 'mutateQueue') {
     const popup = sender.url === chrome.runtime.getURL('popup.html');
+    const { archiveSource } = request;
+    if (
+      archiveSource !== undefined &&
+      (popup ||
+        request.operation !== 'remove_skipped_dose' ||
+        !['grid', 'detail'].includes(archiveSource))
+    ) {
+      sendResponse({ success: false, error: 'Invalid archive source.' });
+      return false;
+    }
     if (
       [
         'setDoseCount',
@@ -5584,7 +5650,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         request.payload,
         popup,
         popup ? null : sender,
-        inactiveDose
+        inactiveDose,
+        archiveSource
       );
     const changed =
       request.operation === 'review_dose'

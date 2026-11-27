@@ -174,6 +174,122 @@ test('workflow Debug links the kept scan to the saved tray without exporting ide
   );
 });
 
+test('Debug attributes committed tray changes to the worker and links their anonymous scan references', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const owner = { ...chart, documentId: 'sample-chart' };
+  const [grid, detail, verified, hud, removed, cleared] = Array.from(
+    { length: 6 },
+    (_, index) => ({
+      id: `179581689000${index}-scan${index}`,
+      lot: 'SAMPLE-LOT',
+      dose_tracking: 'single_use'
+    })
+  );
+  const reservation = {
+    token: crypto.randomUUID(),
+    tabId: owner.tab.id,
+    documentId: owner.documentId
+  };
+  for (const scan of [grid, detail]) scan.unused_dose_release = reservation;
+  verified.dose_reservations = [reservation];
+  let failWrite = false;
+  const worker = fixture({
+    storage: { [queue]: [grid, detail, verified, hud, removed, cleared] },
+    failStorageSet: (values) => failWrite && Object.hasOwn(values, queue)
+  });
+  await worker.open();
+  const initial = await worker.manage('exportRecentActivity');
+  const change = (operation, payload, sender, extra) =>
+    worker.manage(
+      'mutateQueue',
+      { storageKey: queue, operation, payload, ...extra },
+      sender
+    );
+  const archive = (scan, archiveSource) =>
+    change(
+      'remove_skipped_dose',
+      {
+        id: scan.id,
+        expectedSingleUseLot: scan.lot,
+        releaseToken: reservation.token
+      },
+      owner,
+      { archiveSource }
+    );
+  assert.equal((await archive(grid, 'invalid')).success, false);
+  assert.equal((await archive(grid, 'grid')).success, true);
+  assert.equal((await archive(detail, 'detail')).success, true);
+  assert.equal(
+    (
+      await change(
+        'consume',
+        { id: verified.id, token: reservation.token },
+        owner
+      )
+    ).success,
+    true
+  );
+  failWrite = true;
+  assert.equal((await change('remove', { id: hud.id }, owner)).success, false);
+  failWrite = false;
+  const removedRows = await Promise.all([
+    change('remove', { id: hud.id }, owner),
+    change('remove', { id: removed.id }, popup)
+  ]);
+  assert(removedRows.every(({ success }) => success));
+  assert.equal((await change('remove', { id: hud.id }, owner)).success, true);
+  assert.equal((await change('clear', {}, popup)).success, true);
+  assert.equal((await change('clear', {}, popup)).success, true);
+  assert.equal(
+    (await change('restore_skipped_dose', { id: grid.id }, popup)).success,
+    true
+  );
+  assert.equal((await change('clear', {}, owner)).success, true);
+
+  const exported = await worker.manage('exportRecentActivity');
+  const mutations = exported.rows.filter(
+    ({ event }) => event === 'tray_mutation'
+  );
+  const references = Array.from(
+    initial.trayAtExport.scans,
+    ({ scanRef }) => scanRef
+  );
+  assert.deepEqual(
+    Array.from(mutations, ({ action, source, result, scanRef }) => [
+      action,
+      source,
+      result,
+      scanRef
+    ]),
+    [
+      ['archive', 'grid', 'archived', references[0]],
+      ['archive', 'detail', 'archived', references[1]],
+      ['consume', 'verified_fill', 'removed', references[2]],
+      ['remove', 'hud', 'removed', references[3]],
+      ['remove', 'popup', 'removed', references[4]],
+      ['clear', 'popup', 'cleared', undefined],
+      ['restore', 'popup', 'restored', references[0]],
+      ['clear', 'hud', 'cleared', undefined]
+    ]
+  );
+  assert.equal(
+    new Set(mutations.map(({ operation }) => operation)).size,
+    mutations.length
+  );
+  assert.equal(exported.trayAtExport.rows, 0);
+  assert.doesNotMatch(
+    JSON.stringify(exported),
+    /SAMPLE-LOT|scan[0-5]|sample-chart/
+  );
+  const forged = { ...mutations[0], operation: 1 };
+  delete forged.receivedAt;
+  delete forged.scanRef;
+  assert.equal(
+    (await worker.append(await worker.open(), [forged])).success,
+    false
+  );
+});
+
 test('Debug accepts bounded Resume and tray actions through their supported senders', async () => {
   const worker = fixture();
   const ticket = await worker.open();
