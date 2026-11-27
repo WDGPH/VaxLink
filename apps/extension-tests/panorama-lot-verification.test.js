@@ -199,6 +199,70 @@ test('scan order can distinguish repeats after Delete when the detail count agre
   assert.equal(distinct.scanOrder, false);
 });
 
+test('same-count reorder requires exact Lot evidence and uses scan order for tracked repeats', () => {
+  const { context, state, root, select } = fixture();
+  const date = '2026/11/24';
+  let detailAgent = 'HPV';
+  context.getPanoramaCurrentAgentSelectionText = () => detailAgent;
+  context.getPanoramaAdministeredDateTimeFields = () => ({
+    dateField: { value: '2026-11-24' }
+  });
+  const entry = { agent: 'hpv', date, lot: 'SAMPLE-1', dose: { record: {} } };
+  const row = { agent: entry.agent, date, entry };
+  const rows = [
+    row,
+    { agent: 'mmr', date },
+    { agent: 'hpv', date: '2026/11/25' }
+  ];
+  const field = select('SAMPLE-1');
+  state.controls = [root, field];
+  const form = context.getPanoramaAutofillForm();
+  const match = () => context.identifyGridDetail({ rows }, form, 3, 3);
+
+  assert.equal(match().row, row);
+  assert.equal(match().requireLotEvidence, true);
+  assert.equal(match().allowEmptyFinalLot, false);
+  const carried = { ...entry, ...match() };
+  assert.equal(context.matchesGridDetail(carried), true);
+  detailAgent = 'HPV alias';
+  context.queueRecordMatchesPanoramaAgentText = () => true;
+  assert.equal(context.matchesGridDetail(carried), false);
+  detailAgent = 'HPV';
+  context.queueRecordMatchesPanoramaAgentText = () => false;
+
+  field.options[1].disabled = true;
+  assert.equal(match().lotEvidence, 'disabled');
+  field.options[1].disabled = false;
+  field.options[1].text = 'SAMPLE1';
+  assert.equal(match().lotEvidence, 'native_no_match');
+  field.options[1].text = 'SAMPLE-1';
+
+  rows[1] = { agent: 'hpv', date };
+  assert.equal(match().reason, 'duplicate_agent', 'a manual row can compete');
+  rows[1].entry = { lot: 'OTHER' };
+  assert.equal(match().reason, 'duplicate_agent', 'even with different Lots');
+  row.record = {};
+  rows[1].record = {};
+  const opening = context.identifyGridDetail(
+    { rows: [rows[2], row, rows[1]], verifiedThrough: 0 },
+    form,
+    1,
+    3
+  );
+  assert.equal(opening.row, row);
+  assert.equal(opening.scanOrder, true);
+  assert.equal(
+    context.identifyGridDetail(
+      { rows, detailReordered: true, verifiedThrough: 1 },
+      form,
+      3,
+      3
+    ).reason,
+    'duplicate_agent',
+    'scan order cannot fill after a missed detail'
+  );
+});
+
 test('grid carry uses exact enabled Lot evidence on the current widget', () => {
   const { context, state, root, select, panel, label } = fixture();
   const lot = 'SAMPLE-1';
@@ -1117,6 +1181,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     'history_expired',
     'resolved_navigation_late',
     'reordered_rows',
+    'reordered_same_count',
+    'reordered_same_count_repeats',
+    'reordered_same_count_manual_repeat',
+    'reordered_same_count_unverified_repeat',
     'manual_use_after_lot_wait',
     'unconfirmed_release'
   ]) {
@@ -1134,6 +1202,14 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     const tab = { id: 42, url, active: true };
     const repeatedDelete = scenario === 'second_delete_with_repeats';
     const repeatAfterDelete = scenario === 'repeat_after_delete';
+    const sameCountReorder = scenario.startsWith('reordered_same_count');
+    const manualRepeat = scenario === 'reordered_same_count_manual_repeat';
+    const unverifiedRepeat =
+      scenario === 'reordered_same_count_unverified_repeat';
+    const reorderedRepeats =
+      manualRepeat ||
+      unverifiedRepeat ||
+      scenario === 'reordered_same_count_repeats';
     const recovery = scenario.startsWith('repeated_recovery');
     const ambiguousRecovery = scenario === 'repeated_recovery_ambiguous';
     const laterRecovery = scenario === 'repeated_recovery_later';
@@ -1153,9 +1229,11 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         : [
             scenario.startsWith('reordered_after_delete') ? 'HPV' : 'MMR',
             scenario === 'ordered_duplicates' || deleteFirst ? 'MMR' : 'HPV',
-            ['ambiguous_agent', 'next_then_delete'].includes(scenario)
-              ? 'HPV'
-              : 'HB'
+            reorderedRepeats
+              ? 'MMR'
+              : ['ambiguous_agent', 'next_then_delete'].includes(scenario)
+                ? 'HPV'
+                : 'HB'
           ];
     const records = agents.map((agent, index) => ({
       id: String(index),
@@ -1214,8 +1292,9 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       'unconfirmed_release'
     ].includes(scenario);
     const reordered = scenario === 'reordered_rows' || manualUse;
-    let detailAgent = agents[reordered ? 2 : 0];
+    let detailAgent = sameCountReorder ? agents[1] : agents[reordered ? 2 : 0];
     let detailDate = reordered ? '2026-11-24' : date;
+    let offeredLot = manualUse ? 'OTHER' : 'SAMPLE-2';
     let selectedLot = '';
     let retry;
     let navigationTimeout;
@@ -1249,8 +1328,8 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
           value: selectedLot ? 'chosen' : '',
           selectedIndex: selectedLot ? 2 : -1,
           options: [
-            { text: manualUse ? 'OTHER' : 'SAMPLE-2', value: 'pf' },
-            { text: manualUse ? 'N-OTHER' : 'N-SAMPLE-2', value: 'npf' },
+            { text: offeredLot, value: 'pf' },
+            { text: `N-${offeredLot}`, value: 'npf' },
             ...(selectedLot ? [{ text: selectedLot, value: 'chosen' }] : [])
           ]
         }
@@ -1289,6 +1368,10 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
       (await worker.sendMessage({ action: 'checkScannerChart' }, sender))
         .scannerRoute;
     for (const { id } of records) {
+      if (manualRepeat && id === '2') {
+        gridAgents[2] = agents[2];
+        continue;
+      }
       const result = await context.useTrayVaccine(
         id,
         gridToken || context.getScannerDeliveryContext(kind, true),
@@ -1755,11 +1838,13 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
     }
 
     if (scenario === 'ordered_duplicates') {
-      // A different Agent on step 1 must not select a later reservation.
+      // A different Agent and a conflicting Lot cannot select a reservation.
       detailAgent = agents[2];
+      selectedLot = 'SAMPLE-0';
       await context.advanceGridHandoff();
       assert.equal(fills.length, 0);
       detailAgent = agents[0];
+      selectedLot = '';
       for (const [index, { lot }] of records.entries()) {
         state.step = `${index + 1}-of-3`;
         detailAgent = agents[index];
@@ -1782,6 +1867,67 @@ test('Enter Details keeps skipped and ambiguous doses available while later matc
         [1, 1, 1]
       );
       assert.deepEqual(scanOrderNotices, ['1-of-3', '2-of-3']);
+      continue;
+    }
+    if (sameCountReorder) {
+      const pendingRoute = Promise.withResolvers();
+      routeGate = pendingRoute;
+      offeredLot = records[1].lot;
+      const pendingFill = context.advanceGridHandoff();
+      await new Promise(setImmediate);
+      offeredLot = records[0].lot;
+      routeGate = null;
+      pendingRoute.resolve();
+      await pendingFill;
+      assert.equal(fills.length, 0, 'the Lot changed during the route check');
+
+      for (const [index, recordIndex] of [1, 0, 2].entries()) {
+        if (index) assert.equal(clickAction('Next'), true);
+        state.step = `${index + 1}-of-3`;
+        detailAgent = agents[recordIndex];
+        offeredLot = records[recordIndex].lot;
+        if (reorderedRepeats && index === 1 && !manualRepeat) {
+          selectedLot = records[2].lot;
+          await context.advanceGridHandoff();
+          assert.equal(
+            fills.length,
+            1,
+            'a conflicting Lot leaves the scan pending'
+          );
+          assert.equal(selectedLot, records[2].lot);
+          selectedLot = '';
+        }
+        await context.advanceGridHandoff();
+        if (manualRepeat && index) {
+          assert.equal(fills.length, 1, 'a manual row still competes');
+          continue;
+        }
+        if (unverifiedRepeat && index === 2) {
+          assert.equal(fills.length, 2, 'the previous dose did not verify');
+          continue;
+        }
+        assert.equal(fills.length, index + 1);
+        assert.equal(fills[index].lot, offeredLot);
+        if (!unverifiedRepeat || index !== 1)
+          await context.finalizeDeferredPanoramaAutofill(fills[index]);
+      }
+      if (manualRepeat || unverifiedRepeat) {
+        context.clearGridCarry();
+        await new Promise(setImmediate);
+      }
+      assert.deepEqual(
+        saved().map(({ remaining_doses }) => remaining_doses),
+        manualRepeat || unverifiedRepeat ? [2, 1, 2] : [1, 1, 1]
+      );
+      assert.ok(saved().every(({ dose_reservations }) => !dose_reservations));
+      assert.deepEqual(
+        scanOrderNotices,
+        unverifiedRepeat
+          ? ['2-of-3']
+          : reorderedRepeats && !manualRepeat
+            ? ['2-of-3', '3-of-3']
+            : []
+      );
       continue;
     }
     if (reordered) {

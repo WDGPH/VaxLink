@@ -4643,8 +4643,10 @@ async function finalizeDeferredPanoramaAutofill(data) {
     reason: verified ? 'settled' : 'error'
   });
   logDeferredAutofillResult(data, verified, consumed?.record);
-  if (verified && owner.gridDetail)
+  if (verified && owner.gridDetail) {
+    owner.gridDetail.onVerified?.();
     logAnalyticsEvent('chart_carry_completed', { workflow: 'multiple' });
+  }
   if (owner.detailOutcome === 'failed') {
     await stopTrayDose(owner);
   } else if (!owner.lockedResume && isPanoramaAutofillCurrent(data)) {
@@ -4894,7 +4896,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (data._carryScanOrder) {
     toastCarrySlot.innerHTML = `<div class="vl-toast info show" role="status">
       <div class="vl-toast-title">Using scan order</div>
-      <div class="vl-toast-detail">Same Agent and date. Check the lot before you continue.</div>
+      <div class="vl-toast-detail">These doses have the same Agent and date.</div>
     </div>`;
     return;
   }
@@ -6773,6 +6775,7 @@ function startGridHandoff(event) {
     observer,
     trace,
     step: 0,
+    verifiedThrough: 0,
     attempted: ''
   };
   gridDetailHandoff = handoff;
@@ -7065,7 +7068,11 @@ function matchesGridDetail(entry) {
   return (
     sameGridDate(detail.date, entry.date) &&
     (sameAgent ||
-      queueRecordMatchesPanoramaAgentText(entry.dose.record, detail.agent)) &&
+      (!entry.beforeDeleteReorder &&
+        queueRecordMatchesPanoramaAgentText(
+          entry.dose.record,
+          detail.agent
+        ))) &&
     (!entry.orderedRepeat || lotEvidence !== 'conflicting_selection') &&
     ((!entry.requireLotEvidence && sameAgent) ||
       (hasGridDetailLotEvidence(lotEvidence) &&
@@ -7077,8 +7084,7 @@ function identifyGridDetail(handoff, form, step, total) {
   const detail = readGridDetailIdentity(form);
   if (!detail.agent || !detail.date) return { reason: 'detail_fields_loading' };
   const agent = panoramaAgentIdentity(detail.agent);
-  // Enter Details follows the grid positions the scans filled. Keep manual
-  // rows in that order so a gap cannot shift a scanned dose to another step.
+  // Keep manual rows in the grid order so a gap cannot shift a scanned dose.
   const ordered = total === handoff.rows.length ? handoff.rows[step - 1] : null;
   const matchesAgent = (row) =>
     row.agent === agent ||
@@ -7086,6 +7092,12 @@ function identifyGridDetail(handoff, form, step, total) {
       queueRecordMatchesPanoramaAgentText(row.record, detail.agent));
   const matchesIdentity = (row) =>
     matchesAgent(row) && sameGridDate(detail.date, row.date);
+  // Panorama can change the order without changing the number of rows.
+  const beforeDeleteReorder =
+    !!ordered &&
+    !handoff.deletedRows?.length &&
+    !handoff.navigation?.deleting &&
+    !matchesIdentity(ordered);
   // Next can return to an Agent whose earlier Delete was ambiguous.
   const skippedMatches = (handoff.deletedRows || []).filter(
     (row) =>
@@ -7096,6 +7108,8 @@ function identifyGridDetail(handoff, form, step, total) {
   // expected Agent and date still line up with the detail.
   const useOrder =
     ordered &&
+    !handoff.detailReordered &&
+    !beforeDeleteReorder &&
     !skippedMatches.some((row) => row.uncertainDelete) &&
     (!handoff.deletedRows?.length ||
       (ordered.agent === agent && sameGridDate(detail.date, ordered.date)));
@@ -7104,13 +7118,29 @@ function identifyGridDetail(handoff, form, step, total) {
     return { candidate: ordered, reason: 'detail_agent_unmatched' };
   // When order is uncertain, include earlier rows when checking for repeats.
   const dated = candidates.filter((row) => sameGridDate(detail.date, row.date));
-  if (dated.length > 1) return { reason: 'duplicate_agent' };
-  const row = dated[0] || ordered;
-  if (!dated.length) return { candidate: row, reason: 'detail_date_unmatched' };
+  if (!dated.length)
+    return { candidate: ordered, reason: 'detail_date_unmatched' };
+  // Repeated scans can follow grid order when each earlier detail verified.
+  // A manual row could belong to either detail.
+  const reorderedScanOrder =
+    dated.length > 1 &&
+    !!ordered &&
+    (handoff.detailReordered || beforeDeleteReorder) &&
+    !handoff.deletedRows?.length &&
+    !handoff.navigation?.deleting &&
+    handoff.verifiedThrough === step - 1 &&
+    dated.every((row) => row.agent === agent && row.record);
+  const row = reorderedScanOrder
+    ? dated.find((row) => row.entry)
+    : dated.length === 1 && dated[0];
+  if (!row) return { reason: 'duplicate_agent' };
+  if (beforeDeleteReorder && row.agent !== agent)
+    return { candidate: row, reason: 'detail_agent_unmatched' };
   const scanOrder =
-    !!useOrder &&
-    row.agent === agent &&
-    handoff.rows.some((other) => other !== row && matchesIdentity(other));
+    reorderedScanOrder ||
+    (!!useOrder &&
+      row.agent === agent &&
+      handoff.rows.some((other) => other !== row && matchesIdentity(other)));
   if (!row.entry)
     return { candidate: row, reason: 'detail_unassigned', scanOrder };
   const index = handoff.rows.indexOf(row);
@@ -7118,15 +7148,19 @@ function identifyGridDetail(handoff, form, step, total) {
   // from the Lot selected or offered on this detail.
   const alias = row.agent !== agent;
   const reordered =
-    index < step - 1 || index > step - 1 + handoff.rows.length - total;
+    reorderedScanOrder ||
+    index < step - 1 ||
+    index > step - 1 + handoff.rows.length - total;
   const skippedLots = !useOrder
     ? skippedMatches.map((row) => row.record?.lot)
     : [];
   const requireLotEvidence = alias || reordered || skippedLots.length > 0;
-  // All other assignments have been handled. A blank Lot on the final,
-  // exact Agent/date can go through the ordinary Lot search and miss feedback.
+  // The normal search can handle a final assignment with a blank Lot.
+  // A reorder before Delete still needs an exact Lot to confirm the move.
   const allowEmptyFinalLot =
     requireLotEvidence &&
+    !beforeDeleteReorder &&
+    !reorderedScanOrder &&
     step === total &&
     !alias &&
     !skippedLots.length &&
@@ -7156,6 +7190,7 @@ function identifyGridDetail(handoff, form, step, total) {
     };
   return {
     row,
+    beforeDeleteReorder: beforeDeleteReorder || reorderedScanOrder,
     requireLotEvidence,
     skippedLots,
     orderedRepeat,
@@ -7601,6 +7636,9 @@ async function advanceGridHandoff() {
     const confirmed = identifyGridDetail(handoff, form, step, total);
     if (confirmed.row !== row) return;
 
+    // After a reorder, later details need more than the original position.
+    if (confirmed.beforeDeleteReorder) handoff.detailReordered = true;
+
     // Unvisited rows may still appear later in a different order.
     const index = handoff.rows.indexOf(row);
     if (
@@ -7629,11 +7667,19 @@ async function advanceGridHandoff() {
     data._vaxlinkOwner.scannerRoute = route;
     data._vaxlinkOwner.gridDetail = {
       ...entry,
+      beforeDeleteReorder: confirmed.beforeDeleteReorder,
       requireLotEvidence: confirmed.requireLotEvidence,
       skippedLots: confirmed.skippedLots,
       orderedRepeat: confirmed.orderedRepeat,
       allowEmptyFinalLot: confirmed.allowEmptyFinalLot,
-      scanOrder: confirmed.scanOrder
+      scanOrder: confirmed.scanOrder,
+      onVerified() {
+        if (
+          gridDetailHandoff === handoff &&
+          step === handoff.verifiedThrough + 1
+        )
+          handoff.verifiedThrough = step;
+      }
     };
     entry.log('detail_matched', step);
     if (entry.trace)
