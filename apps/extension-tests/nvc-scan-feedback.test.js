@@ -327,4 +327,16 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   context.showVaxlinkToast({ expiry_flag: 'expiring_soon' });
   assert.match(warning.innerHTML, /Expired vaccine/);
   assert.deepEqual(events, ['expiry_notice_shown', 'expiry_notice_shown']);
+
+  const routineBefore = routine.innerHTML;
+  const carried = { _vaxlinkOwner: { gridDetail: {} } };
+  context.showVaxlinkToast({ ...carried, tradename: 'Carried vaccine' });
+  assert.equal(routine.innerHTML, routineBefore);
+  context.showVaxlinkToast({
+    ...carried,
+    lookup_error: 'Catalogue unavailable'
+  });
+  assert.match(routine.innerHTML, /Catalogue unavailable/);
+  context.showVaxlinkToast({ ...carried, expiry_flag: 'expiring_soon' });
+  assert.match(routine.innerHTML, /vl-toast expiring/);
 });

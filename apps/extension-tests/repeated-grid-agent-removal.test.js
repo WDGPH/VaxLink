@@ -45,6 +45,7 @@ async function grid(scenario) {
   };
   const requests = [];
   const warnings = [];
+  const feedback = [];
   const dateEvents = [];
   const settle = () => new Promise(setImmediate);
   const rows = ids.map((id, index) => {
@@ -131,7 +132,21 @@ async function grid(scenario) {
             return this.textContent;
           }
         }
-      : { setAttribute() {}, querySelector: () => null };
+      : {
+          setAttribute() {},
+          remove() {
+            if (skipped.firstElementChild === this) skipped.replaceChildren();
+          },
+          querySelector(selector) {
+            if (selector === 'button' && this.innerHTML.includes('>Undo<'))
+              return {
+                addEventListener: (_type, callback) => {
+                  this.undo = callback;
+                }
+              };
+            return null;
+          }
+        };
   let poll = 0;
   context.chrome.runtime.sendMessage = (message, reply) => {
     if (message.operation) requests.push(message.operation);
@@ -190,6 +205,7 @@ async function grid(scenario) {
     },
     showVaxlinkToast(data) {
       if (data._entryWarning) warnings.push(data._entryWarning);
+      else feedback.push(data);
     },
     setTimeout(callback, delay) {
       if (delay === 125) {
@@ -225,10 +241,28 @@ async function grid(scenario) {
     vm.runInContext('updateRepeatedGridNotice()', context);
   }
   await settle();
-  assert.ok(notice.innerHTML.includes('Keep row 1 · Lot LOT-first'));
-  assert.ok(notice.innerHTML.includes(`Keep row 2 · Lot ${secondLot}`));
+  assert.match(notice.innerHTML, /Keep all rows/);
+  if (scenario === 'same lot') {
+    assert.equal(notice.innerHTML.match(/Lot LOT-first/g).length, 1);
+    assert.match(notice.innerHTML, /Keep row 1<\/button>/);
+    assert.match(notice.innerHTML, /Keep row 2<\/button>/);
+  } else {
+    assert.ok(notice.innerHTML.includes('Keep row 1 · Lot LOT-first'));
+    assert.ok(notice.innerHTML.includes(`Keep row 2 · Lot ${secondLot}`));
+  }
   const click = (event, index = 0) => keep.get(index)(event);
-  return { worker, requests, warnings, dateEvents, rows, click, settle };
+  return {
+    worker,
+    requests,
+    warnings,
+    feedback,
+    dateEvents,
+    rows,
+    click,
+    settle,
+    notice,
+    skipped
+  };
 }
 
 test('the repeated Agent action keeps the selected row and archives the other exact scan', async () => {
@@ -275,9 +309,11 @@ test('the repeated Agent action keeps the selected row and archives the other ex
 
 test('choosing the middle scan clears only its eligible group and stops after an interruption', async () => {
   for (const scenario of ['three choices', 'interrupted']) {
-    const { worker, requests, rows, click, settle } = await grid(scenario);
+    const { worker, requests, rows, click, settle, feedback } =
+      await grid(scenario);
     click({ isTrusted: true }, 1);
     await settle();
+    assert.deepEqual(feedback, []);
     assert.deepEqual(
       rows.map(({ field }) => field.value),
       ['', '1', '1', scenario === 'interrupted' ? '1' : '', '1', '1']
@@ -309,6 +345,26 @@ test('choosing the middle scan clears only its eligible group and stops after an
       scenario === 'interrupted' ? 1 : 2
     );
   }
+});
+
+test('the next chooser leaves compact Undo for the previously removed scan', async () => {
+  const { worker, notice, skipped, click, settle } =
+    await grid('three choices');
+  click({ isTrusted: true }, 2);
+  assert.equal(notice.innerHTML, '');
+  await settle();
+  assert.match(notice.innerHTML, /Keep row 1/);
+  const previous = skipped.firstElementChild;
+  assert.match(previous.className, /vl-toast-undo/);
+  assert.match(previous.innerHTML, /Previous removal · Row 5 · Lot LOT-fifth/);
+  const button = { disabled: false };
+  await previous.undo({ currentTarget: button, isTrusted: true });
+  assert.equal(skipped.firstElementChild, undefined);
+  assert.deepEqual(
+    Array.from(worker.storageData.get(recent), ({ id }) => id),
+    []
+  );
+  assert.equal(worker.storageData.get(tray).at(-1).id, 'fifth');
 });
 
 test('the action keeps the scan when a control changes or release cannot be verified', async () => {

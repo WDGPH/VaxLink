@@ -4814,6 +4814,15 @@ function ensureToastHost() {
     .vl-toast-dismiss:hover { background: rgba(0,0,0,.4); }
     .vl-toast-title { font-weight: 600; margin-bottom: 2px; }
     .vl-toast-detail { opacity: .9; font-size: 12px; }
+    .vl-toast-undo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px 5px 12px;
+    }
+    .vl-toast-undo .vl-toast-dismiss { margin-top: 0; }
+    .vl-repeated-lot { margin-top: 8px; }
+    .vl-repeated-lot .vl-toast-actions { margin-top: 4px; }
     .vl-toast-actions {
       display: flex;
       gap: 8px;
@@ -4853,8 +4862,8 @@ function ensureToastHost() {
   toastRoot.appendChild(toastInventorySlot);
   toastRoot.appendChild(toastWarningSlot);
   toastRoot.appendChild(toastRepeatedAgentSlot);
-  toastRoot.appendChild(toastCarrySlot);
   toastRoot.appendChild(toastSkippedDoseSlot);
+  toastRoot.appendChild(toastCarrySlot);
   toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
@@ -4868,7 +4877,7 @@ function updateInventoryModeNotice() {
   }
   if (!document.body || !isHandsFreeSupportedPage()) return;
   ensureToastHost();
-  toastInventorySlot.innerHTML = `<div class="vl-toast info show" role="status">
+  toastInventorySlot.innerHTML = `<div class="vl-toast info show" role="status" data-vl-notice="inventory_mode">
     <div class="vl-toast-title">Inventory mode</div>
     <div class="vl-toast-detail">Scans go to Inventory. Select Immunization in VaxLink to fill a chart.</div>
   </div>`;
@@ -4879,7 +4888,7 @@ async function handleUnusedSkippedDose(
   canRemove,
   releaseToken,
   overviewCurrent,
-  { quiet = false, scannerRoute, archiveSource } = {}
+  { quiet = false, scannerRoute, archiveSource, gridRow } = {}
 ) {
   const url = location.href;
   const form = getPanoramaAutofillForm();
@@ -4898,13 +4907,17 @@ async function handleUnusedSkippedDose(
   const currentNotice = () =>
     notice && notice === slot.firstElementChild && currentChart();
   let timer;
-  const show = (title, detail = '', undo = false) => {
+  const show = (type, title, detail = '', undo = false) => {
     if (!currentNotice()) return;
-    notice.className = 'vl-toast info persistent show';
+    notice.className = `vl-toast info persistent show${undo ? ' vl-toast-undo' : ''}`;
     notice.setAttribute('role', 'status');
-    notice.innerHTML = `<div class="vl-toast-title">${title}</div>
+    notice.setAttribute('data-vl-notice', type);
+    notice.innerHTML = undo
+      ? `<span class="vl-toast-detail">${title}${detail ? ` · ${detail}` : ''}</span>
+        <button class="vl-toast-dismiss" type="button" aria-label="Undo previous tray removal">Undo</button>`
+      : `<div class="vl-toast-title">${title}</div>
       ${detail ? `<div class="vl-toast-detail">${detail}</div>` : ''}
-      ${undo ? '<button class="vl-toast-dismiss" type="button">Undo</button>' : ''}`;
+      `;
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (notice === slot.firstElementChild) notice.remove();
@@ -4919,6 +4932,7 @@ async function handleUnusedSkippedDose(
     !lot.trim()
   ) {
     show(
+      'scan_kept',
       'Dose kept in the Immunization tray',
       'Review the tray if you need to adjust the count.'
     );
@@ -4932,6 +4946,7 @@ async function handleUnusedSkippedDose(
 
   const showUnconfirmed = () =>
     show(
+      'tray_unconfirmed',
       'Tray change unconfirmed',
       'Check the Immunization tray and Recent Scans.'
     );
@@ -4944,14 +4959,22 @@ async function handleUnusedSkippedDose(
     );
     if (!quiet)
       show(
-        'Unused scan removed from tray',
+        'scan_removed',
+        gridRow
+          ? `Previous removal · Row ${gridRow}`
+          : 'Unused scan removed from tray',
         `Lot ${escapeToastHtml(lot)}`,
         true
       );
     notice
       ?.querySelector('button')
       ?.addEventListener('click', async (event) => {
-        if (!event.isTrusted || !currentNotice()) return;
+        if (
+          !event.isTrusted ||
+          event.currentTarget.disabled ||
+          !currentNotice()
+        )
+          return;
         event.currentTarget.disabled = true;
         try {
           await mutateQueueViaBackground(
@@ -4959,7 +4982,8 @@ async function handleUnusedSkippedDose(
             'restore_skipped_dose',
             { id }
           );
-          show('Scan restored to tray');
+          clearTimeout(timer);
+          if (notice === slot.firstElementChild) notice.remove();
         } catch (_) {
           showUnconfirmed();
         }
@@ -4974,17 +4998,9 @@ function showVaxlinkToast(data, durationMs = 4000) {
   if (!isHandsFreeSupportedPage()) return;
   ensureToastHost();
 
-  if (data._repeatedGridKept) {
-    const { row, removed } = data._repeatedGridKept;
-    toastSkippedDoseSlot.innerHTML = `<div class="vl-toast info show" role="status">
-      <div class="vl-toast-title">Kept row ${row}</div>
-      <div class="vl-toast-detail">${removed} unused scans moved to Recent Scans.</div>
-    </div>`;
-    return;
-  }
-
   if (data._carryScanOrder) {
-    toastCarrySlot.innerHTML = `<div class="vl-toast info show" role="status">
+    clearPreviousDetailLotNotice();
+    toastCarrySlot.innerHTML = `<div class="vl-toast info show" role="status" data-vl-notice="scan_order">
       <div class="vl-toast-title">Using scan order</div>
       <div class="vl-toast-detail">These doses have the same Agent and date.</div>
     </div>`;
@@ -5323,7 +5339,7 @@ function showVaxlinkToast(data, durationMs = 4000) {
 
   if (data._duplicateIgnored) {
     showRoutineToast(
-      `<div class="vl-toast duplicate show">
+      `<div class="vl-toast duplicate show" data-vl-notice="duplicate_scan">
       <div class="vl-toast-title">Duplicate scan ignored</div>
       <div class="vl-toast-detail">${escapeToastHtml(label)} is already in the tray</div>
       ${detail ? `<div class="vl-toast-detail">${escapeToastHtml(detail)}</div>` : ''}
@@ -5340,11 +5356,23 @@ function showVaxlinkToast(data, durationMs = 4000) {
         ? 'expiring'
         : 'valid';
   const isExpired = flag === 'expired';
+  if (
+    data._vaxlinkOwner?.gridDetail &&
+    !data.lookup_error &&
+    flag !== 'expiring_soon' &&
+    !isExpired
+  )
+    return;
   const queuedNote = data._queuedCount
     ? `<div class="vl-toast-detail">Added to tray (${Number(data._queuedCount)} saved)</div>`
     : '';
 
-  const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show">
+  const notice = isExpired
+    ? 'expired'
+    : flag === 'expiring_soon'
+      ? 'expiring'
+      : 'scan_feedback';
+  const toastHtml = `<div class="vl-toast ${cssClass}${isExpired ? ' persistent' : ''} show" data-vl-notice="${notice}">
     <div class="vl-toast-title">${isExpired ? 'Expired vaccine' : escapeToastHtml(label)}</div>
     ${data._chartUseBlocked ? `<div class="vl-toast-detail">${data.reference_only ? 'Saved for reference only.' : 'Autofill stopped. Use an in-date vaccine.'}</div>` : ''}
     ${isExpired ? `<div class="vl-toast-detail">${escapeToastHtml(label)}</div>` : ''}
@@ -7117,7 +7145,7 @@ async function removeRepeatedGridAssignment(
       true,
       dose.token,
       undefined,
-      { quiet, archiveSource: 'grid' }
+      { quiet, archiveSource: 'grid', gridRow: Number(index) + 1 }
     );
   } catch (_) {
     // A Panorama change handler can replace the form during the write.
@@ -7179,10 +7207,6 @@ async function keepRepeatedGridAssignment(keep, group, snapshot) {
       }
       removed += 1;
     }
-    if (removed > 1 && sameChart())
-      showVaxlinkToast({
-        _repeatedGridKept: { row: Number(keep.index) + 1, removed }
-      });
   } finally {
     report(removed === targets.length ? 'completed' : 'interrupted');
     repeatedGridCorrection = false;
@@ -7207,10 +7231,7 @@ function watchRepeatedGridAgents() {
       ? snapshotGridConfirmation(form, rows)
       : null;
     if (repeatedGridCorrection && form) {
-      ensureToastHost();
-      if (shownSnapshot !== null)
-        toastRepeatedAgentSlot.innerHTML =
-          '<div class="vl-toast info persistent show" role="status"><div class="vl-toast-title">Updating repeated Agent rows…</div></div>';
+      if (shownSnapshot !== null) toastRepeatedAgentSlot?.replaceChildren();
       shownSnapshot = null;
       shownChoices = [];
       return;
@@ -7243,15 +7264,18 @@ function watchRepeatedGridAgents() {
     shownChoices = choices;
     shownSnapshot = snapshot;
     const rowChoices = groups
-      .map(
-        (
-          group
-        ) => `<div class="vl-toast-detail">${escapeToastHtml(group[0].removal.label)}</div>
-        <div class="vl-toast-actions">${group.map((entry) => `<button class="vl-toast-action" type="button" data-keep-repeated-grid="${Number(entry.index)}">Keep row ${Number(entry.index) + 1} · Lot ${escapeToastHtml(entry.lot)}</button>`).join('')}
-        </div>`
-      )
+      .map((group, index) => {
+        const first = group[0];
+        const sameLot = group.every(({ lot }) => lot === first.lot);
+        const label = escapeToastHtml(first.removal.label);
+        const lot = sameLot ? ` · Lot ${escapeToastHtml(first.lot)}` : '';
+        return `<div class="vl-repeated-lot" role="group" aria-labelledby="vl-repeat-${index}">
+          <div class="vl-toast-detail" id="vl-repeat-${index}">${label}${lot}</div>
+          <div class="vl-toast-actions">${group.map((entry) => `<button class="vl-toast-action" type="button" data-keep-repeated-grid="${Number(entry.index)}">Keep row ${Number(entry.index) + 1}${sameLot ? '' : ` · Lot ${escapeToastHtml(entry.lot)}`}</button>`).join('')}</div>
+        </div>`;
+      })
       .join('');
-    toastRepeatedAgentSlot.innerHTML = `<div class="vl-toast info persistent show" role="status">
+    toastRepeatedAgentSlot.innerHTML = `<div class="vl-toast info persistent show" role="status" data-vl-notice="repeated_agent">
         <div class="vl-toast-title">Repeated Agent</div>
         <div class="vl-toast-detail">${choices.length ? 'Choose a scan to keep. The other listed scans for that Agent move to Recent Scans.' : 'Check the rows with the same Agent before entering details.'}</div>
         ${rowChoices}
