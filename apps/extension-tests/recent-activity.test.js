@@ -290,6 +290,96 @@ test('Debug attributes committed tray changes to the worker and links their anon
   );
 });
 
+test('Debug records visible notice changes without duplicating a category or reading its text', async () => {
+  const worker = fixture();
+  let observe;
+  const integration = createContentHarness({
+    location: new URL(chartUrl),
+    MutationObserver: class {
+      constructor(callback) {
+        observe = callback;
+      }
+      observe() {}
+    },
+    setTimeout: () => 1,
+    clearTimeout() {}
+  });
+  const { context, storageListeners } = integration;
+  const sent = [];
+  context.chrome.runtime.sendMessage = (message) => {
+    const reply = worker.sendMessage(message, chart);
+    sent.push(reply);
+    return reply;
+  };
+  context.getPanoramaMultiStepIndicatorKey = () => 'sample-detail';
+  const notice = (type, shown = true) => ({
+    getAttribute: () => type,
+    classList: { contains: () => shown },
+    get textContent() {
+      throw new Error('Debug must not read notice text');
+    }
+  });
+  const detail = { firstElementChild: null };
+  const undo = { firstElementChild: null };
+  const unclassified = { firstElementChild: null };
+  context.observeToastActivity({ children: [detail, undo, unclassified] });
+  detail.firstElementChild = notice('carry_warning');
+  observe();
+  for (const listener of storageListeners)
+    listener({ [preference]: { newValue: true } }, 'local');
+  await Promise.all(sent);
+
+  unclassified.firstElementChild = notice('SAMPLE-LOT');
+  observe();
+  detail.firstElementChild = notice('detail_lot');
+  observe();
+  detail.firstElementChild = notice('detail_lot');
+  undo.firstElementChild = notice('scan_removed');
+  observe();
+  detail.firstElementChild = notice('funding');
+  observe();
+  detail.firstElementChild = notice('funding', false);
+  observe();
+  detail.firstElementChild = null;
+  observe();
+
+  vm.runInContext('chartActivity.flush()', context);
+  await Promise.all(sent);
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.deepEqual(
+    Array.from(rows, ({ event, notice, previous, stage }) => [
+      event,
+      notice,
+      previous,
+      stage
+    ]),
+    [
+      ['notice_change', 'detail_lot', 'carry_warning', 'detail'],
+      ['notice_change', 'scan_removed', null, 'detail'],
+      ['notice_change', 'funding', 'detail_lot', 'detail'],
+      ['notice_change', null, 'funding', 'detail']
+    ]
+  );
+  const ticket = await worker.open();
+  for (const notice of ['SAMPLE-LOT', 'funding'])
+    assert.equal(
+      (
+        await worker.append(ticket, [
+          {
+            event: 'notice_change',
+            operation: 1,
+            ms: 0,
+            mode: 'multiple',
+            stage: 'detail',
+            notice,
+            previous: 'funding'
+          }
+        ])
+      ).success,
+      false
+    );
+});
+
 test('Debug accepts bounded Resume and tray actions through their supported senders', async () => {
   const worker = fixture();
   const ticket = await worker.open();

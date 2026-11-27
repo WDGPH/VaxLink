@@ -88,7 +88,7 @@ yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can 
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
 
-If the same Agent appears more than once, choose the **Keep row** button for the row and Lot you intend to enter. VaxLink keeps that row and its date. It clears the other listed scans for that Agent, shows **Removing…** in the tray, and moves each confirmed removal to **Recent Scans**. Use **Restore** there to recover a scan. For intentional repeats, choose **Keep all rows** and continue to **Enter Details**. VaxLink shows **Using scan order** when it carries repeat scans in that order.
+If the same Agent appears more than once, choose the **Keep row** button for the row you intend to enter. When the choices share a Lot, it appears above the row buttons. Otherwise, each button shows its Lot. VaxLink keeps the chosen row and date. The tray shows **Removing…** on the other listed scans until each removal is confirmed. **Undo** applies to the previous single removal. You can also recover removed scans from **Recent Scans**. For intentional repeats, choose **Keep all rows**. VaxLink shows **Using scan order** when it carries those doses in order.
 
 Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the
 exact single-use scan was unused, it removes that scan from the tray. Choose
@@ -115,6 +115,7 @@ In **Settings → Troubleshooting**, choose **Download details** before closing 
 or turning collection off. For a Multiple Immunizations issue, leave the tray
 as you found it until you download the file. It includes the saved tray at
 download, recent removals, HUD counts and which grid row you chose to keep.
+It also records what changed the tray and which kinds of notification appeared together or replaced each other.
 The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.

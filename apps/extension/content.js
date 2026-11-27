@@ -4755,6 +4755,54 @@ let toastInventorySlot = null;
 let toastDismissTimer = null;
 let detailLotNoticeObserver = null;
 
+function observeToastActivity(root) {
+  if (!chartActivity || typeof MutationObserver !== 'function') return;
+  const noticeType = globalThis.VaxLinkRecentActivity.noticeType;
+  const visible = new Map();
+  const observer = new MutationObserver(() => {
+    const changes = [];
+    // A render can replace the node without changing the visible notice type.
+    for (const slot of root.children) {
+      const previous = visible.get(slot) ?? null;
+      const element = slot.firstElementChild;
+      const type = element?.getAttribute('data-vl-notice');
+      const notice =
+        !slot.hidden &&
+        !element?.hidden &&
+        element?.classList.contains('show') &&
+        noticeType(type)
+          ? type
+          : null;
+      if (notice === previous) continue;
+      visible.set(slot, notice);
+      changes.push({ notice, previous });
+    }
+    if (!changes.length || !chartActivity.isRecording()) return;
+    const inventory = activeWorkflowMode === 'inventory';
+    let stage = 'none';
+    if (!inventory) {
+      if (getPanoramaMultiStepIndicatorKey({ visibleOnly: true }))
+        stage = 'detail';
+      else if (isPanoramaMultipleImmunizationGridPage({ visibleOnly: true }))
+        stage = 'grid';
+    }
+    const mode = inventory
+      ? 'inventory'
+      : stage === 'none'
+        ? 'single'
+        : 'multiple';
+    const trace = chartActivity.begin(mode, stage);
+    for (const change of changes)
+      chartActivity.record(trace, 'notice_change', change);
+  });
+  observer.observe(root, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['class', 'hidden', 'data-vl-notice']
+  });
+}
+
 function ensureToastHost() {
   if (toastHost && document.body.contains(toastHost)) return toastRoot;
   toastHost = document.createElement('div');
@@ -4867,6 +4915,7 @@ function ensureToastHost() {
   toastRoot.appendChild(toastRoutineSlot);
   shadow.appendChild(toastRoot);
   document.body.appendChild(toastHost);
+  observeToastActivity(toastRoot);
   return toastRoot;
 }
 

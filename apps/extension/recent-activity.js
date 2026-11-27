@@ -67,7 +67,31 @@
     'blocked',
     'error'
   );
+  const noticeType = choices(
+    null,
+    'inventory_mode',
+    'repeated_agent',
+    'scan_removed',
+    'scan_kept',
+    'tray_unconfirmed',
+    'scan_order',
+    'carry_warning',
+    'detail_lot',
+    'entry_warning',
+    'fill_progress',
+    'barcode_feedback',
+    'grid_added',
+    'mode_changed',
+    'autofill_review',
+    'funding',
+    'expired',
+    'expiring',
+    'scan_feedback',
+    'duplicate_scan',
+    'dose_review'
+  );
   const details = {
+    notice_change: { notice: noticeType, previous: noticeType },
     tray_mutation: {
       action: choices('archive', 'restore', 'consume', 'remove', 'clear'),
       source: choices(
@@ -437,7 +461,11 @@
       !Object.hasOwn(details, row.event)
     )
       return false;
-    if (row.event === 'tray_mutation' && !worker) return false;
+    if (
+      (row.event === 'tray_mutation' && !worker) ||
+      (row.event === 'notice_change' && row.notice === row.previous)
+    )
+      return false;
     if (
       row.event === 'barcode' &&
       row.result === 'malformed' &&
@@ -788,6 +816,9 @@
 
     return {
       flush,
+      isRecording() {
+        return !!recording;
+      },
       begin(mode, stage) {
         if (!recording || recording.operation >= operationRange - 1)
           return null;
@@ -854,6 +885,7 @@
     lookupResult,
     catalogueVersion,
     trayUseResult,
+    noticeType,
     createRecorder,
     createChartRecorder
   };

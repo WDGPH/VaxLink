@@ -116,15 +116,17 @@ then checks the expected position, fresh controls, dose identity and worker
 route before filling the next detail.
 Delete can open the next detail or return from the last detail to the
 immunization overview. VaxLink checks the replacement view before archiving
-the identifiable unused single-use scan. The worker checks the exact scan
+the identifiable unused single-use scan. A confirmed clear of a wrong default
+on an ordered detail can use the same release proof as a Lot search miss when
+the Agent and date identify the outgoing scan. The worker checks the exact scan
 and its release token. Undo and Recent Scans can restore it. A dose that may
 have changed a chart still needs review. The repeated-Agent notice lists eligible
 scans by row and Lot. Staff choose a keeper or keep all rows. Before clearing a
 row, VaxLink checks that the worker supports archiving skipped scans. Each
 other listed scan must have its grid clear and tray archive confirmed before
 the next removal starts. The HUD marks pending removals. For an unavailable
-Lot, a notification Delete uses Panorama’s own button after checking the same
-detail and active route.
+Lot, the current detail owns one notice. Its Delete action checks the detail,
+current native controls and active route before invoking Panorama’s button.
 
 ### User controls: popup
 
@@ -230,7 +232,10 @@ results to the saved scans. Legacy rows without a recognized scan ID have a
 null reference. The snapshot gives the full tray count and details for up to
 250 rows. The timeline records storage counts, rendered HUD counts, repeat-row
 choices, missing-Lot button actions and field categories that Panorama marks
-invalid. New events carry a worker receipt time and, when recorded at the
+invalid. Tray mutation events identify the action and its source, including
+manual removal, tray clear, verified dose use, and skipped-scan archiving.
+Notification changes record categories as notices appear, disappear or replace
+one another. New events carry a worker receipt time and, when recorded at the
 source, an observation time. Field values, reservation tokens and patient
 identifiers are excluded from these additions.
 
