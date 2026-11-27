@@ -7901,18 +7901,19 @@ function readGridDetailLotEvidence(lot, allowEmptyFinalLot) {
   return matches.length ? 'panel_unavailable' : 'panel_no_match';
 }
 
-function hasGridDetailLotEvidence(evidence) {
-  return ['selected', 'native_option', 'panel_option', 'blank_final'].includes(
-    evidence
-  );
-}
-
-function hasDistinctGridDetailLot(lot, evidence, skippedLots = []) {
+function gridDetailLotMatches(lot, evidence, skippedLots = []) {
+  if (
+    !['selected', 'native_option', 'panel_option', 'blank_final'].includes(
+      evidence
+    )
+  )
+    return false;
+  const intended = normalizePanoramaLotToken(lot);
   return skippedLots.every((skipped) => {
     const token = normalizePanoramaLotToken(skipped);
     return (
       token &&
-      token !== normalizePanoramaLotToken(lot) &&
+      token !== intended &&
       (evidence === 'selected' ||
         (evidence === 'native_option' &&
           readGridDetailLotEvidence(skipped, false) === 'native_no_match'))
@@ -7940,8 +7941,7 @@ function matchesGridDetail(entry) {
         ))) &&
     (!entry.orderedRepeat || lotEvidence !== 'conflicting_selection') &&
     ((!entry.requireLotEvidence && sameAgent) ||
-      (hasGridDetailLotEvidence(lotEvidence) &&
-        hasDistinctGridDetailLot(entry.lot, lotEvidence, entry.skippedLots)))
+      gridDetailLotMatches(entry.lot, lotEvidence, entry.skippedLots))
   );
 }
 
@@ -8044,8 +8044,7 @@ function identifyGridDetail(handoff, form, step, total) {
   if (
     (orderedRepeat && lotEvidence === 'conflicting_selection') ||
     (requireLotEvidence &&
-      (!hasGridDetailLotEvidence(lotEvidence) ||
-        !hasDistinctGridDetailLot(row.entry.lot, lotEvidence, skippedLots)))
+      !gridDetailLotMatches(row.entry.lot, lotEvidence, skippedLots))
   )
     return {
       candidate: row,
