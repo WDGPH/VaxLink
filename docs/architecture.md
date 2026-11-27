@@ -403,10 +403,13 @@ stale build, lost focus, unavailable lock check, or unverified result leaves a
 held scan for staff review. If VaxLink cannot identify the Agent for a scanned
 lot, it holds the barcode before any field interaction and shows a warning.
 
-Staff can check the original chart and copy or discard a held barcode in the
-popup. Held scans never replay automatically, including after unlock. Field
-verification reflects what the browser observed. Staff still verify and save
-the record in Panorama.
+Staff can check the original chart, export selected held scans in the Inventory
+CSV format, clear the scans shown, or move selected scans to either tray. The
+worker saves a move to both lists in one storage update. Scans without a readable
+lot and scans awaiting chart verification stay in review during a move. Held
+scans never replay automatically, including after unlock. Field verification
+reflects what the browser observed. Staff still verify and save the record in
+Panorama.
 
 While the workstation is locked, valid captures go straight to the selected
 workflow tray. Repeated physical scans are kept. Captures retain their

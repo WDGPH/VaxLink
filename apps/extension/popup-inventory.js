@@ -244,35 +244,7 @@ export class ScanQueueManager {
   }
 
   exportCsv() {
-    if (!this.rows.length) {
-      return null;
-    }
-
-    const csvRows = [
-      CSV_COLUMNS.join(','),
-      ...this.rows.map((row, index) =>
-        CSV_COLUMNS.map((column) => {
-          if (column === 'scan_index') {
-            return csvEscape(index + 1);
-          }
-          return csvEscape(row[column]);
-        }).join(',')
-      )
-    ];
-
-    const blob = new Blob([csvRows.join('\r\n')], {
-      type: 'text/csv;charset=utf-8'
-    });
-    const url = URL.createObjectURL(blob);
-    const filename = `${this.exportFilenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return filename;
+    return downloadScanCsv(this.rows, this.exportFilenamePrefix);
   }
 
   render() {
@@ -549,6 +521,31 @@ function formatInventoryTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+export function downloadScanCsv(rows, filenamePrefix) {
+  if (!rows.length) return null;
+  const csvRows = [
+    CSV_COLUMNS.join(','),
+    ...rows.map((row, index) =>
+      CSV_COLUMNS.map((column) =>
+        csvEscape(column === 'scan_index' ? index + 1 : row[column])
+      ).join(',')
+    )
+  ];
+  const blob = new Blob([csvRows.join('\r\n')], {
+    type: 'text/csv;charset=utf-8'
+  });
+  const url = URL.createObjectURL(blob);
+  const filename = `${filenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
 }
 
 function csvEscape(value) {

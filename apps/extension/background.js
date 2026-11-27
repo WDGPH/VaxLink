@@ -1885,17 +1885,17 @@ async function prepareScannerQueueRecord(scan, mode, options) {
   let parsed;
   let status;
   try {
+    const retail = requireLot && parser.isRetailBarcode(scan.rawText);
     parsed =
-      requireLot && parser.isRetailBarcode(scan.rawText)
-        ? {}
-        : parser.parseGS1Barcode(scan.rawText);
-    if (requireLot && !String(parsed.lot || '').trim()) status = 'missing_lot';
+      retail && !options.fromReview ? {} : parser.parseGS1Barcode(scan.rawText);
+    if (requireLot && (retail || !String(parsed.lot || '').trim()))
+      status = 'missing_lot';
   } catch (error) {
     if (!requireLot && scan.device?.profileId !== LIVE_SSI_PROFILE_ID)
       throw error;
     status = 'parse_error';
   }
-  if (status) {
+  if (status && !options.fromReview) {
     void logAnalyticsEvent(
       status === 'missing_lot' ? 'barcode_missing_lot' : status,
       { workflow: mode, source: scan.source }
@@ -1903,6 +1903,7 @@ async function prepareScannerQueueRecord(scan, mode, options) {
     return { rejection: { status } };
   }
 
+  parsed ??= {};
   parsed.scanned_at = scan.capturedAt || new Date().toISOString();
 
   parsed.barcode_expiry = parsed.expiry || '';
@@ -1927,12 +1928,13 @@ async function prepareScannerQueueRecord(scan, mode, options) {
   const draft = buildQueueRecordFromParsed(
     parsed,
     scan.rawText,
-    options.context || {}
+    options.fromReview ? { scanned_at: scan.capturedAt || '' } : options.context
   );
   const expiry = globalThis.VaxLinkExpiryDate.expiredVaccineDate(draft);
   if (expiry) draft.expiry_flag = 'expired';
   return {
     record: draft,
+    ...(status && { rejection: { status } }),
     ...(immunization &&
       expiry && {
         rejection: { status: 'expired', lot: draft.lot, expiry }
@@ -2205,22 +2207,98 @@ async function resumeLockedScan(target, { sessionId, captureId, token }) {
   return handoff;
 }
 
-function discardHeldScannerScan(scan) {
-  activeScannerDeliveries.delete(scan?.captureId);
-  return mutatePendingInbox(async () => {
-    const rows = await getHeldScannerScans();
-    // New captures have unique IDs. Legacy rows stay held; discard only one
-    // matching snapshot so a concurrent identical capture is preserved.
-    const index = rows.findIndex((row) =>
-      scan?.captureId
-        ? row.captureId === scan.captureId
-        : JSON.stringify(row) === JSON.stringify(scan)
-    );
-    if (index < 0) return;
-    await setStorage({
-      [PENDING_SCAN_INBOX_KEY]: rows.filter((_, i) => i !== index)
-    });
+async function prepareHeldScannerScan(scan) {
+  const prepared = await prepareScannerQueueRecord(scan, 'inventory', {
+    reviewOnly: true,
+    fromReview: true
   });
+  if (scan.reviewState === 'expired') prepared.record.expiry_flag = 'expired';
+  return prepared;
+}
+
+async function actOnHeldScannerScans({ operation, scans, destination }) {
+  if (
+    !['clear', 'move', 'export'].includes(operation) ||
+    !Array.isArray(scans) ||
+    !scans.length ||
+    scans.length > PENDING_SCAN_INBOX_LIMIT ||
+    scans.some(
+      (scan) =>
+        !scan ||
+        typeof scan.rawText !== 'string' ||
+        (scan.captureId !== undefined && typeof scan.captureId !== 'string')
+    ) ||
+    (operation === 'move' && !['inventory', 'multiple'].includes(destination))
+  )
+    throw new Error('Choose the scans to review again.');
+
+  const prepared =
+    operation === 'clear'
+      ? []
+      : await Promise.all(scans.map(prepareHeldScannerScan));
+  if (operation === 'export')
+    return { records: prepared.map(({ record }) => record) };
+
+  const update = () =>
+    mutatePendingInbox(async () => {
+      const rows = await getHeldScannerScans();
+      const processed = new Set();
+      const moved = [];
+      const storageKey = getQueueStorageKeyForWorkflow(destination);
+      for (const [index, scan] of scans.entries()) {
+        // Match each legacy snapshot once, even when it has an identical copy.
+        const position = rows.findIndex(
+          (row, i) =>
+            !processed.has(i) &&
+            (scan.captureId
+              ? row.captureId === scan.captureId
+              : JSON.stringify(row) === JSON.stringify(scan))
+        );
+        if (position < 0) continue;
+        if (operation === 'move') {
+          const { record, rejection } = prepared[index];
+          const current = rows[position];
+          if (
+            rejection ||
+            current.reviewState === 'checking_chart' ||
+            current.reviewState !== scan.reviewState ||
+            current.rawText !== scan.rawText ||
+            current.capturedAt !== scan.capturedAt
+          )
+            continue;
+          const immunization = destination === 'multiple';
+          if (
+            record.expiry_flag === 'expired' &&
+            (immunization ||
+              !globalThis.VaxLinkExpiryDate.isExpiredVaccine(record))
+          )
+            record.reference_only = true;
+          moved.push(immunization ? defaultChartDose(record) : record);
+        }
+        processed.add(position);
+      }
+      if (processed.size) {
+        const next = {
+          [PENDING_SCAN_INBOX_KEY]: rows.filter((_, i) => !processed.has(i))
+        };
+        if (moved.length) {
+          const stored = await getStorage([storageKey]);
+          const tray = Array.isArray(stored[storageKey])
+            ? stored[storageKey]
+            : [];
+          next[storageKey] = [...tray, ...moved];
+        }
+        // Keep both writers held through the single storage update.
+        await setStorage(next);
+        for (const position of processed)
+          activeScannerDeliveries.delete(rows[position].captureId);
+      }
+      return { count: processed.size };
+    });
+
+  if (operation === 'clear') return update();
+  scannerQueueWriteQueue = scannerQueueWriteQueue.catch(() => {}).then(update);
+  return scannerQueueWriteQueue;
 }
 
 function updateScannerDelivery(delivery, reviewState) {
@@ -2703,7 +2781,17 @@ async function routeScannerScan(
         contextToken,
         scannerRoute: route
       };
-      activeScannerDeliveries.set(held.captureId, delivery);
+      const stillHeld = await mutatePendingInbox(async () => {
+        const rows = await getHeldScannerScans();
+        if (!rows.some((row) => row.captureId === held.captureId)) return false;
+        activeScannerDeliveries.set(held.captureId, delivery);
+        return true;
+      });
+      if (
+        !stillHeld ||
+        activeScannerDeliveries.get(held.captureId) !== delivery
+      )
+        return { routed: false, queued: false, workflow: workflowMode };
       // Messaging must not occupy the inbox writer while a chart responds.
       try {
         delivery.reply = sendScanToTab(destination.id, {
@@ -5475,7 +5563,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (
     request.action === 'getHeldScannerScans' ||
-    request.action === 'discardHeldScannerScan'
+    request.action === 'actOnHeldScannerScans'
   ) {
     if (
       sender.id !== chrome.runtime.id ||
@@ -5490,7 +5578,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             success: true,
             scans: scans.map(({ acknowledgedDelivery, ...scan }) => scan)
           }))
-        : discardHeldScannerScan(request.scan).then(() => ({ success: true }));
+        : actOnHeldScannerScans(request).then((data) => ({
+            success: true,
+            ...data
+          }));
     result
       .then(sendResponse)
       .catch((error) => sendResponse({ success: false, error: error.message }));

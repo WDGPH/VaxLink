@@ -61,9 +61,10 @@ If the unit label is hard to scan and your clinic allows a carton scan, keep the
 ## The scanner beeped but nothing appeared
 
 1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Scans to review** if a capture needs attention.
-2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard scan** once you have accounted for that capture.
-3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
-4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
+2. If a scan may have filled a chart, check its fields and saved record in Panorama first. Select the scans you still need and choose **Move to tray**. Pick **Immunization** or **Inventory**. Scans without a readable lot stay in review. Expired vaccines moved to Immunization are for reference only.
+3. Select scans and choose **Export CSV** to download them in the Inventory format, including the raw barcode. Use **Clear all** to remove the scans shown in the review list. The row’s **⋯** menu also lets you view the full barcode or discard that scan.
+4. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
+5. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
 
 ## The scan appeared, but chart entry is incomplete
 

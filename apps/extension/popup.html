@@ -430,7 +430,8 @@
       .inventory-item.active {
         background: #e8f5f6;
       }
-      .inventory-item [data-select-id] {
+      .inventory-item [data-select-id],
+      #heldScannerScans input[type='checkbox'] {
         width: 14px;
         height: 14px;
         margin: 0;
@@ -926,12 +927,53 @@
       .held-instruction {
         margin: 2px 0 7px 24px;
       }
+      .held-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        padding: 4px 0 4px 24px;
+      }
+      .held-actions label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: auto;
+        text-transform: none;
+        white-space: nowrap;
+      }
+      .held-actions button {
+        width: auto;
+        padding: 6px 7px;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--tray-accent);
+        white-space: nowrap;
+      }
+      .held-actions button:hover:not(:disabled) {
+        background: #edf7f6;
+      }
+      #clearHeldScansBtn {
+        color: #a52b27;
+      }
+      #heldScannerNotice {
+        margin: 4px 0 8px 24px;
+      }
+      #heldScannerNotice:empty {
+        display: none;
+      }
       #heldScannerScanList li {
         flex-wrap: wrap;
       }
-      #heldScannerScanList input {
+      #heldScannerScanList li:has(input:checked) {
+        background: #e8f5f6;
+      }
+      #heldScannerScanList input[readonly] {
         flex-basis: 100%;
         min-width: 0;
+      }
+      #heldScannerScanList input[type='checkbox'] {
+        flex: 0 0 14px;
       }
       #heldScannerScanList strong {
         display: block;
@@ -1047,6 +1089,13 @@
       }
       .tray-dialog p {
         font-size: 12px;
+      }
+      #heldScannerDialog button[value='cancel'] {
+        background: transparent;
+        color: var(--subtle);
+      }
+      #heldScannerDialog button[value='clear'] {
+        background: #a52b27;
       }
     </style>
   </head>
@@ -1360,6 +1409,20 @@
                 These scans need attention. If a scan may have filled a chart,
                 check that chart before using it again.
               </p>
+              <div class="held-actions">
+                <label
+                  ><input id="selectHeldScans" type="checkbox" /> Select
+                  all</label
+                >
+                <button id="moveHeldScansBtn" type="button" disabled>
+                  Move to tray
+                </button>
+                <button id="exportHeldScansBtn" type="button" disabled>
+                  Export CSV
+                </button>
+                <button id="clearHeldScansBtn" type="button">Clear all</button>
+              </div>
+              <p id="heldScannerNotice" role="status"></p>
               <ul id="heldScannerScanList"></ul>
             </details>
             <div id="multipleModeSection" class="mode-panel">
@@ -1515,6 +1578,23 @@
       </div>
     </div>
     <script type="module" src="popup.js"></script>
+    <dialog
+      id="heldScannerDialog"
+      class="tray-dialog"
+      aria-labelledby="heldScannerDialogTitle"
+      aria-describedby="heldScannerDialogMessage"
+    >
+      <form method="dialog">
+        <h2 id="heldScannerDialogTitle"></h2>
+        <p id="heldScannerDialogMessage"></p>
+        <div class="queue-entry-actions">
+          <button value="cancel" autofocus>Cancel</button>
+          <button value="inventory">Inventory</button>
+          <button value="multiple">Immunization</button>
+          <button value="clear">Clear all</button>
+        </div>
+      </form>
+    </dialog>
     <dialog
       id="recentChartLotDialog"
       class="tray-dialog"

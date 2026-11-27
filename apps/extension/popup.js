@@ -4,6 +4,7 @@ import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
   buildQueueRecord,
+  downloadScanCsv,
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
@@ -74,6 +75,10 @@ let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
 const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
+const heldScans = new Map();
+const selectedHeldScans = new Set();
+let heldScanRefresh = 0;
+let heldScanActionBusy = false;
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
 
 const {
@@ -442,6 +447,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
   loadNVCStatus();
+  bindHeldScannerActions();
   void renderHeldScannerScans();
   void loadRecentChartLots();
 });
@@ -473,14 +479,25 @@ async function renderHeldScannerScans() {
   const host = document.getElementById('heldScannerScans');
   const list = document.getElementById('heldScannerScanList');
   if (!host || !list) return;
+  const refresh = ++heldScanRefresh;
   try {
     const result = await sendRuntimeMessage({ action: 'getHeldScannerScans' });
-    if (!result?.success) return;
+    if (refresh !== heldScanRefresh || !result?.success) return;
     host.hidden = !result.scans.length;
     document.getElementById('heldScannerScanCount').textContent =
       `Scans to review (${result.scans.length})`;
     list.replaceChildren();
+    heldScans.clear();
+    const legacyOccurrences = new Map();
     for (const scan of result.scans) {
+      let key = scan.captureId;
+      if (!key) {
+        const snapshot = JSON.stringify(scan);
+        const occurrence = (legacyOccurrences.get(snapshot) || 0) + 1;
+        legacyOccurrences.set(snapshot, occurrence);
+        key = `${occurrence}:${snapshot}`;
+      }
+      heldScans.set(key, scan);
       const row = document.createElement('li');
       const label = document.createElement('div');
       const title = document.createElement('strong');
@@ -515,13 +532,23 @@ async function renderHeldScannerScans() {
         (scan.lock_session_id ? 'Captured while locked' : '');
       label.append(title, [time, reason].filter(Boolean).join(' · '));
 
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = selectedHeldScans.has(key);
+      checkbox.setAttribute(
+        'aria-label',
+        `Select ${title.textContent}, ${time}`
+      );
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedHeldScans.add(key);
+        else selectedHeldScans.delete(key);
+        updateHeldScannerControls();
+      });
       const barcode = document.createElement('input');
       barcode.readOnly = true;
       barcode.hidden = true;
       barcode.value = scan.rawText || '';
       barcode.setAttribute('aria-label', 'Full held barcode');
-      const copy = document.createElement('button');
-      copy.textContent = 'Copy barcode';
       const menu = document.createElement('details');
       menu.className = 'tray-menu';
       const summary = document.createElement('summary');
@@ -548,15 +575,6 @@ async function renderHeldScannerScans() {
         menu.open = false;
         summary.focus();
       });
-      copy.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(scan.rawText);
-          copy.textContent = 'Copied';
-        } catch {
-          showBarcode();
-          copy.textContent = 'Copy manually';
-        }
-      });
       menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
           menu.open = false;
@@ -565,29 +583,131 @@ async function renderHeldScannerScans() {
       });
       const discard = document.createElement('button');
       discard.textContent = 'Discard scan';
-      discard.addEventListener('click', async () => {
-        discard.disabled = true;
-        try {
-          const result = await sendRuntimeMessage({
-            action: 'discardHeldScannerScan',
-            scan
-          });
-          if (!result?.success)
-            throw new Error(result?.error || 'Could not discard scan');
-          await renderHeldScannerScans();
-        } catch (error) {
-          writeOutput(error.message, 'error');
-        } finally {
-          discard.disabled = false;
-        }
+      discard.addEventListener('click', () => {
+        menu.open = false;
+        summary.focus();
+        void runHeldScannerAction('clear', [scan]);
       });
       options.append(show, discard);
       menu.append(summary, options);
-      row.append(label, copy, menu, barcode);
+      row.append(checkbox, label, menu, barcode);
       list.append(row);
     }
+    for (const key of selectedHeldScans)
+      if (!heldScans.has(key)) selectedHeldScans.delete(key);
+    updateHeldScannerControls();
   } catch (error) {
-    writeOutput(error.message, 'error');
+    writeOutput(escapeHtml(error.message), 'error');
+  }
+}
+
+function updateHeldScannerControls() {
+  const selectAll = document.getElementById('selectHeldScans');
+  const count = selectedHeldScans.size;
+  selectAll.checked = count > 0 && count === heldScans.size;
+  selectAll.indeterminate = count > 0 && count < heldScans.size;
+  selectAll.disabled = heldScanActionBusy;
+  document.getElementById('moveHeldScansBtn').disabled =
+    heldScanActionBusy || !count;
+  document.getElementById('exportHeldScansBtn').disabled =
+    heldScanActionBusy || !count;
+  document.getElementById('clearHeldScansBtn').disabled = heldScanActionBusy;
+}
+
+function bindHeldScannerActions() {
+  const selectAll = document.getElementById('selectHeldScans');
+  if (!selectAll) return;
+  selectAll.addEventListener('change', () => {
+    selectedHeldScans.clear();
+    if (selectAll.checked)
+      for (const key of heldScans.keys()) selectedHeldScans.add(key);
+    for (const checkbox of document.querySelectorAll(
+      '#heldScannerScanList input[type="checkbox"]'
+    ))
+      checkbox.checked = selectAll.checked;
+    updateHeldScannerControls();
+  });
+  for (const operation of ['move', 'export', 'clear']) {
+    document
+      .getElementById(`${operation}HeldScansBtn`)
+      .addEventListener('click', () => {
+        const scans = [...heldScans]
+          .filter(
+            ([key]) => operation === 'clear' || selectedHeldScans.has(key)
+          )
+          .map(([, scan]) => scan);
+        void runHeldScannerAction(operation, scans, operation !== 'export');
+      });
+  }
+}
+
+function confirmHeldScannerAction(operation, count) {
+  const dialog = document.getElementById('heldScannerDialog');
+  const clear = operation === 'clear';
+  const scans = `${count} ${count === 1 ? 'scan' : 'scans'}`;
+  document.getElementById('heldScannerDialogTitle').textContent = clear
+    ? `Clear ${scans}?`
+    : `Move ${scans} to a tray?`;
+  document.getElementById('heldScannerDialogMessage').textContent = clear
+    ? 'VaxLink will remove these scans from the review list.'
+    : 'Check the original chart first if a scan may have filled it. Expired vaccines moved to Immunization are for reference only.';
+  for (const button of dialog.querySelectorAll(
+    'button[value]:not([value="cancel"])'
+  ))
+    button.hidden = clear !== (button.value === 'clear');
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue), {
+      once: true
+    });
+    dialog.showModal();
+  });
+}
+
+async function runHeldScannerAction(operation, scans, confirm = false) {
+  if (!scans.length || heldScanActionBusy) return;
+  const notice = document.getElementById('heldScannerNotice');
+  heldScanActionBusy = true;
+  try {
+    const choice = confirm
+      ? await confirmHeldScannerAction(operation, scans.length)
+      : '';
+    if (confirm && (!choice || choice === 'cancel')) return;
+    updateHeldScannerControls();
+    notice.textContent = '';
+    const result = await sendRuntimeMessage({
+      action: 'actOnHeldScannerScans',
+      operation,
+      scans,
+      destination: operation === 'move' ? choice : undefined
+    });
+    if (!result?.success) throw new Error(result?.error || 'Try again.');
+    let message;
+    if (operation === 'export') {
+      downloadScanCsv(result.records, 'vaxlink-scans-to-review');
+      message = `CSV download started for ${scans.length} ${scans.length === 1 ? 'scan' : 'scans'}.`;
+    } else {
+      const count = result.count;
+      const quantity = `${count} ${count === 1 ? 'scan' : 'scans'}`;
+      if (operation === 'clear') message = `Cleared ${quantity}.`;
+      else {
+        const tray = choice === 'inventory' ? 'Inventory' : 'Immunization';
+        const remaining = scans.length - count;
+        message = count ? `Moved ${quantity} to ${tray}. ` : '';
+        if (remaining)
+          message += `${remaining} could not be moved. Scans need a readable lot and must finish any chart verification.`;
+        message = message.trimEnd();
+      }
+      await renderHeldScannerScans();
+    }
+    if (document.getElementById('heldScannerScans').hidden)
+      writeOutput(message, 'info');
+    else notice.textContent = message;
+  } catch (error) {
+    notice.textContent = `Could not ${operation} scans. ${error.message}`;
+  } finally {
+    heldScanActionBusy = false;
+    updateHeldScannerControls();
   }
 }
 
