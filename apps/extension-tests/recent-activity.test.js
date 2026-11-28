@@ -81,33 +81,409 @@ test('Debug rejects unexpected fields and requires a chart sender to append and 
   assert.equal(exported.token, undefined);
 });
 
-test('Debug records locked capture outcomes and an identifier-free popup summary', async () => {
+test('Debug records the destination of locked captures without identifiers', async () => {
   const worker = fixture({ idleState: 'locked' });
   const rawText = '01001234567890121729123110SAMPLE-LOCK';
   assert.equal((await worker.captureScannerScan({ rawText })).locked, true);
-  const summary = { held: 1, inventory: 0, interrupted: false };
-  assert.equal(
-    (await worker.manage('recordLockSummary', summary, chart)).success,
-    false
-  );
-  assert.equal(
-    (await worker.manage('recordLockSummary', summary)).success,
-    true
-  );
+  await new Promise(setImmediate);
   const exported = await worker.manage('exportRecentActivity');
   assert.ok(exported.rows.some(({ event }) => event === 'lock_observed'));
   assert.equal(
     exported.rows.find(({ event }) => event === 'locked_capture').result,
-    'held'
+    'tray'
   );
   assert.equal(
-    exported.rows.find(({ event }) => event === 'lock_summary').held,
-    1
+    exported.rows.find(({ event }) => event === 'scan').decision,
+    'accepted'
   );
   assert.doesNotMatch(
     JSON.stringify(exported),
     /SAMPLE-LOCK|lockedAt|captureId/
   );
+});
+
+test('workflow Debug links the kept scan to the saved tray without exporting identifiers', async () => {
+  const kept = '1795816890000-kept01';
+  const removed = '1795816890001-drop02';
+  const worker = fixture({
+    storage: {
+      multiple_inject_queue_v1: [
+        {
+          id: kept,
+          lot: 'PRIVATE-LOT',
+          dose_tracking: 'single_use',
+          dose_reservations: [{ token: 'PRIVATE-TOKEN', review: true }]
+        }
+      ],
+      vaxlink_skipped_dose_history_v1: [{ id: removed, lot: 'PRIVATE-LOT' }]
+    }
+  });
+  const ticket = await worker.open();
+  const base = { operation: 1, ms: 0, mode: 'multiple', stage: 'grid' };
+  const archived = {
+    ...base,
+    event: 'skipped_dose',
+    action: 'remove',
+    result: 'removed',
+    scanKey: removed
+  };
+  const timeline = [
+    {
+      ...base,
+      event: 'grid_handoff',
+      row: 1,
+      step: 0,
+      result: 'assigned',
+      scanKey: kept
+    },
+    {
+      ...base,
+      event: 'grid_keep_choice',
+      row: 1,
+      alternatives: 1,
+      result: 'selected'
+    },
+    archived,
+    { ...base, event: 'hud_render', rows: 1, displayed: 1, removing: 0 },
+    {
+      ...base,
+      event: 'detail_notice_action',
+      action: 'delete',
+      result: 'submitted',
+      step: 1,
+      total: 2
+    }
+  ];
+  assert.equal((await worker.append(ticket, timeline)).success, true);
+  assert.equal(
+    (await worker.append(ticket, [{ ...archived, scanKey: 'patient-name' }]))
+      .success,
+    false
+  );
+  const log = await worker.manage('exportRecentActivity');
+  assert.equal(log.trayAtExport.rows, 1);
+  assert.equal(log.trayAtExport.review, 1);
+  assert.match(log.rows[0].scanRef, /^[0-9a-f]{16}$/);
+  assert.equal(log.trayAtExport.scans[0].scanRef, log.rows[0].scanRef);
+  assert.equal(log.trayAtExport.recentlyRemoved[0], log.rows[2].scanRef);
+  assert.notEqual(log.rows[0].scanRef, log.rows[2].scanRef);
+  assert(log.rows.every((row) => Number.isSafeInteger(row.receivedAt)));
+  assert.doesNotMatch(
+    JSON.stringify(log),
+    /kept01|drop02|PRIVATE-LOT|PRIVATE-TOKEN|patient-name/
+  );
+});
+
+test('Debug attributes committed tray changes to the worker and links their anonymous scan references', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const owner = { ...chart, documentId: 'sample-chart' };
+  const [grid, detail, verified, hud, removed, cleared] = Array.from(
+    { length: 6 },
+    (_, index) => ({
+      id: `179581689000${index}-scan${index}`,
+      lot: 'SAMPLE-LOT',
+      dose_tracking: 'single_use'
+    })
+  );
+  const reservation = {
+    token: crypto.randomUUID(),
+    tabId: owner.tab.id,
+    documentId: owner.documentId
+  };
+  for (const scan of [grid, detail]) scan.unused_dose_release = reservation;
+  verified.dose_reservations = [reservation];
+  let failWrite = false;
+  const worker = fixture({
+    storage: { [queue]: [grid, detail, verified, hud, removed, cleared] },
+    failStorageSet: (values) => failWrite && Object.hasOwn(values, queue)
+  });
+  await worker.open();
+  const initial = await worker.manage('exportRecentActivity');
+  const change = (operation, payload, sender, extra) =>
+    worker.manage(
+      'mutateQueue',
+      { storageKey: queue, operation, payload, ...extra },
+      sender
+    );
+  const archive = (scan, archiveSource) =>
+    change(
+      'remove_skipped_dose',
+      {
+        id: scan.id,
+        expectedSingleUseLot: scan.lot,
+        releaseToken: reservation.token
+      },
+      owner,
+      { archiveSource }
+    );
+  assert.equal((await archive(grid, 'invalid')).success, false);
+  assert.equal((await archive(grid, 'grid')).success, true);
+  assert.equal((await archive(detail, 'detail')).success, true);
+  assert.equal(
+    (
+      await change(
+        'consume',
+        { id: verified.id, token: reservation.token },
+        owner
+      )
+    ).success,
+    true
+  );
+  failWrite = true;
+  assert.equal((await change('remove', { id: hud.id }, owner)).success, false);
+  failWrite = false;
+  const removedRows = await Promise.all([
+    change('remove', { id: hud.id }, owner),
+    change('remove', { id: removed.id }, popup)
+  ]);
+  assert(removedRows.every(({ success }) => success));
+  assert.equal((await change('remove', { id: hud.id }, owner)).success, true);
+  assert.equal((await change('clear', {}, popup)).success, true);
+  assert.equal((await change('clear', {}, popup)).success, true);
+  assert.equal(
+    (await change('restore_skipped_dose', { id: grid.id }, popup)).success,
+    true
+  );
+  assert.equal((await change('clear', {}, owner)).success, true);
+
+  const exported = await worker.manage('exportRecentActivity');
+  const mutations = exported.rows.filter(
+    ({ event }) => event === 'tray_mutation'
+  );
+  const references = Array.from(
+    initial.trayAtExport.scans,
+    ({ scanRef }) => scanRef
+  );
+  assert.deepEqual(
+    Array.from(mutations, ({ action, source, result, scanRef }) => [
+      action,
+      source,
+      result,
+      scanRef
+    ]),
+    [
+      ['archive', 'grid', 'archived', references[0]],
+      ['archive', 'detail', 'archived', references[1]],
+      ['consume', 'verified_fill', 'removed', references[2]],
+      ['remove', 'hud', 'removed', references[3]],
+      ['remove', 'popup', 'removed', references[4]],
+      ['clear', 'popup', 'cleared', undefined],
+      ['restore', 'popup', 'restored', references[0]],
+      ['clear', 'hud', 'cleared', undefined]
+    ]
+  );
+  assert.equal(
+    new Set(mutations.map(({ operation }) => operation)).size,
+    mutations.length
+  );
+  assert.equal(exported.trayAtExport.rows, 0);
+  assert.doesNotMatch(
+    JSON.stringify(exported),
+    /SAMPLE-LOT|scan[0-5]|sample-chart/
+  );
+  const forged = { ...mutations[0], operation: 1 };
+  delete forged.receivedAt;
+  delete forged.scanRef;
+  assert.equal(
+    (await worker.append(await worker.open(), [forged])).success,
+    false
+  );
+});
+
+test('Debug records visible notice changes without duplicating a category or reading its text', async () => {
+  const worker = fixture();
+  let observe;
+  const integration = createContentHarness({
+    location: new URL(chartUrl),
+    MutationObserver: class {
+      constructor(callback) {
+        observe = callback;
+      }
+      observe() {}
+    },
+    setTimeout: () => 1,
+    clearTimeout() {}
+  });
+  const { context, storageListeners } = integration;
+  const sent = [];
+  context.chrome.runtime.sendMessage = (message) => {
+    const reply = worker.sendMessage(message, chart);
+    sent.push(reply);
+    return reply;
+  };
+  context.getPanoramaMultiStepIndicatorKey = () => 'sample-detail';
+  const notice = (type, shown = true) => ({
+    getAttribute: () => type,
+    classList: { contains: () => shown },
+    get textContent() {
+      throw new Error('Debug must not read notice text');
+    }
+  });
+  const detail = { firstElementChild: null };
+  const undo = { firstElementChild: null };
+  const unclassified = { firstElementChild: null };
+  context.observeToastActivity({ children: [detail, undo, unclassified] });
+  detail.firstElementChild = notice('carry_warning');
+  observe();
+  for (const listener of storageListeners)
+    listener({ [preference]: { newValue: true } }, 'local');
+  await Promise.all(sent);
+
+  unclassified.firstElementChild = notice('SAMPLE-LOT');
+  observe();
+  detail.firstElementChild = notice('detail_lot');
+  observe();
+  detail.firstElementChild = notice('detail_lot');
+  undo.firstElementChild = notice('scan_removed');
+  observe();
+  detail.firstElementChild = notice('funding');
+  observe();
+  detail.firstElementChild = notice('funding', false);
+  observe();
+  detail.firstElementChild = null;
+  observe();
+
+  vm.runInContext('chartActivity.flush()', context);
+  await Promise.all(sent);
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.deepEqual(
+    Array.from(rows, ({ event, notice, previous, stage }) => [
+      event,
+      notice,
+      previous,
+      stage
+    ]),
+    [
+      ['notice_change', 'detail_lot', 'carry_warning', 'detail'],
+      ['notice_change', 'scan_removed', null, 'detail'],
+      ['notice_change', 'funding', 'detail_lot', 'detail'],
+      ['notice_change', null, 'funding', 'detail']
+    ]
+  );
+  const ticket = await worker.open();
+  for (const notice of ['SAMPLE-LOT', 'funding'])
+    assert.equal(
+      (
+        await worker.append(ticket, [
+          {
+            event: 'notice_change',
+            operation: 1,
+            ms: 0,
+            mode: 'multiple',
+            stage: 'detail',
+            notice,
+            previous: 'funding'
+          }
+        ])
+      ).success,
+      false
+    );
+});
+
+test('Debug accepts bounded Resume and tray actions through their supported senders', async () => {
+  const worker = fixture();
+  const ticket = await worker.open();
+  const base = { operation: 1, ms: 0, mode: 'multiple', stage: 'grid' };
+  const resume = {
+    ...base,
+    event: 'locked_resume',
+    trigger: 'automatic',
+    result: 'started',
+    count: 2
+  };
+  const use = { ...base, event: 'tray_use', source: 'hud', result: 'selected' };
+  assert.equal((await worker.append(ticket, [resume, use])).success, true);
+  assert.equal(
+    (await worker.append(ticket, [{ ...resume, trigger: 'unknown' }])).success,
+    false
+  );
+  for (const [payload, sender] of [
+    [{ result: 'selected' }, chart],
+    [{ result: 'selected' }, { ...popup, url: `${popup.url}#carry-support` }],
+    [{ result: 'unknown' }, popup],
+    [{ result: 'selected', recordId: 'FIXTURE' }, popup]
+  ]) {
+    assert.equal(
+      (await worker.manage('recordPopupTrayUse', payload, sender)).success,
+      false
+    );
+  }
+  assert.equal(
+    (await worker.manage('recordPopupTrayUse', { result: 'blocked' })).success,
+    true
+  );
+  const { rows } = await worker.manage('exportRecentActivity');
+  assert.deepEqual(
+    Array.from(rows, ({ event, result, source, stage }) => [
+      event,
+      result,
+      source,
+      stage
+    ]),
+    [
+      ['locked_resume', 'started', undefined, 'grid'],
+      ['tray_use', 'selected', 'hud', 'grid'],
+      ['tray_use', 'blocked', 'popup', 'none']
+    ]
+  );
+});
+
+test('Debug keeps readiness reasons alongside a scan-order decision and staff action', async () => {
+  const worker = fixture();
+  const ticket = await worker.open();
+  const routing = {
+    workflow: 'immunization',
+    form: 'multiple_grid',
+    chartReady: true,
+    formReady: false,
+    singleAutofill: true,
+    gridAutofill: true
+  };
+  const blocked = ['agent_control_unavailable', 'date_control_unavailable'].map(
+    (formBlockedBy) => ({ ...row(), routing: { ...routing, formBlockedBy } })
+  );
+  const detail = { operation: 2, ms: 0, mode: 'multiple', stage: 'detail' };
+  const decision = {
+    ...detail,
+    event: 'grid_detail_decision',
+    row: 2,
+    step: 1,
+    total: 2,
+    reason: 'candidate_ready',
+    waitExpired: false,
+    alias: false,
+    reordered: false,
+    lotEvidence: 'native_option',
+    funding: ''
+  };
+  const action = {
+    ...detail,
+    event: 'multiple_form_action',
+    action: 'delete',
+    result: 'step_changed',
+    step: 1,
+    total: 2
+  };
+  const batch = [
+    ...blocked,
+    decision,
+    { ...decision, scanOrder: true },
+    action,
+    { ...action, result: 'marker_declined' },
+    {
+      ...detail,
+      event: 'grid_handoff',
+      row: 2,
+      step: 1,
+      result: 'release_unconfirmed'
+    }
+  ];
+  const reply = await worker.append(ticket, batch);
+  assert.equal(reply.success, true);
+  const exported = await worker.manage('exportRecentActivity');
+  assert.equal(exported.retained, batch.length);
+  assert.equal(exported.rows[3].scanOrder, true);
+  assert.equal(exported.rows[4].result, 'step_changed');
 });
 
 test('a carry report opens Debug in the background and only the extension page can export', async () => {
@@ -187,6 +563,64 @@ test('export and disable are ordered with a delayed append, then old tickets are
     true
   );
   assert.equal((await worker.append(ticket, [row()])).stale, true);
+});
+
+test('Debug exports the tray and committed removal events at the same write boundary', async () => {
+  const queue = 'multiple_inject_queue_v1';
+  const firstScan = '1795816890000-first';
+  const secondScan = '1795816890001-second';
+  const savingFirst = Promise.withResolvers();
+  const formatting = Promise.withResolvers();
+  let holdWrite = true;
+  let holdExport = true;
+  const worker = fixture({
+    storage: { [queue]: [{ id: firstScan }, { id: secondScan }] },
+    delayStorageSet(values, resume) {
+      if (!holdWrite || !Object.hasOwn(values, queue)) return false;
+      savingFirst.resolve(resume);
+      return true;
+    },
+    delayStorageGet(keys, resume) {
+      if (!holdExport || !keys?.includes('vaxlink_auto_resolve_funding_v1'))
+        return false;
+      formatting.resolve(resume);
+      return true;
+    }
+  });
+  const remove = (id) =>
+    worker.manage('mutateQueue', {
+      storageKey: queue,
+      operation: 'remove',
+      payload: { id }
+    });
+  const first = remove(firstScan);
+  const finishFirst = await savingFirst.promise;
+  const exporting = worker.manage('exportRecentActivity');
+  const second = remove(secondScan);
+  const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+  const beganDuringWrite = await Promise.race([formatting.promise, nextTurn()]);
+  holdWrite = false;
+  finishFirst();
+  const finishExport = await formatting.promise;
+  const secondWhileFormatting = await Promise.race([second, nextTurn()]);
+  holdExport = false;
+  finishExport();
+  const exported = await exporting;
+
+  assert.equal(beganDuringWrite, undefined);
+  assert.equal((await first).success, true);
+  assert.equal(secondWhileFormatting?.success, true);
+  const mutations = (output) =>
+    output.rows.filter(({ event }) => event === 'tray_mutation');
+  assert.equal(mutations(exported).length, 1);
+  assert.equal(exported.trayAtExport.rows, 1);
+  const laterExport = await worker.manage('exportRecentActivity');
+  assert.equal(laterExport.trayAtExport.rows, 0);
+  assert.equal(mutations(laterExport).length, 2);
+  assert.equal(
+    exported.trayAtExport.scans[0].scanRef,
+    mutations(laterExport)[1].scanRef
+  );
 });
 
 test('Debug storage can fail without delaying capture, and disabling preserves Local Activity', async () => {

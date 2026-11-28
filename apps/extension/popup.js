@@ -4,6 +4,7 @@ import { initializeScannerSettings } from './scanner-settings.js';
 import {
   ScanQueueManager,
   buildQueueRecord,
+  downloadScanCsv,
   INVENTORY_BATCH_KEY,
   MULTIPLE_INJECT_QUEUE_KEY
 } from './popup-inventory.js';
@@ -73,12 +74,13 @@ let inventoryManager;
 let activeMode = 'immunization';
 let scannerStatusSnapshot = normalizeScannerStatusSnapshot(null);
 let scannerCaptureError = false;
-let unlockReviewRead = 0;
-let recordedUnlockSummary = '';
-const SCANNER_LOCK_SESSION_KEY = 'vaxlink_scanner_lock_session_v1';
-const REVIEWED_LOCK_SESSION_KEY = 'vaxlink_reviewed_lock_id';
 const HELD_SCANS_KEY = 'vaxlink_pending_scan_inbox_v1';
+const heldScans = new Map();
+const selectedHeldScans = new Set();
+let heldScanRefresh = 0;
+let heldScanActionBusy = false;
 const RECENT_CHART_LOTS_KEY = 'vaxlink_recent_chart_lots_v1';
+const SKIPPED_DOSE_HISTORY_KEY = 'vaxlink_skipped_dose_history_v1';
 
 const {
   WORKFLOW_MODE_KEY,
@@ -445,24 +447,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('queueSaveNotice').hidden = true;
     });
 
-  document
-    .getElementById('dismissUnlockReview')
-    ?.addEventListener('click', async () => {
-      const sessionId =
-        document.getElementById('unlockReview')?.dataset.session;
-      if (!sessionId) return;
-      try {
-        await setLocalStorage({ [REVIEWED_LOCK_SESSION_KEY]: sessionId });
-      } catch (error) {
-        writeOutput(
-          error.message || 'Could not dismiss the lock summary.',
-          'error'
-        );
-      }
-    });
   loadNVCStatus();
+  bindHeldScannerActions();
   void renderHeldScannerScans();
-  void loadUnlockReview();
   void loadRecentChartLots();
 });
 
@@ -493,14 +480,25 @@ async function renderHeldScannerScans() {
   const host = document.getElementById('heldScannerScans');
   const list = document.getElementById('heldScannerScanList');
   if (!host || !list) return;
+  const refresh = ++heldScanRefresh;
   try {
     const result = await sendRuntimeMessage({ action: 'getHeldScannerScans' });
-    if (!result?.success) return;
+    if (refresh !== heldScanRefresh || !result?.success) return;
     host.hidden = !result.scans.length;
     document.getElementById('heldScannerScanCount').textContent =
-      `Held scanner scans (${result.scans.length})`;
+      `Scans to review (${result.scans.length})`;
     list.replaceChildren();
+    heldScans.clear();
+    const legacyOccurrences = new Map();
     for (const scan of result.scans) {
+      let key = scan.captureId;
+      if (!key) {
+        const snapshot = JSON.stringify(scan);
+        const occurrence = (legacyOccurrences.get(snapshot) || 0) + 1;
+        legacyOccurrences.set(snapshot, occurrence);
+        key = `${occurrence}:${snapshot}`;
+      }
+      heldScans.set(key, scan);
       const row = document.createElement('li');
       const label = document.createElement('div');
       const title = document.createElement('strong');
@@ -535,13 +533,23 @@ async function renderHeldScannerScans() {
         (scan.lock_session_id ? 'Captured while locked' : '');
       label.append(title, [time, reason].filter(Boolean).join(' · '));
 
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = selectedHeldScans.has(key);
+      checkbox.setAttribute(
+        'aria-label',
+        `Select ${title.textContent}, ${time}`
+      );
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) selectedHeldScans.add(key);
+        else selectedHeldScans.delete(key);
+        updateHeldScannerControls();
+      });
       const barcode = document.createElement('input');
       barcode.readOnly = true;
       barcode.hidden = true;
       barcode.value = scan.rawText || '';
       barcode.setAttribute('aria-label', 'Full held barcode');
-      const copy = document.createElement('button');
-      copy.textContent = 'Copy barcode';
       const menu = document.createElement('details');
       menu.className = 'tray-menu';
       const summary = document.createElement('summary');
@@ -568,15 +576,6 @@ async function renderHeldScannerScans() {
         menu.open = false;
         summary.focus();
       });
-      copy.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(scan.rawText);
-          copy.textContent = 'Copied';
-        } catch {
-          showBarcode();
-          copy.textContent = 'Copy manually';
-        }
-      });
       menu.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
           menu.open = false;
@@ -584,100 +583,166 @@ async function renderHeldScannerScans() {
         }
       });
       const discard = document.createElement('button');
-      discard.textContent = 'Discard held scan';
-      discard.addEventListener('click', async () => {
-        discard.disabled = true;
-        try {
-          const result = await sendRuntimeMessage({
-            action: 'discardHeldScannerScan',
-            scan
-          });
-          if (!result?.success)
-            throw new Error(result?.error || 'Could not discard scan');
-          await renderHeldScannerScans();
-        } catch (error) {
-          writeOutput(error.message, 'error');
-        } finally {
-          discard.disabled = false;
-        }
+      discard.textContent = 'Discard scan';
+      discard.addEventListener('click', () => {
+        menu.open = false;
+        summary.focus();
+        void runHeldScannerAction('clear', [scan]);
       });
       options.append(show, discard);
       menu.append(summary, options);
-      row.append(label, copy, menu, barcode);
+      row.append(checkbox, label, menu, barcode);
       list.append(row);
     }
+    for (const key of selectedHeldScans)
+      if (!heldScans.has(key)) selectedHeldScans.delete(key);
+    updateHeldScannerControls();
   } catch (error) {
-    writeOutput(error.message, 'error');
+    writeOutput(escapeHtml(error.message), 'error');
   }
 }
 
-async function loadUnlockReview() {
-  const panel = document.getElementById('unlockReview');
-  if (!panel) return;
-  const read = ++unlockReviewRead;
+function updateHeldScannerControls() {
+  const selectAll = document.getElementById('selectHeldScans');
+  const count = selectedHeldScans.size;
+  selectAll.checked = count > 0 && count === heldScans.size;
+  selectAll.indeterminate = count > 0 && count < heldScans.size;
+  selectAll.disabled = heldScanActionBusy;
+  document.getElementById('moveHeldScansBtn').disabled =
+    heldScanActionBusy || !count;
+  document.getElementById('exportHeldScansBtn').disabled =
+    heldScanActionBusy || !count;
+  document.getElementById('clearHeldScansBtn').disabled = heldScanActionBusy;
+}
+
+function bindHeldScannerActions() {
+  const selectAll = document.getElementById('selectHeldScans');
+  if (!selectAll) return;
+  selectAll.addEventListener('change', () => {
+    selectedHeldScans.clear();
+    if (selectAll.checked)
+      for (const key of heldScans.keys()) selectedHeldScans.add(key);
+    for (const checkbox of document.querySelectorAll(
+      '#heldScannerScanList input[type="checkbox"]'
+    ))
+      checkbox.checked = selectAll.checked;
+    updateHeldScannerControls();
+  });
+  for (const operation of ['move', 'export', 'clear']) {
+    document
+      .getElementById(`${operation}HeldScansBtn`)
+      .addEventListener('click', () => {
+        const scans = [...heldScans]
+          .filter(
+            ([key]) => operation === 'clear' || selectedHeldScans.has(key)
+          )
+          .map(([, scan]) => scan);
+        void runHeldScannerAction(operation, scans, operation !== 'export');
+      });
+  }
+}
+
+function confirmHeldScannerAction(operation, count) {
+  const dialog = document.getElementById('heldScannerDialog');
+  const clear = operation === 'clear';
+  const scans = `${count} ${count === 1 ? 'scan' : 'scans'}`;
+  document.getElementById('heldScannerDialogTitle').textContent = clear
+    ? `Clear ${scans}?`
+    : `Move ${scans} to a tray?`;
+  document.getElementById('heldScannerDialogMessage').textContent = clear
+    ? 'VaxLink will remove these scans from the review list.'
+    : 'Check the original chart first if a scan may have filled it. Expired vaccines moved to Immunization are for reference only.';
+  for (const button of dialog.querySelectorAll(
+    'button[value]:not([value="cancel"])'
+  ))
+    button.hidden = clear !== (button.value === 'clear');
+  dialog.returnValue = '';
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue), {
+      once: true
+    });
+    dialog.showModal();
+  });
+}
+
+async function runHeldScannerAction(operation, scans, confirm = false) {
+  if (!scans.length || heldScanActionBusy) return;
+  const notice = document.getElementById('heldScannerNotice');
+  heldScanActionBusy = true;
   try {
-    const stored = await getLocalStorage([
-      SCANNER_LOCK_SESSION_KEY,
-      REVIEWED_LOCK_SESSION_KEY,
-      HELD_SCANS_KEY,
-      INVENTORY_BATCH_KEY
-    ]);
-    if (read !== unlockReviewRead) return;
-    const session = stored[SCANNER_LOCK_SESSION_KEY];
-    const count = (rows) =>
-      Array.isArray(rows)
-        ? rows.filter((row) => row.lock_session_id === session?.id).length
-        : 0;
-    const held = count(stored[HELD_SCANS_KEY]);
-    const inventory = count(stored[INVENTORY_BATCH_KEY]);
-    panel.hidden =
-      !session?.id ||
-      session.state !== 'active' ||
-      session.id === stored[REVIEWED_LOCK_SESSION_KEY] ||
-      (!held && !inventory && !session.interrupted);
-    if (panel.hidden) return;
-    panel.dataset.session = session.id;
-    document.getElementById('unlockReviewText').textContent =
-      `${held} in Held scanner scans · ${inventory} in the Inventory tray`;
-    document.getElementById('unlockInterruption').hidden = !session.interrupted;
-    const summary = `${session.id}/${held}/${inventory}/${!!session.interrupted}`;
-    if (!mainWorkflowPanel?.hidden && summary !== recordedUnlockSummary) {
-      recordedUnlockSummary = summary;
-      void sendRuntimeMessage({
-        action: 'recordLockSummary',
-        held,
-        inventory,
-        interrupted: !!session.interrupted
-      }).catch(() => {});
+    const choice = confirm
+      ? await confirmHeldScannerAction(operation, scans.length)
+      : '';
+    if (confirm && (!choice || choice === 'cancel')) return;
+    updateHeldScannerControls();
+    notice.textContent = '';
+    const result = await sendRuntimeMessage({
+      action: 'actOnHeldScannerScans',
+      operation,
+      scans,
+      destination: operation === 'move' ? choice : undefined
+    });
+    if (!result?.success) throw new Error(result?.error || 'Try again.');
+    let message;
+    if (operation === 'export') {
+      downloadScanCsv(result.records, 'vaxlink-scans-to-review');
+      message = `CSV download started for ${scans.length} ${scans.length === 1 ? 'scan' : 'scans'}.`;
+    } else {
+      const count = result.count;
+      const quantity = `${count} ${count === 1 ? 'scan' : 'scans'}`;
+      if (operation === 'clear') message = `Cleared ${quantity}.`;
+      else {
+        const tray = choice === 'inventory' ? 'Inventory' : 'Immunization';
+        const remaining = scans.length - count;
+        message = count ? `Moved ${quantity} to ${tray}. ` : '';
+        if (remaining)
+          message += `${remaining} could not be moved. Scans need a readable lot and must finish any chart verification.`;
+        message = message.trimEnd();
+      }
+      await renderHeldScannerScans();
     }
+    if (document.getElementById('heldScannerScans').hidden)
+      writeOutput(message, 'info');
+    else notice.textContent = message;
   } catch (error) {
-    if (read === unlockReviewRead)
-      writeOutput(error.message || 'Could not read the lock summary.', 'error');
+    notice.textContent = `Could not ${operation} scans. ${error.message}`;
+  } finally {
+    heldScanActionBusy = false;
+    updateHeldScannerControls();
   }
 }
 
 async function loadRecentChartLots() {
-  try {
-    const stored = await chrome.storage.session.get(RECENT_CHART_LOTS_KEY);
-    renderRecentChartLots(stored[RECENT_CHART_LOTS_KEY]);
-  } catch (_) {
-    renderRecentChartLots([]);
-  }
+  const [recent, skipped] = await Promise.allSettled([
+    chrome.storage.session?.get(RECENT_CHART_LOTS_KEY),
+    getLocalStorage([SKIPPED_DOSE_HISTORY_KEY])
+  ]);
+  renderRecentChartLots(
+    recent.value?.[RECENT_CHART_LOTS_KEY],
+    skipped.value?.[SKIPPED_DOSE_HISTORY_KEY]
+  );
 }
 
-function renderRecentChartLots(history) {
+function renderRecentChartLots(history, skippedHistory) {
   const recent = Array.isArray(history) ? history : [];
+  const skipped = Array.isArray(skippedHistory) ? skippedHistory : [];
   for (const mode of ['immunization', 'inventory']) {
     const list = document.getElementById(`${mode}RecentChartLots`);
     if (!list) continue;
-    if (!recent.length) {
+    const rows = [
+      ...(mode === 'immunization'
+        ? skipped.map((row) => ({ row, restore: true }))
+        : []),
+      ...recent.map((row) => ({ row, restore: false }))
+    ];
+    if (!rows.length) {
       const empty = document.createElement('li');
       empty.textContent = 'No recent scans.';
       list.replaceChildren(empty);
       continue;
     }
     list.replaceChildren(
-      ...recent.map((row) => {
+      ...rows.map(({ row, restore }) => {
         const item = document.createElement('li');
         const label = document.createElement('div');
         const name = row.tradename || row.generic_name || row.name;
@@ -686,17 +751,45 @@ function renderRecentChartLots(history) {
         const expiry =
           row.inventory_expiry || row.barcode_expiry || row.nvc_lot_expiry;
         const details = document.createElement('div');
-        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}`;
+        details.textContent = `Lot ${row.lot} · ${expiry ? `Expiry ${expiry}` : 'Expiry unknown'}${restore ? ' · Removed from tray' : ''}`;
         label.append(title, details);
         const add = document.createElement('button');
         add.type = 'button';
-        add.textContent = 'Add again';
-        add.setAttribute('aria-label', `Add ${name}, lot ${row.lot} again`);
-        add.addEventListener('click', () => void addRecentChartLot(row, mode));
+        add.textContent = restore ? 'Restore' : 'Add again';
+        add.setAttribute(
+          'aria-label',
+          restore
+            ? `Restore ${name}, lot ${row.lot}`
+            : `Add ${name}, lot ${row.lot} again`
+        );
+        add.addEventListener('click', () => {
+          if (restore) void restoreSkippedDose(row, add);
+          else void addRecentChartLot(row, mode);
+        });
         item.append(label, add);
         return item;
       })
     );
+  }
+}
+
+async function restoreSkippedDose(row, button) {
+  button.disabled = true;
+  try {
+    const response = await sendRuntimeMessage({
+      action: 'mutateQueue',
+      operation: 'restore_skipped_dose',
+      storageKey: MULTIPLE_INJECT_QUEUE_KEY,
+      payload: { id: row.id }
+    });
+    if (!response?.success)
+      throw new Error(response?.error || 'Could not restore this scan.');
+    writeOutput('Scan restored to the Immunization tray.', 'success');
+  } catch (error) {
+    writeOutput(escapeHtml(error.message), 'error');
+  } finally {
+    button.disabled = false;
+    void loadRecentChartLots();
   }
 }
 
@@ -750,20 +843,13 @@ async function addRecentChartLot(row, mode) {
 }
 
 function handlePopupStorageChanged(changes, area) {
-  if (area === 'session' && RECENT_CHART_LOTS_KEY in changes)
-    renderRecentChartLots(changes[RECENT_CHART_LOTS_KEY]?.newValue);
+  if (
+    (area === 'session' && RECENT_CHART_LOTS_KEY in changes) ||
+    (area === 'local' && SKIPPED_DOSE_HISTORY_KEY in changes)
+  )
+    void loadRecentChartLots();
   if (area === 'local' && AUTO_RESOLVE_FUNDING_KEY in changes)
     void loadAutofillSettings();
-  if (
-    area === 'local' &&
-    [
-      SCANNER_LOCK_SESSION_KEY,
-      REVIEWED_LOCK_SESSION_KEY,
-      HELD_SCANS_KEY,
-      INVENTORY_BATCH_KEY
-    ].some((key) => key in changes)
-  )
-    void loadUnlockReview();
   if (area === 'local' && HELD_SCANS_KEY in changes)
     void renderHeldScannerScans();
 }
@@ -846,7 +932,7 @@ function applyPopupPanel(panel) {
   const panelTitle = document.getElementById('panelTitle');
   const closeButton = document.getElementById('closePanelBtn');
   const title = carrySupportPage
-    ? 'Report carry problem'
+    ? 'Report an autofill issue'
     : panel === 'settings'
       ? 'Settings'
       : 'Local Activity';
@@ -862,11 +948,7 @@ function applyPopupPanel(panel) {
   if (settingsPanel) {
     settingsPanel.hidden = panel !== 'settings';
   }
-  if (mainWorkflowPanel) {
-    const wasHidden = mainWorkflowPanel.hidden;
-    mainWorkflowPanel.hidden = panel !== 'workflow';
-    if (panel === 'workflow' && wasHidden) void loadUnlockReview();
-  }
+  if (mainWorkflowPanel) mainWorkflowPanel.hidden = panel !== 'workflow';
   if (settingsToggleBtn) {
     settingsToggleBtn.setAttribute(
       'aria-expanded',
@@ -1009,16 +1091,16 @@ function renderAnalyticsSummary(summary) {
       'One funding category matched': share(funding.single),
       'Both funding categories matched': share(funding.both),
       'No funding category matched': funding.unmatched || 0,
-      'Forms filled': day.autofill?.success || 0,
+      'Autofills verified': day.autofill?.success || 0,
       'Inventory exports': day.exports?.inventoryCount || 0,
       'Expiry notices shown': day.expiry?.noticesShown ?? '—',
       'Scanner captures': scannerCaptures,
       'Manual entries': manualEntries,
       'Immunization tray adds': day.queues?.multipleSaved || 0,
-      'Tray to chart': day.queues?.multipleUsed || 0,
-      'Detail carries attempted': day.chartResume?.chart_carry_attempt || 0,
-      'Detail carries verified': day.chartResume?.chart_carry_completed || 0,
-      'Manual uses after a stopped carry':
+      'Doses used from tray': day.queues?.multipleUsed || 0,
+      'Grid autofills attempted': day.chartResume?.chart_carry_attempt || 0,
+      'Grid autofills verified': day.chartResume?.chart_carry_completed || 0,
+      'Used from tray after a chart check failed':
         day.chartResume?.chart_carry_manual_use || 0,
       'Locked batches resumed': day.chartResume?.locked_batch_resumed || 0,
       'Batch resumes interrupted':
@@ -1038,11 +1120,11 @@ function renderAnalyticsSummary(summary) {
     [
       'Charting',
       [
-        'Forms filled',
-        'Tray to chart',
-        'Detail carries attempted',
-        'Detail carries verified',
-        'Manual uses after a stopped carry',
+        'Autofills verified',
+        'Doses used from tray',
+        'Grid autofills attempted',
+        'Grid autofills verified',
+        'Used from tray after a chart check failed',
         'Locked batches resumed',
         'Batch resumes interrupted'
       ]
@@ -1105,11 +1187,11 @@ function setupRecentActivityControls() {
   const emailLink = document.getElementById('openSupportEmailLink');
   const filename = 'vaxlink-debug-details.json';
   const subject = carrySupportPage
-    ? 'VaxLink could not carry a dose into Enter Details'
+    ? 'VaxLink autofill issue'
     : 'VaxLink troubleshooting details';
   const body = [
     carrySupportPage
-      ? 'VaxLink could not carry a saved dose into Enter Details.'
+      ? 'VaxLink did not fill the expected vaccine details.'
       : 'I need help with VaxLink.',
     '',
     'I downloaded the Debug log from VaxLink Settings.',
@@ -1125,7 +1207,7 @@ function setupRecentActivityControls() {
   function render(message) {
     if (!busy) toggle.checked = snapshot?.enabled === true;
     toggle.disabled = busy || !snapshot;
-    exportButton.disabled = busy || !snapshot?.retained;
+    exportButton.disabled = busy || !snapshot?.enabled;
     emailButton.disabled = exportButton.disabled;
     const retained = snapshot?.retained ?? 0;
     status.textContent = snapshot
@@ -1137,9 +1219,11 @@ function setupRecentActivityControls() {
       (overwritten
         ? `${overwritten.toLocaleString()} older ${overwritten === 1 ? 'event was' : 'events were'} removed to make room.`
         : carrySupportPage && !retained
-          ? 'Collect troubleshooting details, then try the carry again.'
+          ? snapshot?.enabled
+            ? 'Recording is on. Reproduce the issue on a training chart.'
+            : 'Turn on troubleshooting before reproducing the issue on a training chart.'
           : carrySupportPage
-            ? 'Email support opens your mail app and downloads the Debug log for you to attach.'
+            ? 'Review the downloaded details, then attach them to the email draft.'
             : '');
   }
 
@@ -1161,14 +1245,29 @@ function setupRecentActivityControls() {
       if (!result?.success) throw new Error();
       snapshot = result;
       if (action === 'exportRecentActivity') {
-        const { format, build, settingsAtExport, retained, overwritten, rows } =
-          result;
-        if (!retained) {
+        const {
+          format,
+          build,
+          settingsAtExport,
+          trayAtExport,
+          retained,
+          overwritten,
+          rows
+        } = result;
+        if (!retained && !trayAtExport) {
           message = 'There are no troubleshooting details to share.';
           return;
         }
         const log = JSON.stringify(
-          { format, build, settingsAtExport, retained, overwritten, rows },
+          {
+            format,
+            build,
+            settingsAtExport,
+            trayAtExport,
+            retained,
+            overwritten,
+            rows
+          },
           null,
           2
         );
@@ -1619,10 +1718,18 @@ async function addPendingScansToInventory() {
 
 let trayUseInFlight = false;
 
+function recordPopupTrayUse(result) {
+  void sendRuntimeMessage({ action: 'recordPopupTrayUse', result }).catch(
+    () => {}
+  );
+}
+
 async function handleUseMultipleInjectRecord(record) {
   if (trayUseInFlight || activeMode !== 'immunization') return;
   if (globalThis.VaxLinkExpiryDate.blocksChartUse(record)) return;
   trayUseInFlight = true;
+  let outcome = 'blocked';
+  recordPopupTrayUse('selected');
   try {
     const [tab] = await chrome.tabs.query({
       active: true,
@@ -1645,6 +1752,7 @@ async function handleUseMultipleInjectRecord(record) {
         'Open a supported Panorama form that is ready for entry.'
       );
     }
+    outcome = 'error';
     const result = await chrome.tabs.sendMessage(
       tab.id,
       {
@@ -1654,11 +1762,13 @@ async function handleUseMultipleInjectRecord(record) {
       },
       { frameId: 0 }
     );
+    outcome = 'blocked';
     if (result?.status === 'expired') return;
     if (!result?.success && !result?.pending)
       throw new Error(result?.error || 'Check the chart before trying again.');
 
     if (result.status === 'grid_added') {
+      outcome = 'grid_added';
       writeOutput(
         result.carryToDetails
           ? 'Added to the grid. Check that Enter Details opens the matching step.'
@@ -1667,6 +1777,7 @@ async function handleUseMultipleInjectRecord(record) {
       );
       return;
     }
+    outcome = result.pending ? 'pending' : 'applied';
     const message =
       result.reason === 'funding_choice_required'
         ? 'Choose the funding category in Panorama to continue.'
@@ -1677,6 +1788,7 @@ async function handleUseMultipleInjectRecord(record) {
   } catch (error) {
     writeOutput(escapeHtml(error.message), 'error');
   } finally {
+    recordPopupTrayUse(outcome);
     trayUseInFlight = false;
   }
 }

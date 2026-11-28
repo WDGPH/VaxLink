@@ -430,7 +430,8 @@
       .inventory-item.active {
         background: #e8f5f6;
       }
-      .inventory-item [data-select-id] {
+      .inventory-item [data-select-id],
+      #heldScannerScans input[type='checkbox'] {
         width: 14px;
         height: 14px;
         margin: 0;
@@ -768,8 +769,9 @@
         align-items: center;
       }
 
-      #recentActivitySettings .settings-controls {
-        flex-shrink: 0;
+      #recentActivitySettings .settings-overview {
+        flex-wrap: wrap;
+        gap: 8px;
       }
 
       #connectionStatus,
@@ -925,12 +927,53 @@
       .held-instruction {
         margin: 2px 0 7px 24px;
       }
+      .held-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+        padding: 4px 0 4px 24px;
+      }
+      .held-actions label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: auto;
+        text-transform: none;
+        white-space: nowrap;
+      }
+      .held-actions button {
+        width: auto;
+        padding: 6px 7px;
+        border-radius: 5px;
+        background: transparent;
+        color: var(--tray-accent);
+        white-space: nowrap;
+      }
+      .held-actions button:hover:not(:disabled) {
+        background: #edf7f6;
+      }
+      #clearHeldScansBtn {
+        color: #a52b27;
+      }
+      #heldScannerNotice {
+        margin: 4px 0 8px 24px;
+      }
+      #heldScannerNotice:empty {
+        display: none;
+      }
       #heldScannerScanList li {
         flex-wrap: wrap;
       }
-      #heldScannerScanList input {
+      #heldScannerScanList li:has(input:checked) {
+        background: #e8f5f6;
+      }
+      #heldScannerScanList input[readonly] {
         flex-basis: 100%;
         min-width: 0;
+      }
+      #heldScannerScanList input[type='checkbox'] {
+        flex: 0 0 14px;
       }
       #heldScannerScanList strong {
         display: block;
@@ -1047,6 +1090,13 @@
       .tray-dialog p {
         font-size: 12px;
       }
+      #heldScannerDialog button[value='cancel'] {
+        background: transparent;
+        color: var(--subtle);
+      }
+      #heldScannerDialog button[value='clear'] {
+        background: #a52b27;
+      }
     </style>
   </head>
   <body>
@@ -1162,8 +1212,8 @@
               </p>
               <div id="scannerCaptureWarning" class="settings-card" hidden>
                 <p class="settings-hint" role="status">
-                  A scan could not be saved or delivered. Check pending scans
-                  and the chart before rescanning.
+                  VaxLink couldn’t confirm a scan. Check the chart and Scans to
+                  review before scanning again.
                 </p>
                 <div class="actions">
                   <button
@@ -1193,7 +1243,7 @@
               </label>
               <label class="settings-check" for="gridDetailAutofillToggle">
                 <input id="gridDetailAutofillToggle" type="checkbox" />
-                Carry a grid dose into Enter Details
+                Autofill vaccine details after Enter Details
               </label>
               <label class="settings-check" for="autoResolveFundingToggle">
                 <input id="autoResolveFundingToggle" type="checkbox" />
@@ -1227,7 +1277,7 @@
               <div class="settings-overview">
                 <div class="settings-summary">
                   <h3 id="recentActivitySettingsTitle" tabindex="-1">
-                    Debug mode
+                    Troubleshooting
                   </h3>
                   <label class="settings-check" for="recentActivityToggle">
                     <input
@@ -1236,13 +1286,8 @@
                       aria-describedby="recentActivityHint"
                       disabled
                     />
-                    <span>Collect troubleshooting details</span>
+                    <span>Record troubleshooting details</span>
                   </label>
-                  <p id="recentActivityHint" class="settings-hint">
-                    <span id="recentActivityStatus" role="status"></span
-                    ><span aria-hidden="true"> · </span>Clears when turned off
-                    or browser restarted.
-                  </p>
                 </div>
                 <div class="settings-controls">
                   <button
@@ -1251,13 +1296,18 @@
                     aria-label="Download troubleshooting details"
                     disabled
                   >
-                    Download
+                    Download details
                   </button>
                   <button id="emailRecentActivityBtn" type="button" disabled>
-                    Email support
+                    Draft support email
                   </button>
                 </div>
               </div>
+              <p id="recentActivityHint" class="settings-hint">
+                <span id="recentActivityStatus" role="status"></span
+                ><span aria-hidden="true"> · </span>Clears when turned off or
+                browser restarted.
+              </p>
               <p
                 id="recentActivityNotice"
                 class="settings-hint"
@@ -1310,20 +1360,6 @@
             </div>
           </div>
           <div id="mainWorkflowPanel">
-            <section id="unlockReview" class="settings-card" hidden>
-              <h3>Scans from the last lock</h3>
-              <p id="unlockReviewText" role="status"></p>
-              <p id="unlockInterruption" hidden>
-                Scanner connection was interrupted. Check for missing scans.
-              </p>
-              <button
-                id="dismissUnlockReview"
-                type="button"
-                aria-label="Dismiss lock summary"
-              >
-                Dismiss
-              </button>
-            </section>
             <div
               class="mode-switch"
               role="tablist"
@@ -1368,11 +1404,25 @@
             </section>
             <p id="scannerConnectionNote" role="status" hidden></p>
             <details id="heldScannerScans" class="tray-history" hidden>
-              <summary id="heldScannerScanCount">Held scanner scans</summary>
+              <summary id="heldScannerScanCount">Scans to review</summary>
               <p class="held-instruction">
-                Review the barcode before using it. If a scan may have filled a
-                chart, check that chart first.
+                These scans need attention. If a scan may have filled a chart,
+                check that chart before using it again.
               </p>
+              <div class="held-actions">
+                <label
+                  ><input id="selectHeldScans" type="checkbox" /> Select
+                  all</label
+                >
+                <button id="moveHeldScansBtn" type="button" disabled>
+                  Move to tray
+                </button>
+                <button id="exportHeldScansBtn" type="button" disabled>
+                  Export CSV
+                </button>
+                <button id="clearHeldScansBtn" type="button">Clear all</button>
+              </div>
+              <p id="heldScannerNotice" role="status"></p>
               <ul id="heldScannerScanList"></ul>
             </details>
             <div id="multipleModeSection" class="mode-panel">
@@ -1528,6 +1578,23 @@
       </div>
     </div>
     <script type="module" src="popup.js"></script>
+    <dialog
+      id="heldScannerDialog"
+      class="tray-dialog"
+      aria-labelledby="heldScannerDialogTitle"
+      aria-describedby="heldScannerDialogMessage"
+    >
+      <form method="dialog">
+        <h2 id="heldScannerDialogTitle"></h2>
+        <p id="heldScannerDialogMessage"></p>
+        <div class="queue-entry-actions">
+          <button value="cancel" autofocus>Cancel</button>
+          <button value="inventory">Inventory</button>
+          <button value="multiple">Immunization</button>
+          <button value="clear">Clear all</button>
+        </div>
+      </form>
+    </dialog>
     <dialog
       id="recentChartLotDialog"
       class="tray-dialog"

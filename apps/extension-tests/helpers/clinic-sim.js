@@ -154,6 +154,7 @@ export function createContentHarness(
       'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form'
     );
   const window = {
+    ...globals.window,
     location,
     addEventListener(type, callback) {
       if (!windowListeners.has(type)) windowListeners.set(type, []);

@@ -13,6 +13,7 @@
       values.includes(value);
   const integer = (min, max) => (value) =>
     Number.isSafeInteger(value) && value >= min && value <= max;
+  const count = integer(0, 100000);
   const outcome = choices('match', 'mismatch', 'not_requested', 'not_checked');
   const deferredFieldNames = ['date', 'time', 'reason', 'consent'];
   const deferredOutcome = choices(
@@ -52,17 +53,144 @@
     'stability',
     'late'
   );
+  const lotList = {
+    count: integer(0, 100000),
+    funding,
+    control: choices('select', 'panel', 'missing'),
+    site: choices('training', 'production')
+  };
+  const trayUseResult = choices(
+    'selected',
+    'grid_added',
+    'pending',
+    'applied',
+    'blocked',
+    'error'
+  );
+  const noticeType = choices(
+    null,
+    'inventory_mode',
+    'repeated_agent',
+    'scan_removed',
+    'scan_kept',
+    'tray_unconfirmed',
+    'scan_order',
+    'carry_warning',
+    'detail_lot',
+    'entry_warning',
+    'fill_progress',
+    'barcode_feedback',
+    'grid_added',
+    'mode_changed',
+    'autofill_review',
+    'funding',
+    'expired',
+    'expiring',
+    'scan_feedback',
+    'duplicate_scan',
+    'dose_review'
+  );
   const details = {
+    notice_change: { notice: noticeType, previous: noticeType },
+    tray_mutation: {
+      action: choices('archive', 'restore', 'consume', 'remove', 'clear'),
+      source: choices(
+        'grid',
+        'detail',
+        'verified_fill',
+        'chart_review',
+        'hud',
+        'popup',
+        'chart'
+      ),
+      result: choices(
+        'archived',
+        'restored',
+        'decremented',
+        'removed',
+        'cleared'
+      )
+    },
+    grid_keep_choice: {
+      row: integer(1, 100000),
+      alternatives: integer(1, 100000),
+      result: choices('selected', 'completed', 'interrupted')
+    },
+    detail_notice_action: {
+      action: choices('retry', 'delete'),
+      result: choices('selected', 'unavailable', 'submitted'),
+      step: count,
+      total: count
+    },
+    tray_storage: {
+      rows: count,
+      reservations: count,
+      review: count
+    },
+    hud_render: {
+      rows: count,
+      displayed: count,
+      removing: count
+    },
+    detail_validation: {
+      step: integer(1, 100000),
+      total: integer(1, 100000),
+      field: choices(
+        'site',
+        'lot',
+        'agent',
+        'date',
+        'time',
+        'route',
+        'consent',
+        'reason',
+        'other'
+      )
+    },
     scan: { decision: choices('accepted', 'held', 'workflow_mismatch') },
     lock_observed: {},
+    lock_released: {},
     locked_capture: { result: choices('held', 'tray', 'save_failed') },
-    lock_summary: {
-      held: integer(0, 250),
-      inventory: integer(0, 100000),
-      interrupted: choices(true, false)
+    locked_resume_offer: {
+      result: choices(
+        'available',
+        'lock_active',
+        'no_lock_witness',
+        'interrupted',
+        'chart_mismatch',
+        'foreground_changed',
+        'route_unavailable',
+        'anchor_unavailable',
+        'autofill_disabled',
+        'single_batch',
+        'no_grid_rows',
+        'no_eligible_scans'
+      ),
+      count: integer(0, 250),
+      eligible: integer(0, 250)
+    },
+    locked_resume_claim: {
+      result: choices(
+        'reserved',
+        'route_unavailable',
+        'anchor_unavailable',
+        'capture_changed',
+        'lock_active',
+        'no_lock_witness',
+        'interrupted',
+        'chart_mismatch',
+        'autofill_disabled',
+        'single_batch',
+        'scan_unavailable',
+        'save_failed'
+      )
+    },
+    locked_resume_declined: {
+      reason: choices('chart_changed', 'row_changed', 'tray_in_progress')
     },
     locked_resume: {
       result: choices(
+        'started',
         'assigned',
         'chart_changed',
         'no_grid_rows',
@@ -75,6 +203,11 @@
         'error'
       ),
       count: integer(0, 250)
+    },
+    tray_use: { source: choices('hud', 'popup'), result: trayUseResult },
+    skipped_dose: {
+      action: choices('remove', 'restore'),
+      result: choices('removed', 'restored', 'kept', 'unavailable', 'error')
     },
     barcode: {
       result: choices('parsed', 'malformed', 'missing_lot'),
@@ -91,15 +224,14 @@
       ),
       catalogueVersion
     },
-    options: {
-      target: choices(true, false),
-      count: integer(0, 100000),
-      funding,
-      control: choices('select', 'panel', 'missing'),
-      site: choices('training', 'production')
+    options: { ...lotList, target: choices(true, false) },
+    lot_search_end: {
+      ...lotList,
+      result: choices('target_absent', 'target_listed', 'unreadable')
     },
     lot_miss: { funding: choices('PUBLICLY_FUNDED', 'NON_PUBLICLY_FUNDED') },
     lot_cleanup: { result: choices('empty', 'cleared', 'review') },
+    lot_tray_release: { result: choices('released', 'unconfirmed') },
     funding_comparison: { outcome: choices('single', 'both', 'unmatched') },
     funding_prompt: { reason: choices('manual', 'both', 'other') },
     funding_choice: {
@@ -123,6 +255,8 @@
         'detail_timeout',
         'manual_use',
         'skipped',
+        'reservation_released',
+        'release_unconfirmed',
         'detail_identity_unmatched',
         'detail_fields_loading',
         'detail_agent_unmatched',
@@ -145,8 +279,10 @@
         'chart_url_changed',
         'grid_form_changed',
         'grid_returned',
+        'detail_finished',
         'single_form_opened',
         'detail_step_reversed',
+        'detail_navigation_changed',
         'unexpected_step_total',
         'detail_form_changed'
       )
@@ -154,12 +290,32 @@
     grid_click: {
       result: choices(
         'accepted',
+        'repeat_agents_confirmed',
+        'repeat_agents_dismissed',
+        'repeat_agents_review',
         'no_assignments',
         'button_outside_form',
         'chart_inactive',
         'grid_not_open',
         'no_matching_rows'
       )
+    },
+    multiple_form_action: {
+      action: choices('reset', 'delete', 'next'),
+      result: choices(
+        'selected',
+        'marker_armed',
+        'marker_declined',
+        'anchor_popstate',
+        'anchor_hashchange',
+        'same_url_popstate',
+        'history_rejected',
+        'step_changed',
+        'overview_returned',
+        'step_unconfirmed'
+      ),
+      step: integer(0, 100000),
+      total: integer(0, 100000)
     },
     grid_detail_decision: {
       row: integer(0, 100000),
@@ -286,6 +442,8 @@
       'conflicting_titles',
       'unrecognized_title',
       'controls_unavailable',
+      'agent_control_unavailable',
+      'date_control_unavailable',
       'panorama_busy',
       'no_grid_rows',
       'already_has_vaccine'
@@ -296,11 +454,16 @@
     gridAutofill: choices(true, false)
   };
 
-  function validEvent(row) {
+  function validEvent(row, worker = false) {
     if (
       !row ||
       typeof row.event !== 'string' ||
       !Object.hasOwn(details, row.event)
+    )
+      return false;
+    if (
+      (row.event === 'tray_mutation' && !worker) ||
+      (row.event === 'notice_change' && row.notice === row.previous)
     )
       return false;
     if (
@@ -310,6 +473,26 @@
     )
       return false;
     const fields = { ...common, ...details[row.event] };
+    if (Object.hasOwn(row, 'observedAt'))
+      fields.observedAt = integer(1, Number.MAX_SAFE_INTEGER);
+    if (
+      ['grid_handoff', 'skipped_dose', 'tray_mutation'].includes(row.event) &&
+      Object.hasOwn(row, 'scanKey')
+    )
+      fields.scanKey = validScanKey;
+    if (row.event === 'lock_observed' && Object.hasOwn(row, 'witness'))
+      fields.witness = choices(
+        'matched',
+        'missing',
+        'not_checked',
+        'foreground_changed',
+        'focus_lost',
+        'anchor_unavailable'
+      );
+    if (row.event === 'locked_resume' && Object.hasOwn(row, 'trigger'))
+      fields.trigger = choices('automatic', 'manual');
+    if (row.event === 'grid_detail_decision' && Object.hasOwn(row, 'scanOrder'))
+      fields.scanOrder = choices(true, false);
     if (row.event === 'scan' && Object.hasOwn(row, 'routing')) {
       fields.routing = (routing) =>
         routing &&
@@ -378,13 +561,46 @@
     };
   }
 
+  function validScanKey(id) {
+    return (
+      typeof id === 'string' &&
+      /^(?:\d{13}-[a-z0-9]{1,8}|[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12})$/i.test(
+        id
+      )
+    );
+  }
+
+  function trayBalance(rows) {
+    const balance = { rows: rows.length, reservations: 0, review: 0 };
+    for (const row of rows) {
+      const doses = Array.isArray(row?.dose_reservations)
+        ? row.dose_reservations
+        : [];
+      balance.reservations += doses.length;
+      balance.review += doses.filter((dose) => dose?.review === true).length;
+    }
+    return balance;
+  }
+
+  async function scanRef(token, id) {
+    if (!token || !validScanKey(id)) return null;
+    const bytes = new TextEncoder().encode(token + ':' + id);
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return Array.from(digest.subarray(0, 8), (v) =>
+      v.toString(16).padStart(2, '0')
+    ).join('');
+  }
+
   function createRecorder(
     getLocal,
     setLocal,
-    getSettingsAtExport = async () => null
+    getSettingsAtExport = async () => null,
+    captureTrayForExport = async (enqueueExport) =>
+      enqueueExport(async () => null)
   ) {
     const session = chrome.storage.session;
     let queue = Promise.resolve();
+    let trayCapture = null;
     const empty = () => ({
       token: crypto.randomUUID(),
       nextSource: 1,
@@ -409,8 +625,15 @@
       return result;
     }
 
+    function afterTrayCapture(work) {
+      // Preserve request order across export, preference changes and chart
+      // batches. A tray writer can enqueue its own event during capture.
+      const enqueue = () => serialize(work);
+      return trayCapture ? trayCapture.then(enqueue, enqueue) : enqueue();
+    }
+
     function open() {
-      return serialize(async () => {
+      return afterTrayCapture(async () => {
         if (!(await enabled())) return {};
         const state = (await load()) ?? empty();
         const source = state.nextSource++;
@@ -430,35 +653,55 @@
         !Array.isArray(rows) ||
         rows.length === 0 ||
         rows.length > maxBatch ||
-        !rows.every(validEvent)
+        !rows.every((row) => validEvent(row))
       )
         return Promise.resolve({ success: false });
 
-      return serialize(async () => {
+      return afterTrayCapture(async () => {
         const state = (await enabled()) ? await load() : null;
         if (token !== state?.token || source >= state.nextSource)
           return { success: false, stale: true };
-        const appended = rows.map((row) => ({
+        return appendRows(state, source, rows);
+      });
+    }
+
+    async function appendRows(state, source, rows) {
+      const receivedAt = Date.now();
+      const appended = await Promise.all(
+        rows.map(async ({ scanKey, ...row }) => ({
           ...row,
-          operation: source * operationRange + row.operation
-        }));
-        state.rows.push(...appended);
-        const excess = Math.max(0, state.rows.length - maxRows);
-        state.rows.splice(0, excess);
-        state.overwritten += excess;
-        while (
-          new TextEncoder().encode(JSON.stringify(state)).length > maxBytes
-        ) {
-          state.rows.shift();
-          state.overwritten += 1;
-        }
-        await save(state);
-        return { success: true };
+          receivedAt,
+          operation: source * operationRange + row.operation,
+          ...(scanKey && { scanRef: await scanRef(state.token, scanKey) })
+        }))
+      );
+      state.rows.push(...appended);
+      const excess = Math.max(0, state.rows.length - maxRows);
+      state.rows.splice(0, excess);
+      state.overwritten += excess;
+      while (
+        new TextEncoder().encode(JSON.stringify(state)).length > maxBytes
+      ) {
+        state.rows.shift();
+        state.overwritten += 1;
+      }
+      await save(state);
+      return { success: true };
+    }
+
+    function recordWorker(row) {
+      if (!validEvent(row, true)) return Promise.resolve({ success: false });
+      // Queue the committed change in one step so a subsequent export or
+      // disable cannot run between assigning its operation and recording it.
+      return serialize(async () => {
+        if (!(await enabled())) return { success: false };
+        const state = (await load()) ?? empty();
+        return appendRows(state, state.nextSource++, [row]);
       });
     }
 
     function manage(action, nextEnabled) {
-      return serialize(async () => {
+      const manageRequest = async (getTrayAtExport) => {
         const wasEnabled = await enabled();
         if (action === 'setRecentActivity' && nextEnabled !== wasEnabled) {
           if (nextEnabled) await save(empty());
@@ -478,16 +721,32 @@
         return action === 'exportRecentActivity'
           ? {
               ...status,
-              format: 3,
+              format: 4,
               build: buildDetails(),
               settingsAtExport: await getSettingsAtExport().catch(() => null),
+              trayAtExport: await getTrayAtExport((id) =>
+                scanRef(state?.token, id)
+              ).catch(() => null),
               rows: state?.rows ?? []
             }
           : status;
+      };
+      if (action !== 'exportRecentActivity')
+        return afterTrayCapture(manageRequest);
+
+      let exporting;
+      const capturing = captureTrayForExport((getTrayAtExport) => {
+        exporting = serialize(() => manageRequest(getTrayAtExport));
       });
+      trayCapture = capturing;
+      return capturing
+        .finally(() => {
+          if (trayCapture === capturing) trayCapture = null;
+        })
+        .then(() => exporting);
     }
 
-    return { open, append, manage };
+    return { open, append, recordWorker, manage };
   }
 
   function createChartRecorder() {
@@ -557,6 +816,9 @@
 
     return {
       flush,
+      isRecording() {
+        return !!recording;
+      },
       begin(mode, stage) {
         if (!recording || recording.operation >= operationRange - 1)
           return null;
@@ -600,6 +862,7 @@
         if (pending.length === maxBatch) pending.shift();
         pending.push({
           event,
+          observedAt: Date.now(),
           operation: trace.operation,
           ms: Math.max(0, Math.round(performance.now() - trace.started)),
           mode: trace.mode,
@@ -614,11 +877,15 @@
   }
 
   globalThis.VaxLinkRecentActivity = {
+    validScanKey,
+    trayBalance,
     preferenceKey,
     sessionKey,
     scannedBarcode,
     lookupResult,
     catalogueVersion,
+    trayUseResult,
+    noticeType,
     createRecorder,
     createChartRecorder
   };

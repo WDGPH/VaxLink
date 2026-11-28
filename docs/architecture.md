@@ -79,13 +79,24 @@ integration verifies the product, stops when chart ownership changes, and
 consumes a confirmed tray dose.
 
 A verified grid assignment keeps its exact saved dose, row, Agent, date and
-foreground route. **Carry a grid dose into Enter Details** lets VaxLink use
-that assignment when the matching detail step opens. If Panorama skips a
-step, its dose stays in the tray. Later steps can still use their assignments
-when the Agent and date identify a single grid row. A detail outside its expected
-position also needs evidence of the scanned Lot. An exact available Lot can open the
-funding prompt before selection when the field is blank. The same Lot
-check applies when a catalogue Agent alias connects the grid and detail labels.
+foreground route. **Autofill vaccine details after Enter Details** lets VaxLink use
+that assignment when the matching detail step opens. When Panorama first opens
+the full list of details, the grid positions keep the scans in order, even
+when two scans have the same Agent and date. A manually filled grid row keeps
+its place. VaxLink checks the Agent, date and any selected Lot before filling.
+After Delete, VaxLink can still use scan order if the remaining count and the
+expected Agent and date agree. For rows with the same Agent and date, a notice
+asks staff to check the Lot. If the count differs and multiple rows match,
+staff choose the dose from the tray.
+A detail outside its expected position also needs evidence of the scanned Lot.
+On a newly opened detail, Panorama can preselect the only Lot it offers.
+When that Lot conflicts with the scan, VaxLink can clear it if exactly one
+grid row matches the Agent and date and the native selection and visible
+label agree on Panorama’s default. Clearing the field leaves the scanned
+dose pending. A different choice made by staff stops automatic correction.
+An exact available Lot can open the funding prompt when the field is blank.
+The same Lot check applies when a catalogue Agent alias connects the grid and
+detail labels.
 VaxLink keeps unvisited assignments available for later steps. On the final
 step, the sole remaining assignment with an exact Agent and date can search an
 empty Lot field. A confirmed miss clears VaxLink’s Lot search and closes its
@@ -97,7 +108,25 @@ Changing the grid row, the Lot or the active route stops automatic carry.
 A brief loss of focus can leave assignments pending while the grid stays
 visible. Enter Details still checks the original rows and active route before
 filling. Staff can choose a dose on the detail step. The grid assignment
-itself does not use a dose.
+itself does not use a dose. Selecting Next or Delete stops the outgoing fill.
+Next can move a chart with no URL fragment to `#topPageAnchor` while replacing
+its detail table. VaxLink uses Chrome’s navigation event to identify that
+fragment move on the original active form. It keeps the pending assignments,
+then checks the expected position, fresh controls, dose identity and worker
+route before filling the next detail.
+Delete can open the next detail or return from the last detail to the
+immunization overview. VaxLink checks the replacement view before archiving
+the identifiable unused single-use scan. A confirmed clear of a wrong default
+on an ordered detail can use the same release proof as a Lot search miss when
+the Agent and date identify the outgoing scan. The worker checks the exact scan
+and its release token. Undo and Recent Scans can restore it. A dose that may
+have changed a chart still needs review. The repeated-Agent notice lists eligible
+scans by row and Lot. Staff choose a keeper or keep all rows. Before clearing a
+row, VaxLink checks that the worker supports archiving skipped scans. Each
+other listed scan must have its grid clear and tray archive confirmed before
+the next removal starts. The HUD marks pending removals. For an unavailable
+Lot, the current detail owns one notice. Its Delete action checks the detail,
+current native controls and active route before invoking Panorama’s button.
 
 ### User controls: popup
 
@@ -110,7 +139,7 @@ access to the page in the current tab.
 The header shows the installed version below VaxLink and provides separate
 Settings and Local Activity controls. Each view uses the top bar for its title
 and a close button that returns to the workflow.
-Settings includes Scanner, Autofill, National Vaccine Catalogue, and Debug mode.
+Settings includes Scanner, Autofill, National Vaccine Catalogue, and Troubleshooting.
 `scanner-settings.js` provides connection controls directly within the Scanner
 section. It shows the saved device and gets current connection status from the
 reader. When the reader does not reply, Settings shows the last known capture
@@ -175,7 +204,7 @@ activity and starts downloads. The background worker saves the daily totals and
 prepares the summaries and JSON export. The totals describe extension activity,
 and staff verify and save clinical records in Panorama.
 
-Debug mode keeps a separate session history for troubleshooting. Packaged
+Troubleshooting keeps a separate session history. Packaged
 Alpha starts with Debug on. Production and development start with Debug off.
 A saved preference overrides the starting value. Staff can download the
 retained history in Settings.
@@ -187,11 +216,28 @@ observations are summarized. Detail readbacks record the funding radio, the nati
 and visible Reason selections, time completeness, and which controls or Lot options
 changed between samples. Grid handoff events record the Enter Details click,
 the visible step and total, the matching row when known, the Lot evidence,
-and what released the assignment. A tray choice and other staff interaction
-have separate events. The two scheduled late checks record their outcomes if
+and why VaxLink stopped carrying an assignment. Next and Delete record whether
+VaxLink expected the transition and how it handled the history event. A counted
+assignment records whether the worker confirmed its release. A tray choice and
+other staff interaction have separate events. Debug records HUD and popup **Use** selections and
+outcomes, lock and unlock, and why the worker offers or declines a batch.
+The two scheduled late checks record their outcomes if
 the page is still running. A completed request has a source label when the page
 exposes its JSF callback and the source belongs to the observed form. Otherwise
 the cause of a replacement is unknown. The session retains up to 3,000 events and 1 MiB.
+
+The Debug download includes a tray snapshot and the recent-removal list at
+export. A session-specific scan reference links grid assignments and archive
+results to the saved scans. Legacy rows without a recognized scan ID have a
+null reference. The snapshot gives the full tray count and details for up to
+250 rows. The timeline records storage counts, rendered HUD counts, repeat-row
+choices, missing-Lot button actions and field categories that Panorama marks
+invalid. Tray mutation events identify the action and its source, including
+manual removal, tray clear, verified dose use, and skipped-scan archiving.
+Notification changes record categories as notices appear, disappear or replace
+one another. New events carry a worker receipt time and, when recorded at the
+source, an observation time. Field values, reservation tokens and patient
+identifiers are excluded from these additions.
 
 Immunization and Inventory show a Setup Scanner button when no scanner
 is configured or permission needs to be granted again. It opens Settings with
@@ -227,8 +273,16 @@ when a write is uncertain or the original document is confirmed inactive.
 An uninterrupted Multiple detail Lot miss can release a counted dose after
 confirming an empty Lot and no prior target selection. A verified fill updates
 the tray count. Panorama save confirmation is separate.
+After a confirmed Delete, an exact unused single-use scan can move out of the
+tray and into the list of removed scans in one local storage update. Undo and
+Recent Scans restore the same scan once. Other reservations stay available
+for later details on the same chart.
 Debug records the numbered grid row, whether it carried into Enter Details,
 and the matching detail step or the reason the assignment was released.
+It records when scan order was used to match repeats. It also records staff
+selecting Reset, Next or Delete in Multiple Immunizations. For a tracked
+Next or Delete, it can record the observed step change or an unconfirmed
+transition.
 
 A hardware scan travels from the scanner worker through the hidden host to the
 background program. The background saves it to a tray or retains it in the
@@ -387,26 +441,24 @@ stale build, lost focus, unavailable lock check, or unverified result leaves a
 held scan for staff review. If VaxLink cannot identify the Agent for a scanned
 lot, it holds the barcode before any field interaction and shows a warning.
 
-Staff can check the original chart and copy or discard a held barcode in the
-popup. Held scans never replay automatically, including after unlock. Field
-verification reflects what the browser observed. Staff still verify and save
-the record in Panorama.
+Staff can check the original chart, export selected held scans in the Inventory
+CSV format, clear the scans shown, or move selected scans to either tray. The
+worker saves a move to both lists in one storage update. Scans without a readable
+lot and scans awaiting chart verification stay in review during a move. Held
+scans never replay automatically, including after unlock. Field verification
+reflects what the browser observed. Staff still verify and save the record in
+Panorama.
 
-While the workstation is locked, Immunization captures stay held and
-Inventory captures stay in Inventory. Repeated physical scans are kept.
-Lock and unlock changes save in order, and captures retain the session they
-started in even if storage is slow. The popup shows the remaining scans from
-the last lock and warns if capture was interrupted, even when no barcode was
-saved. Unlocking does not start a chart fill. The chart can offer Resume for
-eligible connected scanner captures from the last lock. It confirms the
-original foreground document and form before making the offer and again
-before moving a scan. A move saves the dose and binds it to the original
-document before chart entry begins. Any scan with uncertain delivery stays
-available for review.
-
-Multiple Immunizations uses the regular grid assignments and detail fill.
-Single Immunization requires exactly one eligible capture. Long-range
-arrivals use their receipt time and stay available for review.
+While the workstation is locked, valid captures go straight to the selected
+workflow tray. Repeated physical scans are kept. Captures retain their
+original lock session even if a write finishes after unlock. The original
+Multiple grid can fill automatically after unlock. The worker checks the
+foreground document and form before offering or reserving each eligible dose
+in capture order. A Single Immunization form still offers **Resume scans**
+for a lock session with exactly one capture. Choosing **Use** removes that
+dose from the resume list. Long-range arrivals stay in the tray for deliberate
+selection. Rejected captures and scans with uncertain delivery stay available
+under **Scans to review**.
 
 The pending inbox holds up to 250 scans and 1 MiB of JSON data. When either
 limit is reached, VaxLink keeps the existing scans and reports that the new scan

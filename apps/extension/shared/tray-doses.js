@@ -15,6 +15,16 @@
     );
   }
 
+  function trayDoseNeedsReview(row) {
+    const remaining = getTrayRemainingDoses(row);
+    const reservations = row.dose_reservations || [];
+    return (
+      remaining !== null &&
+      reservations.length >= remaining &&
+      reservations.some((dose) => dose.review)
+    );
+  }
+
   function getTrayDoseFields(row) {
     return JSON.stringify([
       row?.dose_tracking,
@@ -38,6 +48,7 @@
 
   globalThis.VaxLinkTrayDoses = Object.freeze({
     getTrayRemainingDoses,
+    trayDoseNeedsReview,
     getTrayDoseFields,
     canPinTrayDose,
     defaultChartDose

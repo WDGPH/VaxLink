@@ -9,6 +9,7 @@ export const INVENTORY_BATCH_KEY = 'inventory_scan_batch_v1';
 
 const {
   getTrayRemainingDoses,
+  trayDoseNeedsReview,
   getTrayDoseFields,
   canPinTrayDose,
   defaultChartDose
@@ -243,35 +244,7 @@ export class ScanQueueManager {
   }
 
   exportCsv() {
-    if (!this.rows.length) {
-      return null;
-    }
-
-    const csvRows = [
-      CSV_COLUMNS.join(','),
-      ...this.rows.map((row, index) =>
-        CSV_COLUMNS.map((column) => {
-          if (column === 'scan_index') {
-            return csvEscape(index + 1);
-          }
-          return csvEscape(row[column]);
-        }).join(',')
-      )
-    ];
-
-    const blob = new Blob([csvRows.join('\r\n')], {
-      type: 'text/csv;charset=utf-8'
-    });
-    const url = URL.createObjectURL(blob);
-    const filename = `${this.exportFilenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return filename;
+    return downloadScanCsv(this.rows, this.exportFilenamePrefix);
   }
 
   render() {
@@ -506,7 +479,9 @@ function buildQueueItemMarkup(row, index, options) {
   const held =
     Array.isArray(row.dose_reservations) && row.dose_reservations.length > 0;
   const useActionMarkup =
-    options.showUseAction && !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
+    options.showUseAction &&
+    !trayDoseNeedsReview(row) &&
+    !globalThis.VaxLinkExpiryDate.blocksChartUse(row)
       ? `<button class="inventory-use" type="button" data-use-id="${id}" aria-label="Use ${title}, lot ${lot}, for chart">${escapeHtml(options.useButtonLabel)}</button>`
       : '';
   const pinned = row.dose_tracking === 'retained';
@@ -532,7 +507,7 @@ function buildQueueItemMarkup(row, index, options) {
       <div class="inventory-item-actions">
         ${useActionMarkup}
         ${pinMarkup}
-        <button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>
+        ${held ? '' : `<button class="tray-tool tray-remove" type="button" data-remove-id="${id}" aria-label="Remove ${title}, lot ${lot}" title="Remove">×</button>`}
       </div>
       ${row.reference_only ? '<div class="inventory-lot-report">Reference only</div>' : ''}
       ${held ? `<div class="inventory-lot-report">${row.dose_reservations.some((dose) => dose.review) ? 'Check original chart' : 'Reserved on chart'}</div>` : ''}
@@ -546,6 +521,31 @@ function formatInventoryTimestamp(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+export function downloadScanCsv(rows, filenamePrefix) {
+  if (!rows.length) return null;
+  const csvRows = [
+    CSV_COLUMNS.join(','),
+    ...rows.map((row, index) =>
+      CSV_COLUMNS.map((column) =>
+        csvEscape(column === 'scan_index' ? index + 1 : row[column])
+      ).join(',')
+    )
+  ];
+  const blob = new Blob([csvRows.join('\r\n')], {
+    type: 'text/csv;charset=utf-8'
+  });
+  const url = URL.createObjectURL(blob);
+  const filename = `${filenamePrefix}-${new Date().toISOString().replace(/[:.]/g, '-')}.csv`;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
 }
 
 function csvEscape(value) {

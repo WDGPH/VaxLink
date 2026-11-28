@@ -5,18 +5,18 @@ Use training records, known sample barcodes and the clinic’s designated browse
 ## Prepare one training run
 
 1. Extract the ZIP for the release you are testing into a dedicated folder. In the designated training profile, open `chrome://extensions`, turn on Developer mode and choose **Load unpacked**. Select the folder containing `manifest.json`. Open a fresh synthetic training chart. Keep additional VaxLink copies disabled until the two-installation check.
-2. In **Settings → Debug mode**, turn on **Collect troubleshooting details**. Record the extension version, browser, scanner and cradle. Use fictional training samples for the run.
+2. In **Settings → Troubleshooting**, turn on **Record troubleshooting details**. Record the extension version, browser, scanner and cradle. Use fictional training samples for the run.
 3. Keep a short observation sheet with the test name, time, sample order, expected destination and what you saw. The log cannot establish which work Windows or the scanner missed, or whether Panorama saved a record.
 
 ## Capture with Windows locked
 
 1. Select Immunization, open a training chart and record its starting fields. Confirm the scanner is connected. Close the popup and lock Windows with Win+L.
 2. Scan five known samples in a recorded order. Scan the same barcode twice consecutively.
-3. Unlock and open VaxLink. Check **Scans from the last lock**, then open **Immunization → Held scanner scans**. Account for five new entries in capture order, including both copies of the repeated barcode. Check that unlocking and opening the popup left the training chart untouched.
+3. Unlock and open VaxLink. Open the **Immunization Tray**. Account for five new entries in capture order, including both copies of the repeated barcode. Check that unlocking and opening the popup left the training chart untouched.
 4. Repeat in Inventory. Account for five new Inventory tray entries in the same order. Confirm that neither workflow filled the chart.
-5. Repeat a lock with the cradle disconnected during the session. After unlocking, check for the interruption message and reconcile the samples. Check for the message even when no scans were saved.
+5. Repeat a lock with the cradle disconnected during the session. After unlocking, check the scanner status and reconcile the samples against the tray. Check that an empty lock does not show a summary card.
 6. Run a separate sleep and wake test. Record which samples arrived before sleep and after wake, and whether the reader needed reconnecting.
-7. Start a new lock from an open Multiple Immunizations grid with room for three doses. Scan three samples for distinct Agents. After unlock, check that the grid is still blank. Select **Resume 3 scans** once, then use **Enter Details** and **Next**. Check the Agent and Lot at each step. Repeat with a replacement chart and check that the scans stay held.
+7. Start a new lock from an open Multiple Immunizations grid with room for three doses. Scan three samples, including two with the same Agent and different lots. After unlock, check that each eligible dose fills one row with no Resume click or rescan. Check that the repeated-Agent warning stays visible. Select **Enter Details**, cancel the confirmation once, then confirm and check the Agent and Lot at each step. Repeat with a replacement chart and check that the scans stay in the tray.
 
 ## Check the Zebra DS8178 setups
 
@@ -62,8 +62,8 @@ before refreshing again.
 2. Repeat while scanning one fictional sample. Check for one more export, one
    new scanner capture and one new Inventory row. Record the sample order.
 3. On a synthetic training chart, turn automatic funding selection off. With
-   Debug mode off, trigger one funding prompt and choose a category. Check the
-   daily prompt and choice counts. Repeat with Debug mode on and export the
+   troubleshooting recording off, trigger one funding prompt and choose a category. Check the
+   daily prompt and choice counts. Repeat with recording on and export the
    session log. Check the prompt reason and choice, then turn collection off and
    confirm that both daily counts still include both attempts.
 4. On the Multiple grid, fill a row from the tray and choose **Enter Details**.
@@ -72,7 +72,7 @@ before refreshing again.
 
 ## Collect the results together
 
-Download the Debug mode log before turning collection off, reloading VaxLink, or restarting the browser. Those actions clear the log. If a scenario requires a reload or an installation change, download that part first. Keep the files and send them together with the workstation observations after the last check. Each installation has its own log.
+Download troubleshooting details before turning collection off, reloading VaxLink, or restarting the browser. Those actions clear the log. If a scenario requires a reload or an installation change, download that part first. Keep the files and send them together with the workstation observations after the last check. Each installation has its own log.
 
 ## Evidence to record
 

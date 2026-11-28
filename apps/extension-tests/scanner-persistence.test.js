@@ -96,22 +96,16 @@ test('duplicate queue capture is reported without another saved event', async ()
   assert.equal(harness.storageData.get('multiple_inject_queue_v1').length, 1);
 });
 
-test('normal GS1 scans reach capacity at 250 and reject the next without loss', async () => {
+test('a full scanner issues list still allows a valid locked scan to reach the tray', async () => {
+  const old = Array.from({ length: 250 }, (_, i) => scan(String(i)));
   const harness = createBackgroundHarness(makeTestNvcBundle(), {
     idleState: 'locked',
-    storage: { vaxlink_workflow_mode_v1: 'single' }
+    storage: { vaxlink_workflow_mode_v1: 'single', [pending]: old }
   });
-  for (let i = 0; i < 250; i++)
-    assert.equal(
-      (await captured(harness, `01099990000000081727123110TEST${i}`)).success,
-      true
-    );
-  assert.equal(harness.storageData.get(pending).length, 250);
-  assert.equal(
-    (await captured(harness, '01099990000000081727123110TEST251')).success,
-    false
-  );
-  assert.equal(harness.storageData.get(pending).length, 250);
+  const valid = await captured(harness, '01099990000000081727123110TEST');
+  assert.equal(valid.queuedToWorkflow, true);
+  assert.equal(harness.storageData.get('multiple_inject_queue_v1').length, 1);
+  assert.equal(harness.storageData.get(pending), old);
 });
 
 test('warning badge survives queue updates and failed acknowledgement', async () => {

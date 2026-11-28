@@ -221,10 +221,12 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   const { context } = createContentHarness();
   const routine = { innerHTML: '' };
   const warning = { innerHTML: '', querySelector: () => null };
+  const carry = { innerHTML: '', querySelector: () => null };
   const events = [];
   Object.assign(context, {
     routine,
     warning,
+    carry,
     ensureToastHost() {},
     escapeToastHtml: (text) => text,
     setTimeout: () => 0,
@@ -233,7 +235,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     logAnalyticsEvent: (event) => events.push(event)
   });
   vm.runInContext(
-    'toastRoutineSlot = routine; toastWarningSlot = warning;',
+    'toastRoutineSlot = routine; toastWarningSlot = warning; toastCarrySlot = carry;',
     context
   );
   context.showVaxlinkToast({
@@ -252,17 +254,15 @@ test('terminal feedback names the fields or catalogue to review and counts rende
     lookup_error_category: 'not_found'
   });
   assert.match(routine.innerHTML, /Lot not found in Panorama training/);
-  assert.match(routine.innerHTML, /Check the Agent and Lot on the chart/);
+  assert.match(routine.innerHTML, /Check the Agent and Lot in Vaccine Details/);
   assert.match(
     routine.innerHTML,
     /missing from the National Vaccine Catalogue/
   );
   assert.doesNotMatch(routine.innerHTML, /Resolution Coordinator/);
-  const draft = () =>
+  const draft = (slot = routine) =>
     new URL(
-      routine.innerHTML
-        .match(/href="(mailto:[^"]+)"/)[1]
-        .replaceAll('&amp;', '&')
+      slot.innerHTML.match(/href="(mailto:[^"]+)"/)[1].replaceAll('&amp;', '&')
     );
   assert.equal(draft().pathname, 'NVC-CNV@phac-aspc.gc.ca');
   const catalogueMatch = {
@@ -276,6 +276,7 @@ test('terminal feedback names the fields or catalogue to review and counts rende
       ? 'trpanoramadhir.prod.ehealthontario.ca'
       : 'panorama.prod.ehealthontario.ca';
     for (const multiple of [true, false]) {
+      const slot = multiple ? carry : routine;
       context.showVaxlinkToast({
         ...catalogueMatch,
         _vaxlinkOwner: {
@@ -285,18 +286,27 @@ test('terminal feedback names the fields or catalogue to review and counts rende
         _doseKept: multiple
       });
       assert.match(
-        routine.innerHTML,
-        /vl-toast-title">Lot found in NVC\. No match in Panorama lookup\./
+        slot.innerHTML,
+        /vl-toast-title">Lot not found in (Panorama training|either funding category)/
       );
-      assert.equal(routine.innerHTML.includes('Panorama training'), training);
-      assert.equal(routine.innerHTML.includes('Draft email to PRC'), !training);
-      assert.equal(routine.innerHTML.includes('mailto:'), !training);
-      assert.equal(routine.innerHTML.includes('delete this entry'), multiple);
-      assert.equal(routine.innerHTML.includes('Dose kept in tray'), multiple);
+      assert.equal(slot.innerHTML.includes('Panorama training'), training);
+      assert.equal(
+        slot.innerHTML.includes('Draft email to Panorama support'),
+        !training
+      );
+      assert.equal(slot.innerHTML.includes('mailto:'), !training);
+      assert.equal(
+        slot.innerHTML.includes('choose Delete in Panorama'),
+        multiple
+      );
+      assert.equal(
+        slot.innerHTML.includes('Dose is still in the Immunization tray.'),
+        multiple
+      );
       if (!training) {
-        assert.equal(draft().pathname, '');
+        assert.equal(draft(slot).pathname, '');
         assert.equal(
-          draft().searchParams.get('cc'),
+          draft(slot).searchParams.get('cc'),
           'innovation@wdgpublichealth.ca'
         );
       }
@@ -318,4 +328,23 @@ test('terminal feedback names the fields or catalogue to review and counts rende
   context.showVaxlinkToast({ expiry_flag: 'expiring_soon' });
   assert.match(warning.innerHTML, /Expired vaccine/);
   assert.deepEqual(events, ['expiry_notice_shown', 'expiry_notice_shown']);
+
+  const routineBefore = routine.innerHTML;
+  const carried = { _vaxlinkOwner: { gridDetail: {} } };
+  context.showVaxlinkToast({ ...carried, tradename: 'Carried vaccine' });
+  assert.equal(routine.innerHTML, routineBefore);
+  context.showVaxlinkToast({
+    ...carried,
+    lookup_error: 'Catalogue unavailable'
+  });
+  assert.match(routine.innerHTML, /Catalogue unavailable/);
+  context.showVaxlinkToast({ ...carried, expiry_flag: 'expiring_soon' });
+  assert.match(routine.innerHTML, /vl-toast expiring/);
+  for (const duplicate of [true, false]) {
+    context.showVaxlinkToast({
+      lot: 'SAMPLE-LOT',
+      _duplicateIgnored: duplicate
+    });
+    assert.equal(routine.innerHTML.match(/SAMPLE-LOT/g)?.length, 1);
+  }
 });

@@ -146,6 +146,22 @@ function interaction(
     });
 }
 
+test('a Lot selected while scan-order carry waits stops the fill', async () => {
+  const f = fixture();
+  const feedback = [];
+  const data = f.beginPanoramaAutofill({ lot: 'SAMPLE-1' });
+  data._vaxlinkOwner.gridDetail = { scanOrder: true };
+  f.context.showCarryProblem = (message) => feedback.push(message);
+  f.schedulePanoramaLotOrTradeSelection(data);
+  f.context.readGridDetailLotEvidence = () => 'conflicting_selection';
+
+  await f.runTimer();
+
+  assert.equal(f.state.fills, 0);
+  assert.equal(f.state.timers.length, 0);
+  assert.match(feedback[0], /Panorama selected a different lot/);
+});
+
 test('newer fills and changed clinical context invalidate the previous owner', () => {
   for (const change of [
     (f) => f.beginPanoramaAutofill({}),
@@ -771,7 +787,7 @@ test('a chosen funding category waits for its Lot list and a miss can try the ot
     f.runTimer();
   assert.match(slot.innerHTML, /Try the other funding category/);
   assert.deepEqual(cleanupModes, [false]);
-  assert.match(slot.innerHTML, /Check the Agent and Lot on the chart/);
+  assert.match(slot.innerHTML, /Check the Agent and Lot in Vaccine Details/);
   assert.equal(rescueStartedAt, 3000, 'panel rescue starts after two seconds');
   assert.equal(
     f.state.now - rescueStartedAt,
@@ -1003,6 +1019,9 @@ test('a counted detail miss releases a blank Lot only before a possible product 
     Object.assign(f.context, {
       getPanoramaFormContext: () => ({ kind: 'multiple_detail', ready: true }),
       getPanoramaCurrentAgentSelectionText: () => 'Training',
+      getPanoramaAdministeredDateTimeFields: () => ({
+        dateField: { value: '2026/11/24' }
+      }),
       getPanoramaLotWidget: () => ({ select }),
       hasPanoramaLotSelection: () => false,
       tryFillPanoramaLotOrTrade: () => false,

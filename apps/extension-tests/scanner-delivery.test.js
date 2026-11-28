@@ -32,6 +32,12 @@ const row = (rawText) => ({
   capturedAt: '2026-07-28T12:00:00.000Z'
 });
 const capture = (h, rawText) => h.captureScannerScan(row(rawText));
+const heldAction = (operation, scans, destination) => ({
+  action: 'actOnHeldScannerScans',
+  operation,
+  scans,
+  destination
+});
 const captureLongRange = (h, rawText, capturedAt = row(rawText).capturedAt) =>
   h.captureScannerScan({
     ...row(rawText),
@@ -169,6 +175,49 @@ test('a grid receives only the new saved row when automatic grid entry is enable
   }
 });
 
+test('grid fills follow scan receipt order when the first chart probe is delayed', async () => {
+  const firstProbe = gate();
+  let probeCount = 0;
+  let secondSaved;
+  const secondInTray = new Promise((resolve) => {
+    secondSaved = resolve;
+  });
+  const h = harness({
+    tabResponse: {
+      supported: true,
+      contextToken: 'grid-document',
+      formContext: { kind: 'multiple_grid', ready: true },
+      status: 'grid_added'
+    },
+    delayTabMessage(_tabId, message, resume) {
+      if (message.action !== 'getPanoramaIntegration' || ++probeCount !== 1)
+        return false;
+      firstProbe.hold(resume);
+      return true;
+    },
+    delayStorageSet(values) {
+      if (values[immunizationTray]?.some((row) => row.lot === 'SECOND'))
+        secondSaved();
+      return false;
+    }
+  });
+  const first = capture(h, '10FIRST');
+  await firstProbe.started;
+  const second = capture(h, '10SECOND');
+  await secondInTray;
+  firstProbe.release();
+  assert.ok((await Promise.all([first, second])).every(({ routed }) => routed));
+  const lots = new Map(
+    Array.from(h.storageData.get(immunizationTray), ({ id, lot }) => [id, lot])
+  );
+  assert.deepEqual(
+    h.tabMessages
+      .filter(({ message }) => message.action === 'vaxlinkGridScanCaptured')
+      .map(({ message }) => lots.get(message.recordId)),
+    ['FIRST', 'SECOND']
+  );
+});
+
 test('long-range frames bypass ready Single and Multiple forms and keep repeated scans in receipt order', async () => {
   for (const kind of ['provider_single', 'multiple_grid']) {
     const h = harness({
@@ -257,18 +306,19 @@ test('long-range rejections stay visible in held scans and expired stock stays f
   );
 });
 
-test('long-range scans keep locked Inventory rows and held Immunization captures distinct', async () => {
+test('long-range scans save to the selected tray while locked', async () => {
   const h = harness({ idleState: 'locked' });
   await captureLongRange(h, '10IMMLOT');
   await captureLongRange(h, 'VAXLINK:INVENTORY');
   await captureLongRange(h, '10INVLOT');
-  assert.equal(h.storageData.has(immunizationTray), false);
-  const held = h.storageData.get(inbox)[0];
-  const saved = h.storageData.get(inventoryTray)[0];
-  assert.equal(held.pending_workflow, 'immunization');
-  assert.equal(held.captured_while_locked, true);
-  assert.equal(saved.captured_while_locked, true);
-  assert.equal(saved.lock_session_id, held.lock_session_id);
+  const immunization = h.storageData.get(immunizationTray)[0];
+  const inventory = h.storageData.get(inventoryTray)[0];
+  assert.equal(immunization.lot, 'IMMLOT');
+  assert.equal(immunization.captured_while_locked, true);
+  assert.equal(inventory.lot, 'INVLOT');
+  assert.equal(inventory.captured_while_locked, true);
+  assert.equal(inventory.lock_session_id, immunization.lock_session_id);
+  assert.equal(h.storageData.has(inbox), false);
 });
 
 test('held scans are not replayed on startup, unlock, or a drain request', async () => {
@@ -328,7 +378,7 @@ test('only the popup can inspect or discard a held scan', async () => {
   const listed = await h.sendMessage({ action: 'getHeldScannerScans' }, popup);
   assert.equal(listed.success, true);
   assert.equal(listed.scans[0].rawText, 'held');
-  const request = { action: 'discardHeldScannerScan', scan: listed.scans[0] };
+  const request = heldAction('clear', listed.scans);
   const untrusted = { id: 'vaxlink-test', tab, url: tab.url };
   assert.notEqual(
     (await h.sendMessage({ action: 'getHeldScannerScans' }, untrusted))
@@ -337,8 +387,73 @@ test('only the popup can inspect or discard a held scan', async () => {
   );
   assert.notEqual((await h.sendMessage(request, untrusted))?.success, true);
   assert.equal(h.storageData.get(inbox).length, 1);
+  await capture(h, 'held');
   assert.equal((await h.sendMessage(request, popup)).success, true);
-  assert.equal(h.storageData.get(inbox).length, 0);
+  assert.equal(h.storageData.get(inbox).length, 1);
+  assert.notEqual(
+    h.storageData.get(inbox)[0].captureId,
+    listed.scans[0].captureId
+  );
+});
+
+test('review moves retain scan copies and commit both lists together', async () => {
+  const expired = { ...row('(17)200101(10)TESTLOT'), reviewState: 'expired' };
+  const scans = [
+    { ...expired, captureId: 'first' },
+    { ...expired, captureId: 'second' },
+    {
+      ...row('not a barcode'),
+      captureId: 'unreadable',
+      reviewState: 'parse_error'
+    },
+    {
+      ...row('(10)PENDING'),
+      captureId: 'pending',
+      reviewState: 'checking_chart'
+    }
+  ];
+  let fail = true;
+  const h = harness({
+    storage: { [inbox]: scans },
+    failStorageSet: (values) => fail && immunizationTray in values
+  });
+  const move = heldAction('move', scans, 'multiple');
+  assert.equal((await h.sendMessage(move, popup)).success, false);
+  assert.equal(h.storageData.get(inbox).length, 4);
+  assert.equal(h.storageData.has(immunizationTray), false);
+  fail = false;
+  const results = await Promise.all([
+    h.sendMessage(move, popup),
+    h.sendMessage(move, popup)
+  ]);
+  assert.deepEqual(results.map(({ count }) => count).sort(), [0, 2]);
+  const tray = h.storageData.get(immunizationTray);
+  assert.equal(tray.length, 2);
+  assert.ok(
+    tray.every(
+      (item) =>
+        item.reference_only &&
+        item.lot === 'TESTLOT' &&
+        item.scanned_at === expired.capturedAt
+    )
+  );
+  assert.deepEqual(
+    Array.from(h.storageData.get(inbox), (scan) => scan.captureId),
+    ['unreadable', 'pending']
+  );
+  assert.deepEqual(h.tabMessages, []);
+});
+
+test('review export returns readable fields and the raw capture for unreadable scans', async () => {
+  const scans = [row('(10)TESTLOT'), row('unreadable')];
+  const h = harness({ storage: { [inbox]: scans } });
+  const response = await h.sendMessage(heldAction('export', scans), popup);
+  assert.equal(response.success, true);
+  assert.equal(response.records[0].lot, 'TESTLOT');
+  assert.equal(response.records[1].lot, '');
+  assert.equal(response.records[1].raw_barcode, 'unreadable');
+  assert.equal(response.records[1].scanned_at, scans[1].capturedAt);
+  assert.equal(h.storageData.get(inbox).length, 2);
 });
 
 test('a timed-out delivery remains held even if its callback arrives late', async () => {
@@ -456,7 +571,7 @@ test('late acknowledgement cannot remove a newer identical capture', async () =>
   const first = capture(h, 'same');
   await delivery.started;
   const old = h.storageData.get(inbox)[0];
-  await h.sendMessage({ action: 'discardHeldScannerScan', scan: old }, popup);
+  await h.sendMessage(heldAction('clear', [old]), popup);
   tabs[0].active = false;
   h.setIdleState('locked');
   await capture(h, 'same');
@@ -473,10 +588,7 @@ test('discarding a legacy scan removes only one identical row', async () => {
     tabs: [],
     storage: { [inbox]: [legacy, { ...legacy }] }
   });
-  await h.sendMessage(
-    { action: 'discardHeldScannerScan', scan: legacy },
-    popup
-  );
+  await h.sendMessage(heldAction('clear', [legacy]), popup);
   assert.equal(h.storageData.get(inbox).length, 1);
 });
 

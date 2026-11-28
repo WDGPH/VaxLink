@@ -181,3 +181,135 @@ test('the visible form explains readiness and its classification follows AJAX re
     false
   );
 });
+
+test('Panorama partial updates change the visible Multiple Immunizations step inside the same form', () => {
+  // Structural IDs from Panorama's grid and detail responses. No chart values.
+  const factory = 'recordImmsForm:immsDetails_dataTable:immsDetails_Factory';
+  const grid = `${factory}:historicalfactoryTable`;
+  const form = {
+    id: 'recordImmsForm',
+    isConnected: true,
+    closest: () => null,
+    querySelectorAll: query
+  };
+  function node(tag, id = '', properties = {}) {
+    return {
+      tagName: tag.toUpperCase(),
+      id,
+      textContent: '',
+      getBoundingClientRect: () => ({ width: 100, height: 20 }),
+      closest: (selector) => (selector === 'form' ? form : null),
+      ...properties
+    };
+  }
+  const row = node('tr');
+  const gridBody = node('tbody', `${grid}:dataTable_data`, {
+    querySelectorAll: (selector) => (selector === 'tr[data-ri]' ? [row] : [])
+  });
+  const addRows = node('button', `${grid}:addButtonId:commandButtonId`);
+  const gridAgent = node(
+    'select',
+    `${grid}:dataTable:0:immsAgentMenu:selectOneMenu_input`
+  );
+  const gridDate = node(
+    'input',
+    `${grid}:dataTable:0:dateIn1:dateInput_input`,
+    { type: 'text' }
+  );
+  // PrimeFaces hides the native select inside its visible widget.
+  const agentWidget = node('div');
+  const agent = () =>
+    node(
+      'select',
+      `${factory}:immsDetailssection_recordImms_agentiterm:selectOneMenu_input`,
+      {
+        getBoundingClientRect: () => ({ width: 0, height: 0 }),
+        closest: (selector) =>
+          selector === '.ui-selectonemenu' ? agentWidget : form
+      }
+    );
+  const date = () =>
+    node(
+      'input',
+      `${factory}:immsDetailssection_dateAdministedDate:dateInput_input`,
+      {
+        type: 'text'
+      }
+    );
+  const counter = (step, total) =>
+    node('span', `${factory}:pagecounter`, {
+      textContent: `\u00a0${step}\u00a0 of \u00a0${total}\u00a0 immunizations\u00a0`
+    });
+  let nodes = [gridBody, addRows, gridAgent, gridDate];
+  // This fixture only needs the chart's tag, tag list, and ID fragment queries.
+  function query(selector) {
+    const idFragment = selector.match(/^([a-z]+)\[id\*="([^"]+)"\]$/);
+    return nodes.filter((item) =>
+      idFragment
+        ? item.tagName.toLowerCase() === idFragment[1] &&
+          item.id.includes(idFragment[2])
+        : selector
+            .split(',')
+            .some((tag) => tag.trim().toUpperCase() === item.tagName)
+    );
+  }
+  const { context, messageListeners, storageReads } = createContentHarness({
+    document: {
+      querySelectorAll: query,
+      querySelector: (selector) => query(selector)[0] || null
+    },
+    getComputedStyle: (item) => ({
+      visibility: item.hidden ? 'hidden' : 'visible'
+    })
+  });
+  storageReads[0].callback({});
+  const probe = () => {
+    let result;
+    messageListeners[0]({ action: 'getPanoramaIntegration' }, {}, (reply) => {
+      result = reply;
+    });
+    return result;
+  };
+
+  const gridState = probe();
+  assert.equal(context.getPanoramaAutofillForm(), form);
+  assert.equal(gridState.formContext.kind, 'multiple_grid');
+  assert.equal(gridState.formContext.ready, true);
+
+  const firstStep = counter(1, 4);
+  const firstDate = date();
+  nodes.push(firstStep, agent(), firstDate);
+  assert.equal(probe().formContext.blockedBy, 'conflicting_controls');
+
+  gridBody.hidden = true;
+  firstDate.disabled = true;
+  const loading = probe();
+  assert.equal(loading.formContext.kind, 'multiple_detail');
+  assert.equal(loading.formContext.blockedBy, 'date_control_unavailable');
+  firstDate.disabled = false;
+  const firstDetail = probe();
+  assert.equal(firstDetail.formContext.ready, true);
+  assert.equal(firstDetail.contextToken, loading.contextToken);
+  assert.notEqual(firstDetail.contextToken, gridState.contextToken);
+
+  // Delete replaces the controls and changes the total while keeping step 1.
+  firstStep.hidden = true;
+  nodes = [firstStep, counter(1, 3), agent(), date()];
+  assert.equal(context.getPanoramaAutofillForm(), form);
+  assert.equal(
+    context.getPanoramaMultiStepIndicatorKey({ visibleOnly: true }),
+    '1-of-3'
+  );
+  const afterDelete = probe();
+  assert.equal(afterDelete.formContext.ready, true);
+  assert.notEqual(afterDelete.contextToken, firstDetail.contextToken);
+  assert.equal(
+    context.isScannerDeliveryContextCurrent(firstDetail.contextToken),
+    false
+  );
+
+  nodes = [counter(2, 3), agent(), date()];
+  const afterNext = probe();
+  assert.equal(afterNext.formContext.ready, true);
+  assert.notEqual(afterNext.contextToken, afterDelete.contextToken);
+});

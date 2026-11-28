@@ -27,19 +27,29 @@ With **Standard USB CDC**, the scanner controls its own beep.
 | Inventory                                             | Open **Inventory** and check the tray. The same destination applies while the workstation is awake and locked.                    |
 | Immunization with a ready single form                 | With automatic entry on, check the fields in the visible chart. Review the agent, lot and other fields before saving in Panorama. |
 | Immunization with a ready Multiple Immunizations grid | Check the Immunization tray and the grid row. The tray keeps the dose for the detail step.                                        |
-| Immunization while locked                             | Return to the original chart and choose **Resume scans** when offered. Find other captures under **Held scanner scans**.          |
+| Immunization while locked                             | After unlock, check the original Multiple grid and the Immunization tray.                                                         |
 
-With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Held scanner scans** for the next step. Check the original chart before using a scan that may have filled fields.
+With automatic entry off or no ready form, check the Immunization Tray. If a scan was held after a focus change, delayed response or extension update, open **Scans to review** for the next step. Check the original chart before using a scan that may have filled fields.
 
-For Multiple Immunizations, **Resume scans** places eligible doses in the
-available grid rows. Select **Enter Details**, then **Next** as you check each
-dose. A ready Single Immunization form can resume one eligible scan. If
-Resume is unavailable or stops, check the chart, the tray and Held scanner
-scans before trying again.
+After unlock, VaxLink fills available rows on the original Multiple
+Immunizations grid if it can confirm the chart and form are still ready. Select
+**Enter Details**, then **Next** as you check each dose. If a scan stays in the
+tray, open the correct chart and choose **Use**. On a ready Single Immunization
+form, choose **Resume scans** when offered for one eligible scan.
 
 On a single form, a scan may stay pending while Panorama updates. If VaxLink
 cannot confirm the fields, follow the message and check the original chart
 before trying again. Review and save the record in Panorama.
+
+If Panorama selects a different lot while entering multiple immunizations,
+compare it with the scanned lot. When Panorama offers the scanned Lot,
+**Clear Lot and retry** clears the conflicting selection and tries the same
+dose again. When the scanned Lot is missing, choose **Delete** in the notice
+to skip that immunization using Panorama’s Delete action. If the notice directs
+you to Panorama, use the form’s **Delete** button. VaxLink can still
+carry the next dose when the Agent, date and lot verify the assignment. Use
+**Check original chart** if VaxLink needs you to verify whether it wrote to the
+form.
 
 The Inventory tray shows captured lots and recent scans.
 
@@ -53,10 +63,11 @@ If the unit label is hard to scan and your clinic allows a carton scan, keep the
 
 ## The scanner beeped but nothing appeared
 
-1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Held scanner scans** in Immunization. The unlock summary shows scans available from the last lock.
-2. If the chart may have changed, check its fields and saved record in Panorama. If a held scan still needs entry, select **Copy barcode** on its row and paste it into the **Barcode** field in VaxLink. Open the row’s **⋯** menu to view the full barcode or choose **Discard held scan** once you have accounted for that capture.
-3. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
-4. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
+1. Open VaxLink on the workstation where you scanned. Check the tray for the selected workflow and **Scans to review** if a capture needs attention.
+2. If a scan may have filled a chart, check its fields and saved record in Panorama first. Select the scans you still need and choose **Move to tray**. Pick **Immunization** or **Inventory**. Scans without a readable lot stay in review. Expired vaccines moved to Immunization are for reference only.
+3. Select scans and choose **Export CSV** to download them in the Inventory format, including the raw barcode. Use **Clear all** to remove the scans shown in the review list. The row’s **⋯** menu also lets you view the full barcode or discard that scan.
+4. Open **Settings → Scanner**. Check the connection message and any last known capture time. A beep alone cannot confirm the workstation received the barcode. If the connection was interrupted, compare the expected doses with the scans you can account for.
+5. If a save failed, reconcile the chart and local scans before rescanning. If a chart needs refreshing after a VaxLink update, check unsaved work first.
 
 ## The scan appeared, but chart entry is incomplete
 
@@ -73,9 +84,16 @@ When a lot appears in both funding categories, staff choose the category. A matc
 
 Choose **Use** for the vaccine you want. In the Multiple Immunizations grid,
 VaxLink fills one row and keeps the dose in the tray. Select **Enter Details**
-yourself. With **Carry a grid dose into Enter Details** on, VaxLink can bring
+yourself. With **Autofill vaccine details after Enter Details** on, VaxLink can bring
 the same dose to the matching step. Choose the dose again if the row changed
 or you switched away.
+
+If the same Agent appears more than once, choose the **Keep row** button for the row you intend to enter. When the choices share a Lot, it appears above the row buttons. Otherwise, each button shows its Lot. VaxLink keeps the chosen row and date. The tray shows **Removing…** on the other listed scans until each removal is confirmed. **Undo** applies to the previous single removal. You can also recover removed scans from **Recent Scans**. For intentional repeats, choose **Keep all rows**. VaxLink shows **Using scan order** when it carries those doses in order.
+
+Choose **Delete** in Panorama to skip a detail. If VaxLink can confirm the
+exact single-use scan was unused, it removes that scan from the tray. Choose
+**Undo** on the chart or **Restore** in the Immunization tray's **Recent Scans**
+to get it back. If VaxLink needs staff to check the dose, it stays in the tray.
 
 The chart tray also has a **Use** button beside each available vaccine.
 
@@ -93,17 +111,20 @@ A reserved dose shows **Reserved on chart** in the popup and **In progress** on 
 
 ## Download troubleshooting details
 
-In **Settings → Debug mode**, choose **Download** before closing the browser
-or turning collection off. The file may include a scanned vaccine barcode.
+In **Settings → Troubleshooting**, choose **Download details** before closing the browser
+or turning collection off. For a Multiple Immunizations issue, leave the tray
+as you found it until you download the file. It includes the saved tray at
+download, recent removals, HUD counts and which grid row you chose to keep.
+It also records what changed the tray and which kinds of notification appeared together or replaced each other.
+The file may include a scanned vaccine barcode.
 Share it only through your clinic’s approved support process. Local Activity
 shows usage counts and remains available after Debug is cleared.
 
-Choose **Email support** to download the current Debug log and open a message
+Choose **Draft support email** to download the current Debug log and open a message
 to `innovation@wdgpublichealth.ca`. Review the JSON file and attach it from
 Downloads before sending. Select **Open email again** if the mail app stays
-closed. When a dose cannot carry into Enter Details, **Report carry problem**
-opens Debug mode in another tab. Choose **Email support** there for a message
-about the carry problem.
+closed. **Report an autofill issue** opens Troubleshooting in another tab.
+Choose **Draft support email** there for a message about the issue.
 
 For support, start with the software version, scanner model, training or production environment, package type, printed lot, catalogue status and exact message. Use a sample record for screenshots. Review any barcode, email recipients and Debug download before sharing through an approved private channel. [Privacy assessment guide](privacy-assessment.md)
 

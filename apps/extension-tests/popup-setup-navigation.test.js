@@ -178,7 +178,7 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     );
     assert.match(
       nodes.analyticsSummary.innerHTML,
-      /Forms filled<\/th><td>5<\/td><td>5<\/td>/
+      /Autofills verified<\/th><td>5<\/td><td>5<\/td>/
     );
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /SAMPLE-DEVICE-ID/);
     assert.doesNotMatch(nodes.analyticsSummary.innerHTML, /Sample workstation/);
@@ -188,8 +188,8 @@ test('Scanner setup opens and focuses Settings without leaving the popup', async
     assert.equal(nodes.recentActivityToggle.disabled, false);
     assert.equal(nodes.recentActivityToggle.checked, true);
     assert.equal(nodes.recentActivityStatus.textContent, '0 events');
-    assert.equal(nodes.exportRecentActivityBtn.disabled, true);
-    assert.equal(nodes.emailRecentActivityBtn.disabled, true);
+    assert.equal(nodes.exportRecentActivityBtn.disabled, false);
+    assert.equal(nodes.emailRecentActivityBtn.disabled, false);
     const url =
       'https://trpanoramadhir.prod.ehealthontario.ca/ImmsWeb/pages/recordImms/form';
     const chart = { id: 'vaxlink-test', frameId: 0, url, tab: { id: 2, url } };
